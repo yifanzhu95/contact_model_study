@@ -227,3 +227,10 @@ node_modules
 
 # VS Code
 .vscode/
+
+# test folder
+test/
+logs/
+
+# uv
+uv.lock
