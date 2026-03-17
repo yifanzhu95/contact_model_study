@@ -21,12 +21,12 @@ import mujoco
 import numpy as np
 import warp as wp
 
-from .types import MJ_MAXVAL
-from .types import Data
-from .types import GeomType
-from .types import Model
-from .types import RenderContext
-from .warp_util import event_scope
+from comfree_warp.mujoco_warp._src.types import MJ_MAXVAL
+from comfree_warp.mujoco_warp._src.types import Data
+from comfree_warp.mujoco_warp._src.types import GeomType
+from comfree_warp.mujoco_warp._src.types import Model
+from comfree_warp.mujoco_warp._src.types import RenderContext
+from comfree_warp.mujoco_warp._src.warp_util import event_scope
 
 wp.set_module_options({"enable_backward": False})
 
@@ -215,7 +215,8 @@ def _compute_bvh_bounds(
     lower_bound, upper_bound = _compute_box_bounds(pos, rot, size)
   elif type == GeomType.HFIELD:
     size = hfield_bounds_size[geom_dataid[geom_id]]
-    lower_bound, upper_bound = _compute_box_bounds(pos, rot, size)
+    hfield_center = pos + rot[:, 2] * size[2]
+    lower_bound, upper_bound = _compute_box_bounds(hfield_center, rot, size)
 
   lower_out[world_id * bvh_ngeom + geom_local_id] = lower_bound
   upper_out[world_id * bvh_ngeom + geom_local_id] = upper_bound
@@ -610,11 +611,12 @@ def _build_flex_2d_elements(
 
 @wp.kernel
 def _build_flex_2d_sides(
+  # Model:
+  flex_shell: wp.array(dtype=int),
   # Data in:
   flexvert_xpos_in: wp.array2d(dtype=wp.vec3),
   # In:
   flexvert_norm_in: wp.array2d(dtype=wp.vec3),
-  flex_shell_in: wp.array(dtype=int),
   shell_adr: int,
   vert_adr: int,
   face_offset: int,
@@ -634,8 +636,8 @@ def _build_flex_2d_sides(
   worldid, shellid = wp.tid()
 
   base = shell_adr + 2 * shellid
-  i0 = vert_adr + flex_shell_in[base + 0]
-  i1 = vert_adr + flex_shell_in[base + 1]
+  i0 = vert_adr + flex_shell[base + 0]
+  i1 = vert_adr + flex_shell[base + 1]
 
   v0 = flexvert_xpos_in[worldid, i0]
   v1 = flexvert_xpos_in[worldid, i1]
@@ -671,10 +673,11 @@ def _build_flex_2d_sides(
 
 @wp.kernel
 def _build_flex_3d_shells(
+  # Model:
+  flex_shell: wp.array(dtype=int),
   # Data in:
   flexvert_xpos_in: wp.array2d(dtype=wp.vec3),
   # In:
-  flex_shell_in: wp.array(dtype=int),
   shell_adr: int,
   vert_adr: int,
   face_offset: int,
@@ -692,9 +695,9 @@ def _build_flex_3d_shells(
   worldid, shellid = wp.tid()
 
   base = shell_adr + shellid * 3
-  i0 = vert_adr + flex_shell_in[base + 0]
-  i1 = vert_adr + flex_shell_in[base + 1]
-  i2 = vert_adr + flex_shell_in[base + 2]
+  i0 = vert_adr + flex_shell[base + 0]
+  i1 = vert_adr + flex_shell[base + 1]
+  i2 = vert_adr + flex_shell[base + 2]
 
   face_id = worldid * nface + face_offset + shellid
   base = face_id * 3
@@ -721,16 +724,16 @@ def _update_flex_face_points(
   flex_dim: wp.array(dtype=int),
   flex_vertadr: wp.array(dtype=int),
   flex_elemnum: wp.array(dtype=int),
+  flex_shelldataadr: wp.array(dtype=int),
   flex_elem: wp.array(dtype=int),
+  flex_shell: wp.array(dtype=int),
+  flex_radius: wp.array(dtype=float),
   # Data in:
   flexvert_xpos_in: wp.array2d(dtype=wp.vec3),
   # In:
-  flex_shell_in: wp.array(dtype=int),
   flexvert_norm_in: wp.array2d(dtype=wp.vec3),
   flex_elemdataadr: wp.array(dtype=int),
-  flex_shelldataadr: wp.array(dtype=int),
   flex_faceadr: wp.array(dtype=int),
-  flex_radius: wp.array(dtype=float),
   flex_workadr: wp.array(dtype=int),
   flex_worknum: wp.array(dtype=int),
   nfaces: int,
@@ -807,8 +810,8 @@ def _update_flex_face_points(
       shellid = locid - elem_count
       shell_adr = flex_shelldataadr[f]
       sbase = shell_adr + 2 * shellid
-      i0 = vert_adr + flex_shell_in[sbase + 0]
-      i1 = vert_adr + flex_shell_in[sbase + 1]
+      i0 = vert_adr + flex_shell[sbase + 0]
+      i1 = vert_adr + flex_shell[sbase + 1]
 
       v0 = flexvert_xpos_in[worldid, i0]
       v1 = flexvert_xpos_in[worldid, i1]
@@ -833,9 +836,9 @@ def _update_flex_face_points(
     shellid = locid
     shell_adr = flex_shelldataadr[f]
     sbase = shell_adr + shellid * 3
-    i0 = vert_adr + flex_shell_in[sbase + 0]
-    i1 = vert_adr + flex_shell_in[sbase + 1]
-    i2 = vert_adr + flex_shell_in[sbase + 2]
+    i0 = vert_adr + flex_shell[sbase + 0]
+    i1 = vert_adr + flex_shell[sbase + 1]
+    i2 = vert_adr + flex_shell[sbase + 2]
 
     v0 = flexvert_xpos_in[worldid, i0]
     v1 = flexvert_xpos_in[worldid, i1]
@@ -922,9 +925,9 @@ def build_flex_bvh(
         kernel=_build_flex_2d_sides,
         dim=(nworld, nshell),
         inputs=[
+          flex_shell,
           flexvert_xpos,
           flexvert_norm,
-          flex_shell,
           shell_adr,
           vert_adr,
           flex_faceadr[f] + 2 * nelem,
@@ -938,8 +941,8 @@ def build_flex_bvh(
         kernel=_build_flex_3d_shells,
         dim=(nworld, nshell),
         inputs=[
-          flexvert_xpos,
           flex_shell,
+          flexvert_xpos,
           shell_adr,
           vert_adr,
           flex_faceadr[f],
@@ -1002,14 +1005,14 @@ def refit_flex_bvh(m: Model, d: Data, rc: RenderContext):
       m.flex_dim,
       m.flex_vertadr,
       m.flex_elemnum,
+      m.flex_shelldataadr,
       m.flex_elem,
+      m.flex_shell,
+      m.flex_radius,
       d.flexvert_xpos,
-      rc.flex_shell,
       flexvert_norm,
       rc.flex_elemdataadr,
-      rc.flex_shelldataadr,
       rc.flex_faceadr,
-      rc.flex_radius,
       rc.flex_workadr,
       rc.flex_worknum,
       rc.flex_nface,

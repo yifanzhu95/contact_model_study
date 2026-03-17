@@ -20,14 +20,14 @@ from typing import Dict
 import mujoco
 import warp as wp
 
-from mujoco_warp.test_data.collision_sdf.bolt import bolt
-from mujoco_warp.test_data.collision_sdf.bolt import bolt_sdf_grad
-from mujoco_warp.test_data.collision_sdf.gear import gear
-from mujoco_warp.test_data.collision_sdf.gear import gear_sdf_grad
-from mujoco_warp.test_data.collision_sdf.nut import nut
-from mujoco_warp.test_data.collision_sdf.nut import nut_sdf_grad
-from mujoco_warp.test_data.collision_sdf.torus import torus
-from mujoco_warp.test_data.collision_sdf.torus import torus_sdf_grad
+from comfree_warp.mujoco_warp.test_data.collision_sdf.bolt import bolt
+from comfree_warp.mujoco_warp.test_data.collision_sdf.bolt import bolt_sdf_grad
+from comfree_warp.mujoco_warp.test_data.collision_sdf.gear import gear
+from comfree_warp.mujoco_warp.test_data.collision_sdf.gear import gear_sdf_grad
+from comfree_warp.mujoco_warp.test_data.collision_sdf.nut import nut
+from comfree_warp.mujoco_warp.test_data.collision_sdf.nut import nut_sdf_grad
+from comfree_warp.mujoco_warp.test_data.collision_sdf.torus import torus
+from comfree_warp.mujoco_warp.test_data.collision_sdf.torus import torus_sdf_grad
 
 
 class SDFType(enum.Enum):

@@ -22,9 +22,9 @@ import warp as wp
 from absl.testing import absltest
 from absl.testing import parameterized
 
-from .types import Data
-from .types import Model
-from .types import Option
+from comfree_warp.mujoco_warp._src.types import Data
+from comfree_warp.mujoco_warp._src.types import Model
+from comfree_warp.mujoco_warp._src.types import Option
 
 
 class TypesTest(parameterized.TestCase):
@@ -45,7 +45,6 @@ class TypesTest(parameterized.TestCase):
       # TODO(team): remove this reordering after MjData._all_fields order is fixed
       # there's a bug in _all_fields where solver_niter is in the wrong place
       mj_fields.insert(0, mj_fields.pop(mj_fields.index("solver_niter")))
-
     mj_set, mjw_set = set(mj_fields), set(mjw_fields)
 
     # first, put any union fields

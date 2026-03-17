@@ -21,11 +21,11 @@ from typing import Callable, Tuple
 import numpy as np
 import warp as wp
 
-from . import warp_util
-from .types import Data
-from .types import Model
-from .types import RenderContext
-from .util_misc import halton
+from comfree_warp.mujoco_warp._src import warp_util
+from comfree_warp.mujoco_warp._src.types import Data
+from comfree_warp.mujoco_warp._src.types import Model
+from comfree_warp.mujoco_warp._src.types import RenderContext
+from comfree_warp.mujoco_warp._src.util_misc import halton
 
 
 def _sum(stack1, stack2):
@@ -57,12 +57,12 @@ def ctrl_noise(
   worldid, actid = wp.tid()
 
   # convert rate and scale to discrete time (Ornstein-Uhlenbeck)
-  rate = wp.exp(-opt_timestep[0] / ctrlnoiserate)
+  rate = wp.exp(-opt_timestep[worldid % opt_timestep.shape[0]] / ctrlnoiserate)
   scale = ctrlnoisestd * wp.sqrt(1.0 - rate * rate)
 
   midpoint = 0.0
   halfrange = 1.0
-  ctrlrange = actuator_ctrlrange[0, actid]
+  ctrlrange = actuator_ctrlrange[worldid % actuator_ctrlrange.shape[0], actid]
   is_limited = actuator_ctrllimited[actid]
   if is_limited:
     midpoint = 0.5 * (ctrlrange[1] + ctrlrange[0])

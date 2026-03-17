@@ -17,33 +17,33 @@ from typing import Tuple
 
 import warp as wp
 
-from .collision_core import CollisionContext
-from .collision_core import Geom
-from .collision_core import contact_params
-from .collision_core import geom_collision_pair
-from .collision_core import write_contact
-from .collision_primitive_core import box_box
-from .collision_primitive_core import capsule_box
-from .collision_primitive_core import capsule_capsule
-from .collision_primitive_core import plane_box
-from .collision_primitive_core import plane_capsule
-from .collision_primitive_core import plane_cylinder
-from .collision_primitive_core import plane_ellipsoid
-from .collision_primitive_core import plane_sphere
-from .collision_primitive_core import sphere_box
-from .collision_primitive_core import sphere_capsule
-from .collision_primitive_core import sphere_cylinder
-from .collision_primitive_core import sphere_sphere
-from .math import make_frame
-from .math import upper_trid_index
-from .types import MJ_MAXVAL
-from .types import Data
-from .types import GeomType
-from .types import Model
-from .types import mat43
-from .types import vec5
-from .warp_util import cache_kernel
-from .warp_util import event_scope
+from comfree_warp.mujoco_warp._src.collision_core import CollisionContext
+from comfree_warp.mujoco_warp._src.collision_core import Geom
+from comfree_warp.mujoco_warp._src.collision_core import contact_params
+from comfree_warp.mujoco_warp._src.collision_core import geom_collision_pair
+from comfree_warp.mujoco_warp._src.collision_core import write_contact
+from comfree_warp.mujoco_warp._src.collision_primitive_core import box_box
+from comfree_warp.mujoco_warp._src.collision_primitive_core import capsule_box
+from comfree_warp.mujoco_warp._src.collision_primitive_core import capsule_capsule
+from comfree_warp.mujoco_warp._src.collision_primitive_core import plane_box
+from comfree_warp.mujoco_warp._src.collision_primitive_core import plane_capsule
+from comfree_warp.mujoco_warp._src.collision_primitive_core import plane_cylinder
+from comfree_warp.mujoco_warp._src.collision_primitive_core import plane_ellipsoid
+from comfree_warp.mujoco_warp._src.collision_primitive_core import plane_sphere
+from comfree_warp.mujoco_warp._src.collision_primitive_core import sphere_box
+from comfree_warp.mujoco_warp._src.collision_primitive_core import sphere_capsule
+from comfree_warp.mujoco_warp._src.collision_primitive_core import sphere_cylinder
+from comfree_warp.mujoco_warp._src.collision_primitive_core import sphere_sphere
+from comfree_warp.mujoco_warp._src.math import make_frame
+from comfree_warp.mujoco_warp._src.math import upper_trid_index
+from comfree_warp.mujoco_warp._src.types import MJ_MAXVAL
+from comfree_warp.mujoco_warp._src.types import Data
+from comfree_warp.mujoco_warp._src.types import GeomType
+from comfree_warp.mujoco_warp._src.types import Model
+from comfree_warp.mujoco_warp._src.types import mat43
+from comfree_warp.mujoco_warp._src.types import vec5
+from comfree_warp.mujoco_warp._src.warp_util import cache_kernel
+from comfree_warp.mujoco_warp._src.warp_util import event_scope
 
 wp.set_module_options({"enable_backward": False})
 
@@ -305,6 +305,7 @@ def plane_sphere_wrapper(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_efc_address_out: wp.array2d(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
   contact_type_out: wp.array(dtype=int),
   contact_geomcollisionid_out: wp.array(dtype=int),
@@ -340,6 +341,7 @@ def plane_sphere_wrapper(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_efc_address_out,
     contact_worldid_out,
     contact_type_out,
     contact_geomcollisionid_out,
@@ -375,6 +377,7 @@ def sphere_sphere_wrapper(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_efc_address_out: wp.array2d(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
   contact_type_out: wp.array(dtype=int),
   contact_geomcollisionid_out: wp.array(dtype=int),
@@ -409,6 +412,7 @@ def sphere_sphere_wrapper(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_efc_address_out,
     contact_worldid_out,
     contact_type_out,
     contact_geomcollisionid_out,
@@ -444,6 +448,7 @@ def sphere_capsule_wrapper(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_efc_address_out: wp.array2d(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
   contact_type_out: wp.array(dtype=int),
   contact_geomcollisionid_out: wp.array(dtype=int),
@@ -481,6 +486,7 @@ def sphere_capsule_wrapper(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_efc_address_out,
     contact_worldid_out,
     contact_type_out,
     contact_geomcollisionid_out,
@@ -516,6 +522,7 @@ def capsule_capsule_wrapper(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_efc_address_out: wp.array2d(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
   contact_type_out: wp.array(dtype=int),
   contact_geomcollisionid_out: wp.array(dtype=int),
@@ -565,6 +572,7 @@ def capsule_capsule_wrapper(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_efc_address_out,
       contact_worldid_out,
       contact_type_out,
       contact_geomcollisionid_out,
@@ -600,6 +608,7 @@ def plane_capsule_wrapper(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_efc_address_out: wp.array2d(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
   contact_type_out: wp.array(dtype=int),
   contact_geomcollisionid_out: wp.array(dtype=int),
@@ -645,6 +654,7 @@ def plane_capsule_wrapper(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_efc_address_out,
       contact_worldid_out,
       contact_type_out,
       contact_geomcollisionid_out,
@@ -680,6 +690,7 @@ def plane_ellipsoid_wrapper(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_efc_address_out: wp.array2d(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
   contact_type_out: wp.array(dtype=int),
   contact_geomcollisionid_out: wp.array(dtype=int),
@@ -714,6 +725,7 @@ def plane_ellipsoid_wrapper(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_efc_address_out,
     contact_worldid_out,
     contact_type_out,
     contact_geomcollisionid_out,
@@ -749,6 +761,7 @@ def plane_box_wrapper(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_efc_address_out: wp.array2d(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
   contact_type_out: wp.array(dtype=int),
   contact_geomcollisionid_out: wp.array(dtype=int),
@@ -785,6 +798,7 @@ def plane_box_wrapper(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_efc_address_out,
       contact_worldid_out,
       contact_type_out,
       contact_geomcollisionid_out,
@@ -820,6 +834,7 @@ def plane_convex_wrapper(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_efc_address_out: wp.array2d(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
   contact_type_out: wp.array(dtype=int),
   contact_geomcollisionid_out: wp.array(dtype=int),
@@ -856,6 +871,7 @@ def plane_convex_wrapper(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_efc_address_out,
       contact_worldid_out,
       contact_type_out,
       contact_geomcollisionid_out,
@@ -891,6 +907,7 @@ def sphere_cylinder_wrapper(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_efc_address_out: wp.array2d(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
   contact_type_out: wp.array(dtype=int),
   contact_geomcollisionid_out: wp.array(dtype=int),
@@ -935,6 +952,7 @@ def sphere_cylinder_wrapper(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_efc_address_out,
     contact_worldid_out,
     contact_type_out,
     contact_geomcollisionid_out,
@@ -970,6 +988,7 @@ def plane_cylinder_wrapper(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_efc_address_out: wp.array2d(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
   contact_type_out: wp.array(dtype=int),
   contact_geomcollisionid_out: wp.array(dtype=int),
@@ -1016,6 +1035,7 @@ def plane_cylinder_wrapper(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_efc_address_out,
       contact_worldid_out,
       contact_type_out,
       contact_geomcollisionid_out,
@@ -1051,6 +1071,7 @@ def sphere_box_wrapper(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_efc_address_out: wp.array2d(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
   contact_type_out: wp.array(dtype=int),
   contact_geomcollisionid_out: wp.array(dtype=int),
@@ -1084,6 +1105,7 @@ def sphere_box_wrapper(
     contact_solimp_out,
     contact_dim_out,
     contact_geom_out,
+    contact_efc_address_out,
     contact_worldid_out,
     contact_type_out,
     contact_geomcollisionid_out,
@@ -1119,6 +1141,7 @@ def capsule_box_wrapper(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_efc_address_out: wp.array2d(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
   contact_type_out: wp.array(dtype=int),
   contact_geomcollisionid_out: wp.array(dtype=int),
@@ -1167,6 +1190,7 @@ def capsule_box_wrapper(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_efc_address_out,
       contact_worldid_out,
       contact_type_out,
       contact_geomcollisionid_out,
@@ -1202,6 +1226,7 @@ def box_box_wrapper(
   contact_solimp_out: wp.array(dtype=vec5),
   contact_dim_out: wp.array(dtype=int),
   contact_geom_out: wp.array(dtype=wp.vec2i),
+  contact_efc_address_out: wp.array2d(dtype=int),
   contact_worldid_out: wp.array(dtype=int),
   contact_type_out: wp.array(dtype=int),
   contact_geomcollisionid_out: wp.array(dtype=int),
@@ -1246,6 +1271,7 @@ def box_box_wrapper(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_efc_address_out,
       contact_worldid_out,
       contact_type_out,
       contact_geomcollisionid_out,
@@ -1328,6 +1354,7 @@ def _primitive_narrowphase(primitive_collisions_types, primitive_collisions_func
     contact_solimp_out: wp.array(dtype=vec5),
     contact_dim_out: wp.array(dtype=int),
     contact_geom_out: wp.array(dtype=wp.vec2i),
+    contact_efc_address_out: wp.array2d(dtype=int),
     contact_worldid_out: wp.array(dtype=int),
     contact_type_out: wp.array(dtype=int),
     contact_geomcollisionid_out: wp.array(dtype=int),
@@ -1417,6 +1444,7 @@ def _primitive_narrowphase(primitive_collisions_types, primitive_collisions_func
           contact_solimp_out,
           contact_dim_out,
           contact_geom_out,
+          contact_efc_address_out,
           contact_worldid_out,
           contact_type_out,
           contact_geomcollisionid_out,
@@ -1512,6 +1540,7 @@ def primitive_narrowphase(m: Model, d: Data, ctx: CollisionContext, collision_ta
       d.contact.solimp,
       d.contact.dim,
       d.contact.geom,
+      d.contact.efc_address,
       d.contact.worldid,
       d.contact.type,
       d.contact.geomcollisionid,

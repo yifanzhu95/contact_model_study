@@ -16,8 +16,8 @@
 import mujoco
 import warp as wp
 
-from .types import ProjectionType
-from .types import RenderContext
+from comfree_warp.mujoco_warp._src.types import ProjectionType
+from comfree_warp.mujoco_warp._src.types import RenderContext
 
 wp.set_module_options({"enable_backward": False})
 

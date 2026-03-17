@@ -21,11 +21,11 @@ import warp as wp
 from absl.testing import absltest
 from absl.testing import parameterized
 
-import mujoco_warp as mjw
-from mujoco_warp import DisableBit
-from mujoco_warp import IntegratorType
-from mujoco_warp import test_data
-from . import inverse
+import comfree_warp.mujoco_warp as mjw
+from comfree_warp.mujoco_warp import DisableBit
+from comfree_warp.mujoco_warp import IntegratorType
+from comfree_warp.mujoco_warp import test_data
+from comfree_warp.mujoco_warp._src import inverse
 
 
 def _assert_eq(a, b, name):

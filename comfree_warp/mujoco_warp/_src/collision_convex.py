@@ -17,33 +17,33 @@ from typing import Tuple
 
 import warp as wp
 
-from .collision_core import CollisionContext
-from .collision_core import Geom
-from .collision_core import contact_params
-from .collision_core import geom_collision_pair
-from .collision_core import write_contact
-from .collision_gjk import ccd
-from .collision_gjk import multicontact
-from .collision_gjk import support
-from .collision_primitive import Geom
-from .collision_primitive import contact_params
-from .collision_primitive import geom_collision_pair
-from .collision_primitive import write_contact
-from .math import make_frame
-from .math import upper_trid_index
-from .types import MJ_MAX_EPAFACES
-from .types import MJ_MAX_EPAHORIZON
-from .types import MJ_MAXCONPAIR
-from .types import MJ_MAXVAL
-from .types import Data
-from .types import EnableBit
-from .types import GeomType
-from .types import Model
-from .types import mat43
-from .types import mat63
-from .types import vec5
-from .warp_util import cache_kernel
-from .warp_util import event_scope
+from comfree_warp.mujoco_warp._src.collision_core import CollisionContext
+from comfree_warp.mujoco_warp._src.collision_core import Geom
+from comfree_warp.mujoco_warp._src.collision_core import contact_params
+from comfree_warp.mujoco_warp._src.collision_core import geom_collision_pair
+from comfree_warp.mujoco_warp._src.collision_core import write_contact
+from comfree_warp.mujoco_warp._src.collision_gjk import ccd
+from comfree_warp.mujoco_warp._src.collision_gjk import multicontact
+from comfree_warp.mujoco_warp._src.collision_gjk import support
+from comfree_warp.mujoco_warp._src.collision_primitive import Geom
+from comfree_warp.mujoco_warp._src.collision_primitive import contact_params
+from comfree_warp.mujoco_warp._src.collision_primitive import geom_collision_pair
+from comfree_warp.mujoco_warp._src.collision_primitive import write_contact
+from comfree_warp.mujoco_warp._src.math import make_frame
+from comfree_warp.mujoco_warp._src.math import upper_trid_index
+from comfree_warp.mujoco_warp._src.types import MJ_MAX_EPAFACES
+from comfree_warp.mujoco_warp._src.types import MJ_MAX_EPAHORIZON
+from comfree_warp.mujoco_warp._src.types import MJ_MAXCONPAIR
+from comfree_warp.mujoco_warp._src.types import MJ_MAXVAL
+from comfree_warp.mujoco_warp._src.types import Data
+from comfree_warp.mujoco_warp._src.types import EnableBit
+from comfree_warp.mujoco_warp._src.types import GeomType
+from comfree_warp.mujoco_warp._src.types import Model
+from comfree_warp.mujoco_warp._src.types import mat43
+from comfree_warp.mujoco_warp._src.types import mat63
+from comfree_warp.mujoco_warp._src.types import vec5
+from comfree_warp.mujoco_warp._src.warp_util import cache_kernel
+from comfree_warp.mujoco_warp._src.warp_util import event_scope
 
 # TODO(team): improve compile time to enable backward pass
 wp.set_module_options({"enable_backward": False})
@@ -234,6 +234,7 @@ def ccd_hfield_kernel_builder(
     contact_solimp_out: wp.array(dtype=vec5),
     contact_dim_out: wp.array(dtype=int),
     contact_geom_out: wp.array(dtype=wp.vec2i),
+    contact_efc_address_out: wp.array2d(dtype=int),
     contact_worldid_out: wp.array(dtype=int),
     contact_type_out: wp.array(dtype=int),
     contact_geomcollisionid_out: wp.array(dtype=int),
@@ -517,6 +518,7 @@ def ccd_hfield_kernel_builder(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_efc_address_out,
       contact_worldid_out,
       contact_type_out,
       contact_geomcollisionid_out,
@@ -573,6 +575,7 @@ def ccd_hfield_kernel_builder(
         contact_solimp_out,
         contact_dim_out,
         contact_geom_out,
+        contact_efc_address_out,
         contact_worldid_out,
         contact_type_out,
         contact_geomcollisionid_out,
@@ -627,6 +630,7 @@ def ccd_hfield_kernel_builder(
         contact_solimp_out,
         contact_dim_out,
         contact_geom_out,
+        contact_efc_address_out,
         contact_worldid_out,
         contact_type_out,
         contact_geomcollisionid_out,
@@ -682,6 +686,7 @@ def ccd_hfield_kernel_builder(
         contact_solimp_out,
         contact_dim_out,
         contact_geom_out,
+        contact_efc_address_out,
         contact_worldid_out,
         contact_type_out,
         contact_geomcollisionid_out,
@@ -752,6 +757,7 @@ def ccd_kernel_builder(
     contact_solimp_out: wp.array(dtype=vec5),
     contact_dim_out: wp.array(dtype=int),
     contact_geom_out: wp.array(dtype=wp.vec2i),
+    contact_efc_address_out: wp.array2d(dtype=int),
     contact_worldid_out: wp.array(dtype=int),
     contact_type_out: wp.array(dtype=int),
     contact_geomcollisionid_out: wp.array(dtype=int),
@@ -788,6 +794,13 @@ def ccd_kernel_builder(
 
     if dist >= 0.0 and pairid[1] == -1:
       return 0
+
+    # CCD operates on margin-inflated shapes (support() inflates each geom by
+    # 0.5 * margin).  The returned dist is therefore relative to the inflated
+    # geometry.  Correct back to the true surface-to-surface distance so that
+    # the constraint pipeline (pos = dist - includemargin) works consistently
+    # with the primitive narrowphase, which reports un-inflated distances.
+    dist += margin
 
     witness1[0] = w1
     witness2[0] = w2
@@ -865,6 +878,7 @@ def ccd_kernel_builder(
         contact_solimp_out,
         contact_dim_out,
         contact_geom_out,
+        contact_efc_address_out,
         contact_worldid_out,
         contact_type_out,
         contact_geomcollisionid_out,
@@ -950,6 +964,7 @@ def ccd_kernel_builder(
     contact_solimp_out: wp.array(dtype=vec5),
     contact_dim_out: wp.array(dtype=int),
     contact_geom_out: wp.array(dtype=wp.vec2i),
+    contact_efc_address_out: wp.array2d(dtype=int),
     contact_worldid_out: wp.array(dtype=int),
     contact_type_out: wp.array(dtype=int),
     contact_geomcollisionid_out: wp.array(dtype=int),
@@ -1064,6 +1079,7 @@ def ccd_kernel_builder(
       contact_solimp_out,
       contact_dim_out,
       contact_geom_out,
+      contact_efc_address_out,
       contact_worldid_out,
       contact_type_out,
       contact_geomcollisionid_out,
@@ -1150,6 +1166,7 @@ def convex_narrowphase(m: Model, d: Data, ctx: CollisionContext, collision_table
     d.contact.solimp,
     d.contact.dim,
     d.contact.geom,
+    d.contact.efc_address,
     d.contact.worldid,
     d.contact.type,
     d.contact.geomcollisionid,

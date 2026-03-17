@@ -15,18 +15,18 @@
 
 import warp as wp
 
-from . import derivative
-from . import forward
-from . import sensor
-from . import smooth
-from . import solver
-from . import support
-from .support import mul_m
-from .types import Data
-from .types import DisableBit
-from .types import EnableBit
-from .types import IntegratorType
-from .types import Model
+from comfree_warp.mujoco_warp._src import derivative
+from comfree_warp.mujoco_warp._src import forward
+from comfree_warp.mujoco_warp._src import sensor
+from comfree_warp.mujoco_warp._src import smooth
+from comfree_warp.mujoco_warp._src import solver
+from comfree_warp.mujoco_warp._src import support
+from comfree_warp.mujoco_warp._src.support import mul_m
+from comfree_warp.mujoco_warp._src.types import Data
+from comfree_warp.mujoco_warp._src.types import DisableBit
+from comfree_warp.mujoco_warp._src.types import EnableBit
+from comfree_warp.mujoco_warp._src.types import IntegratorType
+from comfree_warp.mujoco_warp._src.types import Model
 
 wp.set_module_options({"enable_backward": False})
 

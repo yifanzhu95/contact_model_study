@@ -19,9 +19,9 @@ import numpy as np
 import warp as wp
 from absl.testing import absltest
 
-import mujoco_warp as mjw
-from mujoco_warp import test_data
-from .types import vec6
+import comfree_warp.mujoco_warp as mjw
+from comfree_warp.mujoco_warp import test_data
+from comfree_warp.mujoco_warp._src.types import vec6
 
 # tolerance for difference between MuJoCo and MJX ray calculations - mostly
 # due to float precision

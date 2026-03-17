@@ -21,9 +21,9 @@ import warp as wp
 from absl.testing import absltest
 from absl.testing import parameterized
 
-import mujoco_warp as mjw
-from mujoco_warp import DisableBit
-from mujoco_warp import test_data
+import comfree_warp.mujoco_warp as mjw
+from comfree_warp.mujoco_warp import DisableBit
+from comfree_warp.mujoco_warp import test_data
 
 # tolerance for difference between MuJoCo and MJWarp passive force calculations - mostly
 # due to float precision

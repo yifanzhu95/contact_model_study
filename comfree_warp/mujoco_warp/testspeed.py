@@ -38,10 +38,10 @@ from etils import epath
 import comfree_warp.mujoco_warp as mjw
 
 # mjwarp-testspeed has priviledged access to a few internal methods
-from ._src.benchmark import benchmark
-from ._src.io import find_keys
-from ._src.io import make_trajectory
-from ._src.io import override_model
+from comfree_warp.mujoco_warp._src.benchmark import benchmark
+from comfree_warp.mujoco_warp._src.io import find_keys
+from comfree_warp.mujoco_warp._src.io import make_trajectory
+from comfree_warp.mujoco_warp._src.io import override_model
 
 _FUNCS = {
   n: f
@@ -90,7 +90,7 @@ def _load_model(path: epath.Path) -> mujoco.MjModel:
   spec = mujoco.MjSpec.from_file(path.as_posix())
   # check if the file has any mujoco.sdf test plugins
   if any(p.plugin_name.startswith("mujoco.sdf") for p in spec.plugins):
-    from .test_data.collision_sdf.utils import register_sdf_plugins as register_sdf_plugins
+    from comfree_warp.mujoco_warp.test_data.collision_sdf.utils import register_sdf_plugins as register_sdf_plugins
 
     register_sdf_plugins(mjw)
 
@@ -422,8 +422,8 @@ def _main(argv: Sequence[str]):
 
       if _INFO.value:
         # Collider types grouped by category
-        from ._src.collision_driver import MJ_COLLISION_TABLE
-        from ._src.types import CollisionType
+        from comfree_warp.mujoco_warp._src.collision_driver import MJ_COLLISION_TABLE
+        from comfree_warp.mujoco_warp._src.types import CollisionType
 
         def trid_to_types(trid):
           """Convert triangular index back to geom type pair."""

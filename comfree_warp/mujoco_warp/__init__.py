@@ -56,6 +56,8 @@ from ._src.io import reset_data as reset_data
 from ._src.io import set_const as set_const
 from ._src.io import set_const_0 as set_const_0
 from ._src.io import set_const_fixed as set_const_fixed
+from ._src.io import set_length_range as set_length_range
+from ._src.island import island as island
 from ._src.passive import passive as passive
 from ._src.ray import ray as ray
 from ._src.ray import rays as rays

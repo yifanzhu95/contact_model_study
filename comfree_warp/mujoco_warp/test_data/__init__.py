@@ -21,11 +21,8 @@ import mujoco
 import numpy as np
 from etils import epath
 
-from .. import put_data
-from .. import put_model
-from .._src.io import override_model
-from .._src.types import Data
-from .._src.types import Model
+import comfree_warp.mujoco_warp as mjw
+from comfree_warp.mujoco_warp._src.io import override_model
 
 
 def fixture(
@@ -40,7 +37,7 @@ def fixture(
   mocap_noise: Optional[float] = None,
   overrides: dict[str, Any] | Sequence[str] = tuple(),
   nworld: int = 1,
-) -> Tuple[mujoco.MjModel, mujoco.MjData, Model, Data]:
+) -> Tuple[mujoco.MjModel, mujoco.MjData, mjw.Model, mjw.Data]:
   """Loads MuJoCo MjModel / MjData and corresponding mjw.Model / mjw.Data.
 
   Args:
@@ -101,9 +98,9 @@ def fixture(
 
   mujoco.mj_forward(mjm, mjd)
   mjd.qacc_warmstart = mjd.qacc
-  m = put_model(mjm)
+  m = mjw.put_model(mjm)
   override_model(m, overrides)
 
-  d = put_data(mjm, mjd, nworld=nworld)
+  d = mjw.put_data(mjm, mjd, nworld=nworld)
 
   return mjm, mjd, m, d

@@ -21,8 +21,8 @@ import mujoco
 import numpy as np
 from etils import epath
 
-import mujoco_warp as mjw
-from mujoco_warp._src.io import override_model
+import comfree_warp.mujoco_warp as mjw
+from comfree_warp.mujoco_warp._src.io import override_model
 
 
 def fixture(
@@ -63,7 +63,7 @@ def fixture(
   np.random.seed(42)  # reduce test flakiness
 
   if path is not None:
-    path = epath.resource_path("mujoco_warp") / "test_data" / path
+    path = epath.resource_path("comfree_warp.mujoco_warp") / "test_data" / path
     mjm = mujoco.MjModel.from_xml_path(path.as_posix())
   elif xml is not None:
     mjm = mujoco.MjModel.from_xml_string(xml)

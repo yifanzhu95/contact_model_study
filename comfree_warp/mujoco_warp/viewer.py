@@ -40,9 +40,9 @@ from etils import epath
 import comfree_warp.mujoco_warp as mjw
 
 # mjwarp-viewer has priviledged access to a few internal methods
-from ._src.io import find_keys
-from ._src.io import make_trajectory
-from ._src.io import override_model
+from comfree_warp.mujoco_warp._src.io import find_keys
+from comfree_warp.mujoco_warp._src.io import make_trajectory
+from comfree_warp.mujoco_warp._src.io import override_model
 
 
 class EngineOptions(enum.IntEnum):
@@ -87,7 +87,7 @@ def _load_model(path: epath.Path) -> mujoco.MjModel:
   spec = mujoco.MjSpec.from_file(path.as_posix())
   # check if the file has any mujoco.sdf test plugins
   if any(p.plugin_name.startswith("mujoco.sdf") for p in spec.plugins):
-    from .test_data.collision_sdf.utils import register_sdf_plugins as register_sdf_plugins
+    from comfree_warp.mujoco_warp.test_data.collision_sdf.utils import register_sdf_plugins as register_sdf_plugins
 
     register_sdf_plugins(mjw)
   return spec.compile()

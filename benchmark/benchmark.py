@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-from mujoco_warp._src import benchmark
+from comfree_warp.mujoco_warp._src import benchmark
 
 
 class AlohaCloth(benchmark.BenchmarkSuite):

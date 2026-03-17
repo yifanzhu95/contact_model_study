@@ -17,14 +17,14 @@ from typing import Tuple
 
 import warp as wp
 
-from .math import safe_div
-from .types import MJ_MAXVAL
-from .types import MJ_MINVAL
-from .types import Data
-from .types import GeomType
-from .types import Model
-from .types import RenderContext
-from .types import vec6
+from comfree_warp.mujoco_warp._src.math import safe_div
+from comfree_warp.mujoco_warp._src.types import MJ_MAXVAL
+from comfree_warp.mujoco_warp._src.types import MJ_MINVAL
+from comfree_warp.mujoco_warp._src.types import Data
+from comfree_warp.mujoco_warp._src.types import GeomType
+from comfree_warp.mujoco_warp._src.types import Model
+from comfree_warp.mujoco_warp._src.types import RenderContext
+from comfree_warp.mujoco_warp._src.types import vec6
 
 wp.set_module_options({"enable_backward": False})
 
@@ -66,19 +66,19 @@ def _ray_eliminate(
 ) -> bool:
   """Eliminate ray."""
   bodyid = geom_bodyid[geomid]
-  matid = geom_matid[geomid]
+  matid = geom_matid[geomid]  # kernel_analyzer: ignore
 
   # body exclusion
   if bodyid == bodyexclude:
     return True
 
   # invisible geom exclusion
-  if matid < 0 and geom_rgba[geomid][3] == 0.0:
+  if matid < 0 and geom_rgba[geomid][3] == 0.0:  # kernel_analyzer: ignore
     return True
 
   # invisible material exclusion
   if matid >= 0:
-    if mat_rgba[matid][3] == 0.0:
+    if mat_rgba[matid][3] == 0.0:  # kernel_analyzer: ignore
       return True
 
   # static exclusion

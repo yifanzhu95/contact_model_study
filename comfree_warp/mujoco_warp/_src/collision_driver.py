@@ -17,24 +17,25 @@ from typing import Any
 
 import warp as wp
 
-from .collision_convex import convex_narrowphase
-from .collision_core import CollisionContext
-from .collision_core import create_collision_context
-from .collision_primitive import primitive_narrowphase
-from .collision_sdf import sdf_narrowphase
-from .math import upper_tri_index
-from .types import MJ_MAXVAL
-from .types import BroadphaseFilter
-from .types import BroadphaseType
-from .types import CollisionType
-from .types import Data
-from .types import DisableBit
-from .types import GeomType
-from .types import Model
-from .types import mat23
-from .types import mat63
-from .warp_util import cache_kernel
-from .warp_util import event_scope
+from comfree_warp.mujoco_warp._src.collision_convex import convex_narrowphase
+from comfree_warp.mujoco_warp._src.collision_core import CollisionContext
+from comfree_warp.mujoco_warp._src.collision_core import create_collision_context
+from comfree_warp.mujoco_warp._src.collision_flex import flex_narrowphase
+from comfree_warp.mujoco_warp._src.collision_primitive import primitive_narrowphase
+from comfree_warp.mujoco_warp._src.collision_sdf import sdf_narrowphase
+from comfree_warp.mujoco_warp._src.math import upper_tri_index
+from comfree_warp.mujoco_warp._src.types import MJ_MAXVAL
+from comfree_warp.mujoco_warp._src.types import BroadphaseFilter
+from comfree_warp.mujoco_warp._src.types import BroadphaseType
+from comfree_warp.mujoco_warp._src.types import CollisionType
+from comfree_warp.mujoco_warp._src.types import Data
+from comfree_warp.mujoco_warp._src.types import DisableBit
+from comfree_warp.mujoco_warp._src.types import GeomType
+from comfree_warp.mujoco_warp._src.types import Model
+from comfree_warp.mujoco_warp._src.types import mat23
+from comfree_warp.mujoco_warp._src.types import mat63
+from comfree_warp.mujoco_warp._src.warp_util import cache_kernel
+from comfree_warp.mujoco_warp._src.warp_util import event_scope
 
 wp.set_module_options({"enable_backward": False})
 
@@ -291,13 +292,13 @@ def _broadphase_filter(opt_broadphase_filter: int, ngeom_aabb: int, ngeom_rbound
     # 8: obb
 
     aabb_id = worldid % ngeom_aabb if wp.static(ngeom_aabb > 1) else 0
-    center1, center2 = geom_aabb[aabb_id, geom1, 0], geom_aabb[aabb_id, geom2, 0]
-    size1, size2 = geom_aabb[aabb_id, geom1, 1], geom_aabb[aabb_id, geom2, 1]
+    center1, center2 = geom_aabb[aabb_id, geom1, 0], geom_aabb[aabb_id, geom2, 0]  # kernel_analyzer: ignore
+    size1, size2 = geom_aabb[aabb_id, geom1, 1], geom_aabb[aabb_id, geom2, 1]  # kernel_analyzer: ignore
 
     rbound_id = worldid % ngeom_rbound if wp.static(ngeom_rbound > 1) else 0
-    rbound1, rbound2 = geom_rbound[rbound_id, geom1], geom_rbound[rbound_id, geom2]
+    rbound1, rbound2 = geom_rbound[rbound_id, geom1], geom_rbound[rbound_id, geom2]  # kernel_analyzer: ignore
     margin_id = worldid % ngeom_margin if wp.static(ngeom_margin > 1) else 0
-    margin1, margin2 = geom_margin[margin_id, geom1], geom_margin[margin_id, geom2]
+    margin1, margin2 = geom_margin[margin_id, geom1], geom_margin[margin_id, geom2]  # kernel_analyzer: ignore
     xpos1, xpos2 = geom_xpos_in[worldid, geom1], geom_xpos_in[worldid, geom2]
     xmat1, xmat2 = geom_xmat_in[worldid, geom1], geom_xmat_in[worldid, geom2]
 
@@ -746,6 +747,9 @@ def _narrowphase(m: Model, d: Data, ctx: CollisionContext):
   if m.has_sdf_geom:
     sdf_narrowphase(m, d, ctx)
 
+  if m.nflex > 0:
+    flex_narrowphase(m, d)
+
 
 @event_scope
 def collision(m: Model, d: Data):
@@ -780,3 +784,6 @@ def collision(m: Model, d: Data):
     sap_broadphase(m, d, ctx)
 
   _narrowphase(m, d, ctx)
+
+  if m.callback.contactfilter:
+    m.callback.contactfilter(m, d)

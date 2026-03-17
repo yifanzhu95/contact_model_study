@@ -19,12 +19,12 @@ from typing import Tuple
 
 import warp as wp
 
-from . import math
-from .types import MJ_MAXVAL
-from .types import MJ_MINVAL
-from .types import GeomType
-from .types import WrapType
-from .types import vec10
+from comfree_warp.mujoco_warp._src import math
+from comfree_warp.mujoco_warp._src.types import MJ_MAXVAL
+from comfree_warp.mujoco_warp._src.types import MJ_MINVAL
+from comfree_warp.mujoco_warp._src.types import GeomType
+from comfree_warp.mujoco_warp._src.types import WrapType
+from comfree_warp.mujoco_warp._src.types import vec10
 
 
 @wp.func

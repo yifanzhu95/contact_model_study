@@ -21,12 +21,12 @@ import warp as wp
 from absl.testing import absltest
 from absl.testing import parameterized
 
-import mujoco_warp as mjwarp
-from mujoco_warp import ConeType
-from mujoco_warp import State
-from mujoco_warp import test_data
-from .block_cholesky import create_blocked_cholesky_func
-from .block_cholesky import create_blocked_cholesky_solve_func
+import comfree_warp.mujoco_warp as mjwarp
+from comfree_warp.mujoco_warp import ConeType
+from comfree_warp.mujoco_warp import State
+from comfree_warp.mujoco_warp import test_data
+from comfree_warp.mujoco_warp._src.block_cholesky import create_blocked_cholesky_func
+from comfree_warp.mujoco_warp._src.block_cholesky import create_blocked_cholesky_solve_func
 
 # tolerance for difference between MuJoCo and MJWarp support calculations - mostly
 # due to float precision

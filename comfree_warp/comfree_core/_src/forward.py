@@ -1,12 +1,21 @@
 import warp as wp
 
-import comfree_warp.mujoco_warp as _mjwarp
+from comfree_warp.mujoco_warp._src import collision_driver
+from comfree_warp.mujoco_warp._src import sensor
+from comfree_warp.mujoco_warp._src import smooth
+from comfree_warp.mujoco_warp._src.forward import euler
+from comfree_warp.mujoco_warp._src.forward import fwd_acceleration
+from comfree_warp.mujoco_warp._src.forward import fwd_actuation
+from comfree_warp.mujoco_warp._src.forward import fwd_velocity
+from comfree_warp.mujoco_warp._src.forward import implicit
 from comfree_warp.mujoco_warp._src.warp_util import event_scope
-from comfree_warp.mujoco_warp._src import smooth, collision_driver, sensor
-from comfree_warp.mujoco_warp._src.forward import fwd_velocity, fwd_actuation, fwd_acceleration, euler, rungekutta4, implicit
 
 from . import constraint
-from .types import Model, Data, EnableBit, IntegratorType
+from .types import Data
+from .types import EnableBit
+from .types import IntegratorType
+from .types import Model
+from .types import DisableBit
 
 wp.set_module_options({"enable_backward": False})
 
@@ -41,7 +50,6 @@ def _compute_qfrc_constraint(
   qvel_smooth_pred: wp.array2d(dtype=float),
   nv: int,
   nefc: wp.array(dtype=int),
-  D: wp.array2d(dtype=float),
   # Out: 
   efc_force: wp.array2d(dtype=float),
   qfrc_constraint: wp.array2d(dtype=float),
@@ -114,7 +122,6 @@ def compute_qfrc_total(m: Model, d: Data):
       d.qvel_smooth_pred,
       m.nv,
       d.nefc,
-      d.efc.D,
     ],
     outputs=[
       d.efc.force,
@@ -136,7 +143,7 @@ def compute_qfrc_total(m: Model, d: Data):
 
 
 @event_scope
-def forward_comfree(m: Model, d: Data):
+def forward_comfree(m: Model, d: Data, factorize: bool = True):
   """Forward dynamics with complementarity-free model."""
 
   # forward position
@@ -147,7 +154,6 @@ def forward_comfree(m: Model, d: Data):
   smooth.tendon(m, d)
   smooth.crb(m, d)
   smooth.tendon_armature(m, d)
-  factorize= True
   if factorize:
     smooth.factor_m(m, d)
   if m.opt.run_collision_detection:
@@ -173,10 +179,13 @@ def forward_comfree(m: Model, d: Data):
       sensor.energy_vel(m, d)
 
   # forward actuation and smooth acceleration
+  if not (m.opt.disableflags & DisableBit.ACTUATION):
+    if m.callback.control:
+      m.callback.control(m, d)
   fwd_actuation(m, d)
-  fwd_acceleration(m, d, factorize=False)
+  fwd_acceleration(m, d, factorize=True)
 
-  # call comfree solver to resolve constraints
+  # call comfree model to resolve constraints
   if d.njmax == 0 or m.nv == 0:
     wp.copy(d.qacc, d.qacc_smooth)
   else:

@@ -19,8 +19,8 @@ import warp as wp
 from absl.testing import absltest
 from absl.testing import parameterized
 
-import mujoco_warp as mjw
-from mujoco_warp import test_data
+import comfree_warp.mujoco_warp as mjw
+from comfree_warp.mujoco_warp import test_data
 
 # TODO(team): JAX test is temporary, remove after we land MJX:Warp
 

@@ -19,12 +19,11 @@ nconmax = 1000
 
 
 
-
-model_path = "benchmark/test_data/primitives.xml"
+# model_path = "benchmark/test_data/primitives.xml"
 # model_path = "benchmark/humanoid/n_humanoid.xml"
 # model_path = "benchmark/test_data/collision.xml"
 # model_path = "benchmark/test_data/flex/floppy.xml"
-# model_path = "benchmark/test_data/hfield/hfield.xml"
+model_path = "benchmark/test_data/hfield/hfield.xml"
 # model_path = "benchmark/leap/env_leap_cube.xml"
 
 
@@ -45,18 +44,22 @@ if streamer.enabled:
 
 
 step_counter = 0
+WARP_DEVICE = os.getenv("WARP_DEVICE", "cpu")
+wp.init()
+wp.set_device(WARP_DEVICE)
+print("Warp device:", wp.get_device())
 
 
 if engine!=0:
+    step_fn = None
     if engine==1:
         m = mjwarp.put_model(mjm)
         d = mjwarp.put_data(mjm, mjd, nworld=nworld, nconmax=nconmax, njmax=njmax)
+        step_fn = mjwarp.step
 
         print("Compiling mjwarp step...")
         mjwarp.step(m, d)
         mjwarp.step(m, d)
-        with wp.ScopedCapture() as capture:
-            mjwarp.step(m, d)
     else:
         # Check if comfree_stiffness_val is defined, if not, set a default.
         # This makes the stiffness value explicit.
@@ -65,13 +68,11 @@ if engine!=0:
 
         m= cfwarp.put_model(mjm, comfree_stiffness=comfree_stiffness_vec, comfree_damping=comfree_damping_vec)
         d= cfwarp.put_data(mjm, mjd, nworld=nworld, nconmax=nconmax, njmax=njmax)
+        step_fn = cfwarp.step
 
         print("Compiling comfree_mjwarp step...")
         cfwarp.step(m, d)
         cfwarp.step(m, d)
-
-        with wp.ScopedCapture() as capture:
-            cfwarp.step(m, d)
 
         ##### Default stiffness and damping values for compilation
         # m= comfree_warp.put_model(mjm)
@@ -81,7 +82,11 @@ if engine!=0:
         # with wp.ScopedCapture() as capture:
         #     comfree_warp.step(m, d)
 
-    graph = capture.graph
+    graph = None
+    if wp.get_device().is_cuda:
+        with wp.ScopedCapture() as capture:
+            step_fn(m, d)
+        graph = capture.graph
     print("Compiled.")
 else:
     print("Running MJC...")
@@ -105,8 +110,12 @@ while step_counter<10000:
         wp.copy(d.time, wp.array([mjd.time], dtype=wp.float32))
         
         start = time.time()
-        wp.capture_launch(graph)
-        wp.synchronize()
+        if graph is not None:
+            wp.capture_launch(graph)
+            wp.synchronize()
+        else:
+            step_fn(m, d)
+            wp.synchronize()
         elapsed = time.time() - start
 
         mjwarp.get_data_into(mjd, mjm, d)

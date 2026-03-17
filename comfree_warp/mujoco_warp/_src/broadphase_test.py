@@ -20,12 +20,12 @@ import warp as wp
 from absl.testing import absltest
 from absl.testing import parameterized
 
-import mujoco_warp as mjw
-from mujoco_warp import BroadphaseFilter
-from mujoco_warp import BroadphaseType
-from mujoco_warp import DisableBit
-from mujoco_warp import test_data
-from . import collision_driver
+import comfree_warp.mujoco_warp as mjw
+from comfree_warp.mujoco_warp import BroadphaseFilter
+from comfree_warp.mujoco_warp import BroadphaseType
+from comfree_warp.mujoco_warp import DisableBit
+from comfree_warp.mujoco_warp import test_data
+from comfree_warp.mujoco_warp._src import collision_driver
 
 
 def broadphase_caller(m, d):

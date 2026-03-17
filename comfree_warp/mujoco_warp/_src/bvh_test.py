@@ -20,8 +20,8 @@ import numpy as np
 import warp as wp
 from absl.testing import absltest
 
-from mujoco_warp import test_data
-from . import bvh
+from comfree_warp.mujoco_warp import test_data
+from comfree_warp.mujoco_warp._src import bvh
 
 
 def _assert_eq(a, b, name):

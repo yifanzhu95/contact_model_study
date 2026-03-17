@@ -17,30 +17,26 @@ from typing import Tuple
 
 import warp as wp
 
-from . import math
-from .ray import ray_box
-from .ray import ray_capsule
-from .ray import ray_cylinder
-from .ray import ray_ellipsoid
-from .ray import ray_flex_with_bvh
-from .ray import ray_mesh_with_bvh
-from .ray import ray_mesh_with_bvh_anyhit
-from .ray import ray_plane
-from .ray import ray_sphere
-from .render_util import compute_ray
-from .render_util import pack_rgba_to_uint32
-from .types import MJ_MAXVAL
-from .types import Data
-from .types import GeomType
-from .types import Model
-from .types import RenderContext
-from .warp_util import event_scope
+from comfree_warp.mujoco_warp._src import math
+from comfree_warp.mujoco_warp._src.ray import ray_box
+from comfree_warp.mujoco_warp._src.ray import ray_capsule
+from comfree_warp.mujoco_warp._src.ray import ray_cylinder
+from comfree_warp.mujoco_warp._src.ray import ray_ellipsoid
+from comfree_warp.mujoco_warp._src.ray import ray_flex_with_bvh
+from comfree_warp.mujoco_warp._src.ray import ray_mesh_with_bvh
+from comfree_warp.mujoco_warp._src.ray import ray_mesh_with_bvh_anyhit
+from comfree_warp.mujoco_warp._src.ray import ray_plane
+from comfree_warp.mujoco_warp._src.ray import ray_sphere
+from comfree_warp.mujoco_warp._src.render_util import compute_ray
+from comfree_warp.mujoco_warp._src.render_util import pack_rgba_to_uint32
+from comfree_warp.mujoco_warp._src.types import MJ_MAXVAL
+from comfree_warp.mujoco_warp._src.types import Data
+from comfree_warp.mujoco_warp._src.types import GeomType
+from comfree_warp.mujoco_warp._src.types import Model
+from comfree_warp.mujoco_warp._src.types import RenderContext
+from comfree_warp.mujoco_warp._src.warp_util import event_scope
 
 wp.set_module_options({"enable_backward": False})
-
-
-# TODO(team): remove after mjwarp depends on warp-lang >= 1.12 in pyproject.toml
-from .types import TEXTURE_DTYPE
 
 
 @wp.func
@@ -51,7 +47,7 @@ def sample_texture(
   # In:
   geom_id: int,
   tex_repeat: wp.vec2,
-  tex: TEXTURE_DTYPE,
+  tex: wp.Texture2D,
   pos: wp.vec3,
   rot: wp.mat33,
   mesh_facetexcoord: wp.array(dtype=wp.vec3i),
@@ -467,8 +463,7 @@ def render(m: Model, d: Data, rc: RenderContext):
     mesh_texcoord_offsets: wp.array(dtype=int),
     hfield_bvh_id: wp.array(dtype=wp.uint64),
     flex_rgba: wp.array(dtype=wp.vec4),
-    # TODO: remove after mjwarp depends on warp-lang >= 1.12 in pyproject.toml
-    textures: wp.array(dtype=TEXTURE_DTYPE),
+    textures: wp.array(dtype=wp.Texture2D),
     # Out:
     rgb_out: wp.array2d(dtype=wp.uint32),
     depth_out: wp.array2d(dtype=float),
@@ -552,7 +547,11 @@ def render(m: Model, d: Data, rc: RenderContext):
       return
 
     if render_depth[cam_idx]:
-      depth_out[world_idx, depth_adr[cam_idx] + ray_idx_local] = dist
+      # Planar depth: project Euclidean distance onto the camera's optical axis.
+      # In camera-local coordinates, the optical axis is -Z. The Z-component of the
+      # normalized ray direction is negative, so -ray_dir_local_cam[2] gives cos(θ)
+      # between the ray and the optical axis.
+      depth_out[world_idx, depth_adr[cam_idx] + ray_idx_local] = dist * (-ray_dir_local_cam[2])
 
     if not render_rgb[cam_idx]:
       return

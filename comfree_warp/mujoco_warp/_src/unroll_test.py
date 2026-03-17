@@ -27,11 +27,11 @@ import warp as wp
 from absl.testing import absltest
 from absl.testing import parameterized
 
-import mujoco_warp as mjw
-from mujoco_warp import ConeType
-from mujoco_warp import test_data
-from .io import find_keys
-from .io import make_trajectory
+import comfree_warp.mujoco_warp as mjw
+from comfree_warp.mujoco_warp import ConeType
+from comfree_warp.mujoco_warp import test_data
+from comfree_warp.mujoco_warp._src.io import find_keys
+from comfree_warp.mujoco_warp._src.io import make_trajectory
 
 
 class UnrollTest(parameterized.TestCase):
