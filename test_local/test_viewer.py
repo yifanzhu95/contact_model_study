@@ -15,7 +15,7 @@ njmax = 5000
 nconmax = 1000
 
 # set device
-wp.set_device("cuda:2")
+wp.set_device("cuda:0")
 
 model_path = "benchmark/test_data/primitives.xml"
 # model_path = "benchmark/humanoid/n_humanoid.xml"

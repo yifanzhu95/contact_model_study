@@ -21,16 +21,16 @@ ComFree-Sim enables fast and accurate simulation of robots interacting with thei
 
 ## Installation
 
-Install the package using pip:
-
-```bash
-pip install .
-```
-
-Or with UV package manager:
+Install the package using UV package manager:
 
 ```bash
 uv sync
+```
+
+Or with pip:
+
+```bash
+pip install .
 ```
 
 
@@ -120,3 +120,7 @@ If you use ComFree-Sim in your research, please cite:
   year={2026}
 }
 ```
+
+## Acknowledgments
+
+We thank the MuJoCo Warp (MJWarp) team at Google DeepMind and NVIDIA for making their code publicly available.

@@ -16,7 +16,7 @@ import warp as wp
 import comfree_warp as cfwarp
 from comfree_warp import mujoco_warp as mjwarp
 
-wp.set_device("cuda:2")
+wp.set_device("cuda:0")
 
 def run_hand_test(
     num_steps=1000,
