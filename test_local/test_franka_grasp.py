@@ -2,20 +2,18 @@
 
 import argparse
 import math
-import os
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import mujoco
+import mujoco.viewer
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-
-import test_headless.streaming as mjstream
 
 wp = None
 cfwarp = None
@@ -239,13 +237,6 @@ def run_grasp_trial(
     phases = build_phase_targets(model, data)
     print(f"timestep: {model.opt.timestep}")
 
-    stream_host = os.getenv("MJSTREAM_HOST", "127.0.0.1")
-    stream_port = int(os.getenv("MJSTREAM_PORT", "0"))
-    streamer = mjstream.StreamServer(model_path=MODEL_PATH, host=stream_host, port=stream_port)
-    if streamer.enabled:
-        streamer.start()
-        streamer.send_state(data)
-
     backend_model, backend_data, step_fn = make_backend(
         engine,
         model,
@@ -280,9 +271,12 @@ def run_grasp_trial(
     prev_arm_target = data.ctrl[:ARM_DOF].copy()
     prev_finger_target = float(data.ctrl[ARM_DOF])
 
-    try:
+    with mujoco.viewer.launch_passive(model, data) as viewer:
         for phase in phase_schedule:
             for local_step in range(phase.steps):
+                if not viewer.is_running():
+                    break
+
                 alpha = _smoothstep((local_step + 1) / phase.steps)
                 data.ctrl[:ARM_DOF] = (1.0 - alpha) * prev_arm_target + alpha * phase.arm_target
                 data.ctrl[ARM_DOF] = (1.0 - alpha) * prev_finger_target + alpha * phase.finger_target
@@ -307,17 +301,16 @@ def run_grasp_trial(
                 max_cube_height = max(max_cube_height, cube_height)
                 step_index += 1
 
-                if streamer.enabled:
-                    streamer.send_state(data)
+                viewer.sync()
 
-                if streamer.enabled and elapsed < model.opt.timestep:
+                if elapsed < model.opt.timestep:
                     time.sleep(model.opt.timestep - elapsed)
+
+            if not viewer.is_running():
+                break
 
             prev_arm_target = phase.arm_target.copy()
             prev_finger_target = phase.finger_target
-    finally:
-        if streamer.enabled:
-            streamer.stop_connection()
 
     final_cube_height = float(data.qpos[cube_qpos_adr + 2])
     success = final_cube_height > LIFTED_THRESHOLD and min_cube_height > pedestal_top - 0.005
