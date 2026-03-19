@@ -33,47 +33,55 @@ Or with UV package manager:
 uv sync
 ```
 
-## Citation
-
-If you use ComFree-Sim in your research, please cite:
-
-```bibtex
-@article{borse2026comfree,
-  title={ComFree-Sim: A GPU-Parallelized Analytical Contact Physics Engine for Scalable Contact-Rich Robotics Simulation and Control},
-  author={Borse, Chetan and Xie, Zhixian and Huang, Wei-Cheng and Jin, Wanxin},
-  journal={arXiv preprint arXiv:2603.12185},
-  year={2026}
-}
-```
 
 ## Quick Start
 
-### Basic Simulation with Viewer
+### Local Viewer Simulation
 
 Run an interactive simulation with the native MuJoCo viewer:
 
 ```bash
-python tests_local_viewer/test_viewer.py
+python test_local/test_viewer.py
 ```
 
-This script loads a test scene and displays the simulation in real-time using the built-in MuJoCo viewer. You can modify the `engine` variable (0=MJC, 1=MJWARP, 2=COMFREE_WARP) to compare different simulation backends.
+This script loads a test scene and displays the simulation in real time using the built-in MuJoCo viewer. You can modify the `engine` variable (`0=MJC`, `1=MJWARP`, `2=COMFREE_WARP`) to compare different simulation backends directly on a local machine.
 
-### Headless Simulation
+### Local Franka Grasp Test
 
-Run a headless simulation without visualization:
+Run the Franka cube-grasp benchmark locally:
 
 ```bash
-python test_headless.py
+python test_local/test_franka_grasp.py --engine mujoco
 ```
 
-This script runs simulation without viewer. It supports streaming the simulation state to a remote visualization server. For detailed options and configuration, refer to the [documentation](https://irislab.tech/comfree-doc/intro.html).
+Available backends are `mujoco`, `mjwarp`, and `comfree`.
+
+### Headless Streaming Simulation
+
+Run a headless simulation and stream state to a local viewer:
+
+```bash
+python test_headless/test_streaming.py
+```
+
+By default this waits for a viewer connection on `MJSTREAM_PORT=7000` and streams the MuJoCo state over TCP.
+
+### Headless Franka Grasp Streaming
+
+Run the Franka grasp benchmark headlessly and stream it to the viewer:
+
+```bash
+python test_headless/test_franka_grasp.py --engine comfree
+```
+
+You can override the stream endpoint with `MJSTREAM_HOST` and `MJSTREAM_PORT`.
 
 ### Throughput Benchmarking
 
 Run a throughput benchmark with parallel hand simulation:
 
 ```bash
-python tests_local_viewer/test_throuput_hand.py
+python test_local/test_throuput_hand.py
 ```
 
 This script evaluates the performance of different engines with parallel environments. It benchmarks:
@@ -81,26 +89,6 @@ This script evaluates the performance of different engines with parallel environ
 - ComFree-Sim contact physics in Warp
 
 Results include throughput metrics and step time statistics across multiple parallel environments.
-
-### Rolling Friction Test
-
-Run the rolling friction viewer test:
-
-```bash
-python tests_local_viewer/test_rolling.py
-```
-
-This script runs a cylinder rolling test (`benchmark/test_data/cylinder_rolling.xml`) and logs the linear velocity decay under different rolling friction settings.
-
-### Z-Axis Rotation (Torsional Friction) Test
-
-Run the torsional friction viewer test:
-
-```bash
-python tests_local_viewer/test_z_rotate.py
-```
-
-This script runs a ball rotation test (`benchmark/test_data/ball_rotation.xml`) and logs angular velocity decay under different torsional friction settings.
 
 ### Python API
 
@@ -116,3 +104,16 @@ For comprehensive examples and tutorials, visit the [documentation](https://iris
 ## License
 
 See LICENSE file for details.
+
+## Citation
+
+If you use ComFree-Sim in your research, please cite:
+
+```bibtex
+@article{borse2026comfree,
+  title={ComFree-Sim: A GPU-Parallelized Analytical Contact Physics Engine for Scalable Contact-Rich Robotics Simulation and Control},
+  author={Borse, Chetan and Xie, Zhixian and Huang, Wei-Cheng and Jin, Wanxin},
+  journal={arXiv preprint arXiv:2603.12185},
+  year={2026}
+}
+```
