@@ -30,7 +30,7 @@ def _ensure_comfree_fields(d):
 
 def put_model(*args, **kwargs):
 
-  comfree_stiffness = kwargs.pop("comfree_stiffness", 0.1)
+  comfree_stiffness = kwargs.pop("comfree_stiffness", 0.2)
   comfree_damping = kwargs.pop("comfree_damping", 0.001)
 
   m = _mjwarp.put_model(*args, **kwargs)
