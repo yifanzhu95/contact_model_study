@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache License 2.0"}
 authors = [
-    {name = "Newton Developers"},
+    {name = "ASU IRIS"},
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
