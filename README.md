@@ -44,37 +44,17 @@ Run an interactive simulation with the native MuJoCo viewer:
 python test_local/test_viewer.py
 ```
 
-This script loads a test scene and displays the simulation in real time using the built-in MuJoCo viewer. You can modify the `engine` variable (`0=MJC`, `1=MJWARP`, `2=COMFREE_WARP`) to compare different simulation backends directly on a local machine.
+This script loads a test scene and displays the simulation in real time using the built-in MuJoCo viewer. You can modify the `engine` variable (`0=MJC`, `1=MJWARP`, `2=COMFREE_WARP`) to compare different simulation backends directly on a local machine. You can also switch `model_path` in [test_viewer.py](/home/wjin/Research/comfree/comfree_warp/test_local/test_viewer.py) to try other XML scenes such as `benchmark/humanoid/n_humanoid.xml`, `benchmark/test_data/collision.xml`, `benchmark/test_data/flex/floppy.xml`, `benchmark/test_data/hfield/hfield.xml`, and `benchmark/leap/env_leap_cube.xml`.
 
 ### Local Franka Grasp Test
 
 Run the Franka cube-grasp benchmark locally:
 
 ```bash
-python test_local/test_franka_grasp.py --engine mujoco
+python test_local/test_franka_grasp.py
 ```
 
 Available backends are `mujoco`, `mjwarp`, and `comfree`.
-
-### Headless Streaming Simulation
-
-Run a headless simulation and stream state to a local viewer:
-
-```bash
-python test_headless/test_streaming.py
-```
-
-By default this waits for a viewer connection on `MJSTREAM_PORT=7000` and streams the MuJoCo state over TCP.
-
-### Headless Franka Grasp Streaming
-
-Run the Franka grasp benchmark headlessly and stream it to the viewer:
-
-```bash
-python test_headless/test_franka_grasp.py --engine comfree
-```
-
-You can override the stream endpoint with `MJSTREAM_HOST` and `MJSTREAM_PORT`.
 
 ### Throughput Benchmarking
 
@@ -89,6 +69,29 @@ This script evaluates the performance of different engines with parallel environ
 - ComFree-Sim contact physics in Warp
 
 Results include throughput metrics and step time statistics across multiple parallel environments.
+
+### Headless Streaming Simulation
+
+Run a headless simulation and stream state to a local viewer:
+
+```bash
+python test_headless/test_streaming.py
+```
+
+By default this waits for a viewer connection on `MJSTREAM_PORT=7000` and streams the MuJoCo state over TCP.
+Like the local viewer test, you can change the `engine` setting in [test_streaming.py](/home/wjin/Research/comfree/comfree_warp/test_headless/test_streaming.py) (`0=MJC`, `1=MJWARP`, `2=COMFREE_WARP`) and switch `model_path` to try other XML scenes such as `benchmark/humanoid/n_humanoid.xml`, `benchmark/test_data/collision.xml`, `benchmark/test_data/flex/floppy.xml`, `benchmark/test_data/hfield/hfield.xml`, and `benchmark/leap/env_leap_cube.xml`.
+
+### Headless Franka Grasp Streaming
+
+Run the Franka grasp benchmark headlessly and stream it to the viewer:
+
+```bash
+python test_headless/test_franka_grasp.py
+```
+
+You can override the stream endpoint with `MJSTREAM_HOST` and `MJSTREAM_PORT`.
+This benchmark also supports multiple backends through `--engine` with `mujoco`, `mjwarp`, or `comfree`.
+
 
 ### Python API
 

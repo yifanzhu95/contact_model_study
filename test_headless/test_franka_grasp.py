@@ -336,14 +336,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--engine",
         choices=("mujoco", "mjwarp", "comfree"),
-        default="mujoco",
+        default="comfree",
         help="Simulation backend to run.",
     )
     parser.add_argument("--steps-scale", type=float, default=1.0, help="Scale phase lengths for quicker validation.")
     parser.add_argument("--nworld", type=int, default=1, help="Number of worlds for warp backends.")
     parser.add_argument("--nconmax", type=int, default=256, help="Contacts per world for warp backends.")
     parser.add_argument("--njmax", type=int, default=1024, help="Constraints per world for warp backends.")
-    parser.add_argument("--contact-stiffness", type=float, default=0.1, help="comfree_warp contact stiffness.")
+    parser.add_argument("--contact-stiffness", type=float, default=0.2, help="comfree_warp contact stiffness.")
     parser.add_argument("--contact-damping", type=float, default=0.001, help="comfree_warp contact damping.")
     return parser.parse_args()
 

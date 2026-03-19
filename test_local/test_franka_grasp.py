@@ -336,7 +336,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--engine",
         choices=("mujoco", "mjwarp", "comfree"),
-        default="mujoco",
+        default="comfree",
         help="Simulation backend to run.",
     )
     parser.add_argument("--steps-scale", type=float, default=1.0, help="Scale phase lengths for quicker validation.")
