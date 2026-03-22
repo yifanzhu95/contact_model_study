@@ -19,8 +19,8 @@ nconmax = 1000
 
 
 
-# model_path = "benchmark/test_data/primitives.xml"
-model_path = "benchmark/humanoid/n_humanoid.xml"
+model_path = "benchmark/test_data/primitives.xml"
+# model_path = "benchmark/humanoid/n_humanoid.xml"
 # model_path = "benchmark/test_data/collision.xml"
 # model_path = "benchmark/test_data/flex/floppy.xml"
 # model_path = "benchmark/test_data/hfield/hfield.xml"

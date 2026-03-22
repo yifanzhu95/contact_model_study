@@ -1,3 +1,7 @@
+# Copyright (c) 2026 ASU IRIS
+# Licensed for noncommercial academic research use only.
+# See comfree_warp/comfree_core/LICENSE for terms.
+# -----------------------------------------------------------------------------
 
 """Defines shared constants, enums, and Warp-compatible types for comfree_core."""
 

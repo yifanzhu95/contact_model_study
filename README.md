@@ -106,7 +106,12 @@ For comprehensive examples and tutorials, visit the [documentation](https://iris
 
 ## License
 
-See LICENSE file for details.
+This repository contains materials under multiple licenses:
+
+- Repository-wide licensing notice: `LICENSE`
+- `comfree_warp/comfree_core/`: noncommercial academic research license in `comfree_warp/comfree_core/LICENSE`
+- Vendored `comfree_warp/mujoco_warp/` upstream code: Apache License 2.0; see `LICENSES/Apache-2.0.txt`
+
 
 ## Citation
 

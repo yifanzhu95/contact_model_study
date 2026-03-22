@@ -1,3 +1,7 @@
+# Copyright (c) 2026 ASU IRIS
+# Licensed for noncommercial academic research use only.
+# See comfree_warp/comfree_core/LICENSE for terms.
+# -----------------------------------------------------------------------------
 """Assembles Warp constraint rows and Jacobians for equality, friction, limit, and contact constraints."""
 
 import warp as wp

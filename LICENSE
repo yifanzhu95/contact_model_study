@@ -1,21 +1,24 @@
-MIT License
+Repository Licensing Notice
 
-Copyright (c) 2026 ASU IRIS
+This repository contains materials under multiple licenses.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. Upstream MuJoCo Warp code
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+The vendored MuJoCo Warp code in `comfree_warp/mujoco_warp/`, and any other files
+that are clearly identified as upstream or directly derived from that codebase,
+are distributed under the Apache License, Version 2.0. See
+`LICENSES/Apache-2.0.txt`.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. ComFree Core code
+
+The files in `comfree_warp/comfree_core/` are distributed under the ComFree Core
+Academic Research License in `comfree_warp/comfree_core/LICENSE`, except where a
+file states otherwise.
+
+3. Other third-party materials
+
+Some datasets, meshes, textures, models, and benchmark assets may be subject to
+separate license terms in their own directories or source distributions.
+
+This file is a repository-wide licensing notice only. It does not replace the
+license terms that apply to any specific subdirectory or file.

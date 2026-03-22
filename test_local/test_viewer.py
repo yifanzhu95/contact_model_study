@@ -17,8 +17,8 @@ nconmax = 1000
 # set device
 wp.set_device("cuda:0")
 
-# model_path = "benchmark/test_data/primitives.xml"
-model_path = "benchmark/humanoid/n_humanoid.xml"
+model_path = "benchmark/test_data/primitives.xml"
+# model_path = "benchmark/humanoid/n_humanoid.xml"
 # model_path = "benchmark/test_data/collision.xml"
 # model_path = "benchmark/test_data/flex/floppy.xml"
 # model_path = "benchmark/test_data/hfield/hfield.xml"
