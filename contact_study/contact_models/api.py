@@ -142,7 +142,10 @@ def put_model(
         )
 
     elif cfg.backend == Backend.XPBD:
+        # Force pyramidal cone — the XPBD friction kernel recovers tangent
+        # Jacobians from the pyramidal edge rows in efc_J.
         _patch_mujoco_options(mjm, cfg)
+        mjm.opt.cone = mujoco.mjtCone.mjCONE_PYRAMIDAL
         m = _xpbd_backend().put_model(mjm, cfg.xpbd)
 
     else:

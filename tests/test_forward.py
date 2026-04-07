@@ -36,9 +36,19 @@ import comfree_warp.mujoco_warp as _mjwarp
 wp.set_device("cuda:0")
 
 
+def _get_inner_data(d):
+    """Unwrap XPBDData (or any wrapper with _d) to get raw MJWarp Data."""
+    return d._d if hasattr(d, '_d') else d
+
+
+def _get_inner_model(m):
+    """Unwrap XPBDModel (or any wrapper with _m) to get raw MJWarp Model."""
+    return m._m if hasattr(m, '_m') else m
+
+
 def run(
     xml_path:          str   = "scenes/test_data/allegro/env_allegro_cube.xml",
-    backend:           str   = "comfree",      # "mjwarp" | "comfree" | "mujoco_soft" | "mujoco_anitescu"
+    backend:           str   = "comfree",      # "mjwarp" | "comfree" | "mujoco_anitescu"
     nworld:            int   = 1,
     nconmax:           int   = 64,
     njmax:             int   = 200,
@@ -49,6 +59,7 @@ def run(
     ctrl_update_every: int   = 20,            # steps between control updates
     viewer:            bool  = False,
     warmup_steps:      int   = 50,
+    debug:             bool  = False,
 ) -> dict:
     """Run forward simulation and return throughput stats."""
 
@@ -80,10 +91,10 @@ def run(
         cfg = ContactModelConfig.M3()
         cfg.comfree.stiffness = comfree_stiffness
         cfg.comfree.damping   = comfree_damping
-    elif backend == "mujoco_soft":
-        cfg = ContactModelConfig.M2()
     elif backend == "mujoco_anitescu":
         cfg = ContactModelConfig.M1()
+    elif backend == "xpbd":
+        cfg = ContactModelConfig.M4()
     else:  # mjwarp — same as mujoco_soft, no solver patch
         cfg = ContactModelConfig.M2()
 
@@ -97,6 +108,21 @@ def run(
     # Broadcast initial state to all worlds
     d.qpos.assign(np.tile(mjd.qpos, (nworld, 1)).astype(np.float32))
     d.qvel.assign(np.tile(mjd.qvel, (nworld, 1)).astype(np.float32))
+
+    # ------------------------------------------------------------------
+    # Debug: print initial state info
+    # ------------------------------------------------------------------
+    if debug:
+        wp.synchronize()
+        inner_d = _get_inner_data(d)
+        inner_m = _get_inner_model(m)
+        print(f"\n  [DEBUG] nv={inner_m.nv}, nq={mjm.nq}, nu={mjm.nu}")
+        print(f"  [DEBUG] njmax={inner_d.njmax}, naconmax={inner_d.naconmax}")
+        print(f"  [DEBUG] integrator={mjm.opt.integrator}, cone={mjm.opt.cone}")
+        print(f"  [DEBUG] d type: {type(d).__name__}, inner_d type: {type(inner_d).__name__}")
+        if hasattr(d, 'qfrc_total'):
+            print(f"  [DEBUG] XPBD scratch arrays present (qfrc_total, qvel_pred, qfrc_constraint)")
+        print()
 
     # ------------------------------------------------------------------
     # CUDA graph capture
@@ -123,10 +149,10 @@ def run(
     step_times = []
 
     try:
-        for step in range(num_steps):
+        for step_i in range(num_steps):
 
             # Perturb controls periodically
-            if mjm.nu > 0 and step % ctrl_update_every == 0:
+            if mjm.nu > 0 and step_i % ctrl_update_every == 0:
                 noise = np.random.uniform(-ctrl_noise, ctrl_noise, ref_ctrl.shape)
                 ctrl  = np.tile((ref_ctrl + noise).astype(np.float32), (nworld, 1))
                 d.ctrl.assign(ctrl)
@@ -136,9 +162,40 @@ def run(
             wp.synchronize()
             step_times.append(time.perf_counter() - t0)
 
+            # Debug: print state every 100 steps
+            if debug and step_i < 500 and step_i % 100 == 0:
+                inner_d = _get_inner_data(d)
+                qpos = inner_d.qpos.numpy()
+                qvel = inner_d.qvel.numpy()
+                qacc = inner_d.qacc.numpy()
+                qacc_s = inner_d.qacc_smooth.numpy()
+                print(f"  [DEBUG] step {step_i}:")
+                print(f"    qpos[0,:5]       = {qpos[0,:min(5,qpos.shape[1])]}")
+                print(f"    qvel[0] norm     = {np.linalg.norm(qvel[0]):.6f}")
+                print(f"    qacc[0] norm     = {np.linalg.norm(qacc[0]):.6f}")
+                print(f"    qacc_smooth norm = {np.linalg.norm(qacc_s[0]):.6f}")
+                if hasattr(d, 'qfrc_total'):
+                    qfrc_s = inner_d.qfrc_smooth.numpy()
+                    qfrc_c = d.qfrc_constraint.numpy()
+                    qfrc_t = d.qfrc_total.numpy()
+                    print(f"    qfrc_smooth norm = {np.linalg.norm(qfrc_s[0]):.6f}")
+                    print(f"    qfrc_const norm  = {np.linalg.norm(qfrc_c[0]):.6f}")
+                    print(f"    qfrc_total norm  = {np.linalg.norm(qfrc_t[0]):.6f}")
+                    nefc = inner_d.nefc.numpy()
+                    nacon = inner_d.nacon.numpy()
+                    print(f"    nefc={nefc[0]}, nacon={nacon[0]}")
+                    if np.allclose(qacc[0], qacc_s[0], atol=1e-10):
+                        print(f"    ⚠️  qacc == qacc_smooth")
+                    if np.allclose(qacc[0], 0, atol=1e-10):
+                        print(f"    ⚠️  qacc is all zeros!")
+
             # Sync viewer with world 0
             if v is not None:
-                _mjwarp.get_data_into(mjd, mjm, d, world_id=0)
+                # Unwrap to raw MJWarp Data for the viewer sync —
+                # XPBDData.__getattr__ proxy doesn't always work with
+                # _mjwarp.get_data_into which may do internal type checks.
+                inner_d = _get_inner_data(d)
+                _mjwarp.get_data_into(mjd, mjm, inner_d, world_id=0)
                 v.sync()
 
     finally:
@@ -175,7 +232,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--xml",     default="scenes/test_data/allegro/env_allegro_cube.xml")
     parser.add_argument("--backend", default="comfree",
-                        choices=["mjwarp", "comfree", "mujoco_soft", "mujoco_anitescu", "all"])
+                        choices=["mjwarp", "comfree", "mujoco_soft", "mujoco_anitescu", "xpbd", "all"])
     parser.add_argument("--nworld",  type=int,   default=1)
     parser.add_argument("--nconmax", type=int,   default=64)
     parser.add_argument("--njmax",   type=int,   default=200)
@@ -186,6 +243,8 @@ def main():
     parser.add_argument("--ctrl_update_every", type=int,   default=20)
     parser.add_argument("--viewer",  action="store_true")
     parser.add_argument("--warmup",  type=int,   default=50)
+    parser.add_argument("--debug",   action="store_true",
+                        help="Print per-step diagnostics (first 500 steps)")
     args = parser.parse_args()
 
     backends = (
@@ -211,6 +270,7 @@ def main():
             ctrl_update_every = args.ctrl_update_every,
             viewer            = args.viewer and (i == 0),
             warmup_steps      = args.warmup,
+            debug             = args.debug,
         )
         all_stats.append(stats)
 

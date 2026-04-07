@@ -38,7 +38,7 @@ class MujocoSolverParams:
     into the model at load time by api.put_model().
     """
     cone:       str   = "pyramidal"   # "pyramidal" (M1) | "elliptic" (M2)
-    solver:     str   = "Newton" #"PGS"         # "PGS" | "CG" | "Newton"
+    solver:     str   = "Newton"      # "PGS" | "CG" | "Newton"
     iterations: int   = 100
     tolerance:  float = 1e-8
     # Soft-contact impedance (used by M2; ignored if cone=pyramidal)
@@ -59,16 +59,32 @@ class ComfreeParams:
 
 @dataclasses.dataclass
 class XPBDParams:
-    """Parameters for the decoupled XPBD-style penalty model (M4).
-
-    Contacts are resolved per-contact independently (no global solve).
-    Coulomb friction can be further relaxed to velocity-proportional damping.
+    """Parameters for the decoupled XPBD-style contact model (M4).
+ 
+    Normal contacts are resolved via XPBD compliance projection
+    (position-level, per-contact, unilateral clamp).  Friction uses
+    regularised Coulomb:
+ 
+        f_t = −μ · f_n · v_t / √(‖v_t‖² + ε)
+ 
+    Non-contact constraints (equality, limits, joint friction) are
+    handled with the same compliance parameter, bilateral for equalities
+    and unilateral for limits.
+ 
+    Parameters
+    ----------
+    compliance : float
+        XPBD positional compliance α.  Smaller → stiffer.  The effective
+        compliance per timestep is α̃ = α / dt².  Default 1e-4 gives
+        firm contact at dt = 0.002.
+    friction_reg_eps : float
+        Regularisation ε in the friction denominator.  Controls the
+        cross-over from Coulomb to viscous behaviour near zero slip.
+        Larger values → more damping at low speed.
     """
-    compliance:      float = 1e-4    # positional compliance (inverse stiffness)
-    damping:         float = 1e-3    # velocity damping at contact
-    iterations:      int   = 5       # local XPBD iterations per contact
-    damping_friction: bool = False   # if True: replace Coulomb with viscous damping
-
+    compliance:       float = 1e-4 #1e-4
+    friction_reg_eps: float = 1e-6
+    iterations:       int   = 1
 
 @dataclasses.dataclass
 class PhysicsNoiseParams:
@@ -144,12 +160,12 @@ class ContactModelConfig:
         return cls(backend=Backend.COMFREE, label="M3_comfree")
 
     @classmethod
-    def M4(cls, damping_friction: bool = False) -> "ContactModelConfig":
+    def M4(cls) -> "ContactModelConfig":
         """M4: Decoupled XPBD-style penalty model."""
         return cls(
             backend=Backend.XPBD,
-            xpbd=XPBDParams(damping_friction=damping_friction),
-            label="M4_xpbd" + ("_dampfric" if damping_friction else ""),
+            xpbd=XPBDParams(),
+            label="M4_xpbd",
         )
 
     @classmethod
