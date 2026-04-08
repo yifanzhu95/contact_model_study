@@ -129,6 +129,41 @@ def run(
             print(f"  [DEBUG] XPBD scratch arrays present (qfrc_total, qvel_pred, qfrc_constraint)")
         print()
 
+        # --- #3: mass matrix conditioning ---
+        # Host-side: inertias as MuJoCo compiled them
+        print(f"\n  [DEBUG] body_mass     = {mjm.body_mass}")
+        print(f"  [DEBUG] body_inertia min/max = "
+            f"{mjm.body_inertia.min():.3e} / {mjm.body_inertia.max():.3e}")
+        print(f"  [DEBUG] dof_M0 (joint-space mass diag, pre-crb) =")
+        print(f"          min={mjm.dof_M0.min():.3e}  max={mjm.dof_M0.max():.3e}")
+        print(f"          full: {mjm.dof_M0}")
+
+        # Device-side: the actual qM after factor_m runs once
+        # Run one forward so qM is populated, then read it back
+        api.step(m, d)
+        wp.synchronize()
+        qM = inner_d.qM.numpy()    # shape (nworld, nM) — sparse upper triangle
+        print(f"  [DEBUG] qM[0] min/max = {qM[0].min():.3e} / {qM[0].max():.3e}")
+        inner_d = _get_inner_data(d)
+        print(f"  [comfree sanity] nacon after 1 step = {inner_d.nacon.numpy()[0]}")
+        print(f"  [comfree sanity] nefc  after 1 step = {inner_d.nefc.numpy()[0]}")
+
+        # --- #6: efc.D vs efc.efc_mass convention ---
+        # (api.step above already ran make_constraint once)
+        nefc0 = int(inner_d.nefc.numpy()[0])
+        print(f"\n  [DEBUG] nefc[0] = {nefc0}")
+        if nefc0 > 0:
+            efc_D = inner_d.efc.D.numpy()[0, :nefc0]
+            print(f"  [DEBUG] efc.D[:nefc]        = {efc_D}")
+            # efc_mass only exists on the comfree fork — guard it
+            if hasattr(inner_d.efc, 'efc_mass'):
+                efc_mass = inner_d.efc.efc_mass.numpy()[0, :nefc0]
+                print(f"  [DEBUG] efc.efc_mass[:nefc] = {efc_mass}")
+                print(f"  [DEBUG] D * efc_mass        = {efc_D * efc_mass}")
+                print(f"  [DEBUG] 1/D                 = {1.0/efc_D}")
+
+        from contact_study.contact_models.xpbd_backend import print_constraint_types
+        print_constraint_types()
     # ------------------------------------------------------------------
     # CUDA graph capture
     # ------------------------------------------------------------------

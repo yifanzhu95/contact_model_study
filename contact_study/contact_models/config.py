@@ -82,9 +82,9 @@ class XPBDParams:
         cross-over from Coulomb to viscous behaviour near zero slip.
         Larger values → more damping at low speed.
     """
-    # compliance:       float = 1e-4 #1e-4
-    # friction_reg_eps: float = 1e-6
-    iterations:       int   = 5
+    substeps: int = 1
+    vmax_depenetration: float = 1.0
+    iterations: int   = 1
 
 @dataclasses.dataclass
 class PhysicsNoiseParams:
