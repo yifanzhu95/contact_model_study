@@ -76,6 +76,11 @@ def run(
     mjm = mujoco.MjSpec.from_file(xml_path).compile()
     mjd = mujoco.MjData(mjm)
 
+    print(f"  integrator       = {mjm.opt.integrator}")   # 0=Euler, 1=RK4, 2=implicit, 3=implicitfast
+    print(f"  dof_armature min = {mjm.dof_armature.min():.2e}")
+    print(f"  dof_armature max = {mjm.dof_armature.max():.2e}")
+    print(f"  dof_damping min  = {mjm.dof_damping.min():.2e}")
+
     if mjm.nkey > 0:
         key = mjm.key(0)
         mjd.qpos[:] = key.qpos

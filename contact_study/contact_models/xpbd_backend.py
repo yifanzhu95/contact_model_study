@@ -1,32 +1,46 @@
 """XPBD-style decoupled contact model (M4).
 
-Contact resolution:
-  Normal — XPBD position-level constraint projection with compliance α.
-    Uses efc_J from MJWarp's ``make_constraint`` and the constraint mass
-    efc.D for correct articulated-body effective mass.  Accumulated impulse
-    clamping λ ≥ 0 enforces unilateral contacts.
+Contact resolution follows Macklin et al., "Small Steps in Physics
+Simulation" (SCA 2019), §4.3 and §4.4.
 
-  Friction — Regularised Coulomb (velocity-proportional + Coulomb cap):
-    p_t = −μ · λ_n · v_t / √(‖v_t‖² + ε)
-    Tangent Jacobians are recovered from the pyramidal-cone edge rows
-    that MJWarp already populates in efc_J.
+  Normal contact — hard unilateral constraint (NO compliance α).
+    Per contact, accumulate λ_n with unilateral clamp λ_n ≥ 0:
 
-  Non-contact constraints (equality, limits, joint/tendon friction) —
-    Same XPBD compliance projection, but BILATERAL (no unilateral clamp).
+        Δλ_n = −(v_n + C_n/dt) / w_n,    C_n = min(pos, 0)
+        λ_n  ← max(λ_n + Δλ_n, 0)
+        f_n  = (λ_n_new − λ_n_old) / dt        (velocity-level impulse)
 
-Architecture:
-  Pure MJWarp base — no comfree_core dependency.
-  Pipeline: kinematics → collision → make_constraint → factor_m →
+  Friction — Coulomb box clamp (paper Eq. 11/12):
+
+        Δλ_t  = −v_t / w_t
+        λ_t  ← λ_t + Δλ_t
+        (λ_t1, λ_t2) projected onto disk of radius μ · λ_n    (cone clamp)
+
+    Tangent directions are recovered from the pyramidal-cone edge rows
+    that MJWarp populates in efc_J.  Tangent effective mass is
+    approximated as w_t ≈ 1/(2 μ² D_edge), which comes from
+    J_± = J_n ± μ J_t ⇒ w_tt = (w_{++} − 2 w_{+−} + w_{−−})/(4μ²)
+    under the (typical) assumption that the cross term w_{+−} is small.
+
+  Non-contact constraints (equality, limits, joint/tendon friction)
+    are delegated to MJWarp's native constraint solver.  This backend
+    is NOT intended for soft-body / deformable simulation — it only
+    overrides contact treatment.
+
+Pipeline
+--------
+    kinematics → collision → make_constraint → factor_m →
     transmission → fwd_velocity → fwd_actuation → fwd_acceleration →
-    **xpbd_solve** → smooth.solve_m → sensor_acc
-
-The put_model / make_data / step surface matches the api.py dispatch.
+    **mjw_solver.solve**                (native solve, all rows)
+    **remove_native_contact_qfrc**      (undo native contact forces)
+    **xpbd_contact_solve**              (hard-contact XPBD)
+    **solve_m**                         (final qacc)
+    → sensor_acc → euler
 """
 
 from __future__ import annotations
 
 import mujoco
-import numpy as np
 import warp as wp
 
 from .config import XPBDParams
@@ -37,6 +51,7 @@ from comfree_warp.mujoco_warp._src import collision_driver
 from comfree_warp.mujoco_warp._src import constraint as _mjw_constraint
 from comfree_warp.mujoco_warp._src import sensor
 from comfree_warp.mujoco_warp._src import smooth
+from comfree_warp.mujoco_warp._src import solver as _mjw_solver  # native constraint solver
 from comfree_warp.mujoco_warp._src.forward import (
     euler,
     fwd_acceleration,
@@ -49,12 +64,11 @@ from comfree_warp.mujoco_warp._src.types import (
     ContactType,
     DisableBit,
     EnableBit,
+    IntegratorType,
     vec5,
 )
 
 wp.set_module_options({"enable_backward": False})
-
-_FRICTION_EPS = float(1e-6)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -62,94 +76,74 @@ _FRICTION_EPS = float(1e-6)
 # ═══════════════════════════════════════════════════════════════════
 
 @wp.kernel
-def _predict_qvel_and_zero(
-    opt_timestep:     wp.array(dtype=float),
-    qvel:             wp.array2d(dtype=float),
-    qacc_smooth:      wp.array2d(dtype=float),
-    # out
-    qvel_pred:        wp.array2d(dtype=float),
-    qfrc_constraint:  wp.array2d(dtype=float),
-):
-    """qvel_pred = qvel + qacc_smooth * dt;  zero qfrc_constraint."""
-    worldid, dofid = wp.tid()
-    dt = opt_timestep[worldid % opt_timestep.shape[0]]
-    qvel_pred[worldid, dofid] = (
-        qvel[worldid, dofid] + qacc_smooth[worldid, dofid] * dt
-    )
-    qfrc_constraint[worldid, dofid] = 0.0
+def _zero_array2d(a: wp.array2d(dtype=float)):
+    worldid, i = wp.tid()
+    a[worldid, i] = 0.0
 
-
-# ── XPBD for all non-contact constraint rows (bilateral) ─────────
 
 @wp.kernel
-def _xpbd_noncontact(
-    opt_timestep:     wp.array(dtype=float),
-    efc_J:            wp.array3d(dtype=float),   # (nworld, njmax_pad, nv)
-    efc_pos:          wp.array2d(dtype=float),   # signed distance
-    efc_D:            wp.array2d(dtype=float),   # constraint mass
-    efc_type:         wp.array2d(dtype=int),
-    qvel_pred:        wp.array2d(dtype=float),
-    nv:               int,
-    nefc:             wp.array(dtype=int),
-    compliance:       float,
+def _predict_qvel(
+    opt_timestep: wp.array(dtype=float),
+    qvel:         wp.array2d(dtype=float),
+    qacc:         wp.array2d(dtype=float),
     # out
-    efc_force:        wp.array2d(dtype=float),
-    qfrc_constraint:  wp.array2d(dtype=float),
+    qvel_pred:    wp.array2d(dtype=float),
 ):
-    """XPBD compliance projection for equality / limit / friction-loss rows.
+    """qvel_pred = qvel + qacc * dt.
 
-    Bilateral: force can be positive or negative.
-    Limit rows are unilateral (clamped ≥ 0).
+    qacc here is post-native-solve (MJWarp's solution with non-contact
+    rows applied and contact rows zeroed), so qvel_pred is the velocity
+    the body would have if only equality/limit/friction-loss constraints
+    were active — exactly the prediction the XPBD contact projection
+    should correct.
+    """
+    worldid, dofid = wp.tid()
+    dt = opt_timestep[worldid % opt_timestep.shape[0]]
+    qvel_pred[worldid, dofid] = qvel[worldid, dofid] + qacc[worldid, dofid] * dt
+
+
+# ── remove native contact contributions from qfrc ────────────────
+
+@wp.kernel
+def _remove_native_contact_qfrc(
+    efc_J:      wp.array3d(dtype=float),
+    efc_type:   wp.array2d(dtype=int),
+    nefc:       wp.array(dtype=int),
+    nv:         int,
+    # in/out
+    efc_force:       wp.array2d(dtype=float),
+    qfrc_constraint: wp.array2d(dtype=float),
+):
+    """Subtract J^T · f from qfrc_constraint for every contact efc row,
+    then zero those efc_force entries.
+
+    After this, qfrc_constraint contains only non-contact constraint
+    forces (equality, limit, joint/tendon friction) as produced by the
+    MJWarp native solver.
     """
     worldid, efcid = wp.tid()
     if efcid >= nefc[worldid]:
         return
 
     ctype = efc_type[worldid, efcid]
-
-    # Skip contact rows — handled by _xpbd_contact kernel
     is_contact = (
         ctype == int(ConstraintType.CONTACT_PYRAMIDAL)
         or ctype == int(ConstraintType.CONTACT_FRICTIONLESS)
         or ctype == int(ConstraintType.CONTACT_ELLIPTIC)
     )
-    if is_contact:
+    if not is_contact:
         return
 
-    dt = opt_timestep[worldid % opt_timestep.shape[0]]
-
-    # Constraint-space velocity
-    efc_vel = float(0.0)
-    for i in range(nv):
-        efc_vel += efc_J[worldid, efcid, i] * qvel_pred[worldid, i]
-
-    # XPBD: Δλ = -(v_c + pos/dt) / (1/D + α̃),   α̃ = α/dt²
-    alpha_tilde = compliance / (dt * dt)
-    D = efc_D[worldid, efcid]
-    w_inv = float(0.0)
-    if D > 1.0e-10:
-        w_inv = 1.0 / D
-
-    c = efc_vel + efc_pos[worldid, efcid] / dt
-    d_lambda = -c / (w_inv + alpha_tilde)
-
-    # Convert impulse → force
-    frc = d_lambda / dt
-
-    # Unilateral clamp for limit constraints
-    is_limit = (
-        ctype == int(ConstraintType.LIMIT_JOINT)
-        or ctype == int(ConstraintType.LIMIT_TENDON)
-    )
-    if is_limit:
-        frc = wp.max(frc, 0.0)
-
-    efc_force[worldid, efcid] = frc
-    for i in range(nv):
-        wp.atomic_add(qfrc_constraint, worldid, i, efc_J[worldid, efcid, i] * frc)
+    f = efc_force[worldid, efcid]
+    if f != 0.0:
+        for i in range(nv):
+            wp.atomic_sub(
+                qfrc_constraint, worldid, i, efc_J[worldid, efcid, i] * f
+            )
+    efc_force[worldid, efcid] = 0.0
 
 
-# ── XPBD contact: accumulated-lambda normal + regularised Coulomb ─
+# ── XPBD hard contact + box-clamp Coulomb friction ───────────────
 
 @wp.kernel
 def _xpbd_contact(
@@ -161,34 +155,27 @@ def _xpbd_contact(
     contact_worldid:  wp.array(dtype=int),
     contact_dim:      wp.array(dtype=int),
     contact_type:     wp.array(dtype=int),
-    contact_efc_adr:  wp.array2d(dtype=int),    # (naconmax, nmaxpyramid)
-    nacon:            wp.array(dtype=int),       # (1,)
+    contact_efc_adr:  wp.array2d(dtype=int),   # (naconmax, 5)
+    nacon:            wp.array(dtype=int),     # (1,)
     # constraint data
     efc_J:            wp.array3d(dtype=float),
     efc_pos:          wp.array2d(dtype=float),
-    efc_D:            wp.array2d(dtype=float),   # constraint-space effective mass
+    efc_D:            wp.array2d(dtype=float),
     nefc:             wp.array(dtype=int),
     qvel_pred:        wp.array2d(dtype=float),
-    # XPBD params
-    compliance:       float,
-    # accumulated lambda (in-out, per contact)
-    lambda_acc:       wp.array(dtype=float),     # (naconmax,)
+    # accumulated lambdas (in-out, per contact, zeroed each step)
+    lambda_n:         wp.array(dtype=float),   # (naconmax,)
+    lambda_t1:        wp.array(dtype=float),
+    lambda_t2:        wp.array(dtype=float),
     # out
     efc_force:        wp.array2d(dtype=float),
     qfrc_constraint:  wp.array2d(dtype=float),
 ):
-    """Per-contact XPBD with accumulated lambda + regularised Coulomb.
+    """Small Steps §4.3 + §4.4 — hard XPBD contact with cone-clamp friction.
 
-    Standard XPBD iteration:
-      Δλ = −(c + α̃·λ_acc) / (w + α̃)
-      λ_acc ← max(λ_acc + Δλ, 0)      (unilateral clamp)
-      Δλ = λ_acc_new − λ_acc_old       (actual applied delta)
-
-    Effective mass w = 1/D from make_constraint (constraint-space,
-    includes articulated-body inertia through the Jacobian).
-
-    Only the DELTA impulse is scattered each iteration, so accumulated
-    forces don't compound — this is what prevents the divergence.
+    Operates in velocity-level impulse form (Δλ is an impulse; force =
+    Δλ/dt).  Only the DELTA is scattered each iteration so accumulated
+    forces don't compound across iterations.
     """
     cid = wp.tid()
     if cid >= nacon[0]:
@@ -199,92 +186,117 @@ def _xpbd_contact(
     worldid = contact_worldid[cid]
     dt = opt_timestep[worldid % opt_timestep.shape[0]]
 
-    # ── locate normal efc row ────────────────────────────────────
     normal_efc = contact_efc_adr[cid, 0]
     if normal_efc < 0 or normal_efc >= nefc[worldid]:
         return
 
     mu = contact_friction[cid][0]
 
-    # ── effective inverse mass from efc.D ────────────────────────
-    D = efc_D[worldid, normal_efc]
-    w = float(0.0)
-    if D > 1.0e-10:
-        w = 1.0 / D    # w = J M^{-1} J^T (approximately, with impedance)
+    # ── normal effective mass w_n = 1/D ──────────────────────────
+    D_n = efc_D[worldid, normal_efc]
+    if D_n <= 1.0e-10:
+        return
+    w_n = 1.0 / D_n
 
     # ── normal constraint velocity ───────────────────────────────
     v_n = float(0.0)
     for i in range(nv):
         v_n += efc_J[worldid, normal_efc, i] * qvel_pred[worldid, i]
 
-    # ── XPBD accumulated-lambda update ───────────────────────────
-    alpha_tilde = compliance / (dt * dt)
-    dist = efc_pos[worldid, normal_efc]
-    c = v_n + wp.min(dist, 0.0) / dt
+    # ── hard XPBD normal (no compliance) ─────────────────────────
+    # paper Eq. (7) with α̃ = 0, velocity-level form
+    C_n = wp.min(efc_pos[worldid, normal_efc], 0.0)
+    d_lambda_n = -(v_n + C_n / dt) / w_n
 
-    old_lambda = lambda_acc[cid]
-    d_lambda = -(c + alpha_tilde * old_lambda) / (w + alpha_tilde)
+    old_ln = lambda_n[cid]
+    new_ln = wp.max(old_ln + d_lambda_n, 0.0)        # unilateral clamp
+    d_lambda_n = new_ln - old_ln
+    lambda_n[cid] = new_ln
 
-    # Unilateral clamp on ACCUMULATED lambda
-    new_lambda = wp.max(old_lambda + d_lambda, 0.0)
-    d_lambda = new_lambda - old_lambda
-    lambda_acc[cid] = new_lambda
-
-    # ── scatter DELTA normal force ───────────────────────────────
-    d_force = d_lambda / dt
-    efc_force[worldid, normal_efc] = new_lambda / dt   # store total for diagnostics
+    # scatter normal impulse
+    d_fn = d_lambda_n / dt
+    efc_force[worldid, normal_efc] = new_ln / dt     # total for diagnostics
     for i in range(nv):
         wp.atomic_add(
-            qfrc_constraint, worldid, i, efc_J[worldid, normal_efc, i] * d_force
+            qfrc_constraint, worldid, i, efc_J[worldid, normal_efc, i] * d_fn
         )
 
-    # ── regularised Coulomb friction ─────────────────────────────
-    # Uses the ACCUMULATED normal impulse for the Coulomb cap
-    if mu < 1.0e-8 or new_lambda < 1.0e-12 or contact_dim[cid] < 3:
+    # ── friction (paper §4.4) ────────────────────────────────────
+    if mu < 1.0e-8 or contact_dim[cid] < 3:
         return
 
-    edge1p = contact_efc_adr[cid, 1]
-    edge1m = contact_efc_adr[cid, 2]
-    if edge1p < 0 or edge1m < 0:
+    e1p = contact_efc_adr[cid, 1]
+    e1m = contact_efc_adr[cid, 2]
+    if e1p < 0 or e1m < 0:
         return
 
     inv_2mu = 0.5 / mu
 
+    # tangent basis from pyramidal edges: J_t = (J_+ − J_−) / (2μ)
+    # effective mass:  w_t ≈ 1/(2 μ² D_edge)  (see module docstring)
+    D_e1 = efc_D[worldid, e1p]
+    if D_e1 <= 1.0e-10:
+        return
+    w_t1 = 1.0 / (2.0 * mu * mu * D_e1)
+
     # tangent-1 velocity
     vt1 = float(0.0)
     for i in range(nv):
-        jt1_i = (efc_J[worldid, edge1p, i] - efc_J[worldid, edge1m, i]) * inv_2mu
+        jt1_i = (efc_J[worldid, e1p, i] - efc_J[worldid, e1m, i]) * inv_2mu
         vt1 += jt1_i * qvel_pred[worldid, i]
 
-    # tangent-2 velocity
+    # tangent-2 (if available)
+    e2p = contact_efc_adr[cid, 3]
+    e2m = contact_efc_adr[cid, 4]
+    has_t2 = e2p >= 0 and e2m >= 0
+
     vt2 = float(0.0)
-    edge2p = contact_efc_adr[cid, 3]
-    edge2m = contact_efc_adr[cid, 4]
-    has_t2 = edge2p >= 0 and edge2m >= 0
+    w_t2 = float(0.0)
     if has_t2:
-        for i in range(nv):
-            jt2_i = (efc_J[worldid, edge2p, i] - efc_J[worldid, edge2m, i]) * inv_2mu
-            vt2 += jt2_i * qvel_pred[worldid, i]
+        D_e2 = efc_D[worldid, e2p]
+        if D_e2 > 1.0e-10:
+            w_t2 = 1.0 / (2.0 * mu * mu * D_e2)
+            for i in range(nv):
+                jt2_i = (efc_J[worldid, e2p, i] - efc_J[worldid, e2m, i]) * inv_2mu
+                vt2 += jt2_i * qvel_pred[worldid, i]
+        else:
+            has_t2 = False
 
-    # f_t = −μ · (λ_acc/dt) · v_t / √(‖v_t‖² + ε)
-    vt_sq = vt1 * vt1 + vt2 * vt2
-    denom = wp.sqrt(vt_sq + _FRICTION_EPS)
-    f_n_total = new_lambda / dt
-    fric_scale = mu * f_n_total / denom
+    # Δλ_t = −v_t / w_t  (velocity-level XPBD, zero-slip target)
+    d_lambda_t1 = -vt1 / w_t1
+    d_lambda_t2 = float(0.0)
+    if has_t2:
+        d_lambda_t2 = -vt2 / w_t2
 
-    fric_t1 = -fric_scale * vt1
-    fric_t2 = -fric_scale * vt2
+    # accumulate then cone-clamp: ‖λ_t‖ ≤ μ · λ_n
+    new_lt1 = lambda_t1[cid] + d_lambda_t1
+    new_lt2 = lambda_t2[cid] + d_lambda_t2
 
+    lt_mag = wp.sqrt(new_lt1 * new_lt1 + new_lt2 * new_lt2)
+    lt_max = mu * new_ln
+    if lt_mag > lt_max and lt_mag > 1.0e-12:
+        scale = lt_max / lt_mag
+        new_lt1 *= scale
+        new_lt2 *= scale
+
+    d_lambda_t1 = new_lt1 - lambda_t1[cid]
+    d_lambda_t2 = new_lt2 - lambda_t2[cid]
+    lambda_t1[cid] = new_lt1
+    lambda_t2[cid] = new_lt2
+
+    # scatter tangent impulses as force
+    d_ft1 = d_lambda_t1 / dt
+    d_ft2 = d_lambda_t2 / dt
     for i in range(nv):
-        jt1_i = (efc_J[worldid, edge1p, i] - efc_J[worldid, edge1m, i]) * inv_2mu
-        frc_i = jt1_i * fric_t1
+        jt1_i = (efc_J[worldid, e1p, i] - efc_J[worldid, e1m, i]) * inv_2mu
+        frc_i = jt1_i * d_ft1
         if has_t2:
-            jt2_i = (efc_J[worldid, edge2p, i] - efc_J[worldid, edge2m, i]) * inv_2mu
-            frc_i += jt2_i * fric_t2
+            jt2_i = (efc_J[worldid, e2p, i] - efc_J[worldid, e2m, i]) * inv_2mu
+            frc_i += jt2_i * d_ft2
         wp.atomic_add(qfrc_constraint, worldid, i, frc_i)
 
 
-# ── combine smooth + constraint forces ────────────────────────────
+# ── final qfrc assembly ───────────────────────────────────────────
 
 @wp.kernel
 def _sum_qfrc(
@@ -296,28 +308,6 @@ def _sum_qfrc(
     qfrc_total[worldid, dofid] = (
         qfrc_smooth[worldid, dofid] + qfrc_constraint[worldid, dofid]
     )
-
-
-# ── update qvel_pred from qacc (between XPBD iterations) ─────────
-
-@wp.kernel
-def _repredict_from_qacc(
-    opt_timestep: wp.array(dtype=float),
-    qvel:         wp.array2d(dtype=float),
-    qacc:         wp.array2d(dtype=float),
-    # out
-    qvel_pred:    wp.array2d(dtype=float),
-):
-    """qvel_pred = qvel + qacc * dt."""
-    worldid, dofid = wp.tid()
-    dt = opt_timestep[worldid % opt_timestep.shape[0]]
-    qvel_pred[worldid, dofid] = qvel[worldid, dofid] + qacc[worldid, dofid] * dt
-
-
-@wp.kernel
-def _zero_array2d(a: wp.array2d(dtype=float)):
-    worldid, i = wp.tid()
-    a[worldid, i] = 0.0
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -337,17 +327,17 @@ class XPBDModel:
 
 
 class XPBDData:
-    """Wraps a MJWarp Data with scratch buffers for the XPBD solve."""
+    """Wraps a MJWarp Data with scratch buffers for the XPBD contact solve."""
 
     def __init__(self, mjw_data, nworld: int, nv: int, naconmax: int):
         self._d = mjw_data
         device = mjw_data.qpos.device
-        # Scratch arrays that MJWarp Data doesn't provide
         self.qvel_pred       = wp.zeros((nworld, nv), dtype=float, device=device)
-        self.qfrc_constraint = wp.zeros((nworld, nv), dtype=float, device=device)
         self.qfrc_total      = wp.zeros((nworld, nv), dtype=float, device=device)
-        # Per-contact accumulated normal impulse (zeroed each step)
-        self.lambda_acc      = wp.zeros(naconmax, dtype=float, device=device)
+        # per-contact accumulated lambdas (zeroed each step)
+        self.lambda_n        = wp.zeros(naconmax, dtype=float, device=device)
+        self.lambda_t1       = wp.zeros(naconmax, dtype=float, device=device)
+        self.lambda_t2       = wp.zeros(naconmax, dtype=float, device=device)
 
     def __getattr__(self, name):
         return getattr(self._d, name)
@@ -375,7 +365,7 @@ def make_data(
     if njmax is not None:
         kw["njmax"] = njmax
     mjw_d = _mjw.make_data(mjm, **kw)
-    naconmax = getattr(mjw_d, 'naconmax', nconmax or mjm.nconmax * nworld)
+    naconmax = getattr(mjw_d, "naconmax", (nconmax or mjm.nconmax) * nworld)
     return XPBDData(mjw_d, nworld, mjm.nv, naconmax)
 
 
@@ -393,7 +383,7 @@ def put_data(
     if njmax is not None:
         kw["njmax"] = njmax
     mjw_d = _mjw.put_data(mjm, mjd, **kw)
-    naconmax = getattr(mjw_d, 'naconmax', nconmax or mjm.nconmax * nworld)
+    naconmax = getattr(mjw_d, "naconmax", (nconmax or mjm.nconmax) * nworld)
     return XPBDData(mjw_d, nworld, mjm.nv, naconmax)
 
 
@@ -408,62 +398,99 @@ def reset_data(mjm: mujoco.MjModel, m: XPBDModel, d: XPBDData):
 
 
 # ═══════════════════════════════════════════════════════════════════
-# XPBD constraint solve
+# Constraint solve  (native non-contact + XPBD contact)
 # ═══════════════════════════════════════════════════════════════════
 
 def _xpbd_solve(m: XPBDModel, d: XPBDData):
-    """Iterative XPBD constraint solve.
+    """Hybrid non-contact-native / contact-XPBD constraint solve.
 
-    Each iteration:
-      1. Zero qfrc_constraint
-      2. Compute all constraint forces from current qvel_pred
-      3. Update qvel_pred += diag(M^{-1}) * qfrc_constraint * dt
-
-    After all iterations, form qfrc_total and let smooth.solve_m
-    compute the final qacc with the full (non-diagonal) M^{-1}.
+    Steps:
+      1. Native MJWarp solve.  This populates inner_d.qacc, inner_d.efc.force
+         and inner_d.qfrc_constraint for ALL rows (eq + limit + friction_loss
+         + contact + contact-friction edges).
+      2. Remove the native solver's contact contributions from
+         qfrc_constraint by subtracting J^T·f for every contact row, then
+         zero those efc.force entries.  After this, qfrc_constraint reflects
+         only non-contact constraint forces.
+      3. Rebuild qacc for the "no contacts yet" state and derive qvel_pred
+         from it — this is the velocity the body would have under gravity,
+         actuation, and NON-contact constraints alone.
+      4. Run the XPBD contact kernel with that qvel_pred, adding hard-contact
+         + cone-clamp friction impulses to qfrc_constraint.
+      5. Caller (forward) will do the final solve_m to get post-contact qacc.
     """
     inner_m = m._m
     inner_d = d._d
     params  = m.xpbd_params
-    njmax_pad = inner_d.efc.J.shape[1]
     nv = inner_m.nv
     nw = inner_d.nworld
 
-    # Initial prediction: qvel_pred = qvel + qacc_smooth * dt
+    # ── 1. native solve (handles every constraint type) ─────────
+    _mjw_solver.solve(inner_m, inner_d)
+
+    # The MJWarp native solver internally factorizes the *constrained*
+    # system matrix A = M + Jᵀ R J into qLD / qLDiagInv as part of its
+    # Newton / CG updates, clobbering the clean M factorization that
+    # fwd_acceleration produced.  Any subsequent `smooth.solve_m` would
+    # therefore NOT compute M⁻¹ — it would invert whatever the native
+    # solver left behind (observed symptom: qacc exploding to ~1e6 when
+    # qfrc_total is ~10, i.e. an "inverse mass" of ~1e5).  Restore a
+    # clean factorization of M before we do any of our own solve_m calls.
+    smooth.factor_m(inner_m, inner_d)
+
+    # ── 2. strip contact contributions from qfrc_constraint ─────
+    njmax_pad = inner_d.efc.J.shape[1]
     wp.launch(
-        _predict_qvel_and_zero,
-        dim=(nw, nv),
-        inputs=[inner_m.opt.timestep, inner_d.qvel, inner_d.qacc_smooth],
-        outputs=[d.qvel_pred, d.qfrc_constraint],
+        _remove_native_contact_qfrc,
+        dim=(nw, njmax_pad),
+        inputs=[
+            inner_d.efc.J,
+            inner_d.efc.type,
+            inner_d.nefc,
+            nv,
+        ],
+        outputs=[inner_d.efc.force, inner_d.qfrc_constraint],
     )
 
-    # Zero accumulated contact impulses for this step
-    d.lambda_acc.zero_()
+    # ── 3. qacc ← M⁻¹ (qfrc_smooth + qfrc_constraint_noncon) ────
+    wp.launch(
+        _sum_qfrc,
+        dim=(nw, nv),
+        inputs=[inner_d.qfrc_smooth, inner_d.qfrc_constraint],
+        outputs=[d.qfrc_total],
+    )
+    # solve_m wants arrays that live on inner_d; reuse the scratch slot.
+    wp.copy(inner_d.qfrc_constraint, d.qfrc_total)
+    smooth.solve_m(inner_m, inner_d, inner_d.qacc, inner_d.qfrc_constraint)
 
-    for _iter in range(params.iterations):
+    # qvel_pred = qvel + qacc · dt  (no-contact prediction)
+    wp.launch(
+        _predict_qvel,
+        dim=(nw, nv),
+        inputs=[inner_m.opt.timestep, inner_d.qvel, inner_d.qacc],
+        outputs=[d.qvel_pred],
+    )
 
-        # Zero constraint forces for this iteration
-        wp.launch(_zero_array2d, dim=(nw, nv), inputs=[d.qfrc_constraint])
+    # Reset qfrc_constraint to contain only NON-contact forces again.
+    # (We clobbered it above with qfrc_total to feed solve_m.)
+    # Easiest: recompute qfrc_constraint = qfrc_total − qfrc_smooth.
+    # But we don't need it — the XPBD kernel only ADDS to qfrc_constraint
+    # and we'll reassemble qfrc_total from scratch afterwards.  So zero it.
+    wp.launch(_zero_array2d, dim=(nw, nv), inputs=[inner_d.qfrc_constraint])
 
-        # Non-contact constraints (equality, limits, joint friction)
-        wp.launch(
-            _xpbd_noncontact,
-            dim=(nw, njmax_pad),
-            inputs=[
-                inner_m.opt.timestep,
-                inner_d.efc.J,
-                inner_d.efc.pos,
-                inner_d.efc.D,
-                inner_d.efc.type,
-                d.qvel_pred,
-                nv,
-                inner_d.nefc,
-                params.compliance,
-            ],
-            outputs=[inner_d.efc.force, d.qfrc_constraint],
-        )
+    # We still need the non-contact forces to add to qfrc_smooth later.
+    # Derive them as (qfrc_total − qfrc_smooth) and stash in d.qfrc_total.
+    # d.qfrc_total currently holds (qfrc_smooth + qfrc_constraint_noncon),
+    # which is exactly what we want added to the contact forces below.
 
-        # Contact constraints (accumulated-lambda XPBD + friction)
+    # ── 4. XPBD hard-contact + box-clamp friction ───────────────
+    # Zero per-contact accumulators at start of step.
+    d.lambda_n.zero_()
+    d.lambda_t1.zero_()
+    d.lambda_t2.zero_()
+
+    # (Optionally loop iterations; paper recommends 1 per substep.)
+    for _iter in range(max(1, params.iterations)):
         if inner_d.naconmax > 0:
             wp.launch(
                 _xpbd_contact,
@@ -482,37 +509,20 @@ def _xpbd_solve(m: XPBDModel, d: XPBDData):
                     inner_d.efc.D,
                     inner_d.nefc,
                     d.qvel_pred,
-                    params.compliance,
-                    d.lambda_acc,
+                    d.lambda_n,
+                    d.lambda_t1,
+                    d.lambda_t2,
                 ],
-                outputs=[inner_d.efc.force, d.qfrc_constraint],
+                outputs=[inner_d.efc.force, inner_d.qfrc_constraint],
             )
 
-        # Update qvel_pred for next iteration via full M^{-1} solve
-        if _iter < params.iterations - 1:
-            # qfrc_total = qfrc_smooth + qfrc_constraint
-            wp.launch(
-                _sum_qfrc,
-                dim=(nw, nv),
-                inputs=[inner_d.qfrc_smooth, d.qfrc_constraint],
-                outputs=[d.qfrc_total],
-            )
-            # qacc = M^{-1} * qfrc_total  (via Data-field copy trick)
-            wp.copy(inner_d.qfrc_constraint, d.qfrc_total)
-            smooth.solve_m(inner_m, inner_d, inner_d.qacc, inner_d.qfrc_constraint)
-            # qvel_pred = qvel + qacc * dt
-            wp.launch(
-                _repredict_from_qacc,
-                dim=(nw, nv),
-                inputs=[inner_m.opt.timestep, inner_d.qvel, inner_d.qacc],
-                outputs=[d.qvel_pred],
-            )
-
-    # Final: qfrc_total = qfrc_smooth + qfrc_constraint
+    # ── 5. final qfrc_total = (smooth + non-contact) + contact ──
+    # d.qfrc_total already = qfrc_smooth + qfrc_constraint_noncon,
+    # and inner_d.qfrc_constraint now holds ONLY the XPBD contact forces.
     wp.launch(
         _sum_qfrc,
         dim=(nw, nv),
-        inputs=[inner_d.qfrc_smooth, d.qfrc_constraint],
+        inputs=[d.qfrc_total, inner_d.qfrc_constraint],   # noncon_total + contact
         outputs=[d.qfrc_total],
     )
 
@@ -522,7 +532,7 @@ def _xpbd_solve(m: XPBDModel, d: XPBDData):
 # ═══════════════════════════════════════════════════════════════════
 
 def forward(m: XPBDModel, d: XPBDData):
-    """Full forward pass with XPBD constraint resolution."""
+    """Full forward pass: native non-contact solve + XPBD contact."""
     inner_m = m._m
     inner_d = d._d
 
@@ -536,7 +546,7 @@ def forward(m: XPBDModel, d: XPBDData):
     smooth.tendon_armature(inner_m, inner_d)
     smooth.factor_m(inner_m, inner_d)
 
-    if inner_m.opt.run_collision_detection:
+    if not (inner_m.opt.disableflags & DisableBit.CONSTRAINT):
         collision_driver.collision(inner_m, inner_d)
 
     _mjw_constraint.make_constraint(inner_m, inner_d)
@@ -564,16 +574,19 @@ def forward(m: XPBDModel, d: XPBDData):
         if inner_m.callback.control:
             inner_m.callback.control(inner_m, inner_d)
     fwd_actuation(inner_m, inner_d)
+    # factorize=True matches comfree_warp's forward_comfree.  factor_m is
+    # idempotent on already-factored qLD, so the second factorization here
+    # is harmless (a small waste).  My earlier "double factor is a bug"
+    # diagnosis was wrong.
     fwd_acceleration(inner_m, inner_d, factorize=True)
 
-    # ── XPBD constraint solve ────────────────────────────────────
+    # ── constraint solve (native non-contact + XPBD contact) ────
     if inner_d.njmax == 0 or inner_m.nv == 0:
         wp.copy(inner_d.qacc, inner_d.qacc_smooth)
     else:
         _xpbd_solve(m, d)
-        # solve_m may only work with arrays that live on the Data struct.
-        # Copy qfrc_total into inner_d.qfrc_constraint (a real Data field),
-        # then solve:  qacc = M^{-1} * qfrc_total.
+        # d.qfrc_total = qfrc_smooth + qfrc_noncontact + qfrc_contact.
+        # solve_m reads from a real Data field:
         wp.copy(inner_d.qfrc_constraint, d.qfrc_total)
         smooth.solve_m(inner_m, inner_d, inner_d.qacc, inner_d.qfrc_constraint)
 
@@ -581,13 +594,23 @@ def forward(m: XPBDModel, d: XPBDData):
 
 
 def step(m: XPBDModel, d: XPBDData):
-    """Advance one timestep with XPBD contact."""
+    """Advance one timestep.  Dispatches on m.opt.integrator to match
+    comfree_warp's step_comfree behaviour.
+    """
     inner_m = m._m
     inner_d = d._d
 
     forward(m, d)
 
-    # euler reads inner_d.qacc (set by solve_m in forward).
-    # efc.Ma is only needed by the implicit integrator.
+    # Both EULER and IMPLICITFAST integrators read efc.Ma; comfree stashes
+    # qfrc_total there unconditionally before integrating.
     wp.copy(inner_d.efc.Ma, d.qfrc_total)
-    euler(inner_m, inner_d)
+
+    if inner_m.opt.integrator == IntegratorType.EULER:
+        euler(inner_m, inner_d)
+    elif inner_m.opt.integrator == IntegratorType.IMPLICITFAST:
+        implicit(inner_m, inner_d)
+    else:
+        raise NotImplementedError(
+            f"integrator {inner_m.opt.integrator} not supported by xpbd backend"
+        )
