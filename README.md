@@ -7,9 +7,8 @@
 
 ## Overview
 
-This repo implements the experimental study from the attached PDF. It evaluates
-10 contact model variants (M1–M10) across three manipulation tasks of increasing
-contact complexity, under two experimental conditions:
+This repo implements the experimental study that evaluates
+different contact models under different conditions across different manipulation tasks, under two experimental conditions:
 
 - **Condition A** — fixed computation budget (models with lower cost get more samples)
 - **Condition B** — fixed sample count (isolates approximation error from sample count)
@@ -18,27 +17,13 @@ contact complexity, under two experimental conditions:
 
 | ID  | Description |
 |-----|-------------|
-| M1  | Anitescu / pyramidal-cone Newton solver (MJWarp) |
-| M2  | MuJoCo default soft contact / PGS — **baseline M*** |
+| M1  | Anitescu    |
+| M2  | MuJoCo default soft contact |
 | M3  | Jin 2024 complementarity-free model |
-| M4  | Decoupled XPBD-style penalty (Coulomb friction) |
-| M4d | M4 with friction relaxed to viscous damping |
-| M5  | Degraded geometry + accurate contact (M2) |
-| M6  | Degraded geometry + approximate contact (M4) |
-| M7  | Inaccurate physical parameters + accurate contact |
-| M8  | Inaccurate physical parameters + M4 |
-| M9  | Degraded geometry + inaccurate physics + M2 |
-| M10 | Degraded geometry + inaccurate physics + M4 |
+| M4  | XPBD-style contact model |
 
 ### Tasks
 
-| Task | Complexity | Key contact challenge |
-|------|------------|----------------------|
-| Push | LOW | 1–2 quasi-static contacts |
-| Grasp & Reorient | MEDIUM | ~4 contacts, dynamic lifting |
-| Peg-in-Hole | HIGH | tight clearance, multi-contact insertion |
-
----
 
 ## Repository Structure
 
@@ -48,7 +33,7 @@ contact_study/
 │   ├── contact_models/
 │   │   ├── config.py           # ContactModelConfig + all Mk factory methods
 │   │   ├── api.py              # Unified dispatch surface (put_model/step/forward)
-│   │   ├── xpbd_backend.py     # M4: decoupled XPBD contact solver
+│   │   ├── xpbd_backend.py     # M4: XPBD-style contact model
 │   │   └── benchmarks.py       # Speed and approximation error measurement
 │   ├── planners/
 │   │   ├── mppi.py             # MPPI controller

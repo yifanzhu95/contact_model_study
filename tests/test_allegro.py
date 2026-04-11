@@ -1,4 +1,4 @@
-"""test_forward.py
+"""test_allegro.py
 
 Forward simulation debugger for contact_study.
 Runs any contact model backend against any XML scene, with optional
@@ -6,17 +6,17 @@ MuJoCo viewer showing world 0.
 
 Usage:
     # Headless, comfree backend
-    python test_forward.py
+    python test_allegro.py
 
     # With viewer, MuJoCo soft contact
-    python test_forward.py --viewer --backend mujoco_soft
+    python test_allegro.py --viewer --backend mujoco_soft
 
     # Batched, custom XML
-    python test_forward.py --xml scenes/tasks/peg_in_hole_accurate.xml \
+    python test_allegro.py --xml scenes/tasks/peg_in_hole_accurate.xml \
                             --nworld 512 --backend comfree --steps 500
 
     # All backends, no viewer
-    python test_forward.py --backend all
+    python test_allegro.py --backend all
 """
 
 import argparse
