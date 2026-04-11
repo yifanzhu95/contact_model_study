@@ -47,9 +47,10 @@ def _get_inner_data(d):
 def _make_cfg(backend: str,
               comfree_stiffness: float,
               comfree_damping: float) -> ContactModelConfig:
-    if backend == "mujoco_anitescu":
+
+    if backend == "mjwarp_hard":
         return ContactModelConfig.M1()
-    if backend in ("mjwarp", "mujoco_soft"):
+    if backend in ("mjwarp"):
         return ContactModelConfig.M2()
     if backend == "comfree":
         cfg = ContactModelConfig.M3()
@@ -191,8 +192,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--xml", default="scenes/test_data/primitives.xml")
     parser.add_argument("--backend", default="comfree",
-                        choices=["mjwarp", "comfree", "mujoco_soft",
-                                 "mujoco_anitescu", "xpbd", "all"])
+                        choices=["mjwarp", "comfree", "mjwarp_hard", "xpbd", "all"])
     parser.add_argument("--nworld", type=int, default=1)
     parser.add_argument("--nconmax", type=int, default=1000)
     parser.add_argument("--njmax", type=int, default=5000)
@@ -207,7 +207,7 @@ def main():
     args = parser.parse_args()
 
     backends = (
-        ["mjwarp", "comfree", "mujoco_soft", "mujoco_anitescu", "xpbd"]
+        ["mjwarp", "comfree", "mjwarp_hard", "xpbd"]
         if args.backend == "all"
         else [args.backend]
     )

@@ -1,19 +1,35 @@
 """run_experiment.py
 
-Master experiment runner with the full simulation + planning. Executes the full study grid:
+Master experiment runner. Executes the full study grid:
 
   tasks × contact_models × conditions × n_episodes
 
-and writes results to results/experiment_{timestamp}.json.
+for ONE choice of (geometry variant, physics noise level). To sweep
+over geometry or noise, invoke this script multiple times with different
+--geometry / --friction_sigma / --mass_sigma flags, or wrap it in an
+outer loop. Geometry and physics noise are deliberately NOT part of
+ContactModelConfig — they live on orthogonal axes and are applied here
+at load time.
 
 Usage:
+    # Clean baseline
     python experiments/run_experiment.py \
         --tasks push grasp_reorient peg_in_hole \
-        --models M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 \
+        --models M1 M2 M3 M4 \
         --conditions A B \
         --n_episodes 20 \
         --budget_seconds 0.1 \
         --n_samples_b 1024
+
+    # Old "M5" equivalent: M2 + convex-hull geometry
+    python experiments/run_experiment.py \
+        --models M2 \
+        --geometry convex_hull
+
+    # Old "M8" equivalent: M4 + friction noise
+    python experiments/run_experiment.py \
+        --models M4 \
+        --friction_sigma 0.2 --mass_sigma 0.1
 """
 
 from __future__ import annotations
@@ -42,29 +58,46 @@ from contact_study.evaluation.metrics import (
 )
 from contact_study.planners.mppi import MPPIController, MPPIConfig
 from contact_study.tasks.base import get_task
+from contact_study.utils.physics_noise import (
+    PhysicsNoiseParams,
+    apply_physics_noise,
+)
 from contact_study.utils.rollout import fixed_budget_rollout, fixed_sample_rollout
 
 RESULTS_DIR = Path(__file__).parent.parent / "results"
 
 
 # ---------------------------------------------------------------------------
-# Config table: name -> factory
+# Contact model factory table — M1..M4 only
 # ---------------------------------------------------------------------------
 
 MODEL_FACTORIES = {
-    "M1":  ContactModelConfig.M1,
-    "M2":  ContactModelConfig.M2,
-    "M3":  ContactModelConfig.M3,
-    "M4":  ContactModelConfig.M4,
-    "M4d": lambda: ContactModelConfig.M4(damping_friction=True),
-    "M5":  lambda: ContactModelConfig.M5(GeometryVariant.CONVEX_HULL),
-    "M5p": lambda: ContactModelConfig.M5(GeometryVariant.PRIMITIVE_UNION),
-    "M6":  lambda: ContactModelConfig.M6(GeometryVariant.CONVEX_HULL),
-    "M7":  ContactModelConfig.M7,
-    "M8":  ContactModelConfig.M8,
-    "M9":  ContactModelConfig.M9,
-    "M10": ContactModelConfig.M10,
+    "M1": ContactModelConfig.M1,
+    "M2": ContactModelConfig.M2,
+    "M3": ContactModelConfig.M3,
+    "M4": ContactModelConfig.M4,
 }
+
+
+# ---------------------------------------------------------------------------
+# Helper: load a task's MjModel with a chosen geometry variant and
+# optional physics noise applied. Returned MjModel is ready to hand
+# to api.put_model under any contact config.
+# ---------------------------------------------------------------------------
+
+def load_mjm_for_study(
+    task_name: str,
+    geometry:  GeometryVariant,
+    noise:     PhysicsNoiseParams,
+    rng:       np.random.Generator,
+) -> tuple[mujoco.MjModel, "BaseTask"]:
+    task = get_task(task_name, geometry=geometry)
+    mjm, _ = task.load()
+    mjm = apply_physics_noise(mjm, noise, rng)
+    # Re-bind so the task's later helper methods (success check, etc.)
+    # see the perturbed model.
+    task._mjm = mjm
+    return mjm, task
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +139,6 @@ def run_one_episode(
 
     for t in range(task.spec.max_steps):
         if condition == "A":
-            # Condition A: MPPI with dynamic sample count inside fixed budget
             result = fixed_budget_rollout(
                 mjm            = mjm,
                 cfg            = cfg,
@@ -117,12 +149,10 @@ def run_one_episode(
                 initial_qvel   = mjd.qvel,
                 rng            = rng,
             )
-            # Pick best action from the rollout
             best_idx = int(np.argmin(result["costs"]))
             ctrl     = result["final_qpos"][best_idx][:mjm.nu]  # placeholder
             n_used   = result["n_samples"]
         else:
-            # Condition B: standard MPPI with fixed N
             ctrl   = controller.plan(mjd)
             n_used = n_samples_b
 
@@ -159,24 +189,37 @@ def run_study(
     n_samples_b:    int,
     horizon:        int,
     seed:           int,
+    geometry:       GeometryVariant,
+    noise:          PhysicsNoiseParams,
     baseline_model: str = "M2",
 ) -> list[AggregatedResult]:
 
-    rng    = np.random.default_rng(seed)
+    rng = np.random.default_rng(seed)
     aggregated: list[AggregatedResult] = []
     all_cfgs = {name: MODEL_FACTORIES[name]() for name in model_names}
 
-    # Pre-compute speed and accuracy metrics against baseline
+    # Cell tag appended to every label so the output JSON records the
+    # (geometry, noise) context of this run.
+    cell_tag_parts = []
+    if geometry != GeometryVariant.ACCURATE:
+        cell_tag_parts.append(geometry.value)
+    if any(getattr(noise, f) > 0.0
+           for f in ("mass_sigma", "inertia_sigma", "friction_sigma", "com_sigma")):
+        cell_tag_parts.append(
+            f"noise_m{noise.mass_sigma}_f{noise.friction_sigma}"
+            f"_i{noise.inertia_sigma}_c{noise.com_sigma}"
+        )
+    cell_tag = "__" + "__".join(cell_tag_parts) if cell_tag_parts else ""
+
     print("=== Pre-computing speed / accuracy metrics ===")
     speed_cache: dict[str, float] = {}
     error_cache: dict[str, float] = {}
 
     for task_name in task_names:
-        task = get_task(task_name)
-        mjm, _ = task.load()
+        mjm, task = load_mjm_for_study(task_name, geometry, noise, rng)
 
-        baseline_cfg = all_cfgs[baseline_model]
-        baseline_r   = measure_rollout_speed(mjm, baseline_cfg)
+        baseline_cfg  = all_cfgs[baseline_model]
+        baseline_r    = measure_rollout_speed(mjm, baseline_cfg)
         baseline_time = baseline_r.mean_ms
 
         test_states = np.stack([
@@ -196,18 +239,16 @@ def run_study(
             error_cache[key] = mean_err
             print(f"  {key}: speedup={speed_cache[key]:.2f}x  err={error_cache[key]:.4f}")
 
-    # Main experiment loop
     print("\n=== Running episodes ===")
     for task_name in task_names:
-        task = get_task(task_name)
-        mjm, _ = task.load()
+        mjm, task = load_mjm_for_study(task_name, geometry, noise, rng)
 
         for model_name in model_names:
             cfg = all_cfgs[model_name]
             key = f"{task_name}/{model_name}"
 
             for condition in conditions:
-                print(f"  {task_name} | {model_name} | Condition {condition} | {n_episodes} eps")
+                print(f"  {task_name} | {model_name}{cell_tag} | Cond {condition} | {n_episodes} eps")
                 episodes = []
                 for ep in range(n_episodes):
                     result = run_one_episode(
@@ -220,9 +261,15 @@ def run_study(
                         horizon        = horizon,
                         rng            = rng,
                     )
+                    # Tag the label with the (geometry, noise) cell so
+                    # downstream plots don't mix rows from different
+                    # ablation cells.
+                    result.model_label = cfg.label + cell_tag
                     episodes.append(result)
 
-                agg = aggregate_episodes(episodes, task_name, cfg.label, condition)
+                agg = aggregate_episodes(
+                    episodes, task_name, cfg.label + cell_tag, condition
+                )
                 agg.speedup_vs_baseline    = speed_cache.get(key, 1.0)
                 agg.approx_err_vs_baseline = error_cache.get(key, 0.0)
                 aggregated.append(agg)
@@ -236,16 +283,37 @@ def run_study(
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tasks",    nargs="+", default=["push", "grasp_reorient", "peg_in_hole"])
-    parser.add_argument("--models",   nargs="+", default=["M1","M2","M3","M4","M5","M7","M9"])
-    parser.add_argument("--conditions", nargs="+", default=["A","B"])
+    parser.add_argument("--tasks",    nargs="+",
+                        default=["push", "grasp_reorient", "peg_in_hole"])
+    parser.add_argument("--models",   nargs="+",
+                        default=["M1", "M2", "M3", "M4"],
+                        choices=list(MODEL_FACTORIES.keys()))
+    parser.add_argument("--conditions", nargs="+", default=["A", "B"])
     parser.add_argument("--n_episodes",     type=int,   default=20)
     parser.add_argument("--budget_seconds", type=float, default=0.1)
     parser.add_argument("--n_samples_b",    type=int,   default=1024)
     parser.add_argument("--horizon",        type=int,   default=30)
     parser.add_argument("--seed",           type=int,   default=42)
     parser.add_argument("--output",         type=str,   default=None)
+
+    # --- Orthogonal ablation axes ---
+    parser.add_argument("--geometry", type=str, default="accurate",
+                        choices=[g.value for g in GeometryVariant],
+                        help="Geometry variant XML to pair with every contact model")
+    parser.add_argument("--mass_sigma",     type=float, default=0.0)
+    parser.add_argument("--inertia_sigma",  type=float, default=0.0)
+    parser.add_argument("--friction_sigma", type=float, default=0.0)
+    parser.add_argument("--com_sigma",      type=float, default=0.0)
+
     args = parser.parse_args()
+
+    noise = PhysicsNoiseParams(
+        mass_sigma     = args.mass_sigma,
+        inertia_sigma  = args.inertia_sigma,
+        friction_sigma = args.friction_sigma,
+        com_sigma      = args.com_sigma,
+    )
+    geometry = GeometryVariant(args.geometry)
 
     results = run_study(
         task_names     = args.tasks,
@@ -256,6 +324,8 @@ def main():
         n_samples_b    = args.n_samples_b,
         horizon        = args.horizon,
         seed           = args.seed,
+        geometry       = geometry,
+        noise          = noise,
     )
 
     ts  = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

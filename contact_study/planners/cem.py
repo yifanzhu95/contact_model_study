@@ -49,14 +49,13 @@ class CEMController:
         self.nu = mjm.nu
         self.nq = mjm.nq
 
-        # Distribution parameters
         self.mu    = np.zeros((cem_cfg.horizon, mjm.nu), dtype=np.float32)
         self.sigma = np.ones((cem_cfg.horizon, mjm.nu), dtype=np.float32) * cem_cfg.noise_sigma
 
         self._ctrl_range = mjm.actuator_ctrlrange.copy()
         self._has_limits  = mjm.actuator_ctrllimited.astype(bool)
 
-        self.m = api.put_model(mjm, cfg, rng=self.rng)
+        self.m = api.put_model(mjm, cfg)
         self.d = api.make_data(mjm, self.m, nworld=cem_cfg.n_samples)
 
     def reset(self):
@@ -98,29 +97,23 @@ class CEMController:
         k  = self.cc.n_elites
 
         for _ in range(self.cc.n_iterations):
-            # Sample N sequences from current distribution
             eps = self.rng.standard_normal((N, H, self.nu)).astype(np.float32)
             seqs = self.mu[None] + self.sigma[None] * eps
             seqs = self._clip(seqs)
 
             costs = self._rollout_costs(mjd, seqs)
 
-            # Refit to elite set
             elite_idx = np.argsort(costs)[:k]
-            elites    = seqs[elite_idx]          # (k, H, nu)
+            elites    = seqs[elite_idx]
 
             new_mu    = elites.mean(axis=0)
             new_sigma = elites.std(axis=0) + 1e-5
 
-            # Smoothed update
             a = self.cc.alpha
             self.mu    = a * self.mu    + (1 - a) * new_mu
             self.sigma = a * self.sigma + (1 - a) * new_sigma
 
         action = self.mu[0].copy()
-
-        # Shift
         self.mu[:-1] = self.mu[1:]
         self.mu[-1]  = 0.0
-
         return action

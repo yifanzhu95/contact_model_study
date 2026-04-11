@@ -1,30 +1,43 @@
 """Unified contact model API.
 
-This module is the single entry point for all contact model variants.
-It mirrors the comfree_warp.api surface (put_model, make_data, put_data,
-get_data_into, reset_data, step, forward) but accepts a ContactModelConfig
-to dispatch to the correct backend.
+Single entry point for M1-M4. Mirrors the comfree_warp.api surface
+(put_model, make_data, put_data, get_data_into, reset_data, step,
+forward) and dispatches on ContactModelConfig.backend.
 
-Usage::
+Scope
+-----
+put_model takes an MjModel AS-IS and installs it on the GPU under the
+requested contact backend. It does NOT apply physics noise and does NOT
+swap geometry. To run any Mk against:
 
-    from contact_study.contact_models.api import put_model, make_data, step
-    from contact_study.contact_models.config import ContactModelConfig
+  * a degraded geometry  → load the corresponding XML variant via
+    contact_study.tasks.base.BaseTask(geometry=...)
+  * noisy physics params → call contact_study.utils.physics_noise
+    .apply_physics_noise(mjm, PhysicsNoiseParams(...)) first, then
+    pass the perturbed MjModel in here.
 
-    cfg  = ContactModelConfig.M3()
-    m    = put_model(mjm, cfg)
-    d    = make_data(mjm, m)
+MJWarp limitation
+-----------------
+MJWarp only supports pyramidal friction cones on the GPU. Any config
+with cone != 'pyramidal' is rejected at put_model time. The paper's
+"elliptic" M2 cannot be run through this backend; see config.M2's
+docstring.
 
-    for _ in range(horizon):
-        step(m, d)
+Side effect warning
+-------------------
+_patch_mujoco_options and _apply_hard_contact_preset mutate the
+incoming MjModel in place (cone, solver, iterations, tolerance,
+and for M1 also geom_solref/geom_solimp/pair_*). If you reuse the
+same MjModel across multiple contact configs, later put_model calls
+will NOT restore the previous settings. For benchmarks that sweep
+over configs, re-load or deep-copy the MjModel between calls.
 """
 
 from __future__ import annotations
 
 import mujoco
-import numpy as np
-import warp as wp
 
-from .config import Backend, ContactModelConfig, PhysicsNoiseParams
+from .config import Backend, ContactModelConfig, MujocoSolverParams
 
 # ---------------------------------------------------------------------------
 # Lazy backend imports – only pay the import cost for what's actually used
@@ -44,46 +57,12 @@ def _xpbd_backend():
 
 
 # ---------------------------------------------------------------------------
-# Physics noise injection
-# ---------------------------------------------------------------------------
-
-def _apply_physics_noise(mjm: mujoco.MjModel, noise: PhysicsNoiseParams, rng: np.random.Generator) -> mujoco.MjModel:
-    """Return a copy of mjm with noise applied to physical parameters.
-
-    All perturbations are multiplicative: x <- x * (1 + N(0, sigma)).
-    """
-    if all(getattr(noise, f) == 0.0 for f in ("mass_sigma", "inertia_sigma", "friction_sigma", "com_sigma")):
-        return mjm  # fast path: no noise
-
-    # mujoco.MjModel is not directly copyable; we go via XML roundtrip.
-    # For batched rollouts a pre-perturbed array of models is preferred;
-    # see utils/rollout.py for the batched variant.
-    import copy
-    mjm_noisy = copy.deepcopy(mjm)
-
-    if noise.mass_sigma > 0.0:
-        mjm_noisy.body_mass[:] *= (1.0 + rng.normal(0, noise.mass_sigma, mjm.nbody))
-
-    if noise.inertia_sigma > 0.0:
-        mjm_noisy.body_inertia[:] *= (1.0 + rng.normal(0, noise.inertia_sigma, (mjm.nbody, 3)))
-
-    if noise.friction_sigma > 0.0:
-        mjm_noisy.geom_friction[:] *= (1.0 + rng.normal(0, noise.friction_sigma, mjm_noisy.geom_friction.shape))
-        mjm_noisy.geom_friction[:] = np.clip(mjm_noisy.geom_friction, 0.01, None)
-
-    if noise.com_sigma > 0.0:
-        mjm_noisy.body_ipos[:] += rng.normal(0, noise.com_sigma, mjm_noisy.body_ipos.shape)
-
-    return mjm_noisy
-
-
-# ---------------------------------------------------------------------------
 # MuJoCo option patching (M1 / M2 solver params)
 # ---------------------------------------------------------------------------
 
+# Elliptic intentionally omitted — MJWarp only implements pyramidal cones.
 _CONE_MAP = {
     "pyramidal": mujoco.mjtCone.mjCONE_PYRAMIDAL,
-    "elliptic":  mujoco.mjtCone.mjCONE_ELLIPTIC,
 }
 _SOLVER_MAP = {
     "PGS":    mujoco.mjtSolver.mjSOL_PGS,
@@ -91,45 +70,117 @@ _SOLVER_MAP = {
     "Newton": mujoco.mjtSolver.mjSOL_NEWTON,
 }
 
+
 def _patch_mujoco_options(mjm: mujoco.MjModel, cfg: ContactModelConfig) -> None:
-    """Write MujocoSolverParams into the MjModel option in-place."""
+    """Write MujocoSolverParams into the MjModel in place.
+
+    Patches mjm.opt (cone, solver, iterations, tolerance) and — if
+    cfg.mujoco.hard_contact is True — also patches every geom's
+    solref/solimp via _apply_hard_contact_preset.
+
+    Raises ValueError if cone != 'pyramidal' since MJWarp does not
+    support any other cone type on GPU.
+    """
     p = cfg.mujoco
+    if p.cone not in _CONE_MAP:
+        raise ValueError(
+            f"MJWarp only supports pyramidal friction cones; got "
+            f"cone={p.cone!r}. All MJWarp-backed contact models (M1, "
+            f"M2, and the MJWarp path of M3/M4) must use "
+            f"cone='pyramidal'."
+        )
     mjm.opt.cone       = _CONE_MAP[p.cone]
     mjm.opt.solver     = _SOLVER_MAP[p.solver]
     mjm.opt.iterations = p.iterations
     mjm.opt.tolerance  = p.tolerance
+
+    if p.hard_contact:
+        _apply_hard_contact_preset(mjm, p)
+
+
+def _apply_hard_contact_preset(mjm: mujoco.MjModel, p: MujocoSolverParams) -> None:
+    """Push all contact rows toward the hard-constraint limit (M1).
+
+    MuJoCo's constraint solver is a regularized convex QP:
+
+        minimize  ½ vᵀ A v − vᵀ b     s.t.   v in friction cone
+
+    where the diagonal regularizer R = 1/efc_D and the reference
+    acceleration aref are derived per-row from solref/solimp. The
+    regularized row-space equation is
+
+        (J M⁻¹ Jᵀ + R) λ  =  aref − J v_free
+
+    Driving solimp.d → 1 collapses R → 0 on contact rows; shrinking
+    solref.timeconst tightens aref so position-level penetration is
+    corrected within ~one step. In the joint limit R → 0 and the
+    position correction becomes one-step tight, the regularized QP
+    approaches the hard pyramidal-cone QP that Anitescu's formulation
+    targets. This is NOT a bit-exact Anitescu solve — MJWarp keeps the
+    convex-QP form throughout — but it is the stiff limit of MuJoCo's
+    own math and stays fully parallel on GPU.
+
+    Stability note
+    --------------
+    solref timeconst < 2·dt causes the semi-implicit integrator to
+    ring or blow up. We clamp to max(timeconst_mult · dt, 2 · dt).
+
+    What gets patched
+    -----------------
+    * mjm.geom_solref       shape (ngeom, mjNREF=2)
+    * mjm.geom_solimp       shape (ngeom, mjNIMP=5)
+    * mjm.pair_solref       shape (npair, 2)    (if npair > 0)
+    * mjm.pair_solimp       shape (npair, 5)    (if npair > 0)
+
+    Per-geom values are used when a contact is generated by the broad
+    phase. Per-pair values override per-geom for contacts involving
+    an explicit <pair> declared in XML. Patching both covers every
+    contact path.
+
+    Side effect: this mutates mjm in place. Calling put_model later
+    with a different config will NOT restore the original XML values.
+    """
+    dt = float(mjm.opt.timestep)
+    timeconst = max(p.hard_solref_timeconst_mult * dt, 2.0 * dt)
+
+    solref_row = [timeconst, p.hard_solref_dampratio]
+    solimp_row = [
+        p.hard_solimp_d,         # dmin
+        p.hard_solimp_d,         # dmax == dmin → flat, nearly-one impedance
+        p.hard_solimp_width,
+        p.hard_solimp_midpoint,
+        p.hard_solimp_power,
+    ]
+
+    # Per-geom: numpy broadcast assigns the same row to every geom.
+    mjm.geom_solref[:] = solref_row
+    mjm.geom_solimp[:] = solimp_row
+
+    # Per-pair overrides for explicit <pair> contacts in the XML.
+    if mjm.npair > 0:
+        mjm.pair_solref[:] = solref_row
+        mjm.pair_solimp[:] = solimp_row
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def put_model(
-    mjm: mujoco.MjModel,
-    cfg: ContactModelConfig,
-    rng: np.random.Generator | None = None,
-):
+def put_model(mjm: mujoco.MjModel, cfg: ContactModelConfig):
     """Create a device-side model for the given contact config.
 
     Args:
-        mjm:  Host-side MuJoCo model.
+        mjm:  Host-side MuJoCo model. Any geometry/physics-parameter
+              degradation should already be baked into this MjModel
+              before it reaches here. NOTE: this function mutates mjm
+              in place (see module docstring).
         cfg:  Contact model configuration (selects backend + params).
-        rng:  RNG for physics noise (M7-M10). If None a default RNG is created.
 
     Returns:
-        Backend-specific model object. Always has a .contact_cfg attribute
+        Backend-specific model object with a .contact_cfg attribute
         carrying the ContactModelConfig for downstream dispatch.
-
-    Note:
-        nworld is NOT a model-level concept upstream — it belongs to
-        make_data / put_data, matching the comfree_warp / mujoco_warp API.
     """
-    if rng is None:
-        rng = np.random.default_rng()
-
-    mjm = _apply_physics_noise(mjm, cfg.physics_noise, rng)
-
-    if cfg.backend in (Backend.MUJOCO_ANITESCU, Backend.MUJOCO_SOFT):
+    if cfg.backend in (Backend.MUJOCO_HARD, Backend.MUJOCO_SOFT):
         _patch_mujoco_options(mjm, cfg)
         m = _mujoco_warp().put_model(mjm)
 
@@ -142,9 +193,8 @@ def put_model(
         )
 
     elif cfg.backend == Backend.XPBD:
-        # Force pyramidal cone — the XPBD friction kernel recovers tangent
-        # Jacobians from the pyramidal edge rows in efc_J.
         _patch_mujoco_options(mjm, cfg)
+        # XPBD kernel recovers tangent Jacobians from pyramidal edge rows.
         mjm.opt.cone = mujoco.mjtCone.mjCONE_PYRAMIDAL
         m = _xpbd_backend().put_model(mjm, cfg.xpbd)
 
@@ -155,7 +205,8 @@ def put_model(
     return m
 
 
-def make_data(mjm: mujoco.MjModel, m, nworld: int = 1, nconmax: int | None = None, njmax: int | None = None):
+def make_data(mjm: mujoco.MjModel, m, nworld: int = 1,
+              nconmax: int | None = None, njmax: int | None = None):
     """Allocate device-side data matching the model's backend."""
     cfg = m.contact_cfg
     kwargs = dict(nworld=nworld)
@@ -163,16 +214,17 @@ def make_data(mjm: mujoco.MjModel, m, nworld: int = 1, nconmax: int | None = Non
         kwargs["nconmax"] = nconmax
     if njmax is not None:
         kwargs["njmax"] = njmax
-    if cfg.backend in (Backend.MUJOCO_ANITESCU, Backend.MUJOCO_SOFT):
+    if cfg.backend in (Backend.MUJOCO_HARD, Backend.MUJOCO_SOFT):
         return _mujoco_warp().make_data(mjm, **kwargs)
-    elif cfg.backend == Backend.COMFREE:
+    if cfg.backend == Backend.COMFREE:
         return _comfree_warp().make_data(mjm, **kwargs)
-    elif cfg.backend == Backend.XPBD:
+    if cfg.backend == Backend.XPBD:
         return _xpbd_backend().make_data(mjm, m, **kwargs)
     raise ValueError(f"Unknown backend: {cfg.backend}")
 
 
-def put_data(mjm: mujoco.MjModel, mjd: mujoco.MjData, m, nworld: int = 1, nconmax: int | None = None, njmax: int | None = None):
+def put_data(mjm: mujoco.MjModel, mjd: mujoco.MjData, m,
+             nworld: int = 1, nconmax: int | None = None, njmax: int | None = None):
     """Upload host-side MjData to device."""
     cfg = m.contact_cfg
     kwargs = dict(nworld=nworld)
@@ -180,11 +232,11 @@ def put_data(mjm: mujoco.MjModel, mjd: mujoco.MjData, m, nworld: int = 1, nconma
         kwargs["nconmax"] = nconmax
     if njmax is not None:
         kwargs["njmax"] = njmax
-    if cfg.backend in (Backend.MUJOCO_ANITESCU, Backend.MUJOCO_SOFT):
+    if cfg.backend in (Backend.MUJOCO_HARD, Backend.MUJOCO_SOFT):
         return _mujoco_warp().put_data(mjm, mjd, **kwargs)
-    elif cfg.backend == Backend.COMFREE:
+    if cfg.backend == Backend.COMFREE:
         return _comfree_warp().put_data(mjm, mjd, **kwargs)
-    elif cfg.backend == Backend.XPBD:
+    if cfg.backend == Backend.XPBD:
         return _xpbd_backend().put_data(mjm, mjd, m, **kwargs)
     raise ValueError(f"Unknown backend: {cfg.backend}")
 
@@ -192,11 +244,11 @@ def put_data(mjm: mujoco.MjModel, mjd: mujoco.MjData, m, nworld: int = 1, nconma
 def get_data_into(mjm: mujoco.MjModel, m, d, mjd: mujoco.MjData):
     """Download device-side data back to host."""
     cfg = m.contact_cfg
-    if cfg.backend in (Backend.MUJOCO_ANITESCU, Backend.MUJOCO_SOFT):
+    if cfg.backend in (Backend.MUJOCO_HARD, Backend.MUJOCO_SOFT):
         return _mujoco_warp().get_data_into(mjm, m, d, mjd)
-    elif cfg.backend == Backend.COMFREE:
+    if cfg.backend == Backend.COMFREE:
         return _comfree_warp().get_data_into(mjm, m, d, mjd)
-    elif cfg.backend == Backend.XPBD:
+    if cfg.backend == Backend.XPBD:
         return _xpbd_backend().get_data_into(mjm, m, d, mjd)
     raise ValueError(f"Unknown backend: {cfg.backend}")
 
@@ -204,11 +256,11 @@ def get_data_into(mjm: mujoco.MjModel, m, d, mjd: mujoco.MjData):
 def reset_data(mjm: mujoco.MjModel, m, d):
     """Reset device-side data to the model default state."""
     cfg = m.contact_cfg
-    if cfg.backend in (Backend.MUJOCO_ANITESCU, Backend.MUJOCO_SOFT):
+    if cfg.backend in (Backend.MUJOCO_HARD, Backend.MUJOCO_SOFT):
         return _mujoco_warp().reset_data(mjm, m, d)
-    elif cfg.backend == Backend.COMFREE:
+    if cfg.backend == Backend.COMFREE:
         return _comfree_warp().reset_data(mjm, m, d)
-    elif cfg.backend == Backend.XPBD:
+    if cfg.backend == Backend.XPBD:
         return _xpbd_backend().reset_data(mjm, m, d)
     raise ValueError(f"Unknown backend: {cfg.backend}")
 
@@ -216,11 +268,11 @@ def reset_data(mjm: mujoco.MjModel, m, d):
 def step(m, d):
     """Advance simulation by one timestep."""
     cfg = m.contact_cfg
-    if cfg.backend in (Backend.MUJOCO_ANITESCU, Backend.MUJOCO_SOFT):
+    if cfg.backend in (Backend.MUJOCO_HARD, Backend.MUJOCO_SOFT):
         return _mujoco_warp().step(m, d)
-    elif cfg.backend == Backend.COMFREE:
+    if cfg.backend == Backend.COMFREE:
         return _comfree_warp().step(m, d)
-    elif cfg.backend == Backend.XPBD:
+    if cfg.backend == Backend.XPBD:
         return _xpbd_backend().step(m, d)
     raise ValueError(f"Unknown backend: {cfg.backend}")
 
@@ -228,10 +280,10 @@ def step(m, d):
 def forward(m, d):
     """Run forward kinematics + dynamics (no integration)."""
     cfg = m.contact_cfg
-    if cfg.backend in (Backend.MUJOCO_ANITESCU, Backend.MUJOCO_SOFT):
+    if cfg.backend in (Backend.MUJOCO_HARD, Backend.MUJOCO_SOFT):
         return _mujoco_warp().forward(m, d)
-    elif cfg.backend == Backend.COMFREE:
+    if cfg.backend == Backend.COMFREE:
         return _comfree_warp().forward(m, d)
-    elif cfg.backend == Backend.XPBD:
+    if cfg.backend == Backend.XPBD:
         return _xpbd_backend().forward(m, d)
     raise ValueError(f"Unknown backend: {cfg.backend}")

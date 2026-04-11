@@ -4,17 +4,22 @@ Measures approximation error epsilon_k = d(Mk, M*) for each contact model
 relative to the M2 baseline (MuJoCo soft contact), across a grid of test
 states and rollout horizons.
 
-Produces:
-  - results/approx_error_{timestamp}.json
-  - figures/error_vs_horizon.pdf   (error growth over planning horizon)
-  - figures/error_heatmap.pdf      (task × model heatmap at H=20)
+Geometry degradation and physics-parameter noise are applied orthogonally
+via --geometry / --{friction,mass,...}_sigma flags; the contact-model axis
+stays clean (M1..M4 only).
 
 Usage:
+    # Clean baseline
     python experiments/measure_approx_error.py \
         --tasks push grasp_reorient peg_in_hole \
-        --models M1 M3 M4 M5 M7 \
+        --models M1 M3 M4 \
         --horizons 5 10 20 40 \
         --n_states 50
+
+    # Same models, but against a friction-noise-perturbed MjModel
+    python experiments/measure_approx_error.py \
+        --models M1 M3 M4 \
+        --friction_sigma 0.2
 """
 
 from __future__ import annotations
@@ -32,8 +37,9 @@ import numpy as np
 
 import contact_study.tasks.tasks  # noqa: F401
 from contact_study.contact_models.benchmarks import measure_approximation_error
-from contact_study.contact_models.config import ContactModelConfig
+from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
 from contact_study.tasks.base import get_task
+from contact_study.utils.physics_noise import PhysicsNoiseParams, apply_physics_noise
 
 RESULTS_DIR = Path(__file__).parent.parent / "results"
 FIGURES_DIR = Path(__file__).parent.parent / "figures"
@@ -43,13 +49,6 @@ MODEL_FACTORIES = {
     "M2": ContactModelConfig.M2,
     "M3": ContactModelConfig.M3,
     "M4": ContactModelConfig.M4,
-    "M4d": lambda: ContactModelConfig.M4(damping_friction=True),
-    "M5": ContactModelConfig.M5,
-    "M6": ContactModelConfig.M6,
-    "M7": ContactModelConfig.M7,
-    "M8": ContactModelConfig.M8,
-    "M9": ContactModelConfig.M9,
-    "M10": ContactModelConfig.M10,
 }
 
 TASK_LABELS = {
@@ -60,10 +59,8 @@ TASK_LABELS = {
 
 
 def plot_error_vs_horizon(records: list[dict], out_path: Path):
-    """One subplot per task, lines per model."""
     tasks   = sorted(set(r["task"] for r in records))
     models  = sorted(set(r["model"] for r in records if r["model"] != "M2"))
-    horizons = sorted(set(r["horizon"] for r in records))
 
     fig, axes = plt.subplots(1, len(tasks), figsize=(5 * len(tasks), 4), sharey=False)
     if len(tasks) == 1:
@@ -96,7 +93,6 @@ def plot_error_vs_horizon(records: list[dict], out_path: Path):
 
 
 def plot_error_heatmap(records: list[dict], horizon: int, out_path: Path):
-    """Model × task heatmap at a fixed horizon."""
     tasks  = ["push", "grasp_reorient", "peg_in_hole"]
     models = sorted(set(r["model"] for r in records if r["model"] != "M2"))
 
@@ -134,26 +130,45 @@ def main():
     parser.add_argument("--tasks",    nargs="+",
                         default=["push", "grasp_reorient", "peg_in_hole"])
     parser.add_argument("--models",   nargs="+",
-                        default=["M1", "M3", "M4", "M5", "M7"])
+                        default=["M1", "M3", "M4"],
+                        choices=list(MODEL_FACTORIES.keys()))
     parser.add_argument("--horizons", nargs="+", type=int,
                         default=[5, 10, 20, 40])
     parser.add_argument("--n_states", type=int, default=50)
+
+    # Orthogonal ablation axes
+    parser.add_argument("--geometry", type=str, default="accurate",
+                        choices=[g.value for g in GeometryVariant])
+    parser.add_argument("--mass_sigma",     type=float, default=0.0)
+    parser.add_argument("--inertia_sigma",  type=float, default=0.0)
+    parser.add_argument("--friction_sigma", type=float, default=0.0)
+    parser.add_argument("--com_sigma",      type=float, default=0.0)
     args = parser.parse_args()
 
     rng     = np.random.default_rng(0)
     records = []
-    cfg_gt  = ContactModelConfig.M2()
+    cfg_gt  = ContactModelConfig.M1() #Use Anitescu's model as the ground truth?
+
+    geometry = GeometryVariant(args.geometry)
+    noise = PhysicsNoiseParams(
+        mass_sigma     = args.mass_sigma,
+        inertia_sigma  = args.inertia_sigma,
+        friction_sigma = args.friction_sigma,
+        com_sigma      = args.com_sigma,
+    )
 
     for task_name in args.tasks:
-        task      = get_task(task_name)
+        task      = get_task(task_name, geometry=geometry)
         mjm, _    = task.load()
+        mjm       = apply_physics_noise(mjm, noise, rng)
+
         test_states = np.stack([
             np.concatenate(task.sample_initial_state(rng))
             for _ in range(args.n_states)
         ])
 
         for model_name in args.models:
-            if model_name == "M2":
+            if model_name == "M1":
                 continue
             cfg_ap = MODEL_FACTORIES[model_name]()
 
@@ -169,6 +184,8 @@ def main():
                     "horizon":  H,
                     "mean_err": mean_err,
                     "std_err":  std_err,
+                    "geometry": geometry.value,
+                    "noise":    dataclasses_asdict_lite(noise),
                 })
 
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -181,6 +198,15 @@ def main():
     FIGURES_DIR.mkdir(exist_ok=True)
     plot_error_vs_horizon(records, FIGURES_DIR / f"error_vs_horizon_{ts}.pdf")
     plot_error_heatmap(records, horizon=20, out_path=FIGURES_DIR / f"error_heatmap_{ts}.pdf")
+
+
+def dataclasses_asdict_lite(noise: PhysicsNoiseParams) -> dict:
+    return {
+        "mass_sigma":     noise.mass_sigma,
+        "inertia_sigma":  noise.inertia_sigma,
+        "friction_sigma": noise.friction_sigma,
+        "com_sigma":      noise.com_sigma,
+    }
 
 
 if __name__ == "__main__":

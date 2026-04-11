@@ -1,8 +1,18 @@
-"""ContactModelConfig: central dispatch object for all contact model variants.
+"""ContactModelConfig: central dispatch object for contact model variants.
 
-Each Mk in the study is fully described by one of these configs.
-The 'backend' field drives dispatch in api.py; all other fields are
-backend-specific parameters with sensible defaults.
+Each Mk on the contact-model axis of the study is fully described by one of
+these configs. The 'backend' field drives dispatch in api.py.
+
+Scope note
+----------
+This config describes ONLY the contact model (M1..M4). Orthogonal study
+axes — geometry fidelity and physics parameter noise — are handled OUTSIDE
+this object:
+
+  * Geometry variants live in XML files; pick one at task-load time via
+    contact_study.tasks.base.BaseTask(geometry=GeometryVariant.CONVEX_HULL).
+  * Physics noise is applied by contact_study.utils.physics_noise.apply_physics_noise
+    to an MjModel before put_model is called.
 """
 
 from __future__ import annotations
@@ -14,144 +24,177 @@ from typing import Optional
 
 class Backend(str, enum.Enum):
     """Top-level contact model backend selector."""
-    MUJOCO_ANITESCU  = "mujoco_anitescu"   # M1: Anitescu / Newton-CG solver
-    MUJOCO_SOFT      = "mujoco_soft"       # M2: MuJoCo default soft-contact (PGS)
+    MUJOCO_HARD  = "mujoco_hard"   # M1: stiff MuJoCo model
+    MUJOCO_SOFT      = "mujoco_soft"       # M2: MJWarp default soft contact
     COMFREE          = "comfree"           # M3: Jin 2024 complementarity-free
-    XPBD             = "xpbd"             # M4: decoupled penalty / XPBD-style
+    XPBD             = "xpbd"              # M4: XPBD-style penalty model
 
 
 class GeometryVariant(str, enum.Enum):
-    """Geometry fidelity level (controls which XML scene file is loaded)."""
-    ACCURATE         = "accurate"          # original mesh / accurate geometry
-    CONVEX_HULL      = "convex_hull"       # single convex hull per body
-    PRIMITIVE_UNION  = "primitive_union"   # union of spheres / capsules / boxes
-    LINEARIZED       = "linearized"        # polyhedral linearization of curved geoms
+    """Geometry fidelity level (selects which XML scene file is loaded).
+
+    NOT part of ContactModelConfig. Pair any geometry variant with any Mk
+    by passing it to BaseTask(geometry=...) before calling api.put_model.
+    """
+    ACCURATE         = "accurate"
+    CONVEX_HULL      = "convex_hull"
+    PRIMITIVE_UNION  = "primitive_union"
+    LINEARIZED       = "linearized"
 
 
 @dataclasses.dataclass
 class MujocoSolverParams:
-    """Parameters for MuJoCo's built-in solvers (M1 and M2).
+    """Parameters for MuJoCo's (MJWarp-hosted) built-in solver.
 
-    For M1 (Anitescu): set cone=pyramidal, solver=Newton or CG.
-    For M2 (soft):     set cone=elliptic,  solver=PGS.
-    These map directly to MuJoCo XML <option> attributes and are written
-    into the model at load time by api.put_model().
+    MJWarp only supports pyramidal friction cones — elliptic is not
+    implemented on the GPU backend. All MJWarp-backed configs must use
+    cone='pyramidal'; api._patch_mujoco_options raises on anything else.
+
+    The soft-vs-hard distinction between M1 and M2 is expressed via
+    `hard_contact` rather than cone type. When hard_contact=True,
+    api._apply_hard_contact_preset patches every geom's solref/solimp
+    toward the hard-constraint limit (d → 1, timeconst → 2·dt), pushing
+    MJWarp's regularized convex QP as close to the true Anitescu QP as
+    the solver can express while remaining stable.
     """
-    cone:       str   = "pyramidal"   # "pyramidal" (M1) | "elliptic" (M2)
-    solver:     str   = "Newton"      # "PGS" | "CG" | "Newton"
+    cone:       str   = "pyramidal"
+    solver:     str   = "Newton"       # "PGS" | "CG" | "Newton"
     iterations: int   = 100
     tolerance:  float = 1e-8
-    # Soft-contact impedance (used by M2; ignored if cone=pyramidal)
-    solimp_dmin:  float = 0.9
-    solimp_dmax:  float = 0.95
-    solimp_width: float = 0.001
+
+    # --- Hard-contact preset (M1) ---------------------------------
+    # When True, all geom/pair solref and solimp are overwritten with
+    # the values below at put_model time. When False, the XML's own
+    # per-geom solref/solimp are left untouched (M2 default).
+    hard_contact:               bool  = False
+
+    # solimp target: d → 1 means the contact row's regularizer R = 1/D → 0.
+    # dmin == dmax collapses the impedance ramp to a flat near-one curve.
+    hard_solimp_d:              float = 0.9999
+    hard_solimp_width:          float = 1.0e-4
+    hard_solimp_midpoint:       float = 0.5
+    hard_solimp_power:          float = 2.0
+
+    # solref target: timeconst = timeconst_mult · dt, clamped to ≥ 2·dt
+    # by _apply_hard_contact_preset. Smaller timeconst → stiffer
+    # position-level correction; < 2·dt is unstable for the implicit
+    # integrator.
+    hard_solref_timeconst_mult: float = 2.0
+    hard_solref_dampratio:      float = 1.0
 
 
 @dataclasses.dataclass
 class ComfreeParams:
-    """Parameters for Jin's complementarity-free model (M3).
-
-    These are injected onto the Warp model object by comfree_warp.api.put_model().
-    """
+    """Parameters for Jin's complementarity-free model (M3)."""
     stiffness: float = 0.2
     damping:   float = 0.001
 
 
 @dataclasses.dataclass
 class XPBDParams:
-    """Parameters for the decoupled XPBD-style contact model (M4).
- 
-    Normal contacts are resolved via XPBD compliance projection
-    (position-level, per-contact, unilateral clamp).  Friction uses
-    regularised Coulomb:
- 
-        f_t = −μ · f_n · v_t / √(‖v_t‖² + ε)
- 
-    Non-contact constraints (equality, limits, joint friction) are
-    handled with the same compliance parameter, bilateral for equalities
-    and unilateral for limits.
- 
-    Parameters
-    ----------
-    compliance : float
-        XPBD positional compliance α.  Smaller → stiffer.  The effective
-        compliance per timestep is α̃ = α / dt².  Default 1e-4 gives
-        firm contact at dt = 0.002.
-    friction_reg_eps : float
-        Regularisation ε in the friction denominator.  Controls the
-        cross-over from Coulomb to viscous behaviour near zero slip.
-        Larger values → more damping at low speed.
-    """
-    substeps: int = 1
-    vmax_depenetration: float = 1.0
-    iterations: int   = 1
+    """Parameters for the XPBD-style contact model (M4).
 
-@dataclasses.dataclass
-class PhysicsNoiseParams:
-    """Perturbations applied to physical parameters (M7–M10).
-
-    All noise is multiplicative: true_value * (1 + N(0, sigma)).
-    Set sigma=0.0 to disable.
+    See contact_study.contact_models.xpbd_backend for what each field does.
     """
-    mass_sigma:     float = 0.0
-    inertia_sigma:  float = 0.0
-    friction_sigma: float = 0.0
-    com_sigma:      float = 0.0   # additive noise on CoM position (meters)
+    substeps:            int   = 1
+    vmax_depenetration:  float = 1.0
+    iterations:          int   = 1
 
 
 @dataclasses.dataclass
 class ContactModelConfig:
-    """Full specification of a contact model variant Mk.
+    """Full specification of one contact model variant Mk (k ∈ 1..4).
 
     Usage::
 
-        cfg = ContactModelConfig(
-            backend=Backend.COMFREE,
-            geometry=GeometryVariant.CONVEX_HULL,
-            comfree=ComfreeParams(stiffness=0.3),
-            physics_noise=PhysicsNoiseParams(friction_sigma=0.1),
-        )
-        m, d = api.put_model(mjm, cfg), api.make_data(mjm, m)
+        cfg = ContactModelConfig.M3()
+        cfg.comfree.stiffness = 0.3
+        m = api.put_model(mjm, cfg)
+        d = api.make_data(mjm, m, nworld=1024)
         api.step(m, d)
     """
-    backend:       Backend          = Backend.MUJOCO_SOFT
-    geometry:      GeometryVariant  = GeometryVariant.ACCURATE
+    backend: Backend = Backend.MUJOCO_SOFT
 
-    # Per-backend parameter blocks (only the relevant one is used)
-    mujoco:        MujocoSolverParams  = dataclasses.field(default_factory=MujocoSolverParams)
-    comfree:       ComfreeParams       = dataclasses.field(default_factory=ComfreeParams)
-    xpbd:          XPBDParams          = dataclasses.field(default_factory=XPBDParams)
+    mujoco:  MujocoSolverParams = dataclasses.field(default_factory=MujocoSolverParams)
+    comfree: ComfreeParams      = dataclasses.field(default_factory=ComfreeParams)
+    xpbd:    XPBDParams         = dataclasses.field(default_factory=XPBDParams)
 
-    # Physics parameter noise (shared across all backends)
-    physics_noise: PhysicsNoiseParams  = dataclasses.field(default_factory=PhysicsNoiseParams)
-
-    # Human-readable label used in plots / result tables
     label: Optional[str] = None
 
     def __post_init__(self):
         if self.label is None:
-            self.label = f"{self.backend.value}_{self.geometry.value}"
+            self.label = self.backend.value
 
     # ------------------------------------------------------------------
-    # Factory methods for each Mk in the study
+    # Factory methods — one per contact model in the study
     # ------------------------------------------------------------------
 
     @classmethod
     def M1(cls) -> "ContactModelConfig":
-        """M1: Anitescu model (pyramidal cone, Newton solver)."""
+        """M1: Stiff-limit pyramidal contact.
+
+        MJWarp's solver is a regularized convex QP, not a hard LCP, 
+        and there is no way to
+        disable the regularization entirely. What M1 does instead is
+        push that QP toward its hard-constraint limit:
+
+          * contact solimp → (0.9999, 0.9999, 1e-4, 0.5, 2)
+            so the diagonal regularizer R = 1/efc_D is driven ~1000×
+            smaller than MuJoCo's default d ≈ 0.9;
+          * contact solref → (2·dt, 1.0)
+            the tightest stable timeconst for the implicit integrator,
+            producing critically-damped position-level correction
+            within ~one step;
+          * Newton solver, iterations=200, tolerance=1e-10
+            to ensure the stiffened QP actually converges.
+
+        The result is measurably different from M2 (soft defaults) and
+        is the closest-to-Anitescu formulation that stays inside
+        MJWarp's parallel-per-world solver. The paper should describe
+        M1 as "stiff-limit pyramidal MJWarp," not "Anitescu verbatim."
+
+        If the M1-vs-M2 gap turns out too small to be interesting, the
+        next step is to write a dedicated projected-Newton Anitescu
+        backend (see xpbd_backend.py for how a custom solver slots in).
+        """
         return cls(
-            backend=Backend.MUJOCO_ANITESCU,
-            mujoco=MujocoSolverParams(cone="pyramidal", solver="Newton"),
-            label="M1_anitescu",
+            backend=Backend.MUJOCO_HARD,
+            mujoco=MujocoSolverParams(
+                cone="pyramidal",
+                solver="Newton",
+                iterations=200,
+                tolerance=1e-10,
+                hard_contact=True,
+            ),
+            label="M1_stiff_pyramidal",
         )
 
     @classmethod
     def M2(cls) -> "ContactModelConfig":
-        """M2: MuJoCo default soft-contact (elliptic cone, Newton)."""
+        """M2: MJWarp default soft contact (pyramidal cone, Newton).
+
+        CAVEAT — paper vs. implementation: the paper's M2 is "MuJoCo
+        default soft contact," which in reference MuJoCo uses an
+        *elliptic* friction cone. MJWarp does not implement elliptic
+        cones on the GPU; only pyramidal. So the M2 available here is
+        pyramidal + default solref/solimp, which is MuJoCo's soft
+        formulation with a pyramidalized friction cone. This is an
+        unavoidable approximation of the paper's M2 under the MJWarp
+        backend and should be reported as such in the methodology.
+
+        Concretely this means M1 and M2 differ only in the stiffness of
+        the soft-contact formulation (hard vs. default regularization),
+        not in cone type. That is not ideal for the taxonomy, but it is
+        honest and it reflects the state of the GPU tooling.
+        """
         return cls(
             backend=Backend.MUJOCO_SOFT,
-            mujoco=MujocoSolverParams(cone="elliptic", solver="Newton"),
-            label="M2_mujoco_soft",
+            mujoco=MujocoSolverParams(
+                cone="pyramidal",   # NOT elliptic — MJWarp limitation
+                solver="Newton",
+                hard_contact=False,
+            ),
+            label="M2_mjwarp_soft",
         )
 
     @classmethod
@@ -162,68 +205,9 @@ class ContactModelConfig:
     @classmethod
     def M4(cls) -> "ContactModelConfig":
         """M4: Decoupled XPBD-style penalty model."""
-        return cls(
-            backend=Backend.XPBD,
-            xpbd=XPBDParams(),
-            label="M4_xpbd",
-        )
-
-    @classmethod
-    def M5(cls, geom: GeometryVariant = GeometryVariant.CONVEX_HULL) -> "ContactModelConfig":
-        """M5: Degraded geometry + accurate contact model."""
-        return cls(backend=Backend.MUJOCO_SOFT, geometry=geom, label=f"M5_{geom.value}")
-
-    @classmethod
-    def M6(cls, geom: GeometryVariant = GeometryVariant.CONVEX_HULL) -> "ContactModelConfig":
-        """M6: Degraded geometry + M3/M4."""
-        return cls(backend=Backend.XPBD, geometry=geom, label=f"M6_{geom.value}")
-
-    @classmethod
-    def M7(cls, friction_sigma: float = 0.2) -> "ContactModelConfig":
-        """M7: Inaccurate physical parameters + accurate contact model."""
-        return cls(
-            backend=Backend.MUJOCO_SOFT,
-            physics_noise=PhysicsNoiseParams(friction_sigma=friction_sigma, mass_sigma=0.1),
-            label="M7_phys_noise",
-        )
-
-    @classmethod
-    def M8(cls, friction_sigma: float = 0.2) -> "ContactModelConfig":
-        """M8: Inaccurate physical parameters + M3/M4."""
-        return cls(
-            backend=Backend.XPBD,
-            physics_noise=PhysicsNoiseParams(friction_sigma=friction_sigma, mass_sigma=0.1),
-            label="M8_xpbd_phys_noise",
-        )
-
-    @classmethod
-    def M9(cls, geom: GeometryVariant = GeometryVariant.CONVEX_HULL,
-           friction_sigma: float = 0.2) -> "ContactModelConfig":
-        """M9: Degraded geometry + inaccurate physics + accurate contact model."""
-        return cls(
-            backend=Backend.MUJOCO_SOFT,
-            geometry=geom,
-            physics_noise=PhysicsNoiseParams(friction_sigma=friction_sigma, mass_sigma=0.1),
-            label=f"M9_{geom.value}_phys_noise",
-        )
-
-    @classmethod
-    def M10(cls, geom: GeometryVariant = GeometryVariant.CONVEX_HULL,
-            friction_sigma: float = 0.2) -> "ContactModelConfig":
-        """M10: Degraded geometry + inaccurate physics + M3/M4."""
-        return cls(
-            backend=Backend.XPBD,
-            geometry=geom,
-            physics_noise=PhysicsNoiseParams(friction_sigma=friction_sigma, mass_sigma=0.1),
-            label=f"M10_{geom.value}_phys_noise",
-        )
+        return cls(backend=Backend.XPBD, xpbd=XPBDParams(), label="M4_xpbd")
 
     @classmethod
     def all_models(cls) -> list["ContactModelConfig"]:
-        """Return the canonical list of all Mk configs for a full study run."""
-        return [
-            cls.M1(), cls.M2(), cls.M3(), cls.M4(), cls.M4(damping_friction=True),
-            cls.M5(GeometryVariant.CONVEX_HULL), cls.M5(GeometryVariant.PRIMITIVE_UNION),
-            cls.M6(GeometryVariant.CONVEX_HULL),
-            cls.M7(), cls.M8(), cls.M9(), cls.M10(),
-        ]
+        """Return the canonical list of all contact model configs."""
+        return [cls.M1(), cls.M2(), cls.M3(), cls.M4()]

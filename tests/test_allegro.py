@@ -48,7 +48,7 @@ def _get_inner_model(m):
 
 def run(
     xml_path:          str   = "scenes/test_data/allegro/env_allegro_cube.xml",
-    backend:           str   = "comfree",      # "mjwarp" | "comfree" | "mujoco_anitescu"
+    backend:           str   = "comfree",      # "mjwarp" | "comfree" | "mjwarp_hard"
     nworld:            int   = 1,
     nconmax:           int   = 64,
     njmax:             int   = 200,
@@ -96,11 +96,11 @@ def run(
         cfg = ContactModelConfig.M3()
         cfg.comfree.stiffness = comfree_stiffness
         cfg.comfree.damping   = comfree_damping
-    elif backend == "mujoco_anitescu":
+    elif backend == "mjwarp_hard":
         cfg = ContactModelConfig.M1()
     elif backend == "xpbd":
         cfg = ContactModelConfig.M4()
-    else:  # mjwarp — same as mujoco_soft, no solver patch
+    else:  
         cfg = ContactModelConfig.M2()
 
     # ------------------------------------------------------------------
@@ -272,7 +272,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--xml",     default="scenes/test_data/allegro/env_allegro_cube.xml")
     parser.add_argument("--backend", default="comfree",
-                        choices=["mjwarp", "comfree", "mujoco_soft", "mujoco_anitescu", "xpbd", "all"])
+                        choices=["mjwarp", "comfree", "mjwarp_hard", "xpbd", "all"])
     parser.add_argument("--nworld",  type=int,   default=1)
     parser.add_argument("--nconmax", type=int,   default=64)
     parser.add_argument("--njmax",   type=int,   default=200)
@@ -288,7 +288,7 @@ def main():
     args = parser.parse_args()
 
     backends = (
-        ["mjwarp", "comfree", "mujoco_soft", "mujoco_anitescu"]
+        ["mjwarp", "comfree", "mjwarp_hard", "xpbd"]
         if args.backend == "all"
         else [args.backend]
     )
