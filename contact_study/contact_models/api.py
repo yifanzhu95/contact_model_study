@@ -257,7 +257,8 @@ def reset_data(mjm: mujoco.MjModel, m, d):
     """Reset device-side data to the model default state."""
     cfg = m.contact_cfg
     if cfg.backend in (Backend.MUJOCO_HARD, Backend.MUJOCO_SOFT):
-        return _mujoco_warp().reset_data(mjm, m, d)
+        #return _mujoco_warp().reset_data(mjm, m, d)
+        return _mujoco_warp().reset_data(m, d)
     if cfg.backend == Backend.COMFREE:
         return _comfree_warp().reset_data(mjm, m, d)
     if cfg.backend == Backend.XPBD:

@@ -100,7 +100,7 @@ class GraspReorientTask(BaseTask):
         mjm = self.mjm
         q0  = mjm.qpos0.copy()
         # Randomize object yaw orientation
-        obj_jnt = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "object_freejoint")
+        obj_jnt = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "cube_table")
         if obj_jnt >= 0:
             adr = mjm.jnt_qposadr[obj_jnt]
             # perturb quaternion slightly (small yaw)

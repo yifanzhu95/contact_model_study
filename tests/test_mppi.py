@@ -49,6 +49,8 @@ from contact_study.utils.physics_noise import PhysicsNoiseParams, apply_physics_
 import contact_study.tasks.tasks  # noqa: F401
 from contact_study.tasks.base import get_task
 
+#$from contact_study.contact_models.config import GeometryVariant
+#from .base import BaseTask, ContactComplexity, TaskSpec, register
 
 # ---------------------------------------------------------------------------
 # Contact model factory table (matches run_experiment.py)
@@ -85,9 +87,9 @@ def _make_fallback_cost(ref_qpos: np.ndarray):
 # ---------------------------------------------------------------------------
 
 def run(
-    task_name:         str | None = "push",
+    task_name:         str | None = "grasp_reorient",
     xml_path:          str | None = None,
-    backend:           str        = "mjwarp",
+    backend:           str   = "comfree",      # "mjwarp" | "comfree" | "mjwarp_hard"
     condition:         str        = "B",        # "A" = fixed_budget_rollout, "B" = MPPIController
     n_episodes:        int        = 3,
     budget_seconds:    float      = 0.1,
@@ -151,7 +153,10 @@ def run(
 
     if task_name is not None:
         task = get_task(task_name, geometry=geo)
-        mjm, _ = task.load()
+        if xml_path is not None:
+            mjm, _ = task.load(xml_path)
+        else:
+            mjm, _ = task.load()
         mjm     = apply_physics_noise(mjm, noise, rng)
         task._mjm = mjm
         cost_fn   = task.cost_fn
@@ -162,12 +167,12 @@ def run(
         mjm = mujoco.MjSpec.from_file(xml_path).compile()
         mjm = apply_physics_noise(mjm, noise, rng)
 
-    if xml_path is not None and task_name is not None:
-        # User supplied an override XML — reload geometry from that file
-        mjm = mujoco.MjSpec.from_file(xml_path).compile()
-        mjm = apply_physics_noise(mjm, noise, rng)
-        if task is not None:
-            task._mjm = mjm
+    # if xml_path is not None and task_name is not None:
+    #     # User supplied an override XML — reload geometry from that file
+    #     mjm = mujoco.MjSpec.from_file(xml_path).compile()
+    #     mjm = apply_physics_noise(mjm, noise, rng)
+    #     if task is not None:
+    #         task._mjm = mjm
 
     # Fallback cost if no task
     mjd_ref   = mujoco.MjData(mjm)
@@ -347,9 +352,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Closed-loop MPPI debugger — mirrors test_allegro.py structure."
     )
-    parser.add_argument("--task",    type=str, default="push",
+    parser.add_argument("--task",    type=str, default="grasp_reorient",
                         help="Registered task name. Set to 'none' to use --xml only.")
-    parser.add_argument("--xml",     type=str, default=None,
+    parser.add_argument("--xml",     type=str, default="scenes/test_data/allegro/env_allegro_cube.xml",
                         help="Override / standalone XML scene path.")
     parser.add_argument("--backend", type=str, default="mjwarp",
                         choices=["mjwarp", "mjwarp_hard", "comfree", "xpbd", "all"])

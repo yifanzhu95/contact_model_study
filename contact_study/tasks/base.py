@@ -51,11 +51,12 @@ class BaseTask(abc.ABC):
     @property
     @abc.abstractmethod
     def spec(self) -> TaskSpec: ...
-
-    def load(self) -> tuple[mujoco.MjModel, mujoco.MjData]:
+    
+    def load(self,full_path:str | None = None) -> tuple[mujoco.MjModel, mujoco.MjData]:
         """Load the MuJoCo model for this task and geometry variant."""
-        xml_path = self.spec.xml_path_template.format(geometry=self.geometry.value)
-        full_path = SCENES_DIR / xml_path
+        if full_path is None:
+            xml_path = self.spec.xml_path_template.format(geometry=self.geometry.value)
+            full_path = SCENES_DIR / xml_path
         self._mjm = mujoco.MjModel.from_xml_path(str(full_path))
         self._mjd = mujoco.MjData(self._mjm)
         return self._mjm, self._mjd
