@@ -93,7 +93,7 @@ def run(
     condition:         str        = "B",        # "A" = fixed_budget_rollout, "B" = MPPIController
     n_episodes:        int        = 3,
     budget_seconds:    float      = 0.1,
-    n_samples:         int        = 1024,
+    n_samples:         int        = 256,
     horizon:           int        = 30,
     seed:              int        = 42,
     geometry:          str        = "accurate",
@@ -197,6 +197,8 @@ def run(
     mppi_cfg = MPPIConfig(
         n_samples  = n_samples,
         horizon    = horizon,
+        temperature = 0.02,
+        noise_sigma = 0.05,
         warm_start = True,
     )
 
@@ -274,7 +276,7 @@ def run(
 
                 # --- Debug output ---
                 if debug and t % 50 == 0:
-                    cost_val = cost_fn(mjd.qpos, mjd.qvel, mjd.ctrl)
+                    cost_val = cost_fn(mjd.qpos, mjd.qvel, mjd.ctrl,True)
                     print(f"  [ep {ep:02d} | step {t:04d}]  "
                           f"cost={cost_val:.4f}  "
                           f"qpos_norm={np.linalg.norm(mjd.qpos):.4f}  "

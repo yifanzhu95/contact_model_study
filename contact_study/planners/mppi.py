@@ -24,11 +24,14 @@ from contact_study.contact_models.config import ContactModelConfig
 @dataclass
 class MPPIConfig:
     n_samples:    int   = 1024        # N: number of candidate trajectories
-    horizon:      int   = 30          # H: planning horizon (steps)
-    temperature:  float = 0.1         # lambda: MPPI temperature
-    noise_sigma:  float = 0.1         # action noise std dev
+    horizon:      int   = 50          # H: planning horizon (steps)
+    temperature:  float = 1.0         # lambda: MPPI temperature <- Should be Inverse Temp Technically
+    noise_sigma:  float = 0.01         # action noise std dev
     n_iterations: int   = 1           # number of MPPI update iterations per call
     warm_start:   bool  = True        # shift action sequence one step forward
+    nconmax:      int   = 200
+    njmax:        int   = 500
+    debug:        bool  = True
 
 
 class MPPIController:
@@ -66,7 +69,7 @@ class MPPIController:
 
         # Device-side model for batch rollouts
         self.m = api.put_model(mjm, cfg)
-        self.d = api.make_data(mjm, self.m, nworld=mppi_cfg.n_samples)
+        self.d = api.make_data(mjm, self.m, nworld=mppi_cfg.n_samples, nconmax=mppi_cfg.nconmax, njmax=mppi_cfg.njmax)
 
         # Control limits from model
         self._ctrl_range = mjm.actuator_ctrlrange.copy()   # (nu, 2)
@@ -123,11 +126,14 @@ class MPPIController:
 
             beta = costs.min()
             w    = np.exp(-(costs - beta) / lam)
-            w   /= w.sum() + 1e-8
+            eta = w.sum() + 1e-8
+            w   /= eta#w.sum() + 1e-8
 
             dU = np.einsum("n,nht->ht", w, eps)
             self.U += dU
             self.U  = self._clip_ctrl(self.U)
+            if self.pc.debug:
+                print("Avg. Cost:", costs.mean(), "Min. Cost:", beta, "Eta:", eta)
 
         action = self.U[0].copy()
 
