@@ -39,6 +39,10 @@ from pathlib import Path
 import mujoco
 import mujoco.viewer
 import numpy as np
+try:
+    import mediapy as media
+except ImportError:
+    media = None
 
 from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
 from contact_study.planners.mppi import MPPIController, MPPIConfig
@@ -101,7 +105,7 @@ def run(
     inertia_sigma:     float      = 0.0,
     friction_sigma:    float      = 0.0,
     com_sigma:         float      = 0.0,
-    viewer:            bool       = False,
+    render_mode:       str        = "none",
     warmup_episodes:   int        = 1,
     debug:             bool       = False,
 ) -> dict:
@@ -121,6 +125,8 @@ def run(
     condition:
         "A" = fixed_budget_rollout (open-loop sample, pick best action),
         "B" = MPPIController warm-started across steps.
+    render_mode:
+        "none", "viewer" (live window), or "video" (save mp4).
     """
 
     model_key = BACKEND_TO_MODEL[backend]
@@ -204,12 +210,15 @@ def run(
     )
 
     # ------------------------------------------------------------------
-    # Optional viewer — driven by world state of episode 0
+    # Rendering setup
     # ------------------------------------------------------------------
     mjd_view = mujoco.MjData(mjm)
     v = None
-    if viewer:
+    renderer = None
+    if render_mode == "viewer":
         v = mujoco.viewer.launch_passive(mjm, mjd_view)
+    elif render_mode == "video":
+        renderer = mujoco.Renderer(mjm)
 
     # ------------------------------------------------------------------
     # Episode loop
@@ -246,6 +255,7 @@ def run(
             success          = False
             steps_to_success = None
             ep_start         = time.perf_counter()
+            frames           = []
 
             for t in range(max_steps):
                 step_start = time.perf_counter()
@@ -292,15 +302,23 @@ def run(
                             print(f"  ✓  ep {ep:02d} succeeded at step {steps_to_success}")
                     # Keep simulating so timing is comparable across episodes
 
-                # --- Viewer sync ---
-                if v is not None:
+                # --- Rendering ---
+                if render_mode == "viewer" and v is not None:
                     mjd_view.qpos[:] = mjd.qpos
                     mjd_view.qvel[:] = mjd.qvel
                     mjd_view.ctrl[:] = mjd.ctrl
                     mujoco.mj_forward(mjm, mjd_view)
                     v.sync()
+                elif render_mode == "video" and renderer is not None:
+                    renderer.update_scene(mjd)
+                    frames.append(renderer.render())
 
             ep_elapsed = time.perf_counter() - ep_start
+
+            if render_mode == "video" and frames and media is not None:
+                video_path = f"video_{task_name or 'raw'}_{backend}_{condition}_ep{ep}.mp4"
+                media.write_video(video_path, frames, fps=int(1.0/mjm.opt.timestep))
+                print(f"  Saved video to {video_path}")
 
             if ep >= warmup_episodes:
                 episode_times.append(ep_elapsed)
@@ -375,7 +393,8 @@ def main():
     parser.add_argument("--inertia_sigma",  type=float, default=0.0)
     parser.add_argument("--friction_sigma", type=float, default=0.0)
     parser.add_argument("--com_sigma",      type=float, default=0.0)
-    parser.add_argument("--viewer",         action="store_true")
+    parser.add_argument("--render", type=str, default="none", choices=["none", "viewer", "video"],
+                        help="Rendering mode: none, viewer (live), or video (save mp4)")
     parser.add_argument("--warmup",         type=int,   default=1,
                         help="Episodes to skip when computing aggregate stats")
     parser.add_argument("--debug",          action="store_true",
@@ -392,6 +411,11 @@ def main():
 
     all_stats = []
     for i, backend in enumerate(backends):
+        # Only open viewer for first backend; save video for all backends if requested
+        current_render = args.render
+        if args.render == "viewer" and i > 0:
+            current_render = "none"
+
         stats = run(
             task_name         = task_name,
             xml_path          = args.xml,
@@ -407,7 +431,7 @@ def main():
             inertia_sigma     = args.inertia_sigma,
             friction_sigma    = args.friction_sigma,
             com_sigma         = args.com_sigma,
-            viewer            = args.viewer and (i == 0),  # only first backend gets viewer
+            render_mode       = current_render,
             warmup_episodes   = args.warmup,
             debug             = args.debug,
         )
