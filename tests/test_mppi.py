@@ -31,6 +31,9 @@ Usage:
 """
 
 from __future__ import annotations
+import os
+os.environ["MUJOCO_GL"] = "egl"   # must be set before importing mujoco
+
 
 import argparse
 import time

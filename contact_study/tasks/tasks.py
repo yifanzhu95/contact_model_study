@@ -92,7 +92,7 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "tasks/grasp_reorient_{geometry}.xml",
-            max_steps         = 300,
+            max_steps         = 500,
             success_threshold = 0.05,  # combined pose error
         )
 
