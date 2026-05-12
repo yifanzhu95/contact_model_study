@@ -158,8 +158,7 @@ class GraspReorientTask(BaseTask):
         obj_quat = mjd.xquat[obj_id]
         target_quat = mjm.site_quat[target_id]
         quat_err = 1.0 - np.dot(obj_quat, target_quat)**2
-
-        return bool(pos_err < self.spec.success_threshold and quat_err < 0.05)
+        return bool(pos_err < self.spec.success_threshold and quat_err < self.spec.success_threshold)
 
 
 # ---------------------------------------------------------------------------
