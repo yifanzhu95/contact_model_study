@@ -100,12 +100,12 @@ class GraspReorientTask(BaseTask):
         mjm = self.mjm
         q0  = mjm.qpos0.copy()
         # Randomize object yaw orientation
-        obj_jnt = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "cube_table")
+        obj_jnt = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "obj_freejoint")
         if obj_jnt >= 0:
             adr = mjm.jnt_qposadr[obj_jnt]
             # perturb quaternion slightly (small yaw)
             dtheta = rng.uniform(-0.3, 0.3)
-            q0[adr+6] += dtheta  # w component (unnormalized; mj_forward normalizes)
+            q0[adr+3] += dtheta  # w component (unnormalized; mj_forward normalizes)
         return q0, np.zeros(mjm.nv)
 
     def cost_fn(self, qpos, qvel, ctrl, terminal: bool) -> np.ndarray:
@@ -113,26 +113,53 @@ class GraspReorientTask(BaseTask):
         qpos_np = np.asarray(qpos.numpy() if hasattr(qpos, "numpy") else qpos)
         nworld  = qpos_np.shape[0] if qpos_np.ndim == 2 else 1
 
-        # Placeholder: penalize distance of object freejoint from target
-        target_pos = np.array([0.0, 0.0, 0.4])
-        obj_start  = 7  # adjust to match XML
-        pos_err  = np.linalg.norm(qpos_np[:, obj_start:obj_start+3] - target_pos, axis=-1)
-        cost     = pos_err.astype(np.float32)
+        mjm = self.mjm
+        obj_jnt = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "obj_freejoint")
+        target_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
+
+        if obj_jnt < 0 or target_id < 0:
+            return np.zeros(nworld, dtype=np.float32)
+
+        # Get target from model site
+        target_pos = mjm.site_pos[target_id]
+        target_quat = mjm.site_quat[target_id]
+
+        # Get object state from qpos using model address
+        adr = mjm.jnt_qposadr[obj_jnt]
+        obj_pos = qpos_np[:, adr:adr+3] if qpos_np.ndim == 2 else qpos_np[adr:adr+3]
+        obj_quat = qpos_np[:, adr+3:adr+7] if qpos_np.ndim == 2 else qpos_np[adr+3:adr+7]
+
+        # Position error
+        pos_err = np.linalg.norm(obj_pos - target_pos, axis=-1)
+
+        # Orientation error (1 - <q1, q2>^2)
+        if qpos_np.ndim == 2:
+            dot_prod = np.sum(obj_quat * target_quat, axis=-1)
+        else:
+            dot_prod = np.dot(obj_quat, target_quat)
+        quat_err = 1.0 - dot_prod**2
+
+        cost = (pos_err + 0.2 * quat_err).astype(np.float32)
         if terminal:
             cost *= 20.0
         return cost
 
     def is_success(self, mjd: mujoco.MjData) -> bool:
-        obj_id    = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
-        target_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
+        mjm = self.mjm
+        obj_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
+        target_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
+
         if obj_id < 0 or target_id < 0:
             return False
+
         pos_err = np.linalg.norm(mjd.xpos[obj_id] - mjd.site_xpos[target_id])
-        # Orientation error via quaternion distance
-        obj_quat    = mjd.xquat[obj_id]
-        target_site = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
-        # Use position error only for now; add quat distance for full eval
-        return bool(pos_err < self.spec.success_threshold)
+
+        # Orientation error: use site orientation from model (assumed static goal)
+        obj_quat = mjd.xquat[obj_id]
+        target_quat = mjm.site_quat[target_id]
+        quat_err = 1.0 - np.dot(obj_quat, target_quat)**2
+
+        return bool(pos_err < self.spec.success_threshold and quat_err < 0.05)
 
 
 # ---------------------------------------------------------------------------
