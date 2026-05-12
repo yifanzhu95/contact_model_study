@@ -111,7 +111,7 @@ class MPPIController:
         t_control_points = np.linspace(0, H - 1, self.pc.n_spline_points)
         t_full_horizon = np.arange(H)
 
-        for _ in range(self.pc.n_iterations):
+        for i in range(self.pc.n_iterations):
             # Generate Gaussian noise for the spline control points
             noise_control_points = self.rng.normal(0, sigma, (N, self.pc.n_spline_points, self.nu)).astype(np.float32)
             eps = np.zeros((N, H, self.nu), dtype=np.float32)

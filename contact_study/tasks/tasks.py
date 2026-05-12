@@ -123,14 +123,14 @@ class GraspReorientTask(BaseTask):
         return cost
 
     def is_success(self, mjd: mujoco.MjData) -> bool:
-        obj_id    = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "object")
-        target_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_SITE, "object_target")
+        obj_id    = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
+        target_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
         if obj_id < 0 or target_id < 0:
             return False
         pos_err = np.linalg.norm(mjd.xpos[obj_id] - mjd.site_xpos[target_id])
         # Orientation error via quaternion distance
         obj_quat    = mjd.xquat[obj_id]
-        target_site = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_SITE, "object_target")
+        target_site = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
         # Use position error only for now; add quat distance for full eval
         return bool(pos_err < self.spec.success_threshold)
 

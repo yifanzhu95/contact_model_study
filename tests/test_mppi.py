@@ -197,9 +197,10 @@ def run(
     mppi_cfg = MPPIConfig(
         n_samples  = n_samples,
         horizon    = horizon,
-        temperature = 0.02,
+        temperature = 0.1,
         noise_sigma = 0.05,
         warm_start = True,
+        debug = debug
     )
 
     # ------------------------------------------------------------------
@@ -276,9 +277,9 @@ def run(
 
                 # --- Debug output ---
                 if debug and t % 50 == 0:
-                    cost_val = cost_fn(mjd.qpos, mjd.qvel, mjd.ctrl,True)
+                    terminal = False
+                    #cost_val = controller.cost_fn(mjd.qpos, mjd.qvel, mjd.ctrl, terminal)
                     print(f"  [ep {ep:02d} | step {t:04d}]  "
-                          f"cost={cost_val:.4f}  "
                           f"qpos_norm={np.linalg.norm(mjd.qpos):.4f}  "
                           f"qvel_norm={np.linalg.norm(mjd.qvel):.4f}")
 
@@ -362,11 +363,11 @@ def main():
                         choices=["mjwarp", "mjwarp_hard", "comfree", "xpbd", "all"])
     parser.add_argument("--condition", type=str, default="B", choices=["A", "B"],
                         help="A=fixed_budget_rollout  B=warm-started MPPIController")
-    parser.add_argument("--n_episodes",     type=int,   default=3)
+    parser.add_argument("--n_episodes",     type=int,   default=1)
     parser.add_argument("--budget_seconds", type=float, default=0.1,
                         help="Per-step time budget for Condition A")
-    parser.add_argument("--n_samples",      type=int,   default=1024)
-    parser.add_argument("--horizon",        type=int,   default=30)
+    parser.add_argument("--n_samples",      type=int,   default=256)
+    parser.add_argument("--horizon",        type=int,   default=50)
     parser.add_argument("--seed",           type=int,   default=42)
     parser.add_argument("--geometry",       type=str,   default="accurate",
                         choices=[g.value for g in GeometryVariant])
