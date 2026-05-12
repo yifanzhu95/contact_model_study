@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 import mujoco
+from scipy.interpolate import CubicSpline
 import numpy as np
 import warp as wp
 
@@ -30,6 +31,7 @@ class MPPIConfig:
     n_iterations: int   = 1           # number of MPPI update iterations per call
     warm_start:   bool  = True        # shift action sequence one step forward
     nconmax:      int   = 200
+    n_spline_points: int = 5          # number of control points for spline noise
     njmax:        int   = 500
     debug:        bool  = True
 
@@ -105,8 +107,19 @@ class MPPIController:
         lam = self.pc.temperature
         sigma = self.pc.noise_sigma
 
+        # Define time points for spline control points and for the full horizon
+        t_control_points = np.linspace(0, H - 1, self.pc.n_spline_points)
+        t_full_horizon = np.arange(H)
+
         for _ in range(self.pc.n_iterations):
-            eps = self.rng.normal(0, sigma, (N, H, self.nu)).astype(np.float32)
+            # Generate Gaussian noise for the spline control points
+            noise_control_points = self.rng.normal(0, sigma, (N, self.pc.n_spline_points, self.nu)).astype(np.float32)
+            eps = np.zeros((N, H, self.nu), dtype=np.float32)
+            # For each sample and each actuator, fit a spline and evaluate it over the horizon
+            for i in range(N):
+                for j in range(self.nu):
+                    spl = CubicSpline(t_control_points, noise_control_points[i, :, j])
+                    eps[i, :, j] = spl(t_full_horizon)
             V   = self.U[None] + eps
             V   = self._clip_ctrl(V)
 
