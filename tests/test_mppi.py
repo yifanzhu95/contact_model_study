@@ -78,6 +78,7 @@ BACKEND_TO_MODEL = {
     "xpbd":        "M4",
 }
 
+wp.init()
 
 # ---------------------------------------------------------------------------
 # Fallback cost: penalise distance from a fixed reference qpos.
@@ -89,9 +90,10 @@ def _fallback_cost_func(
     qpos: wp.array(dtype=float),
     qvel: wp.array(dtype=float),
     ctrl: wp.array(dtype=float),
-    ref_qpos: wp.array(dtype=float),
+    terminal: bool
 ) -> float:
-    return wp.linalg.norm(qpos - ref_qpos)
+    # Dummy cost for raw XML testing without a registered task
+    return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -203,8 +205,8 @@ def run(
         # Use the GPU-accelerated cost function defined in the task
         cost_fn_for_mppi = task.cost_fn_wp
     else:
-        # If no task, use fallback cost. This is now a wp.func.
-        cost_fn_for_mppi = lambda q, v, c, t: _fallback_cost_func(q, v, c, ref_qpos_wp)
+        # Pass the wp.func directly, no lambdas!
+        cost_fn_for_mppi = _fallback_cost_func
 
     print(f"  nq={mjm.nq}  nv={mjm.nv}  nu={mjm.nu}  max_steps={max_steps}")
     print(f"  integrator      = {mjm.opt.integrator}")

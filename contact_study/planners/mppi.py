@@ -105,6 +105,23 @@ class MPPIController:
         self.nq = mjm.nq
         self.nv = mjm.nv
 
+        target_cost_fn = self.cost_fn_wp
+
+        @wp.kernel
+        def _accumulate_kernel(
+            qpos: wp.array2d(dtype=float),
+            qvel: wp.array2d(dtype=float),
+            ctrl: wp.array2d(dtype=float),
+            terminal: bool,
+            costs_out: wp.array(dtype=float),
+        ):
+            w = wp.tid()
+            # Warp will now statically link this specific wp.func at compile time
+            step_cost = target_cost_fn(qpos[w], qvel[w], ctrl[w], terminal)
+            costs_out[w] += step_cost
+
+        self._accumulate_costs_kernel = _accumulate_kernel
+
         # Action sequence mean: (H, nu) on GPU
         self.U_wp = wp.zeros((mppi_cfg.horizon, mjm.nu), dtype=wp.float32, device="cuda")
 
@@ -183,9 +200,9 @@ class MPPIController:
                 
                 # Compute and accumulate costs on GPU
                 wp.launch(
-                    _accumulate_costs_kernel,
+                    self._accumulate_costs_kernel,
                     dim=N,
-                    inputs=[self.d.qpos, self.d.qvel, self.d.ctrl, self.cost_fn_wp, terminal],
+                    inputs=[self.d.qpos, self.d.qvel, self.d.ctrl, terminal],
                     outputs=[self.costs_wp],
                 )
             
