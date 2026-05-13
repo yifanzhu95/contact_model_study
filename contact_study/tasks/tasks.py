@@ -22,10 +22,10 @@ from .base import BaseTask, ContactComplexity, TaskSpec, register
 
 # Predefined home position for the manipulator joints (e.g., 16 joints for Allegro Hand)
 MANIPULATOR_HOME_STATE = np.array([
-    0.0, 0.2, 0.2, 0.2,  # Index
-    0.0, 0.2, 0.2, 0.2,  # Middle
-    0.0, 0.2, 0.2, 0.2,  # Ring
-    1.2, 0.5, 0.2, 0.2   # Thumb
+    0.127, 0.7, 1.5, 1.0,  # Index
+    0.0, 0.4, 1.42, 1.0,  # Middle
+    -0.127, 0.7, 1.5, 1.0,  # Ring
+    0.25, 1.7, 1.7, 1.0   # Thumb
 ], dtype=np.float32)
 
 # ---------------------------------------------------------------------------
@@ -123,11 +123,11 @@ class GraspReorientTask(BaseTask):
             adr = mjm.jnt_qposadr[obj_jnt]
             
             # Randomize Position (x, y) within ±3cm
-            q0[adr:adr+2] += rng.uniform(-0.03, 0.03, 2)
+            #q0[adr:adr+2] += rng.uniform(-0.03, 0.03, 2)
             
             # Randomize Orientation (perturb all quaternion components)
             # Note: MuJoCo will normalize the quaternion in mj_forward
-            q0[adr+3:adr+7] += rng.uniform(-0.2, 0.2, 4)
+            #q0[adr+3:adr+7] += rng.uniform(-0.2, 0.2, 4)
 
         return q0, np.zeros(mjm.nv)
 
