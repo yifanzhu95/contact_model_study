@@ -4,8 +4,6 @@ All rollouts are executed in parallel on GPU via the batched step()
 interface (nworld = N samples). The MPPI weight update and action
 resampling runs on CPU/numpy after a wp.synchronize().
 
-Reference: Williams et al. 2017 "Information Theoretic MPC for
-           Model-Based Reinforcement Learning".
 """
 
 from __future__ import annotations
@@ -13,7 +11,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
-import mujoco
 from scipy.interpolate import CubicSpline
 import numpy as np
 import warp as wp
@@ -22,6 +19,7 @@ from contact_study.contact_models import api
 from contact_study.contact_models.config import ContactModelConfig
 
 import time
+import mujoco
 
 
 @dataclass
@@ -38,6 +36,45 @@ class MPPIConfig:
     debug:        bool  = True
 
 
+# ---------------------------------------------------------------------------
+# Warp Kernels
+# ---------------------------------------------------------------------------
+
+@wp.kernel
+def _add_noise_and_clip_kernel(
+    U_mean: wp.array2d(dtype=float),        # (H, nu)
+    eps: wp.array3d(dtype=float),           # (N, H, nu)
+    ctrl_range: wp.array2d(dtype=float),    # (nu, 2)
+    has_limits: wp.array(dtype=bool),       # (nu,)
+    # out
+    V_out: wp.array3d(dtype=float),         # (N, H, nu)
+):
+    """Adds noise to the mean action sequence and clips to actuator limits."""
+    n, h, u = wp.tid()
+
+    val = U_mean[h, u] + eps[n, h, u]
+
+    if has_limits[u]:
+        val = wp.clamp(val, ctrl_range[u, 0], ctrl_range[u, 1])
+
+    V_out[n, h, u] = val
+
+
+@wp.kernel
+def _accumulate_costs_kernel(
+    qpos: wp.array2d(dtype=float),
+    qvel: wp.array2d(dtype=float),
+    ctrl: wp.array2d(dtype=float),
+    cost_fn_wp: wp.func,  # The Warp function for cost calculation
+    terminal: bool,
+    # in/out
+    costs_out: wp.array(dtype=float),  # (N,)
+):
+    """Computes step costs for all worlds and accumulates them."""
+    w = wp.tid()
+    step_cost = cost_fn_wp(qpos[w], qvel[w], ctrl[w], terminal)
+    costs_out[w] += step_cost
+
 class MPPIController:
     """MPPI controller backed by a contact model.
 
@@ -45,7 +82,7 @@ class MPPIController:
         mjm:       Host MuJoCo model. Already-perturbed/already-degraded;
                    this class does not apply physics noise or swap geometry.
         cfg:       Contact model config (selects backend).
-        mppi_cfg:  MPPI hyperparameters.
+        mppi_cfg:  MPPI hyperparameters. Reference: Williams et al. 2017 "Information Theoretic MPC for Model-Based Reinforcement Learning".
         cost_fn:   Callable(qpos, qvel, ctrl, terminal) -> float array (nworld,)
         rng:       NumPy RNG for action sampling reproducibility.
     """
@@ -55,42 +92,41 @@ class MPPIController:
         mjm:       mujoco.MjModel,
         cfg:       ContactModelConfig,
         mppi_cfg:  MPPIConfig,
-        cost_fn:   Callable,
+        cost_fn:   wp.func, # Expecting a warp.func for GPU cost calculation
         rng:       np.random.Generator | None = None,
     ):
         self.mjm      = mjm
         self.cfg      = cfg
         self.pc       = mppi_cfg
-        self.cost_fn  = cost_fn
+        self.cost_fn_wp = cost_fn # Store the warp.func directly
         self.rng      = rng or np.random.default_rng()
 
         self.nu = mjm.nu
         self.nq = mjm.nq
         self.nv = mjm.nv
 
-        # Action sequence mean: (H, nu)
-        self.U = np.zeros((mppi_cfg.horizon, mjm.nu), dtype=np.float32)
+        # Action sequence mean: (H, nu) on GPU
+        self.U_wp = wp.zeros((mppi_cfg.horizon, mjm.nu), dtype=wp.float32, device="cuda")
 
         # Device-side model for batch rollouts
         self.m = api.put_model(mjm, cfg)
         self.d = api.make_data(mjm, self.m, nworld=mppi_cfg.n_samples, nconmax=mppi_cfg.nconmax, njmax=mppi_cfg.njmax)
 
         # Control limits from model
-        self._ctrl_range = mjm.actuator_ctrlrange.copy()   # (nu, 2)
-        self._has_limits  = mjm.actuator_ctrllimited.astype(bool)
+        self._ctrl_range_wp = wp.array(mjm.actuator_ctrlrange, dtype=wp.float32, device="cuda")
+        self._has_limits_wp = wp.array(mjm.actuator_ctrllimited.astype(bool), dtype=wp.bool, device="cuda")
+
+        # Buffer for candidate action sequences (N, H, nu) on GPU
+        self.V_wp = wp.zeros((mppi_cfg.n_samples, mppi_cfg.horizon, mjm.nu), dtype=wp.float32, device="cuda")
+
+        # Buffer for accumulating costs (N,) on GPU
+        self.costs_wp = wp.zeros(mppi_cfg.n_samples, dtype=wp.float32, device="cuda")
 
     # ------------------------------------------------------------------
 
     def reset(self):
         """Clear the action sequence (e.g., at start of new episode)."""
         self.U[:] = 0.0
-
-    def _clip_ctrl(self, u: np.ndarray) -> np.ndarray:
-        """Clip controls to actuator limits where defined."""
-        for i in range(self.nu):
-            if self._has_limits[i]:
-                u[..., i] = np.clip(u[..., i], self._ctrl_range[i, 0], self._ctrl_range[i, 1])
-        return u
 
     def _set_batch_state(self, mjd: mujoco.MjData):
         """Upload current env state to all N parallel worlds."""
@@ -116,53 +152,63 @@ class MPPIController:
         iter_start = time.perf_counter()
 
         for i in range(self.pc.n_iterations):
-            # Generate Gaussian noise for the spline control points
+            # Generate Gaussian noise for the spline control points on CPU
             noise_control_points = self.rng.normal(0, sigma, (N, self.pc.n_spline_points, self.nu)).astype(np.float32)
             eps = np.zeros((N, H, self.nu), dtype=np.float32)
             # For each sample and each actuator, fit a spline and evaluate it over the horizon
             for i in range(N):
                 for j in range(self.nu):
                     spl = CubicSpline(t_control_points, noise_control_points[i, :, j])
-                    eps[i, :, j] = spl(t_full_horizon)
-            V   = self.U[None] + eps
-            V   = self._clip_ctrl(V)
+                    eps[i, :, j] = spl(t_full_horizon) # eps is (N, H, nu)
+            
+            # Transfer noise to GPU
+            eps_wp = wp.array(eps, dtype=wp.float32, device="cuda")
 
-            print(time.perf_counter() - iter_start)
+            # Add noise to mean action sequence and clip on GPU
+            wp.launch(
+                _add_noise_and_clip_kernel,
+                dim=(N, H, self.nu),
+                inputs=[self.U_wp, eps_wp, self._ctrl_range_wp, self._has_limits_wp],
+                outputs=[self.V_wp],
+            )
 
             self._set_batch_state(mjd)
-            costs = np.zeros(N, dtype=np.float32)
-
-            print(time.perf_counter() - iter_start)
+            self.costs_wp.zero_() # Reset costs on GPU
 
             for t in range(H):
-                self.d.ctrl.assign(V[:, t, :])
+                # Assign the t-th action for all N samples from V_wp (GPU) to d.ctrl (GPU)
+                self.d.ctrl.assign(self.V_wp[:, t, :])
                 api.step(self.m, self.d)
                 terminal = (t == H - 1)
-                step_costs = self.cost_fn(
-                    self.d.qpos, self.d.qvel, self.d.ctrl, terminal
+                
+                # Compute and accumulate costs on GPU
+                wp.launch(
+                    _accumulate_costs_kernel,
+                    dim=N,
+                    inputs=[self.d.qpos, self.d.qvel, self.d.ctrl, self.cost_fn_wp, terminal],
+                    outputs=[self.costs_wp],
                 )
-                costs += np.asarray(step_costs, dtype=np.float32)
-
-            print(time.perf_counter() - iter_start)
-
+            
             wp.synchronize()
+            costs_np = self.costs_wp.numpy() # Bring total costs to CPU for MPPI update
 
-            beta = costs.min()
-            w    = np.exp(-(costs - beta) / lam)
+            beta = costs_np.min()
+            w    = np.exp(-(costs_np - beta) / lam)
             eta = w.sum() + 1e-8
             w   /= eta#w.sum() + 1e-8
 
-            dU = np.einsum("n,nht->ht", w, eps)
-            self.U += dU
-            self.U  = self._clip_ctrl(self.U)
+            dU_np = np.einsum("n,nht->ht", w, eps) # dU is (H, nu)
+            self.U_wp.assign(self.U_wp.numpy() + dU_np) # Update mean action sequence on GPU
             if self.pc.debug:
-                print("Avg. Cost:", costs.mean(), "Min. Cost:", beta, "Eta:", eta)
+                print("Avg. Cost:", costs_np.mean(), "Min. Cost:", beta, "Eta:", eta)
 
-            print(time.perf_counter() - iter_start)
-        action = self.U[0].copy()
+        action_np = self.U_wp[0].numpy().copy() # Get the first action from GPU
 
         if self.pc.warm_start:
-            self.U[:-1] = self.U[1:]
-            self.U[-1]  = 0.0
+            # Shift U_wp on GPU
+            U_shifted_np = self.U_wp.numpy()
+            U_shifted_np[:-1] = U_shifted_np[1:]
+            U_shifted_np[-1] = 0.0
+            self.U_wp.assign(U_shifted_np)
 
-        return action
+        return action_np

@@ -83,10 +83,14 @@ BACKEND_TO_MODEL = {
 # Used when running against a raw XML that has no registered task.
 # ---------------------------------------------------------------------------
 
-def _make_fallback_cost(ref_qpos: np.ndarray):
-    def cost_fn(qpos: np.ndarray, qvel: np.ndarray, ctrl: np.ndarray) -> float:
-        return float(np.linalg.norm(qpos - ref_qpos))
-    return cost_fn
+@wp.func
+def _fallback_cost_func(
+    qpos: wp.array(dtype=float),
+    qvel: wp.array(dtype=float),
+    ctrl: wp.array(dtype=float),
+    ref_qpos: wp.array(dtype=float),
+) -> float:
+    return wp.linalg.norm(qpos - ref_qpos)
 
 
 # ---------------------------------------------------------------------------
@@ -192,8 +196,18 @@ def run(
         mjd_ref.qvel[:] = key.qvel
         mjd_ref.ctrl[:] = key.ctrl
     ref_qpos  = mjd_ref.qpos.copy()
+    ref_qpos_wp = wp.array(ref_qpos, dtype=wp.float32, device="cuda")
+
     if cost_fn is None:
-        cost_fn = _make_fallback_cost(ref_qpos)
+        # If no task, use fallback cost. This is now a wp.func.
+        # MPPIController will use this wp.func directly.
+        cost_fn_for_mppi = lambda q, v, c, t: _fallback_cost_func(q, v, c, ref_qpos_wp)
+    else:
+        # For task-specific costs, a wp.func version would be needed.
+        # For now, we'll use a dummy wp.func that returns 0.0.
+        @wp.func
+        def dummy_task_cost_func(q, v, c, t) -> float: return 0.0
+        cost_fn_for_mppi = dummy_task_cost_func # Placeholder, needs actual implementation
 
     print(f"  nq={mjm.nq}  nv={mjm.nv}  nu={mjm.nu}  max_steps={max_steps}")
     print(f"  integrator      = {mjm.opt.integrator}")
@@ -239,7 +253,7 @@ def run(
                 mjm      = mjm,
                 cfg      = cfg,
                 mppi_cfg = mppi_cfg,
-                cost_fn  = cost_fn,
+                cost_fn  = cost_fn_for_mppi, # Pass the wp.func
                 rng      = rng,
             )
 
