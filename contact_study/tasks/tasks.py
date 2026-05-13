@@ -104,7 +104,7 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "scenes/test_data/allegro/allegro_right_hand_armature.xml",#"tasks/grasp_reorient_{geometry}.xml",
-            max_steps         = 500,
+            max_steps         = 100,
             success_threshold = 0.05,  # combined pose error
         )
 
