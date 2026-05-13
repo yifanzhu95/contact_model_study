@@ -60,20 +60,22 @@ def _add_noise_and_clip_kernel(
     V_out[n, h, u] = val
 
 
-@wp.kernel
-def _accumulate_costs_kernel(
-    qpos: wp.array2d(dtype=float),
-    qvel: wp.array2d(dtype=float),
-    ctrl: wp.array2d(dtype=float),
-    cost_fn_wp: wp.func,  # The Warp function for cost calculation
-    terminal: bool,
-    # in/out
-    costs_out: wp.array(dtype=float),  # (N,)
-):
-    """Computes step costs for all worlds and accumulates them."""
-    w = wp.tid()
-    step_cost = cost_fn_wp(qpos[w], qvel[w], ctrl[w], terminal)
-    costs_out[w] += step_cost
+# Remove the broken module-level _accumulate_costs_kernel entirely.
+
+# Add this factory function at module level instead:
+def _make_accumulate_kernel(cost_fn_wp: wp.func):
+    """Factory that bakes a specific wp.func into a new kernel at definition time."""
+    @wp.kernel
+    def _kernel(
+        qpos:      wp.array2d(dtype=float),
+        qvel:      wp.array2d(dtype=float),
+        ctrl:      wp.array2d(dtype=float),
+        terminal:  bool,
+        costs_out: wp.array(dtype=float),
+    ):
+        w = wp.tid()
+        costs_out[w] += cost_fn_wp(qpos[w], qvel[w], ctrl[w], terminal)
+    return _kernel
 
 class MPPIController:
     """MPPI controller backed by a contact model.
@@ -107,20 +109,7 @@ class MPPIController:
 
         target_cost_fn = self.cost_fn_wp
 
-        @wp.kernel
-        def _accumulate_kernel(
-            qpos: wp.array2d(dtype=float),
-            qvel: wp.array2d(dtype=float),
-            ctrl: wp.array2d(dtype=float),
-            terminal: bool,
-            costs_out: wp.array(dtype=float),
-        ):
-            w = wp.tid()
-            # Warp will now statically link this specific wp.func at compile time
-            step_cost = target_cost_fn(qpos[w], qvel[w], ctrl[w], terminal)
-            costs_out[w] += step_cost
-
-        self._accumulate_costs_kernel = _accumulate_kernel
+        self._accumulate_costs_kernel = _make_accumulate_kernel(cost_fn)
 
         # Action sequence mean: (H, nu) on GPU
         self.U_wp = wp.zeros((mppi_cfg.horizon, mjm.nu), dtype=wp.float32, device="cuda")

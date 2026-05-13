@@ -153,7 +153,7 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "scenes/test_data/allegro/allegro_right_hand_armature.xml",#"tasks/grasp_reorient_{geometry}.xml",
-            max_steps         = 100,
+            max_steps         = 10,
             success_threshold = 0.05,  # combined pose error
         )
 
@@ -176,11 +176,11 @@ class GraspReorientTask(BaseTask):
             adr = mjm.jnt_qposadr[obj_jnt]
             
             # 2a. Randomize Position (x, y) within ±3cm
-            q0[adr:adr+2] += rng.uniform(-0.03, 0.03, 2)
+            #q0[adr:adr+2] += rng.uniform(-0.03, 0.03, 2)
             
             # 2b. Randomize Orientation (perturb all quaternion components)
             # Note: MuJoCo will normalize the quaternion in mj_forward
-            q0[adr+3:adr+7] += rng.uniform(-0.2, 0.2, 4)
+            #q0[adr+3:adr+7] += rng.uniform(-0.2, 0.2, 4)
 
         return q0, v0, ctrl0
 
