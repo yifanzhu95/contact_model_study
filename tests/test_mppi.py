@@ -108,6 +108,7 @@ def run(
     inertia_sigma:     float      = 0.0,
     friction_sigma:    float      = 0.0,
     com_sigma:         float      = 0.0,
+    settle_seconds:    float      = 1.0,
     render_mode:       str        = "none",
     warmup_episodes:   int        = 1,
     debug:             bool       = False,
@@ -255,6 +256,16 @@ def run(
             mjd.qvel[:] = v0
             mujoco.mj_forward(mjm, mjd)
 
+            # Allow model to settle (e.g., objects falling to rest)
+            settle_steps = int(settle_seconds / mjm.opt.timestep)
+            for _ in range(settle_steps):
+                mujoco.mj_step(mjm, mjd)
+                if render_mode == "viewer" and v is not None:
+                    mjd_view.qpos[:] = mjd.qpos
+                    mjd_view.qvel[:] = mjd.qvel
+                    mujoco.mj_forward(mjm, mjd_view)
+                    v.sync()
+
             success          = False
             steps_to_success = None
             ep_start         = time.perf_counter()
@@ -396,6 +407,8 @@ def main():
     parser.add_argument("--inertia_sigma",  type=float, default=0.0)
     parser.add_argument("--friction_sigma", type=float, default=0.0)
     parser.add_argument("--com_sigma",      type=float, default=0.0)
+    parser.add_argument("--settle",         type=float, default=1.0,
+                        help="Seconds to allow physics to settle before planning starts")
     parser.add_argument("--render", type=str, default="none", choices=["none", "viewer", "video"],
                         help="Rendering mode: none, viewer (live), or video (save mp4)")
     parser.add_argument("--warmup",         type=int,   default=1,
@@ -434,6 +447,7 @@ def main():
             inertia_sigma     = args.inertia_sigma,
             friction_sigma    = args.friction_sigma,
             com_sigma         = args.com_sigma,
+            settle_seconds    = args.settle,
             render_mode       = current_render,
             warmup_episodes   = args.warmup,
             debug             = args.debug,
