@@ -126,7 +126,7 @@ class MPPIController:
 
     def reset(self):
         """Clear the action sequence (e.g., at start of new episode)."""
-        self.U[:] = 0.0
+        self.U_wp.zero_()
 
     def _set_batch_state(self, mjd: mujoco.MjData):
         """Upload current env state to all N parallel worlds."""

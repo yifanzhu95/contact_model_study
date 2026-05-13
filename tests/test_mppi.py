@@ -199,16 +199,12 @@ def run(
     ref_qpos  = mjd_ref.qpos.copy()
     ref_qpos_wp = wp.array(ref_qpos, dtype=wp.float32, device="cuda")
 
-    if cost_fn is None:
-        # If no task, use fallback cost. This is now a wp.func.
-        # MPPIController will use this wp.func directly.
-        cost_fn_for_mppi = lambda q, v, c, t: _fallback_cost_func(q, v, c, ref_qpos_wp)
+    if task is not None:
+        # Use the GPU-accelerated cost function defined in the task
+        cost_fn_for_mppi = task.cost_fn_wp
     else:
-        # For task-specific costs, a wp.func version would be needed.
-        # For now, we'll use a dummy wp.func that returns 0.0.
-        @wp.func
-        def dummy_task_cost_func(q, v, c, t) -> float: return 0.0
-        cost_fn_for_mppi = dummy_task_cost_func # Placeholder, needs actual implementation
+        # If no task, use fallback cost. This is now a wp.func.
+        cost_fn_for_mppi = lambda q, v, c, t: _fallback_cost_func(q, v, c, ref_qpos_wp)
 
     print(f"  nq={mjm.nq}  nv={mjm.nv}  nu={mjm.nu}  max_steps={max_steps}")
     print(f"  integrator      = {mjm.opt.integrator}")
