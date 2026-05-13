@@ -17,6 +17,18 @@ from .base import BaseTask, ContactComplexity, TaskSpec, register
 
 
 # ---------------------------------------------------------------------------
+# Global Task Constants
+# ---------------------------------------------------------------------------
+
+# Predefined home position for the manipulator joints (e.g., 16 joints for Allegro Hand)
+MANIPULATOR_HOME_STATE = np.array([
+    0.0, 0.2, 0.2, 0.2,  # Index
+    0.0, 0.2, 0.2, 0.2,  # Middle
+    0.0, 0.2, 0.2, 0.2,  # Ring
+    1.2, 0.5, 0.2, 0.2   # Thumb
+], dtype=np.float32)
+
+# ---------------------------------------------------------------------------
 # Task 1: Planar Pushing (LOW complexity)
 # ---------------------------------------------------------------------------
 
@@ -91,7 +103,7 @@ class GraspReorientTask(BaseTask):
         return TaskSpec(
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
-            xml_path_template = "tasks/grasp_reorient_{geometry}.xml",
+            xml_path_template = "scenes/test_data/allegro/allegro_right_hand_armature.xml",#"tasks/grasp_reorient_{geometry}.xml",
             max_steps         = 500,
             success_threshold = 0.05,  # combined pose error
         )
@@ -99,13 +111,24 @@ class GraspReorientTask(BaseTask):
     def sample_initial_state(self, rng: np.random.Generator):
         mjm = self.mjm
         q0  = mjm.qpos0.copy()
-        # Randomize object yaw orientation
+
+        # 1. Set manipulator to the predefined home state
+        n_manip = len(MANIPULATOR_HOME_STATE)
+        if mjm.nq >= n_manip:
+            q0[:n_manip] = MANIPULATOR_HOME_STATE
+
+        # 2. Randomize object position and orientation
         obj_jnt = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "obj_freejoint")
         if obj_jnt >= 0:
             adr = mjm.jnt_qposadr[obj_jnt]
-            # perturb quaternion slightly (small yaw)
-            dtheta = rng.uniform(-0.3, 0.3)
-            q0[adr+3] += dtheta  # w component (unnormalized; mj_forward normalizes)
+            
+            # Randomize Position (x, y) within ±3cm
+            q0[adr:adr+2] += rng.uniform(-0.03, 0.03, 2)
+            
+            # Randomize Orientation (perturb all quaternion components)
+            # Note: MuJoCo will normalize the quaternion in mj_forward
+            q0[adr+3:adr+7] += rng.uniform(-0.2, 0.2, 4)
+
         return q0, np.zeros(mjm.nv)
 
     def cost_fn(self, qpos, qvel, ctrl, terminal: bool) -> np.ndarray:
