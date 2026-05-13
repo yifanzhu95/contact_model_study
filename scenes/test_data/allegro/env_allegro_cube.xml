@@ -2,7 +2,7 @@
   <include file="allegro_right_hand.xml"/>
 
   <statistic center="0 0 0" extent="0.3"/>
-  <option ccd_iterations="1000" timestep="0.001" />
+  <option ccd_iterations="1000" timestep="0.01" />
 
   <visual>
     <rgba haze="0.15 0.25 0.35 1"/>
@@ -32,7 +32,7 @@
               />
     </body>
       <site name="obj_target" type="box" material="obj_material" size="0.035 0.035 0.035" 
-        rgba="1.0 1.0 0 0.1" pos="-0.02 0.00 0.045" euler="0 0 180"
+        rgba="1.0 1.0 0 0.1" pos="-0.02 0.00 0.045" euler="0 0 90"
         />
     
   </worldbody>

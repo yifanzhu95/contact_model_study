@@ -21,6 +21,8 @@ import warp as wp
 from contact_study.contact_models import api
 from contact_study.contact_models.config import ContactModelConfig
 
+import time
+
 
 @dataclass
 class MPPIConfig:
@@ -31,7 +33,7 @@ class MPPIConfig:
     n_iterations: int   = 1           # number of MPPI update iterations per call
     warm_start:   bool  = True        # shift action sequence one step forward
     nconmax:      int   = 200
-    n_spline_points: int = 5          # number of control points for spline noise
+    n_spline_points: int = 3          # number of control points for spline noise
     njmax:        int   = 500
     debug:        bool  = True
 
@@ -111,6 +113,8 @@ class MPPIController:
         t_control_points = np.linspace(0, H - 1, self.pc.n_spline_points)
         t_full_horizon = np.arange(H)
 
+        iter_start = time.perf_counter()
+
         for i in range(self.pc.n_iterations):
             # Generate Gaussian noise for the spline control points
             noise_control_points = self.rng.normal(0, sigma, (N, self.pc.n_spline_points, self.nu)).astype(np.float32)
@@ -123,8 +127,12 @@ class MPPIController:
             V   = self.U[None] + eps
             V   = self._clip_ctrl(V)
 
+            print(time.perf_counter() - iter_start)
+
             self._set_batch_state(mjd)
             costs = np.zeros(N, dtype=np.float32)
+
+            print(time.perf_counter() - iter_start)
 
             for t in range(H):
                 self.d.ctrl.assign(V[:, t, :])
@@ -134,6 +142,8 @@ class MPPIController:
                     self.d.qpos, self.d.qvel, self.d.ctrl, terminal
                 )
                 costs += np.asarray(step_costs, dtype=np.float32)
+
+            print(time.perf_counter() - iter_start)
 
             wp.synchronize()
 
@@ -148,6 +158,7 @@ class MPPIController:
             if self.pc.debug:
                 print("Avg. Cost:", costs.mean(), "Min. Cost:", beta, "Eta:", eta)
 
+            print(time.perf_counter() - iter_start)
         action = self.U[0].copy()
 
         if self.pc.warm_start:

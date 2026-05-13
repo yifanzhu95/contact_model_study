@@ -104,7 +104,7 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "scenes/test_data/allegro/allegro_right_hand_armature.xml",#"tasks/grasp_reorient_{geometry}.xml",
-            max_steps         = 500,
+            max_steps         = 100,
             success_threshold = 0.05,  # combined pose error
         )
 
@@ -172,7 +172,7 @@ class GraspReorientTask(BaseTask):
         obj_vel = qvel_np[:, v_adr:v_adr+3] if qvel_np.ndim == 2 else qvel_np[v_adr:v_adr+3]
         vel_err = np.linalg.norm(obj_vel, axis=-1)
 
-        cost = (pos_err + 0.2 * quat_err + 0.05 * vel_err).astype(np.float32)
+        cost = (pos_err + 1.5 * quat_err + 0.001 * vel_err).astype(np.float32)
         if terminal:
             cost *= 20.0
         return cost
