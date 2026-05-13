@@ -44,19 +44,42 @@ def push_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl:
 
 @wp.func
 def grasp_reorient_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float), terminal: bool) -> float:
-    # Hand (0-15), Obj Joint (16-22). 
-    # Obj Pos: 16, 17, 18. Obj Quat: 19, 20, 21, 22.
-    # Target based on site in XML: pos=[0, 0, 0.05], quat=[1, 0, 0, 0]
-    dx = qpos[16] - 0.0
-    dy = qpos[17] - 0.0
-    dz = qpos[18] - 0.05
+    # Object joint starting indices (assuming 16 hand joints followed by obj_freejoint)
+    obj_qpos_adr = 16
+    obj_qvel_adr = 16
+
+    # Target state taken from site "obj_target" in XML
+    target_pos_x = 0.0
+    target_pos_y = 0.0
+    target_pos_z = 0.05
+    target_quat_w = 1.0
+    target_quat_x = 0.0
+    target_quat_y = 0.0
+    target_quat_z = 0.0
+
+    # 1. Position error
+    dx = qpos[obj_qpos_adr + 0] - target_pos_x
+    dy = qpos[obj_qpos_adr + 1] - target_pos_y
+    dz = qpos[obj_qpos_adr + 2] - target_pos_z
     pos_err = wp.sqrt(dx*dx + dy*dy + dz*dz)
 
-    # Orientation error: 1 - <q1, q2>^2. Target quat is identity [1,0,0,0]
-    dot_prod = qpos[19] # dot product with [1,0,0,0] is just q_w
+    # 2. Orientation error (1 - <q_obj, q_target>^2)
+    qw = qpos[obj_qpos_adr + 3]
+    qx = qpos[obj_qpos_adr + 4]
+    qy = qpos[obj_qpos_adr + 5]
+    qz = qpos[obj_qpos_adr + 6]
+    dot_prod = qw * target_quat_w + qx * target_quat_x + qy * target_quat_y + qz * target_quat_z
     quat_err = 1.0 - dot_prod * dot_prod
 
-    cost = pos_err + 1.5 * quat_err
+    # 3. Velocity penalty (L2 norm of object linear velocity)
+    vx = qvel[obj_qvel_adr + 0]
+    vy = qvel[obj_qvel_adr + 1]
+    vz = qvel[obj_qvel_adr + 2]
+    vel_err = wp.sqrt(vx*vx + vy*vy + vz*vz)
+
+    # Combined cost using same weights as GraspReorientTask.cost_fn
+    cost = pos_err + 1.5 * quat_err + 0.001 * vel_err
+
     if terminal:
         return cost * 20.0
     return cost
