@@ -72,8 +72,8 @@ class BaseTask(abc.ABC):
         return self._mjd
 
     @abc.abstractmethod
-    def sample_initial_state(self, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
-        """Return (qpos, qvel) for a random initial state."""
+    def sample_initial_state(self, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+        """Return (qpos, qvel, ctrl) for a random initial state."""
         ...
 
     @abc.abstractmethod
@@ -115,9 +115,11 @@ class BaseTask(abc.ABC):
         mjd = mujoco.MjData(mjm)
         T   = max_steps or self.spec.max_steps
 
-        q0, v0 = self.sample_initial_state(rng)
+        q0, v0, u0 = self.sample_initial_state(rng)
         mjd.qpos[:] = q0
         mjd.qvel[:] = v0
+        if u0 is not None:
+            mjd.ctrl[:] = u0
         mujoco.mj_forward(mjm, mjd)
 
         trajectory = []
