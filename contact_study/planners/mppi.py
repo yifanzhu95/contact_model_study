@@ -298,17 +298,17 @@ class MPPIController:
             # ----------------------------------------------------------
             beta = costs_np.min()
             w    = np.exp(-(costs_np - beta) / lam)
-            w   /= w.sum() + 1e-8
+            eta = w.sum() + 1e-8
+            w   /= eta
 
             dU = np.einsum("n,nht->ht", w, eps)   # (H, nu)
             self.U_wp.assign((self.U_wp.numpy() + dU).astype(np.float32))
 
             if self.pc.debug:
                 print(
-                    f"[MPPI iter {iteration}]  "
                     f"avg cost: {costs_np.mean():.4f}  "
                     f"min cost: {beta:.4f}  "
-                    f"eta: {w.sum():.4f}"
+                    f"eta: {eta:.4f}"
                 )
 
         # ------------------------------------------------------------------

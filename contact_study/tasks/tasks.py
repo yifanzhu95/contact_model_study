@@ -78,7 +78,7 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=flo
     vel_err = wp.sqrt(vx*vx + vy*vy + vz*vz)
 
     # Combined cost using same weights as GraspReorientTask.cost_fn
-    cost = pos_err + 1.5 * quat_err + 0.001 * vel_err
+    cost = pos_err + 0.5 * quat_err + 0.1 * vel_err
 
     if terminal:
         return cost * 20.0
@@ -176,7 +176,7 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "scenes/test_data/allegro/allegro_right_hand_armature.xml",#"tasks/grasp_reorient_{geometry}.xml",
-            max_steps         = 500,
+            max_steps         = 100,
             success_threshold = 0.05,  # combined pose error
         )
 
