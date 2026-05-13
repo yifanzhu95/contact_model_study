@@ -58,7 +58,7 @@ class PushTask(BaseTask):
         if box_qpos_adr >= 0:
             adr = mjm.jnt_qposadr[box_qpos_adr]
             q0[adr:adr+2] += rng.uniform(-0.1, 0.1, 2)
-        return q0, np.zeros(mjm.nv)
+        return q0, np.zeros(mjm.nv), None
 
     def cost_fn(self, qpos, qvel, ctrl, terminal: bool) -> np.ndarray:
         """L2 distance of box position to target."""
@@ -111,25 +111,29 @@ class GraspReorientTask(BaseTask):
     def sample_initial_state(self, rng: np.random.Generator):
         mjm = self.mjm
         q0  = mjm.qpos0.copy()
+        v0  = np.zeros(mjm.nv, dtype=np.float32)
+        ctrl0 = np.zeros(mjm.nu, dtype=np.float32)
 
         # 1. Set manipulator to the predefined home state
         n_manip = len(MANIPULATOR_HOME_STATE)
         if mjm.nq >= n_manip:
             q0[:n_manip] = MANIPULATOR_HOME_STATE
+        if mjm.nu >= n_manip:
+            ctrl0[:n_manip] = MANIPULATOR_HOME_STATE
 
         # 2. Randomize object position and orientation
         obj_jnt = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "obj_freejoint")
         if obj_jnt >= 0:
             adr = mjm.jnt_qposadr[obj_jnt]
             
-            # Randomize Position (x, y) within ±3cm
-            #q0[adr:adr+2] += rng.uniform(-0.03, 0.03, 2)
+            # 2a. Randomize Position (x, y) within ±3cm
+            q0[adr:adr+2] += rng.uniform(-0.03, 0.03, 2)
             
-            # Randomize Orientation (perturb all quaternion components)
+            # 2b. Randomize Orientation (perturb all quaternion components)
             # Note: MuJoCo will normalize the quaternion in mj_forward
-            #q0[adr+3:adr+7] += rng.uniform(-0.2, 0.2, 4)
+            q0[adr+3:adr+7] += rng.uniform(-0.2, 0.2, 4)
 
-        return q0, np.zeros(mjm.nv)
+        return q0, v0, ctrl0
 
     def cost_fn(self, qpos, qvel, ctrl, terminal: bool) -> np.ndarray:
         """Weighted sum of position error + orientation error."""
@@ -214,7 +218,7 @@ class PegInHoleTask(BaseTask):
         if peg_jnt >= 0:
             adr = mjm.jnt_qposadr[peg_jnt]
             q0[adr:adr+2] += rng.uniform(-0.003, 0.003, 2)
-        return q0, np.zeros(mjm.nv)
+        return q0, np.zeros(mjm.nv), None
 
     def cost_fn(self, qpos, qvel, ctrl, terminal: bool) -> np.ndarray:
         """Penalize peg height (reward insertion depth) + lateral misalignment."""

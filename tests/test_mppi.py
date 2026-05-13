@@ -247,13 +247,16 @@ def run(
 
             # Initial state: from task sampler or from key/zeros
             if task is not None:
-                q0, v0 = task.sample_initial_state(rng)
+                q0, v0, u0 = task.sample_initial_state(rng)
             else:
                 q0 = ref_qpos.copy()
                 v0 = np.zeros(mjm.nv)
+                u0 = None
 
             mjd.qpos[:] = q0
             mjd.qvel[:] = v0
+            if u0 is not None:
+                mjd.ctrl[:] = u0
             mujoco.mj_forward(mjm, mjd)
 
             # Allow model to settle (e.g., objects falling to rest)
