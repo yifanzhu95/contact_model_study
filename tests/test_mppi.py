@@ -115,7 +115,7 @@ def run(
     inertia_sigma:     float      = 0.0,
     friction_sigma:    float      = 0.0,
     com_sigma:         float      = 0.0,
-    settle_seconds:    float      = 1.0,
+    settle_seconds:    float      = 10.0,
     render_mode:       str        = "none",
     warmup_episodes:   int        = 1,
     debug:             bool       = False,
