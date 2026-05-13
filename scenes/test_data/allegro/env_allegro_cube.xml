@@ -32,7 +32,7 @@
               />
     </body>
       <site name="obj_target" type="box" material="obj_material" size="0.035 0.035 0.035" 
-        rgba="1.0 1.0 0 0.1" pos="-0.02 0.00 0.045" euler="0 0 90"
+        rgba="1.0 1.0 0 0.1" pos="-0.02 0.00 0.045" euler="0 0 180"
         />
     
   </worldbody>
