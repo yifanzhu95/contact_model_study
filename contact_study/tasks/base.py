@@ -18,6 +18,7 @@ from typing import Callable
 
 import mujoco
 import numpy as np
+import warp as wp
 
 from contact_study.contact_models.config import GeometryVariant
 
@@ -84,6 +85,12 @@ class BaseTask(abc.ABC):
         ctrl,     # Warp array (nworld, nu)
         terminal: bool,
     ) -> np.ndarray:
+        """Return (nworld,) cost array. Called inside the MPC rollout."""
+        ...
+
+    @property
+    @abc.abstractmethod
+    def cost_fn_wp(self) -> wp.func:
         """Return (nworld,) cost array. Called inside the MPC rollout."""
         ...
 

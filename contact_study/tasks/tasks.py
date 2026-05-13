@@ -29,6 +29,51 @@ MANIPULATOR_HOME_STATE = np.array([
 ], dtype=np.float32)
 
 # ---------------------------------------------------------------------------
+# Warp Cost Functions (GPU-side)
+# ---------------------------------------------------------------------------
+
+@wp.func
+def push_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float), terminal: bool) -> float:
+    # Indices: 7, 8 (Box x, y). Target: 0.5, 0.0
+    dx = qpos[7] - 0.5
+    dy = qpos[8] - 0.0
+    dist = wp.sqrt(dx*dx + dy*dy)
+    if terminal:
+        return dist * 10.0
+    return dist
+
+@wp.func
+def grasp_reorient_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float), terminal: bool) -> float:
+    # Hand (0-15), Obj Joint (16-22). 
+    # Obj Pos: 16, 17, 18. Obj Quat: 19, 20, 21, 22.
+    # Target based on site in XML: pos=[0, 0, 0.05], quat=[1, 0, 0, 0]
+    dx = qpos[16] - 0.0
+    dy = qpos[17] - 0.0
+    dz = qpos[18] - 0.05
+    pos_err = wp.sqrt(dx*dx + dy*dy + dz*dz)
+
+    # Orientation error: 1 - <q1, q2>^2. Target quat is identity [1,0,0,0]
+    dot_prod = qpos[19] # dot product with [1,0,0,0] is just q_w
+    quat_err = 1.0 - dot_prod * dot_prod
+
+    cost = pos_err + 1.5 * quat_err
+    if terminal:
+        return cost * 20.0
+    return cost
+
+@wp.func
+def peg_in_hole_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float), terminal: bool) -> float:
+    # Peg joint at index 7. z_target = -0.05
+    z_err = wp.abs(qpos[9] - (-0.05))
+    dx = qpos[7] - 0.0
+    dy = qpos[8] - 0.0
+    xy_err = wp.sqrt(dx*dx + dy*dy)
+    cost = z_err + 5.0 * xy_err
+    if terminal:
+        return cost * 30.0
+    return cost
+
+# ---------------------------------------------------------------------------
 # Task 1: Planar Pushing (LOW complexity)
 # ---------------------------------------------------------------------------
 
@@ -73,6 +118,10 @@ class PushTask(BaseTask):
         if terminal:
             cost *= 10.0
         return cost
+
+    @property
+    def cost_fn_wp(self) -> wp.func:
+        return push_cost_wp
 
     def is_success(self, mjd: mujoco.MjData) -> bool:
         box_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "box")
@@ -177,6 +226,10 @@ class GraspReorientTask(BaseTask):
             cost *= 20.0
         return cost
 
+    @property
+    def cost_fn_wp(self) -> wp.func:
+        return grasp_reorient_cost_wp
+
     def is_success(self, mjd: mujoco.MjData) -> bool:
         mjm = self.mjm
         obj_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
@@ -239,6 +292,10 @@ class PegInHoleTask(BaseTask):
         if terminal:
             cost *= 30.0
         return cost
+
+    @property
+    def cost_fn_wp(self) -> wp.func:
+        return peg_in_hole_cost_wp
 
     def is_success(self, mjd: mujoco.MjData) -> bool:
         peg_id  = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "peg")
