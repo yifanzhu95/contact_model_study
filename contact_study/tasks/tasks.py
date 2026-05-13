@@ -136,8 +136,9 @@ class GraspReorientTask(BaseTask):
         return q0, v0, ctrl0
 
     def cost_fn(self, qpos, qvel, ctrl, terminal: bool) -> np.ndarray:
-        """Weighted sum of position error + orientation error."""
+        """Weighted sum of position error + orientation error + velocity penalty."""
         qpos_np = np.asarray(qpos.numpy() if hasattr(qpos, "numpy") else qpos)
+        qvel_np = np.asarray(qvel.numpy() if hasattr(qvel, "numpy") else qvel)
         nworld  = qpos_np.shape[0] if qpos_np.ndim == 2 else 1
 
         mjm = self.mjm
@@ -166,7 +167,12 @@ class GraspReorientTask(BaseTask):
             dot_prod = np.dot(obj_quat, target_quat)
         quat_err = 1.0 - dot_prod**2
 
-        cost = (pos_err + 0.2 * quat_err).astype(np.float32)
+        # Velocity error (L2 norm of object linear velocity)
+        v_adr = mjm.jnt_dofadr[obj_jnt]
+        obj_vel = qvel_np[:, v_adr:v_adr+3] if qvel_np.ndim == 2 else qvel_np[v_adr:v_adr+3]
+        vel_err = np.linalg.norm(obj_vel, axis=-1)
+
+        cost = (pos_err + 0.2 * quat_err + 0.05 * vel_err).astype(np.float32)
         if terminal:
             cost *= 20.0
         return cost
