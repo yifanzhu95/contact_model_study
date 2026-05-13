@@ -42,6 +42,7 @@ from pathlib import Path
 import mujoco
 import mujoco.viewer
 import numpy as np
+import warp as wp
 try:
     import mediapy as media
 except ImportError:
