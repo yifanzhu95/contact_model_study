@@ -39,7 +39,7 @@ class MPPIConfig:
     n_iterations:    int   = 1      # number of MPPI update iterations per call
     warm_start:      bool  = True   # shift action sequence one step forward
     nconmax:         int   = 200
-    n_spline_points: int   = 3      # control points for spline-smoothed noise
+    n_spline_points: int   = 5      # control points for spline-smoothed noise
     njmax:           int   = 500
     debug:           bool  = True
     delta_range:     tuple[float, float] = (-0.1, 0.1)

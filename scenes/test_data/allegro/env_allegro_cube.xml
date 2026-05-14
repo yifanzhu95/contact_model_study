@@ -2,7 +2,7 @@
   <include file="allegro_right_hand.xml"/>
 
   <statistic center="0 0 0" extent="0.3"/>
-  <option ccd_iterations="1000" timestep="0.001" />
+  <option ccd_iterations="2000" timestep="0.001" />
 
   <visual>
     <rgba haze="0.15 0.25 0.35 1"/>
@@ -22,9 +22,11 @@
   <worldbody>
     <light directional="true" ambient="0.2 0.2 0.2" diffuse="0.8 0.8 0.8"  castshadow="false" pos="0 1 4" dir="0 0 -1" name="light0"/>
     <camera name="demo-cam" pos="-0.003 -0.393 0.317" xyaxes="1.000 -0.000 0.000 0.000 0.462 0.887"/>
-
-    <geom name="floor" pos="0 0 -0.1" size="0 0 0.05" type="plane" material="groundplane"/>
     
+    <body name="floor" pos="0 0 0">
+      <geom name="floor" pos="0 0 -0.1" size="0 0 0.05" type="plane" material="groundplane"/>
+    </body>
+
     <body name="obj" pos="-0.02 0.00 0.05">
         <freejoint name="obj_freejoint"/>
         <geom name="obj" type="box" material="obj_material" size="0.035 0.035 0.035" 
@@ -32,7 +34,7 @@
               />
     </body>
       <site name="obj_target" type="box" material="obj_material" size="0.035 0.035 0.035" 
-        rgba="1.0 1.0 0 0.1" pos="-0.02 0.00 0.045" euler="0 0 90"
+        rgba="1.0 1.0 0 0.1" pos="-0.02 0.00 0.05" euler="0 0 -5"
         />
     
   </worldbody>
@@ -45,5 +47,9 @@
     ctrl="0.3854 1.19462 1.44538 0.280375 0 0.22841 1.15351 0.142 -0.3854 1.40231 1.00287 1.23055 1.0561 1.09704 0.81915 1.38042"
     />
   </keyframe>
+
+  <contact>
+    <exclude body1="obj" body2="floor"/>
+  </contact>
 
 </mujoco>
