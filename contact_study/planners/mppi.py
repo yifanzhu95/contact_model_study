@@ -309,7 +309,7 @@ class MPPIController:
             # ----------------------------------------------------------
             beta = costs_np.min()
             w    = np.exp(-(costs_np - beta) / lam)
-            eta = w.sum() + 1e-8
+            eta  = w.sum() + 1e-8
             w   /= eta
 
             dU = np.einsum("n,nht->ht", w, eps)   # (H, nu)
@@ -317,7 +317,7 @@ class MPPIController:
 
             if self.pc.debug:
                 print(
-                    f"avg cost: {costs_np.mean():.4f}  "
+                    f"avg cost: {costs_np.mean():.4f} +/- {costs_np.std():.4f} "
                     f"min cost: {beta:.4f}  "
                     f"eta: {eta:.4f}"
                 )
@@ -341,6 +341,8 @@ class MPPIController:
 
     def _set_batch_state(self, mjd: mujoco.MjData):
         """Upload the current environment state to all N parallel worlds."""
+        #print("BEFORE")
+        #print(self.d.qpos)
         api.reset_data(self.mjm, self.m, self.d)
         self.d.qpos.assign(
             np.tile(mjd.qpos, (self.pc.n_samples, 1)).astype(np.float32)
@@ -348,3 +350,4 @@ class MPPIController:
         self.d.qvel.assign(
             np.tile(mjd.qvel, (self.pc.n_samples, 1)).astype(np.float32)
         )
+        #print(self.d.qpos)

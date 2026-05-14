@@ -222,7 +222,7 @@ def run(
     mppi_cfg = MPPIConfig(
         n_samples  = n_samples,
         horizon    = horizon,
-        temperature = 0.002,
+        temperature = 0.02,
         noise_sigma = 0.01,
         warm_start = True,
         debug = debug
@@ -417,7 +417,7 @@ def main():
     parser.add_argument("--budget_seconds", type=float, default=0.1,
                         help="Per-step time budget for Condition A")
     parser.add_argument("--n_samples",      type=int,   default=256)
-    parser.add_argument("--horizon",        type=int,   default=100)
+    parser.add_argument("--horizon",        type=int,   default=50)
     parser.add_argument("--seed",           type=int,   default=42)
     parser.add_argument("--geometry",       type=str,   default="accurate",
                         choices=[g.value for g in GeometryVariant])
