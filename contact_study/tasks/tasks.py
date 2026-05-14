@@ -119,7 +119,7 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
 
     #5 
     fallen = float(0.0)
-    if qpos[obj_qpos_adr] < 0.04:
+    if qpos[obj_qpos_adr] < 0.05:
         fallen = 1.0
 
     cost = (0.1 * c_quat) + (0.1 * c_pos) + (1.0 * c_contact) + (0.5 * c_joint) + 1.0*fallen
