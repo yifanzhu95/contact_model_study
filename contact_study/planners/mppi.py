@@ -77,15 +77,6 @@ def _assign_ctrl_kernel(
 
 
 def _make_accumulate_kernel(cost_fn_wp: wp.func):
-    """
-    Factory that closes over a specific @wp.func at kernel definition time.
-
-    Warp resolves @wp.func references statically when the @wp.kernel decorator
-    runs. By accepting cost_fn_wp as a local argument here (rather than reading
-    it from self), the compiler can see the concrete function object in the
-    enclosing scope and link the call correctly.
-    """
-    # In mppi.py -> _make_accumulate_kernel()
     @wp.kernel
     def _kernel(
         qpos:      wp.array2d(dtype=float),
@@ -94,16 +85,15 @@ def _make_accumulate_kernel(cost_fn_wp: wp.func):
         terminal:  bool,
         goal:      wp.array(dtype=float),
         indices:   wp.array(dtype=int),
-        xpos:      wp.array2d(dtype=wp.vec3),
-        xquat:     wp.array2d(dtype=wp.quat),
+        xpos:      wp.array3d(dtype=wp.vec3), # New
+        xquat:     wp.array3d(dtype=wp.quat), # New
         costs_out: wp.array(dtype=float),
     ):
         w = wp.tid()
-        # Calculate current step cost
-        c = cost_fn_wp(qpos[w], qvel[w], ctrl[w], terminal, goal, indices, xpos[w], xquat[w])
-        # Explicitly add to the global total for this world
-        costs_out[w] = costs_out[w] + c
-
+        # Pass xpos[w] and xquat[w] to the specific world's cost calculation
+        costs_out[w] += cost_fn_wp(
+            qpos[w], qvel[w], ctrl[w], terminal, goal, indices, xpos[w], xquat[w]
+        )
     return _kernel
 
 
@@ -270,7 +260,11 @@ class MPPIController:
             wp.launch(
                 self._accumulate_costs_kernel,
                 dim=N,
-                inputs=[self.d.qpos, self.d.qvel, self.d.ctrl, terminal, self.goal_wp, self.indices_wp, self.d.xpos, self.d.xquat],
+                inputs=[
+                    self.d.qpos, self.d.qvel, self.d.ctrl, 
+                    terminal, self.goal_wp, self.indices_wp,
+                    self.d.xpos, self.d.xquat  # Add these two
+                ],
                 outputs=[self.costs_wp],
             )
 

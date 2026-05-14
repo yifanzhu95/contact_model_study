@@ -84,67 +84,43 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
                            indices: wp.array(dtype=int),
                            xpos: wp.array(dtype=wp.vec3),   
                            xquat: wp.array(dtype=wp.quat)) -> float:
-    # Index Mapping:
-    # 0: obj_qpos_adr, 1: obj_qvel_adr, 2: robot_qpos_adr, 3: n_manip
-    # 4: obj_body_id, 5-8: fingertip body IDs
+    # Index Mapping MUST match initialize_task
     obj_qpos_adr   = indices[0]
     robot_qpos_adr = indices[2]
     n_manip        = indices[3]
     obj_id         = indices[4]
 
-    # Current object state from MuJoCo xpos/xquat
     p_obj = xpos[obj_id]
     q_obj = xquat[obj_id] 
-
-    # Target state from goal vector
     p_target = wp.vec3(goal[0], goal[1], goal[2])
-    # MuJoCo quat is (w, x, y, z). goal[3:7] follows this.
     q_target = wp.vec4(goal[3], goal[4], goal[5], goal[6])
     q_obj_v4 = wp.vec4(q_obj.w, q_obj.x, q_obj.y, q_obj.z)
 
-    # ---- 1. Orientation error: c_quat = 1 - (q_target^T * q_obj)^2 ----
+    # 1. Orientation error
     dot_prod = wp.dot(q_target, q_obj_v4)
     c_quat = 1.0 - dot_prod * dot_prod
 
-    # ---- 2. Per-axis absolute position errors (px, py, pz) ----
-    px = wp.abs(p_obj[0] - p_target[0])
-    py = wp.abs(p_obj[1] - p_target[1])
-    pz = wp.abs(p_obj[2] - p_target[2])
+    # 2. Position error
+    pos_diff = p_obj - p_target
+    c_pos = wp.dot(pos_diff, pos_diff)
 
-    # ---- 3. Joint deviation: c_joint = ||q_robot - q_ref||^2 ----
+    # 3. Joint deviation (Using 'dq' to avoid 'diff' type clash)
     c_joint = float(0.0) 
     for i in range(n_manip):
-        # Renamed to 'dq' to avoid type clash with 'dp' later
         dq = qpos[robot_qpos_adr + i] - goal[7 + i]
         c_joint = c_joint + dq * dq
 
-    # ---- 4. Fallen indicator: I_fallen = 1 if p_z < 0.05 ----
-    fallen = float(0.0)
-    if p_obj[2] < 0.05:
-        fallen = 1.0
-
-    # ---- 5. Contact cost: c_contact = sum(||p_obj - p_tip_i||^2) ----
+    # 4. Contact cost (Using 'dp' to avoid 'diff' type clash)
     c_contact = float(0.0)
     for i in range(5, 9):
         p_tip = xpos[indices[i]]
-        # Renamed to 'dp' (vec3 type) to keep types distinct
         dp = p_obj - p_tip
         c_contact = c_contact + wp.dot(dp, dp)
 
-    # ---- 6. Running cost (Equations 14 & 15 from paper) ----
-    # Weights: w1=1.5, w2-w4=1.0, w5=5.0, w6=0.01, Omega=100.0
-    cost = (0.5 * c_quat) + (1.0 * px) + (1.0 * py) + (1.0 * pz) + \
-           (0.1 * c_contact) + (0.01 * c_joint) + (10.0 * fallen)
-
-    # ---- 7. Terminal cost: V = phi1*||dp||^2 + phi2*c_quat ----
+    cost = (1.5 * c_quat) + (1.0 * c_pos) + (5.0 * c_contact) + (0.01 * c_joint)
     if terminal:
-        d_pos_terminal = p_obj - p_target
-        pos_err_sq = wp.dot(d_pos_terminal, d_pos_terminal)
-        # Weights: phi1=10.0, phi2=10.0
-        return 10.0 * pos_err_sq + 10.0 * c_quat
-
+        return cost * 20.0
     return cost
-
 
 @wp.func
 def peg_in_hole_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float), 
@@ -277,22 +253,23 @@ class GraspReorientTask(BaseTask):
         mjm = self.mjm
         obj_jnt = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "obj_freejoint")
         
-        # Look up body IDs to calculate Cartesian spatial distances
-        obj_body = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
-        ff_tip   = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "ff_tip")
-        mf_tip   = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "mf_tip")
-        rf_tip   = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "rf_tip")
-        th_tip   = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "th_tip")
+        # Required Body IDs for xpos/xquat
+        obj_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
+        tip_ids = [
+            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "ff_tip"),
+            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "mf_tip"),
+            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "rf_tip"),
+            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "th_tip")
+        ]
 
-        # Map addresses and IDs to the index vector for Warp
+        # Construct index vector (Length 9)
         self.index_vector = np.array([
-            mjm.jnt_qposadr[obj_jnt], 
-            mjm.jnt_dofadr[obj_jnt],
-            obj_body,
-            ff_tip,
-            mf_tip,
-            rf_tip,
-            th_tip
+            mjm.jnt_qposadr[obj_jnt], # 0
+            mjm.jnt_dofadr[obj_jnt],  # 1
+            0,                        # 2: robot_qpos_adr (Hand is first in XML)
+            16,                       # 3: n_manip (Allegro has 16 joints)
+            obj_id,                   # 4
+            *tip_ids                  # 5, 6, 7, 8
         ], dtype=np.int32)
         
         target_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
