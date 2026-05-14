@@ -202,14 +202,18 @@ def run(
     ref_qpos  = mjd_ref.qpos.copy()
     # ref_qpos_wp = wp.array(ref_qpos, dtype=wp.float32, device="cuda")
 
+    cost_fn_wp = None
+    goal_wp = None
+    idx_wp = None
+
     if task is not None:
         # Use the GPU-accelerated cost function defined in the task
-        cost_fn_for_mppi = task.cost_fn_wp
-        goals_wp = task.goal_vector_wp
-        idxs_wp = task.index_vector_wp
+        cost_fn_wp, goal_wp, idx_wp = task.cost_fn_wp
     else:
         # Pass the wp.func directly, no lambdas!
-        cost_fn_for_mppi = _fallback_cost_func
+        cost_fn_wp = _fallback_cost_func
+        goal_wp = wp.zeros(1, dtype=wp.float32, device="cuda")
+        idx_wp = wp.zeros(1, dtype=wp.int32, device="cuda")
 
     print(f"  nq={mjm.nq}  nv={mjm.nv}  nu={mjm.nu}  max_steps={max_steps}")
     print(f"  integrator      = {mjm.opt.integrator}")
@@ -223,7 +227,7 @@ def run(
     mppi_cfg = MPPIConfig(
         n_samples  = n_samples,
         horizon    = horizon,
-        temperature = 0.1,
+        temperature = 1000.0,
         noise_sigma = 0.02,
         warm_start = True,
         debug = debug
@@ -262,9 +266,9 @@ def run(
                 mjm      = mjm,
                 cfg      = cfg,
                 mppi_cfg = mppi_cfg,
-                cost_fn  = cost_fn_for_mppi, # Pass the wp.func
-                goals_wp = goals_wp,
-                idx_wp   = idxs_wp,
+                cost_fn  = cost_fn_wp,
+                goals_wp = goal_wp,
+                idx_wp   = idx_wp,
                 rng      = rng,
                 initial_ctrl_sequence = u0,
             )

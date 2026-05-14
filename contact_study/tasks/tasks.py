@@ -276,8 +276,10 @@ class GraspReorientTask(BaseTask):
         target_pos = mjm.site_pos[target_id]
         target_quat = mjm.site_quat[target_id]
         
-        # Concatenate pos (3) and quat (4)
-        self.goal_vector = np.concatenate([target_pos, target_quat]).astype(np.float32)
+        # Concatenate pos (3), quat (4), and manipulator home pose (16)
+        self.goal_vector = np.concatenate([
+            target_pos, target_quat, MANIPULATOR_HOME_STATE
+        ]).astype(np.float32)
         
         self.index_vector_wp = wp.array(self.index_vector, dtype=wp.int32, device="cuda")
         self.goal_vector_wp = wp.array(self.goal_vector, dtype=wp.float32, device="cuda")
@@ -310,8 +312,8 @@ class GraspReorientTask(BaseTask):
         target_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
 
         # IDs unpacked from index_vector mapping
-        obj_id  = self.index_vector[2]
-        tip_ids = self.index_vector[3:7]
+        obj_id  = self.index_vector[4]
+        tip_ids = self.index_vector[5:9]
 
         if obj_jnt < 0 or target_id < 0:
             return np.zeros(nworld, dtype=np.float32)
@@ -351,8 +353,8 @@ class GraspReorientTask(BaseTask):
         return cost
 
     @property
-    def cost_fn_wp(self) -> wp.func:
-        return grasp_reorient_cost_wp
+    def cost_fn_wp(self) -> tuple[wp.func, wp.array, wp.array]:
+        return grasp_reorient_cost_wp, self.goal_vector_wp, self.index_vector_wp
 
     def is_success(self, mjd: mujoco.MjData) -> bool:
         mjm = self.mjm
