@@ -34,7 +34,6 @@ from __future__ import annotations
 import os
 os.environ["MUJOCO_GL"] = "egl"   # must be set before importing mujoco
 
-
 import argparse
 import time
 from pathlib import Path
@@ -222,7 +221,7 @@ def run(
     mppi_cfg = MPPIConfig(
         n_samples  = n_samples,
         horizon    = horizon,
-        temperature = 0.05,
+        temperature = 0.75,
         noise_sigma = 0.02,
         warm_start = True,
         debug = debug
