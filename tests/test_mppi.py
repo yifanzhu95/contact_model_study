@@ -205,6 +205,8 @@ def run(
     if task is not None:
         # Use the GPU-accelerated cost function defined in the task
         cost_fn_for_mppi = task.cost_fn_wp
+        goals_wp = task.goal_vector_wp
+        idxs_wp = task.index_vector_wp
     else:
         # Pass the wp.func directly, no lambdas!
         cost_fn_for_mppi = _fallback_cost_func
@@ -221,7 +223,7 @@ def run(
     mppi_cfg = MPPIConfig(
         n_samples  = n_samples,
         horizon    = horizon,
-        temperature = 1000.0,
+        temperature = 0.1,
         noise_sigma = 0.02,
         warm_start = True,
         debug = debug
@@ -261,6 +263,8 @@ def run(
                 cfg      = cfg,
                 mppi_cfg = mppi_cfg,
                 cost_fn  = cost_fn_for_mppi, # Pass the wp.func
+                goals_wp = goals_wp,
+                idx_wp   = idxs_wp,
                 rng      = rng,
                 initial_ctrl_sequence = u0,
             )

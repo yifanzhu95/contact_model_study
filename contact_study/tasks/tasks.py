@@ -117,9 +117,9 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
         dp = p_obj - p_tip
         c_contact = c_contact + wp.dot(dp, dp)
 
-    cost = (1.5 * c_quat) + (1.0 * c_pos) + (5.0 * c_contact) + (0.01 * c_joint)
+    cost = (0.1 * c_quat) + (0.1 * c_pos) + (5.0 * c_contact) #+ (1.0 * c_joint)
     if terminal:
-        return cost * 20.0
+        cost = (10.0 * c_quat) + (10.0 * c_pos)
     return cost
 
 @wp.func

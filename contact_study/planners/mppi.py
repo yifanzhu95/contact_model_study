@@ -122,6 +122,8 @@ class MPPIController:
         cfg:      ContactModelConfig,
         mppi_cfg: MPPIConfig,
         cost_fn:  wp.func,
+        goals_wp: wp.array,
+        idx_wp:   wp.array,
         rng:      np.random.Generator | None = None,
         initial_ctrl_sequence: np.ndarray | None = None,
     ):
@@ -135,11 +137,6 @@ class MPPIController:
         self.nv = mjm.nv
 
         # --- Pre-sample static spline noise (sampled once, reused every plan call) ---
-        # WARNING: This deviates from standard MPPI, which re-samples noise at each step.
-        # This implementation will use the same set of noise perturbations for every
-        # planning step, which may limit exploration and lead to suboptimal performance.
-        # If true MPPI behavior is desired, this noise generation should be moved back
-        # into the `plan` method.
         N, H, nu = mppi_cfg.n_samples, mppi_cfg.horizon, mjm.nu
         t_knots  = np.linspace(0, H - 1, self.pc.n_spline_points)
         t_dense  = np.arange(H)
@@ -156,13 +153,9 @@ class MPPIController:
         self._static_eps_wp = wp.array(static_eps_np, dtype=wp.float32, device="cuda")
 
         # Handle potential tuple from cost_fn_wp
-        if isinstance(cost_fn, tuple):
-            self.cost_fn_wp_func, self.goal_wp, self.indices_wp = cost_fn
-        else:
-            self.cost_fn_wp_func = cost_fn
-            # Provide empty fallbacks if not provided
-            self.goal_wp = wp.zeros(1, dtype=wp.float32, device="cuda")
-            self.indices_wp = wp.zeros(1, dtype=wp.int32, device="cuda")
+        self.cost_fn_wp_func = cost_fn
+        self.goal_wp = goals_wp
+        self.indices_wp = idx_wp
 
         # Build the cost-accumulation kernel with this task's cost function
         # baked in at compile time (see factory docstring above).
@@ -315,6 +308,9 @@ class MPPIController:
             # ----------------------------------------------------------
             self._set_batch_state(mjd)
 
+            #print("should be const",self.d.qpos)
+            #print(self.indices_wp)
+
             # ----------------------------------------------------------
             # 4. Run the full H-step rollout — single GPU graph launch
             #    (costs_wp is zeroed inside the graph)
@@ -327,6 +323,8 @@ class MPPIController:
             wp.synchronize()
             costs_np = self.costs_wp.numpy()
 
+            #print(self.d.qpos)
+
             # ----------------------------------------------------------
             # 6. MPPI weight update (CPU)
             # ----------------------------------------------------------
@@ -335,9 +333,15 @@ class MPPIController:
             eta  = w.sum() + 1e-8
             w   /= eta
 
-            dU = np.einsum("n,nht->ht", w, eps_np)   # (H, nu)
+            if eta > 100:
+                lam = 0.01*lam
+            elif eta < 2:
+                lam = 10*lam
+
+
             low, high = self.pc.delta_range
-            new_U = (self.U_wp.numpy() + dU).clip(low, high)
+            dU = np.einsum("n,nht->ht", w, eps_np).clip(low, high)   # (H, nu)
+            new_U = self.U_wp.numpy() + dU
             self.U_wp.assign(new_U.astype(np.float32))
 
             if self.pc.debug:
