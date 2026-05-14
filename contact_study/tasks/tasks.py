@@ -22,10 +22,10 @@ from .base import BaseTask, ContactComplexity, TaskSpec, register
 
 # Predefined home position for the manipulator joints (e.g., 16 joints for Allegro Hand)
 MANIPULATOR_HOME_STATE = np.array([
-    0.127, 0.7, 1.5, 1.0,  # Index
-    0.0, 0.4, 1.42, 1.0,  # Middle
-    -0.127, 0.7, 1.5, 1.0,  # Ring
-    0.25, 1.7, 1.7, 1.0   # Thumb
+    0.127, 0.5, 1.5, 1.0,  # Index
+    0.0, 0.3, 1.42, 1.0,  # Middle
+    -0.127, 0.5, 1.5, 1.0,  # Ring
+    0.25, 1.5, 1.7, 1.0   # Thumb
 ], dtype=np.float32)
 
 # ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=flo
     # 3. Velocity penalty (L2 norm of object linear velocity)
     vel_err = wp.sqrt(qvel[obj_qvel_adr + 0]**2.0 + qvel[obj_qvel_adr + 1]**2.0 + qvel[obj_qvel_adr + 2]**2.0)
 
-    cost = pos_err + 1.5 * quat_err + 0.01 * vel_err
+    cost = pos_err + 1.5 * quat_err + 0.1 * vel_err
     if terminal:
         return cost * 20.0
     return cost
@@ -175,7 +175,7 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "scenes/test_data/allegro/allegro_right_hand_armature.xml",#"tasks/grasp_reorient_{geometry}.xml",
-            max_steps         = 500,
+            max_steps         = 1000,
             success_threshold = 0.05,  # combined pose error
         )
 

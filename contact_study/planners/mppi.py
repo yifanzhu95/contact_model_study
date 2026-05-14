@@ -154,15 +154,15 @@ class MPPIController:
         N, H, nu = mppi_cfg.n_samples, mppi_cfg.horizon, mjm.nu
 
         # Mean action sequence: (H, nu)
-        if initial_ctrl_sequence is not None:
-            # Tile the initial control sequence for the entire horizon
-            self.U_wp = wp.array(
-                np.tile(initial_ctrl_sequence, (H, 1)),
-                dtype=wp.float32,
-                device="cuda"
-            )
-        else:
-            self.U_wp = wp.zeros((H, nu), dtype=wp.float32, device="cuda")
+        # if initial_ctrl_sequence is not None:
+        #     # Tile the initial control sequence for the entire horizon
+        #     self.U_wp = wp.array(
+        #         np.tile(initial_ctrl_sequence, (H, 1)),
+        #         dtype=wp.float32,
+        #         device="cuda"
+        #     )
+        # else:
+        self.U_wp = wp.zeros((H, nu), dtype=wp.float32, device="cuda")
 
         # Candidate perturbed sequences: (N, H, nu)
         self.V_wp = wp.zeros((N, H, nu), dtype=wp.float32, device="cuda")

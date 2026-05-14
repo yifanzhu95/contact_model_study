@@ -222,8 +222,8 @@ def run(
     mppi_cfg = MPPIConfig(
         n_samples  = n_samples,
         horizon    = horizon,
-        temperature = 0.02,
-        noise_sigma = 0.01,
+        temperature = 0.05,
+        noise_sigma = 0.02,
         warm_start = True,
         debug = debug
     )
@@ -312,7 +312,7 @@ def run(
                     # Condition B: warm-started MPPI
                     ctrl = controller.plan(mjd)
 
-                mjd.ctrl[:] = ctrl
+                mjd.ctrl[:] += ctrl
                 mujoco.mj_step(mjm, mjd)
 
                 step_times.append(time.perf_counter() - step_start)
@@ -417,7 +417,7 @@ def main():
     parser.add_argument("--budget_seconds", type=float, default=0.1,
                         help="Per-step time budget for Condition A")
     parser.add_argument("--n_samples",      type=int,   default=256)
-    parser.add_argument("--horizon",        type=int,   default=50)
+    parser.add_argument("--horizon",        type=int,   default=48)
     parser.add_argument("--seed",           type=int,   default=42)
     parser.add_argument("--geometry",       type=str,   default="accurate",
                         choices=[g.value for g in GeometryVariant])
