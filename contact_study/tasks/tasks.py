@@ -33,63 +33,53 @@ MANIPULATOR_HOME_STATE = np.array([
 # ---------------------------------------------------------------------------
 
 @wp.func
-def push_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float), terminal: bool) -> float:
-    # Indices: 7, 8 (Box x, y). Target: 0.5, 0.0
-    dx = qpos[7] - 0.5
-    dy = qpos[8] - 0.0
+def push_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float), 
+                 terminal: bool, goal: wp.array(dtype=float), indices: wp.array(dtype=int)) -> float:
+    # indices[0]: Box qpos address
+    adr = indices[0]
+    dx = qpos[adr] - goal[0]
+    dy = qpos[adr + 1] - goal[1]
     dist = wp.sqrt(dx*dx + dy*dy)
     if terminal:
         return dist * 10.0
     return dist
 
 @wp.func
-def grasp_reorient_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float), terminal: bool) -> float:
-    # Object joint starting indices (assuming 16 hand joints followed by obj_freejoint)
-    obj_qpos_adr = 16
-    obj_qvel_adr = 16
-
-    # Target state taken from site "obj_target" in XML
-    target_pos_x = 0.0
-    target_pos_y = 0.0
-    target_pos_z = 0.05
-    target_quat_w = 1.0
-    target_quat_x = 0.0
-    target_quat_y = 0.0
-    target_quat_z = 0.0
+def grasp_reorient_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float), 
+                           terminal: bool, goal: wp.array(dtype=float), indices: wp.array(dtype=int)) -> float:
+    # indices[0]: obj qpos address, indices[1]: obj qvel address
+    obj_qpos_adr = indices[0]
+    obj_qvel_adr = indices[1]
 
     # 1. Position error
-    dx = qpos[obj_qpos_adr + 0] - target_pos_x
-    dy = qpos[obj_qpos_adr + 1] - target_pos_y
-    dz = qpos[obj_qpos_adr + 2] - target_pos_z
+    dx = qpos[obj_qpos_adr + 0] - goal[0]
+    dy = qpos[obj_qpos_adr + 1] - goal[1]
+    dz = qpos[obj_qpos_adr + 2] - goal[2]
     pos_err = wp.sqrt(dx*dx + dy*dy + dz*dz)
 
     # 2. Orientation error (1 - <q_obj, q_target>^2)
-    qw = qpos[obj_qpos_adr + 3]
-    qx = qpos[obj_qpos_adr + 4]
-    qy = qpos[obj_qpos_adr + 5]
-    qz = qpos[obj_qpos_adr + 6]
-    dot_prod = qw * target_quat_w + qx * target_quat_x + qy * target_quat_y + qz * target_quat_z
+    dot_prod = (qpos[obj_qpos_adr + 3] * goal[3] + 
+                qpos[obj_qpos_adr + 4] * goal[4] + 
+                qpos[obj_qpos_adr + 5] * goal[5] + 
+                qpos[obj_qpos_adr + 6] * goal[6])
     quat_err = 1.0 - dot_prod * dot_prod
 
     # 3. Velocity penalty (L2 norm of object linear velocity)
-    vx = qvel[obj_qvel_adr + 0]
-    vy = qvel[obj_qvel_adr + 1]
-    vz = qvel[obj_qvel_adr + 2]
-    vel_err = wp.sqrt(vx*vx + vy*vy + vz*vz)
+    vel_err = wp.sqrt(qvel[obj_qvel_adr + 0]**2 + qvel[obj_qvel_adr + 1]**2 + qvel[obj_qvel_adr + 2]**2)
 
-    # Combined cost using same weights as GraspReorientTask.cost_fn
     cost = pos_err + 0.5 * quat_err + 0.1 * vel_err
-
     if terminal:
         return cost * 20.0
     return cost
 
 @wp.func
-def peg_in_hole_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float), terminal: bool) -> float:
-    # Peg joint at index 7. z_target = -0.05
-    z_err = wp.abs(qpos[9] - (-0.05))
-    dx = qpos[7] - 0.0
-    dy = qpos[8] - 0.0
+def peg_in_hole_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float), 
+                        terminal: bool, goal: wp.array(dtype=float), indices: wp.array(dtype=int)) -> float:
+    # indices[0]: Peg qpos address. goal: [target_z, target_x, target_y]
+    adr = indices[0]
+    z_err = wp.abs(qpos[adr + 2] - goal[0])
+    dx = qpos[adr] - goal[1]
+    dy = qpos[adr + 1] - goal[2]
     xy_err = wp.sqrt(dx*dx + dy*dy)
     cost = z_err + 5.0 * xy_err
     if terminal:
@@ -118,6 +108,18 @@ class PushTask(BaseTask):
             success_threshold = 0.02,  # 2 cm
         )
 
+    def initialize_task(self):
+        mjm = self.mjm
+        box_jnt = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "box_freejoint")
+        self.index_vector = np.array([mjm.jnt_qposadr[box_jnt]], dtype=np.int32)
+        
+        target_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "target")
+        # Extract target position from site
+        self.goal_vector = mjm.site_pos[target_id][:2].astype(np.float32)
+        
+        self.index_vector_wp = wp.array(self.index_vector, dtype=wp.int32, device="cuda")
+        self.goal_vector_wp = wp.array(self.goal_vector, dtype=wp.float32, device="cuda")
+
     def sample_initial_state(self, rng: np.random.Generator):
         mjm = self.mjm
         q0  = mjm.qpos0.copy()
@@ -128,23 +130,20 @@ class PushTask(BaseTask):
             q0[adr:adr+2] += rng.uniform(-0.1, 0.1, 2)
         return q0, np.zeros(mjm.nv), None
 
-    def cost_fn(self, qpos, qvel, ctrl, terminal: bool) -> np.ndarray:
+    def cost_fn(self, qpos, qvel, ctrl, terminal: bool, goal, indices) -> np.ndarray:
         """L2 distance of box position to target."""
-        # Target position is stored in a site named "target"
-        # Here we use a placeholder: minimize qpos[7:9] distance to origin
         qpos_np = np.asarray(qpos.numpy() if hasattr(qpos, "numpy") else qpos)
-        # box freejoint qpos starts at index 7 (after robot joints)
-        # This is task-specific; adjust index for your XML
-        target = np.array([0.5, 0.0])
-        box_pos = qpos_np[:, 7:9] if qpos_np.ndim == 2 else qpos_np[7:9]
-        cost = np.linalg.norm(box_pos - target, axis=-1).astype(np.float32)
+        adr = indices[0]
+        box_pos = qpos_np[:, adr:adr+2] if qpos_np.ndim == 2 else qpos_np[adr:adr+2]
+        
+        cost = np.linalg.norm(box_pos - goal, axis=-1).astype(np.float32)
         if terminal:
             cost *= 10.0
         return cost
 
     @property
-    def cost_fn_wp(self) -> wp.func:
-        return push_cost_wp
+    def cost_fn_wp(self) -> tuple[wp.func, wp.array, wp.array]:
+        return push_cost_wp, self.goal_vector_wp, self.index_vector_wp
 
     def is_success(self, mjd: mujoco.MjData) -> bool:
         box_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "box")
@@ -179,6 +178,21 @@ class GraspReorientTask(BaseTask):
             max_steps         = 100,
             success_threshold = 0.05,  # combined pose error
         )
+
+    def initialize_task(self):
+        mjm = self.mjm
+        obj_jnt = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "obj_freejoint")
+        self.index_vector = np.array([mjm.jnt_qposadr[obj_jnt], mjm.jnt_dofadr[obj_jnt]], dtype=np.int32)
+        
+        target_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
+        target_pos = mjm.site_pos[target_id]
+        target_quat = mjm.site_quat[target_id]
+        
+        # Concatenate pos (3) and quat (4)
+        self.goal_vector = np.concatenate([target_pos, target_quat]).astype(np.float32)
+        
+        self.index_vector_wp = wp.array(self.index_vector, dtype=wp.int32, device="cuda")
+        self.goal_vector_wp = wp.array(self.goal_vector, dtype=wp.float32, device="cuda")
 
     def sample_initial_state(self, rng: np.random.Generator):
         mjm = self.mjm
@@ -292,6 +306,17 @@ class PegInHoleTask(BaseTask):
             success_threshold = 0.005,  # 5 mm insertion depth
         )
 
+    def initialize_task(self):
+        mjm = self.mjm
+        peg_jnt = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "peg_freejoint")
+        self.index_vector = np.array([mjm.jnt_qposadr[peg_jnt]], dtype=np.int32)
+        
+        # Target: z = -0.05, xy = 0.0
+        self.goal_vector = np.array([-0.05, 0.0, 0.0], dtype=np.float32)
+        
+        self.index_vector_wp = wp.array(self.index_vector, dtype=wp.int32, device="cuda")
+        self.goal_vector_wp = wp.array(self.goal_vector, dtype=wp.float32, device="cuda")
+
     def sample_initial_state(self, rng: np.random.Generator):
         mjm = self.mjm
         q0  = mjm.qpos0.copy()
@@ -302,23 +327,24 @@ class PegInHoleTask(BaseTask):
             q0[adr:adr+2] += rng.uniform(-0.003, 0.003, 2)
         return q0, np.zeros(mjm.nv), None
 
-    def cost_fn(self, qpos, qvel, ctrl, terminal: bool) -> np.ndarray:
+    def cost_fn(self, qpos, qvel, ctrl, terminal: bool, goal, indices) -> np.ndarray:
         """Penalize peg height (reward insertion depth) + lateral misalignment."""
         qpos_np = np.asarray(qpos.numpy() if hasattr(qpos, "numpy") else qpos)
-        peg_start = 7  # adjust to match XML
+        adr = indices[0]
+        target_z, target_xy = goal[0], goal[1:]
 
         # z: reward insertion (minimize height above hole bottom)
-        z_err   = np.abs(qpos_np[:, peg_start+2] - (-0.05))   # target z = -5cm
+        z_err   = np.abs(qpos_np[:, adr+2] - target_z)
         # x,y: penalize lateral offset
-        xy_err  = np.linalg.norm(qpos_np[:, peg_start:peg_start+2], axis=-1)
+        xy_err  = np.linalg.norm(qpos_np[:, adr:adr+2] - target_xy, axis=-1)
         cost    = (z_err + 5.0 * xy_err).astype(np.float32)
         if terminal:
             cost *= 30.0
         return cost
 
     @property
-    def cost_fn_wp(self) -> wp.func:
-        return peg_in_hole_cost_wp
+    def cost_fn_wp(self) -> tuple[wp.func, wp.array, wp.array]:
+        return peg_in_hole_cost_wp, self.goal_vector_wp, self.index_vector_wp
 
     def is_success(self, mjd: mujoco.MjData) -> bool:
         peg_id  = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "peg")

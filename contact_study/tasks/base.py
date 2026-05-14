@@ -14,7 +14,7 @@ import abc
 import enum
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Any
 
 import mujoco
 import numpy as np
@@ -49,17 +49,27 @@ class BaseTask(abc.ABC):
         self._mjm: mujoco.MjModel | None = None
         self._mjd: mujoco.MjData  | None = None
 
+        # Task-specific metadata extracted at load time
+        self.goal_vector: np.ndarray | None = None
+        self.index_vector: np.ndarray | None = None
+        self.goal_vector_wp: wp.array | None = None
+        self.index_vector_wp: wp.array | None = None
+
     @property
     @abc.abstractmethod
     def spec(self) -> TaskSpec: ...
     
-    def load(self,full_path:str | None = None) -> tuple[mujoco.MjModel, mujoco.MjData]:
+    def load(self, full_path: str | None = None) -> tuple[mujoco.MjModel, mujoco.MjData]:
         """Load the MuJoCo model for this task and geometry variant."""
         if full_path is None:
             xml_path = self.spec.xml_path_template.format(geometry=self.geometry.value)
             full_path = SCENES_DIR / xml_path
         self._mjm = mujoco.MjModel.from_xml_path(str(full_path))
         self._mjd = mujoco.MjData(self._mjm)
+
+        # Post-load initialization to extract task-specific indices/goals
+        self.initialize_task()
+
         return self._mjm, self._mjd
 
     @property
@@ -73,6 +83,15 @@ class BaseTask(abc.ABC):
         return self._mjd
 
     @abc.abstractmethod
+    def initialize_task(self):
+        """Extract task-specific info (joint indices, goal poses) from MjModel.
+        
+        Should populate self.goal_vector and self.index_vector as both
+        NumPy and Warp arrays.
+        """
+        ...
+
+    @abc.abstractmethod
     def sample_initial_state(self, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
         """Return (qpos, qvel, ctrl) for a random initial state."""
         ...
@@ -84,13 +103,15 @@ class BaseTask(abc.ABC):
         qvel,     # Warp array (nworld, nv)
         ctrl,     # Warp array (nworld, nu)
         terminal: bool,
+        goal: np.ndarray,
+        indices: np.ndarray,
     ) -> np.ndarray:
         """Return (nworld,) cost array. Called inside the MPC rollout."""
         ...
 
     @property
     @abc.abstractmethod
-    def cost_fn_wp(self) -> wp.func:
+    def cost_fn_wp(self) -> tuple[wp.func, wp.array, wp.array]:
         """Return (nworld,) cost array. Called inside the MPC rollout."""
         ...
 

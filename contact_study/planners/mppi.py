@@ -90,10 +90,12 @@ def _make_accumulate_kernel(cost_fn_wp: wp.func):
         qvel:      wp.array2d(dtype=float),
         ctrl:      wp.array2d(dtype=float),
         terminal:  bool,
+        goal:      wp.array(dtype=float),
+        indices:   wp.array(dtype=int),
         costs_out: wp.array(dtype=float),   # (N,)  [in/out]
     ):
         w = wp.tid()
-        costs_out[w] += cost_fn_wp(qpos[w], qvel[w], ctrl[w], terminal)
+        costs_out[w] += cost_fn_wp(qpos[w], qvel[w], ctrl[w], terminal, goal, indices)
 
     return _kernel
 
@@ -134,9 +136,18 @@ class MPPIController:
         self.nq = mjm.nq
         self.nv = mjm.nv
 
+        # Handle potential tuple from cost_fn_wp
+        if isinstance(cost_fn, tuple):
+            self.cost_fn_wp_func, self.goal_wp, self.indices_wp = cost_fn
+        else:
+            self.cost_fn_wp_func = cost_fn
+            # Provide empty fallbacks if not provided
+            self.goal_wp = wp.zeros(1, dtype=wp.float32, device="cuda")
+            self.indices_wp = wp.zeros(1, dtype=wp.int32, device="cuda")
+
         # Build the cost-accumulation kernel with this task's cost function
         # baked in at compile time (see factory docstring above).
-        self._accumulate_costs_kernel = _make_accumulate_kernel(cost_fn)
+        self._accumulate_costs_kernel = _make_accumulate_kernel(self.cost_fn_wp_func)
 
         # ---- GPU buffers -------------------------------------------------
         N, H, nu = mppi_cfg.n_samples, mppi_cfg.horizon, mjm.nu
@@ -218,7 +229,7 @@ class MPPIController:
             wp.launch(
                 self._accumulate_costs_kernel,
                 dim=N,
-                inputs=[self.d.qpos, self.d.qvel, self.d.ctrl, terminal],
+                inputs=[self.d.qpos, self.d.qvel, self.d.ctrl, terminal, self.goal_wp, self.indices_wp],
                 outputs=[self.costs_wp],
             )
 

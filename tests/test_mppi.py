@@ -90,7 +90,9 @@ def _fallback_cost_func(
     qpos: wp.array(dtype=float),
     qvel: wp.array(dtype=float),
     ctrl: wp.array(dtype=float),
-    terminal: bool
+    terminal: bool,
+    goal: wp.array(dtype=float),
+    indices: wp.array(dtype=int)
 ) -> float:
     # Dummy cost for raw XML testing without a registered task
     return 0.0
@@ -199,7 +201,7 @@ def run(
         mjd_ref.qvel[:] = key.qvel
         mjd_ref.ctrl[:] = key.ctrl
     ref_qpos  = mjd_ref.qpos.copy()
-    ref_qpos_wp = wp.array(ref_qpos, dtype=wp.float32, device="cuda")
+    # ref_qpos_wp = wp.array(ref_qpos, dtype=wp.float32, device="cuda")
 
     if task is not None:
         # Use the GPU-accelerated cost function defined in the task
