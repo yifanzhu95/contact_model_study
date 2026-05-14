@@ -250,23 +250,23 @@ def run(
     try:
         for ep in range(n_episodes):
             # Fresh controller each episode (prevents stale warm-start)
-            controller = MPPIController(
-                mjm      = mjm,
-                cfg      = cfg,
-                mppi_cfg = mppi_cfg,
-                cost_fn  = cost_fn_for_mppi, # Pass the wp.func
-                rng      = rng,
-            )
-
-            mjd = mujoco.MjData(mjm)
-
-            # Initial state: from task sampler or from key/zeros
             if task is not None:
                 q0, v0, u0 = task.sample_initial_state(rng)
             else:
                 q0 = ref_qpos.copy()
                 v0 = np.zeros(mjm.nv)
                 u0 = None
+
+            controller = MPPIController(
+                mjm      = mjm,
+                cfg      = cfg,
+                mppi_cfg = mppi_cfg,
+                cost_fn  = cost_fn_for_mppi, # Pass the wp.func
+                rng      = rng,
+                initial_ctrl_sequence = u0,
+            )
+
+            mjd = mujoco.MjData(mjm)
 
             mjd.qpos[:] = q0
             mjd.qvel[:] = v0

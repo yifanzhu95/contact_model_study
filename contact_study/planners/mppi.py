@@ -72,7 +72,7 @@ def _assign_ctrl_kernel(
 ):
     """Copy the t-th slice of V into d.ctrl without a Python-side round-trip."""
     n, u = wp.tid()
-    ctrl[n, u] = V[n, t, u]
+    ctrl[n, u] += V[n, t, u]
 
 
 def _make_accumulate_kernel(cost_fn_wp: wp.func):
@@ -126,6 +126,7 @@ class MPPIController:
         mppi_cfg: MPPIConfig,
         cost_fn:  wp.func,
         rng:      np.random.Generator | None = None,
+        initial_ctrl_sequence: np.ndarray | None = None,
     ):
         self.mjm = mjm
         self.cfg = cfg
@@ -153,7 +154,15 @@ class MPPIController:
         N, H, nu = mppi_cfg.n_samples, mppi_cfg.horizon, mjm.nu
 
         # Mean action sequence: (H, nu)
-        self.U_wp = wp.zeros((H, nu), dtype=wp.float32, device="cuda")
+        if initial_ctrl_sequence is not None:
+            # Tile the initial control sequence for the entire horizon
+            self.U_wp = wp.array(
+                np.tile(initial_ctrl_sequence, (H, 1)),
+                dtype=wp.float32,
+                device="cuda"
+            )
+        else:
+            self.U_wp = wp.zeros((H, nu), dtype=wp.float32, device="cuda")
 
         # Candidate perturbed sequences: (N, H, nu)
         self.V_wp = wp.zeros((N, H, nu), dtype=wp.float32, device="cuda")
