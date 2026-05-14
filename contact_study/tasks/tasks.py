@@ -22,10 +22,10 @@ from .base import BaseTask, ContactComplexity, TaskSpec, register
 
 # Predefined home position for the manipulator joints (e.g., 16 joints for Allegro Hand)
 MANIPULATOR_HOME_STATE = np.array([
-    0.127, 0.5, 1.5, 1.0,  # Index
-    0.0, 0.3, 1.42, 1.0,  # Middle
-    -0.127, 0.5, 1.5, 1.0,  # Ring
-    0.25, 1.5, 1.7, 1.0   # Thumb
+    0.765751, -0.568012, 0.916951, 0.573897,
+    -0.0191225, -0.0837503, 0.709056, 1.01884,
+    0.830768, 0.610365, 0.929305, 0.610097,
+    1.09912, 1.44581, 1.33179, 0.192794
 ], dtype=np.float32)
 
 # ---------------------------------------------------------------------------
