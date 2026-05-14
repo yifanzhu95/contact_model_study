@@ -138,6 +138,27 @@ class MPPIController:
         self.nq = mjm.nq
         self.nv = mjm.nv
 
+        # --- Pre-sample static spline noise (sampled once, reused every plan call) ---
+        # WARNING: This deviates from standard MPPI, which re-samples noise at each step.
+        # This implementation will use the same set of noise perturbations for every
+        # planning step, which may limit exploration and lead to suboptimal performance.
+        # If true MPPI behavior is desired, this noise generation should be moved back
+        # into the `plan` method.
+        N, H, nu = mppi_cfg.n_samples, mppi_cfg.horizon, mjm.nu
+        t_knots  = np.linspace(0, H - 1, self.pc.n_spline_points)
+        t_dense  = np.arange(H)
+
+        knot_noise = self.rng.normal(
+            0, mppi_cfg.noise_sigma, (N, self.pc.n_spline_points, self.nu)
+        ).astype(np.float32)
+        
+        static_eps_np = np.empty((N, H, self.nu), dtype=np.float32)
+        for n in range(N):
+            for j in range(self.nu):
+                static_eps_np[n, :, j] = CubicSpline(t_knots, knot_noise[n, :, j])(t_dense)
+        self._static_eps_np = static_eps_np
+        self._static_eps_wp = wp.array(static_eps_np, dtype=wp.float32, device="cuda")
+
         # Handle potential tuple from cost_fn_wp
         if isinstance(cost_fn, tuple):
             self.cost_fn_wp_func, self.goal_wp, self.indices_wp = cost_fn
@@ -272,27 +293,15 @@ class MPPIController:
         lam   = self.pc.temperature
         sigma = self.pc.noise_sigma
 
-        t_knots  = np.linspace(0, H - 1, self.pc.n_spline_points)
-        t_dense  = np.arange(H)
-
         for iteration in range(self.pc.n_iterations):
-
             # ----------------------------------------------------------
-            # 1. Sample spline-smoothed noise (CPU)
+            # 1. Use pre-sampled static spline-smoothed noise
             # ----------------------------------------------------------
-            knot_noise = self.rng.normal(
-                0, sigma, (N, self.pc.n_spline_points, self.nu)
-            ).astype(np.float32)
-
-            eps = np.empty((N, H, self.nu), dtype=np.float32)
-            for n in range(N):
-                for j in range(self.nu):
-                    eps[n, :, j] = CubicSpline(t_knots, knot_noise[n, :, j])(t_dense)
-
-            # ----------------------------------------------------------
-            # 2. Build V = U_mean + eps, clipped — fully on GPU
-            # ----------------------------------------------------------
-            eps_wp = wp.array(eps, dtype=wp.float32, device="cuda")
+            # Note: The noise (self._static_eps_np / _static_eps_wp) is sampled
+            # once during initialization and reused here. This deviates from
+            # standard MPPI behavior which re-samples noise at each planning step.
+            eps_np = self._static_eps_np
+            eps_wp = self._static_eps_wp
 
             wp.launch(
                 _add_noise_and_clip_kernel,
@@ -326,7 +335,7 @@ class MPPIController:
             eta  = w.sum() + 1e-8
             w   /= eta
 
-            dU = np.einsum("n,nht->ht", w, eps)   # (H, nu)
+            dU = np.einsum("n,nht->ht", w, eps_np)   # (H, nu)
             low, high = self.pc.delta_range
             new_U = (self.U_wp.numpy() + dU).clip(low, high)
             self.U_wp.assign(new_U.astype(np.float32))
