@@ -85,6 +85,7 @@ def _make_accumulate_kernel(cost_fn_wp: wp.func):
     it from self), the compiler can see the concrete function object in the
     enclosing scope and link the call correctly.
     """
+    # In mppi.py -> _make_accumulate_kernel()
     @wp.kernel
     def _kernel(
         qpos:      wp.array2d(dtype=float),
@@ -93,10 +94,15 @@ def _make_accumulate_kernel(cost_fn_wp: wp.func):
         terminal:  bool,
         goal:      wp.array(dtype=float),
         indices:   wp.array(dtype=int),
-        costs_out: wp.array(dtype=float),   # (N,)  [in/out]
+        xpos:      wp.array2d(dtype=wp.vec3),
+        xquat:     wp.array2d(dtype=wp.quat),
+        costs_out: wp.array(dtype=float),
     ):
         w = wp.tid()
-        costs_out[w] += cost_fn_wp(qpos[w], qvel[w], ctrl[w], terminal, goal, indices)
+        # Calculate current step cost
+        c = cost_fn_wp(qpos[w], qvel[w], ctrl[w], terminal, goal, indices, xpos[w], xquat[w])
+        # Explicitly add to the global total for this world
+        costs_out[w] = costs_out[w] + c
 
     return _kernel
 
@@ -264,7 +270,7 @@ class MPPIController:
             wp.launch(
                 self._accumulate_costs_kernel,
                 dim=N,
-                inputs=[self.d.qpos, self.d.qvel, self.d.ctrl, terminal, self.goal_wp, self.indices_wp],
+                inputs=[self.d.qpos, self.d.qvel, self.d.ctrl, terminal, self.goal_wp, self.indices_wp, self.d.xpos, self.d.xquat],
                 outputs=[self.costs_wp],
             )
 
