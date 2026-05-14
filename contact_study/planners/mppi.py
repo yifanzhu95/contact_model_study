@@ -85,8 +85,8 @@ def _make_accumulate_kernel(cost_fn_wp: wp.func):
         terminal:  bool,
         goal:      wp.array(dtype=float),
         indices:   wp.array(dtype=int),
-        xpos:      wp.array3d(dtype=wp.vec3), # New
-        xquat:     wp.array3d(dtype=wp.quat), # New
+        xpos:      wp.array2d(dtype=wp.vec3), # New
+        xquat:     wp.array2d(dtype=wp.quat), # New
         costs_out: wp.array(dtype=float),
     ):
         w = wp.tid()
