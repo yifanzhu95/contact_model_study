@@ -42,6 +42,7 @@ class MPPIConfig:
     n_spline_points: int   = 3      # control points for spline-smoothed noise
     njmax:           int   = 500
     debug:           bool  = True
+    delta_range:     tuple[float, float] = (-0.1, 0.1)
 
 
 # ---------------------------------------------------------------------------
@@ -171,12 +172,16 @@ class MPPIController:
         self.costs_wp = wp.zeros(N, dtype=wp.float32, device="cuda")
 
         # Actuator limits
+        delta_low, delta_high = mppi_cfg.delta_range
+        delta_range_np = np.empty((self.nu, 2), dtype=np.float32)
+        delta_range_np[:, 0] = delta_low
+        delta_range_np[:, 1] = delta_high
+
         self._ctrl_range_wp = wp.array(
-            mjm.actuator_ctrlrange, dtype=wp.float32, device="cuda"
+            delta_range_np, dtype=wp.float32, device="cuda"
         )
-        self._has_limits_wp = wp.array(
-            mjm.actuator_ctrllimited.astype(bool), dtype=wp.bool, device="cuda"
-        )
+        # Always enable clipping for deltas in incremental mode
+        self._has_limits_wp = wp.array(np.ones(self.nu, dtype=bool), dtype=wp.bool, device="cuda")
 
         # ---- Batched physics model ---------------------------------------
         self.m = api.put_model(mjm, cfg)
@@ -322,7 +327,9 @@ class MPPIController:
             w   /= eta
 
             dU = np.einsum("n,nht->ht", w, eps)   # (H, nu)
-            self.U_wp.assign((self.U_wp.numpy() + dU).astype(np.float32))
+            low, high = self.pc.delta_range
+            new_U = (self.U_wp.numpy() + dU).clip(low, high)
+            self.U_wp.assign(new_U.astype(np.float32))
 
             if self.pc.debug:
                 print(
@@ -358,5 +365,8 @@ class MPPIController:
         )
         self.d.qvel.assign(
             np.tile(mjd.qvel, (self.pc.n_samples, 1)).astype(np.float32)
+        )
+        self.d.ctrl.assign(
+            np.tile(mjd.ctrl, (self.pc.n_samples, 1)).astype(np.float32)
         )
         #print(self.d.qpos)
