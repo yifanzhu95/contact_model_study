@@ -227,7 +227,7 @@ def run(
     mppi_cfg = MPPIConfig(
         n_samples  = n_samples,
         horizon    = horizon,
-        temperature = 0.01,
+        temperature = 0.001,
         noise_sigma = 0.02,
         warm_start = True,
         debug = debug

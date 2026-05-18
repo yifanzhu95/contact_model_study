@@ -22,10 +22,10 @@ from .base import BaseTask, ContactComplexity, TaskSpec, register
 
 # Predefined home position for the manipulator joints (e.g., 16 joints for Allegro Hand)
 MANIPULATOR_HOME_STATE = np.array([
-    0.765751, -0.568012, 0.916951, 0.573897,
-    -0.0191225, -0.0837503, 0.709056, 1.01884,
-    0.830768, 0.610365, 0.929305, 0.610097,
-    1.09912, 1.44581, 1.33179, 0.192794
+    0.127, 0.5, 1.5, 1.0,  # Index
+    0.0, 0.3, 1.42, 1.0,  # Middle
+    -0.127, 0.5, 1.5, 1.0,  # Ring
+    0.25, 1.5, 1.7, 1.0   # Thumb
 ], dtype=np.float32)
 
 # ---------------------------------------------------------------------------
@@ -104,13 +104,13 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
     pos_diff = p_obj - p_target
     c_pos = wp.dot(pos_diff, pos_diff)
 
-    # 3. Joint deviation (Using 'dq' to avoid 'diff' type clash)
+    # 3. Joint deviation 
     c_joint = float(0.0) 
     for i in range(n_manip):
         dq = qpos[robot_qpos_adr + i] - goal[7 + i]
         c_joint = c_joint + dq * dq
 
-    # 4. Contact cost (Using 'dp' to avoid 'diff' type clash)
+    # 4. Contact cost
     c_contact = float(0.0)
     for i in range(5, 9):
         p_tip = xpos[indices[i]]
@@ -119,12 +119,12 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
 
     #5 
     fallen = float(0.0)
-    if qpos[obj_qpos_adr] < 0.05:
+    if qpos[obj_qpos_adr] < 0.04:
         fallen = 1.0
 
-    cost = (0.1 * c_quat) + (0.1 * c_pos) + (1.0 * c_contact) + (0.5 * c_joint) + 1.0*fallen
+    cost = (0.1 * c_quat) + (0.05 * c_pos) + (1.0 * c_contact) + (1.0 * c_joint) + 50.0*fallen
     if terminal:
-        cost = (10.0 * c_quat) + (10.0 * c_pos)
+        cost = (10.0 * c_quat) + (5.0 * c_pos)
     return cost
 
 @wp.func

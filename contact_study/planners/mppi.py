@@ -150,6 +150,8 @@ class MPPIController:
             for j in range(self.nu):
                 static_eps_np[n, :, j] = CubicSpline(t_knots, knot_noise[n, :, j])(t_dense)
         self._static_eps_np = static_eps_np
+        
+        self._static_eps_np = self.rng.normal(loc=0.0, scale=mppi_cfg.noise_sigma, size=static_eps_np.shape)
         self._static_eps_wp = wp.array(static_eps_np, dtype=wp.float32, device="cuda")
 
         # Handle potential tuple from cost_fn_wp
@@ -333,11 +335,10 @@ class MPPIController:
             eta  = w.sum() + 1e-8
             w   /= eta
 
-            if eta > 100:
-                lam = 0.01*lam
-            elif eta < 2:
-                lam = 10*lam
-
+            if eta > 10.0:
+                self.pc.temperature = 0.9*self.pc.temperature
+            elif eta < 5.0:
+                self.pc.temperature = 1.1*self.pc.temperature
 
             low, high = self.pc.delta_range
             dU = np.einsum("n,nht->ht", w, eps_np).clip(low, high)   # (H, nu)
@@ -348,7 +349,8 @@ class MPPIController:
                 print(
                     f"avg cost: {costs_np.mean():.4f} +/- {costs_np.std():.4f} "
                     f"min cost: {beta:.4f}  "
-                    f"eta: {eta:.4f}"
+                    f"eta: {eta:.4f} "
+                    f"lam: {lam:.6f}"
                 )
 
         # ------------------------------------------------------------------

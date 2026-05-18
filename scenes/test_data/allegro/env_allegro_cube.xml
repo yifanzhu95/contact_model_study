@@ -2,7 +2,7 @@
   <include file="allegro_right_hand.xml"/>
 
   <statistic center="0 0 0" extent="0.3"/>
-  <option ccd_iterations="2000" timestep="0.001" />
+  <option ccd_iterations="2000" timestep="0.001" gravity="4.91 0  -8.50"/>
 
   <visual>
     <rgba haze="0.15 0.25 0.35 1"/>
@@ -47,9 +47,5 @@
     ctrl="0.3854 1.19462 1.44538 0.280375 0 0.22841 1.15351 0.142 -0.3854 1.40231 1.00287 1.23055 1.0561 1.09704 0.81915 1.38042"
     />
   </keyframe>
-
-  <contact>
-    <exclude body1="obj" body2="floor"/>
-  </contact>
 
 </mujoco>
