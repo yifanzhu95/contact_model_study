@@ -162,68 +162,22 @@ def run(
         print(f"  budget    : {budget_seconds*1e3:.1f} ms")
     print(f"{'='*60}")
 
-    # ------------------------------------------------------------------
-    # Load task / model
-    # ------------------------------------------------------------------
-    task      = None
-    cost_fn   = None
-    max_steps = 200
-
-    if task_name is not None:
-        task = get_task(task_name, geometry=geo)
-        if xml_path is not None:
-            mjm, _ = task.load(xml_path)
-        else:
-            mjm, _ = task.load()
-        mjm     = apply_physics_noise(mjm, noise, rng)
-        task._mjm = mjm
-        #cost_fn   = task.cost_fn
-        max_steps = task.spec.max_steps
+    task = get_task(task_name, geometry=geo)
+    if xml_path is not None:
+        mjm, _ = task.load(xml_path)
     else:
-        # Raw XML path — no registered task
-        assert xml_path is not None, "Provide --task or --xml."
-        mjm = mujoco.MjSpec.from_file(xml_path).compile()
-        mjm = apply_physics_noise(mjm, noise, rng)
+        mjm, _ = task.load()
+    mjm     = apply_physics_noise(mjm, noise, rng)
+    task._mjm = mjm
+    max_steps = task.spec.max_steps
 
-    # if xml_path is not None and task_name is not None:
-    #     # User supplied an override XML — reload geometry from that file
-    #     mjm = mujoco.MjSpec.from_file(xml_path).compile()
-    #     mjm = apply_physics_noise(mjm, noise, rng)
-    #     if task is not None:
-    #         task._mjm = mjm
-
-    # Fallback cost if no task
-    mjd_ref   = mujoco.MjData(mjm)
-    if mjm.nkey > 0:
-        key = mjm.key(0)
-        mjd_ref.qpos[:] = key.qpos
-        mjd_ref.qvel[:] = key.qvel
-        mjd_ref.ctrl[:] = key.ctrl
-    ref_qpos  = mjd_ref.qpos.copy()
-    # ref_qpos_wp = wp.array(ref_qpos, dtype=wp.float32, device="cuda")
-
-    cost_fn_wp = None
-    goal_wp = None
-    idx_wp = None
-
-    if task is not None:
-        # Use the GPU-accelerated cost function defined in the task
-        cost_fn_wp, goal_wp, idx_wp = task.cost_fn_wp
-    else:
-        # Pass the wp.func directly, no lambdas!
-        cost_fn_wp = _fallback_cost_func
-        goal_wp = wp.zeros(1, dtype=wp.float32, device="cuda")
-        idx_wp = wp.zeros(1, dtype=wp.int32, device="cuda")
+    cost_fn_wp, goal_wp, idx_wp, weights_wp = task.cost_fn_wp
 
     print(f"  nq={mjm.nq}  nv={mjm.nv}  nu={mjm.nu}  max_steps={max_steps}")
     print(f"  integrator      = {mjm.opt.integrator}")
     print(f"  dof_damping     : min={mjm.dof_damping.min():.2e}  "
           f"max={mjm.dof_damping.max():.2e}")
 
-    # ------------------------------------------------------------------
-    # MPPI config (shared across episodes; controller is re-built per
-    # episode so warm-start state doesn't carry over between runs)
-    # ------------------------------------------------------------------
     mppi_cfg = MPPIConfig(
         n_samples  = n_samples,
         horizon    = horizon,
@@ -254,22 +208,18 @@ def run(
 
     try:
         for ep in range(n_episodes):
-            # Fresh controller each episode (prevents stale warm-start)
-            if task is not None:
-                q0, v0, u0 = task.sample_initial_state(rng)
-            else:
-                q0 = ref_qpos.copy()
-                v0 = np.zeros(mjm.nv)
-                u0 = None
+            
+            q0, v0, u0 = task.sample_initial_state(rng)
 
             controller = MPPIController(
-                mjm      = mjm,
-                cfg      = cfg,
-                mppi_cfg = mppi_cfg,
-                cost_fn  = cost_fn_wp,
-                goals_wp = goal_wp,
-                idx_wp   = idx_wp,
-                rng      = rng,
+                mjm       = mjm,
+                cfg       = cfg,
+                mppi_cfg  = mppi_cfg,
+                cost_fn   = cost_fn_wp,
+                goals_wp  = goal_wp,
+                idx_wp    = idx_wp,
+                weights_wp= weights_wp,
+                rng       = rng,
                 initial_ctrl_sequence = u0,
             )
 
@@ -277,8 +227,7 @@ def run(
 
             mjd.qpos[:] = q0
             mjd.qvel[:] = v0
-            if u0 is not None:
-                mjd.ctrl[:] = u0
+            mjd.ctrl[:] = u0
             mujoco.mj_forward(mjm, mjd)
 
             # Allow model to settle (e.g., objects falling to rest)

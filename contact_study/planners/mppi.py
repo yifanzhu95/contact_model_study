@@ -154,7 +154,7 @@ class MPPIController:
                 static_eps_np[n, :, j] = CubicSpline(t_knots, knot_noise[n, :, j])(t_dense)
         self._static_eps_np = static_eps_np
 
-        #self._static_eps_np = self.rng.normal(loc=0.0, scale=mppi_cfg.noise_sigma, size=static_eps_np.shape)
+        self._static_eps_np = self.rng.normal(loc=0.0, scale=mppi_cfg.noise_sigma, size=static_eps_np.shape)
         self._static_eps_wp = wp.array(static_eps_np, dtype=wp.float32, device="cuda")
 
         # Handle potential tuple from cost_fn_wp
@@ -320,8 +320,6 @@ class MPPIController:
             # ----------------------------------------------------------
             wp.synchronize()
             costs_np = self.costs_wp.numpy()
-
-            #print(self.d.qpos)
 
             # ----------------------------------------------------------
             # 6. MPPI weight update (CPU)

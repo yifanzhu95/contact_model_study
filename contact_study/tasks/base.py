@@ -39,6 +39,7 @@ class TaskSpec:
     xml_path_template: str    # format string with {geometry} placeholder
     max_steps:         int
     success_threshold: float  # task-specific (e.g., position error in meters)
+    cost_weights:      dict
 
 
 class BaseTask(abc.ABC):
