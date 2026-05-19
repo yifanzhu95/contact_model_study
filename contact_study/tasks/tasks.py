@@ -119,12 +119,12 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
 
     #5 
     fallen = float(0.0)
-    if qpos[obj_qpos_adr] < 0.04:
+    if qpos[obj_qpos_adr + 2] < 0.05:
         fallen = 1.0
 
-    cost = (0.1 * c_quat) + (0.05 * c_pos) + (1.0 * c_contact) + (1.0 * c_joint) + 50.0*fallen
+    cost = (1.0 * c_quat) + (0.5 * c_pos) + (0.10 * c_contact) + (0.10 * c_joint) + 10.0*fallen
     if terminal:
-        cost = (10.0 * c_quat) + (5.0 * c_pos)
+        cost = (10.0 * c_quat) + (5.0 * c_pos) + 20.0*fallen
     return cost
 
 @wp.func
@@ -302,60 +302,6 @@ class GraspReorientTask(BaseTask):
             ctrl0[:n_manip] = MANIPULATOR_HOME_STATE
 
         return q0, v0, ctrl0
-
-    def cost_fn(self, qpos, qvel, ctrl, terminal: bool, xpos, xquat) -> np.ndarray:
-        """Weighted sum of position error + orientation error + velocity penalty + contact cost."""
-        qpos_np = np.asarray(qpos.numpy() if hasattr(qpos, "numpy") else qpos)
-        qvel_np = np.asarray(qvel.numpy() if hasattr(qvel, "numpy") else qvel)
-        xpos_np = np.asarray(xpos.numpy() if hasattr(xpos, "numpy") else xpos)
-        xquat_np = np.asarray(xquat.numpy() if hasattr(xquat, "numpy") else xquat)
-        
-        nworld = qpos_np.shape[0] if qpos_np.ndim == 2 else 1
-        mjm = self.mjm
-        
-        obj_jnt   = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "obj_freejoint")
-        target_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
-
-        # IDs unpacked from index_vector mapping
-        obj_id  = self.index_vector[4]
-        tip_ids = self.index_vector[5:9]
-
-        if obj_jnt < 0 or target_id < 0:
-            return np.zeros(nworld, dtype=np.float32)
-
-        target_pos = mjm.site_pos[target_id]
-        target_quat = mjm.site_quat[target_id]
-
-        # Ensure correct batch indexing for xpos and xquat shapes
-        obj_pos = xpos_np[:, obj_id] if xpos_np.ndim == 3 else xpos_np[obj_id]
-        obj_quat_val = xquat_np[:, obj_id] if xquat_np.ndim == 3 else xquat_np[obj_id]
-
-        # 1. Position error
-        pos_err = np.linalg.norm(obj_pos - target_pos, axis=-1)
-
-        # 2. Orientation error
-        if xquat_np.ndim == 3:
-            dot_prod = np.sum(obj_quat_val * target_quat, axis=-1)
-        else:
-            dot_prod = np.dot(obj_quat_val, target_quat)
-        quat_err = 1.0 - dot_prod**2
-
-        # 3. Velocity error
-        v_adr = mjm.jnt_dofadr[obj_jnt]
-        obj_vel = qvel_np[:, v_adr:v_adr+3] if qvel_np.ndim == 2 else qvel_np[v_adr:v_adr+3]
-        vel_err = np.linalg.norm(obj_vel, axis=-1)
-
-        # 4. Contact cost
-        contact_cost = np.zeros(nworld, dtype=np.float32)
-        for tip_id in tip_ids:
-            tip_pos = xpos_np[:, tip_id] if xpos_np.ndim == 3 else xpos_np[tip_id]
-            contact_cost += np.sum((obj_pos - tip_pos)**2, axis=-1)
-
-        cost = (pos_err + 1.5 * quat_err + 0.1 * vel_err + 5.0 * contact_cost).astype(np.float32)
-        
-        if terminal:
-            cost *= 20.0
-        return cost
 
     @property
     def cost_fn_wp(self) -> tuple[wp.func, wp.array, wp.array]:

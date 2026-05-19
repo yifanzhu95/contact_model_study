@@ -42,7 +42,7 @@ class MPPIConfig:
     n_spline_points: int   = 5      # control points for spline-smoothed noise
     njmax:           int   = 500
     debug:           bool  = True
-    delta_range:     tuple[float, float] = (-0.1, 0.1)
+    delta_range:     tuple[float, float] = (-0.01, 0.01)
 
 
 # ---------------------------------------------------------------------------
@@ -150,8 +150,8 @@ class MPPIController:
             for j in range(self.nu):
                 static_eps_np[n, :, j] = CubicSpline(t_knots, knot_noise[n, :, j])(t_dense)
         self._static_eps_np = static_eps_np
-        
-        self._static_eps_np = self.rng.normal(loc=0.0, scale=mppi_cfg.noise_sigma, size=static_eps_np.shape)
+
+        #self._static_eps_np = self.rng.normal(loc=0.0, scale=mppi_cfg.noise_sigma, size=static_eps_np.shape)
         self._static_eps_wp = wp.array(static_eps_np, dtype=wp.float32, device="cuda")
 
         # Handle potential tuple from cost_fn_wp

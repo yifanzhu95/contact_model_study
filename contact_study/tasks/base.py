@@ -96,19 +96,6 @@ class BaseTask(abc.ABC):
         """Return (qpos, qvel, ctrl) for a random initial state."""
         ...
 
-    @abc.abstractmethod
-    def cost_fn(
-        self,
-        qpos,     # Warp array (nworld, nq)
-        qvel,     # Warp array (nworld, nv)
-        ctrl,     # Warp array (nworld, nu)
-        terminal: bool,
-        goal: np.ndarray,
-        indices: np.ndarray,
-    ) -> np.ndarray:
-        """Return (nworld,) cost array. Called inside the MPC rollout."""
-        ...
-
     @property
     @abc.abstractmethod
     def cost_fn_wp(self) -> tuple[wp.func, wp.array, wp.array]:
