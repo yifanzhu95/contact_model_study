@@ -74,59 +74,6 @@ def push_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl:
         return dist * 10.0
     return dist
 
-
-@wp.func
-def grasp_reorient_cost_wp(qpos: wp.array(dtype=float), 
-                           qvel: wp.array(dtype=float), 
-                           ctrl: wp.array(dtype=float), 
-                           terminal: bool, 
-                           goal: wp.array(dtype=float), 
-                           indices: wp.array(dtype=int),
-                           xpos: wp.array(dtype=wp.vec3),   
-                           xquat: wp.array(dtype=wp.quat)) -> float:
-    # Index Mapping MUST match initialize_task
-    obj_qpos_adr   = indices[0]
-    robot_qpos_adr = indices[2]
-    n_manip        = indices[3]
-    obj_id         = indices[4]
-
-    p_obj = xpos[obj_id]
-    q_obj = xquat[obj_id] 
-    p_target = wp.vec3(goal[0], goal[1], goal[2])
-    q_target = wp.vec4(goal[3], goal[4], goal[5], goal[6])
-    q_obj_v4 = wp.vec4(q_obj.w, q_obj.x, q_obj.y, q_obj.z)
-
-    # 1. Orientation error
-    dot_prod = wp.dot(q_target, q_obj_v4)
-    c_quat = 1.0 - dot_prod * dot_prod
-
-    # 2. Position error
-    pos_diff = p_obj - p_target
-    c_pos = wp.dot(pos_diff, pos_diff)
-
-    # 3. Joint deviation 
-    c_joint = float(0.0) 
-    for i in range(n_manip):
-        dq = qpos[robot_qpos_adr + i] - goal[7 + i]
-        c_joint = c_joint + dq * dq
-
-    # 4. Contact cost
-    c_contact = float(0.0)
-    for i in range(5, 9):
-        p_tip = xpos[indices[i]]
-        dp = p_obj - p_tip
-        c_contact = c_contact + wp.dot(dp, dp)
-
-    #5 
-    fallen = float(0.0)
-    if qpos[obj_qpos_adr + 2] < 0.05:
-        fallen = 1.0
-
-    cost = (1.0 * c_quat) + (0.5 * c_pos) + (0.10 * c_contact) + (0.10 * c_joint) + 10.0*fallen
-    if terminal:
-        cost = (10.0 * c_quat) + (5.0 * c_pos) + 20.0*fallen
-    return cost
-
 @wp.func
 def peg_in_hole_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float), 
                         terminal: bool, goal: wp.array(dtype=float), indices: wp.array(dtype=int)) -> float:
@@ -235,6 +182,58 @@ class PushTask(BaseTask):
 # ---------------------------------------------------------------------------
 # Task 2: Grasp and Reorient (MEDIUM complexity)
 # ---------------------------------------------------------------------------
+
+@wp.func
+def grasp_reorient_cost_wp(qpos: wp.array(dtype=float), 
+                           qvel: wp.array(dtype=float), 
+                           ctrl: wp.array(dtype=float), 
+                           terminal: bool, 
+                           goal: wp.array(dtype=float), 
+                           indices: wp.array(dtype=int),
+                           xpos: wp.array(dtype=wp.vec3),   
+                           xquat: wp.array(dtype=wp.quat)) -> float:
+    # Index Mapping MUST match initialize_task
+    obj_qpos_adr   = indices[0]
+    robot_qpos_adr = indices[2]
+    n_manip        = indices[3]
+    obj_id         = indices[4]
+
+    p_obj = xpos[obj_id]
+    q_obj = xquat[obj_id] 
+    p_target = wp.vec3(goal[0], goal[1], goal[2])
+    q_target = wp.vec4(goal[3], goal[4], goal[5], goal[6])
+    q_obj_v4 = wp.vec4(q_obj.w, q_obj.x, q_obj.y, q_obj.z)
+
+    # 1. Orientation error
+    dot_prod = wp.dot(q_target, q_obj_v4)
+    c_quat = 1.0 - dot_prod * dot_prod
+
+    # 2. Position error
+    pos_diff = p_obj - p_target
+    c_pos = wp.dot(pos_diff, pos_diff)
+
+    # 3. Joint deviation 
+    c_joint = float(0.0) 
+    for i in range(n_manip):
+        dq = qpos[robot_qpos_adr + i] - goal[7 + i]
+        c_joint = c_joint + dq * dq
+
+    # 4. Contact cost
+    c_contact = float(0.0)
+    for i in range(5, 9):
+        p_tip = xpos[indices[i]]
+        dp = p_obj - p_tip
+        c_contact = c_contact + wp.dot(dp, dp)
+
+    #5 
+    fallen = float(0.0)
+    if qpos[obj_qpos_adr + 2] < 0.05:
+        fallen = 1.0
+
+    cost = (1.0 * c_quat) + (0.5 * c_pos) + (0.10 * c_contact) + (0.10 * c_joint) + 10.0*fallen
+    if terminal:
+        cost = (10.0 * c_quat) + (5.0 * c_pos) + 20.0*fallen
+    return cost
 
 @register("grasp_reorient")
 class GraspReorientTask(BaseTask):
