@@ -39,6 +39,7 @@ class MPPIConfig:
     n_iterations:    int   = 1      # number of MPPI update iterations per call
     warm_start:      bool  = True   # shift action sequence one step forward
     nconmax:         int   = 200
+    use_spline_noise: bool = True   # toggle between spline and Gaussian noise
     n_spline_points: int   = 5      # control points for spline-smoothed noise
     njmax:           int   = 500
     debug:           bool  = True
@@ -137,24 +138,26 @@ class MPPIController:
         self.nq = mjm.nq
         self.nv = mjm.nv
 
-        # --- Pre-sample static spline noise (sampled once, reused every plan call) ---
-        N, H, nu = mppi_cfg.n_samples, mppi_cfg.horizon, mjm.nu
+        # --- Pre-sample static noise (sampled once, reused every plan call) ---
+        N, H, nu = mppi_cfg.n_samples, mppi_cfg.horizon, self.nu
 
+        if mppi_cfg.use_spline_noise:
+            t_knots  = np.linspace(0, H - 1, mppi_cfg.n_spline_points)
+            t_dense  = np.arange(H)
+            knot_noise = self.rng.normal(
+                0, mppi_cfg.noise_sigma, (N, mppi_cfg.n_spline_points, nu)
+            ).astype(np.float32)
+            
+            static_eps_np = np.empty((N, H, nu), dtype=np.float32)
+            for n in range(N):
+                for j in range(nu):
+                    static_eps_np[n, :, j] = CubicSpline(t_knots, knot_noise[n, :, j])(t_dense)
+        else:
+            static_eps_np = self.rng.normal(
+                loc=0.0, scale=mppi_cfg.noise_sigma, size=(N, H, nu)
+            ).astype(np.float32)
 
-        t_knots  = np.linspace(0, H - 1, self.pc.n_spline_points)
-        t_dense  = np.arange(H)
-
-        knot_noise = self.rng.normal(
-            0, mppi_cfg.noise_sigma, (N, self.pc.n_spline_points, self.nu)
-        ).astype(np.float32)
-        
-        static_eps_np = np.empty((N, H, self.nu), dtype=np.float32)
-        for n in range(N):
-            for j in range(self.nu):
-                static_eps_np[n, :, j] = CubicSpline(t_knots, knot_noise[n, :, j])(t_dense)
         self._static_eps_np = static_eps_np
-
-        self._static_eps_np = self.rng.normal(loc=0.0, scale=mppi_cfg.noise_sigma, size=static_eps_np.shape)
         self._static_eps_wp = wp.array(static_eps_np, dtype=wp.float32, device="cuda")
 
         # Handle potential tuple from cost_fn_wp
@@ -286,7 +289,7 @@ class MPPIController:
 
         for iteration in range(self.pc.n_iterations):
             # ----------------------------------------------------------
-            # 1. Use pre-sampled static spline-smoothed noise
+            # 1. Use pre-sampled static noise
             # ----------------------------------------------------------
             # Note: The noise (self._static_eps_np / _static_eps_wp) is sampled
             # once during initialization and reused here. This deviates from
