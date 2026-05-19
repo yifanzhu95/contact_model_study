@@ -290,15 +290,21 @@ class GraspReorientTask(BaseTask):
 
     def sample_initial_state(self, rng: np.random.Generator):
         mjm = self.mjm
-        q0  = mjm.qpos0.copy()
-        v0  = np.zeros(mjm.nv, dtype=np.float32)
-        ctrl0 = np.zeros(mjm.nu, dtype=np.float32)
+        if mjm.nkey > 0:
+            # Use the first keyframe defined in the XML (e.g., key0)
+            q0 = mjm.key_qpos[0].copy()
+            v0 = mjm.key_qvel[0].copy()
+            ctrl0 = mjm.key_ctrl[0].copy()
+        else:
+            q0 = mjm.qpos0.copy()
+            v0 = np.zeros(mjm.nv, dtype=np.float32)
+            ctrl0 = np.zeros(mjm.nu, dtype=np.float32)
 
-        n_manip = len(MANIPULATOR_HOME_STATE)
-        if mjm.nq >= n_manip:
-            q0[:n_manip] = MANIPULATOR_HOME_STATE
-        if mjm.nu >= n_manip:
-            ctrl0[:n_manip] = MANIPULATOR_HOME_STATE
+            n_manip = len(MANIPULATOR_HOME_STATE)
+            if mjm.nq >= n_manip:
+                q0[:n_manip] = MANIPULATOR_HOME_STATE
+            if mjm.nu >= n_manip:
+                ctrl0[:n_manip] = MANIPULATOR_HOME_STATE
 
         return q0, v0, ctrl0
 
