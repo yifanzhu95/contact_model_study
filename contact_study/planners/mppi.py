@@ -85,14 +85,14 @@ def _make_accumulate_kernel(cost_fn_wp: wp.func):
         terminal:  bool,
         goal:      wp.array(dtype=float),
         indices:   wp.array(dtype=int),
-        xpos:      wp.array2d(dtype=wp.vec3), # New
-        xquat:     wp.array2d(dtype=wp.quat), # New
+        xpos:      wp.array2d(dtype=wp.vec3),
+        xquat:     wp.array2d(dtype=wp.quat),
+        weights:   wp.array(dtype=float),
         costs_out: wp.array(dtype=float),
     ):
         w = wp.tid()
-        # Pass xpos[w] and xquat[w] to the specific world's cost calculation
         costs_out[w] += cost_fn_wp(
-            qpos[w], qvel[w], ctrl[w], terminal, goal, indices, xpos[w], xquat[w]
+            qpos[w], qvel[w], ctrl[w], terminal, goal, indices, xpos[w], xquat[w], weights
         )
     return _kernel
 
@@ -124,6 +124,7 @@ class MPPIController:
         cost_fn:  wp.func,
         goals_wp: wp.array,
         idx_wp:   wp.array,
+        weights_wp: wp.array,
         rng:      np.random.Generator | None = None,
         initial_ctrl_sequence: np.ndarray | None = None,
     ):
@@ -160,6 +161,7 @@ class MPPIController:
         self.cost_fn_wp_func = cost_fn
         self.goal_wp = goals_wp
         self.indices_wp = idx_wp
+        self.weights_wp = weights_wp
 
         # Build the cost-accumulation kernel with this task's cost function
         # baked in at compile time (see factory docstring above).
@@ -251,7 +253,8 @@ class MPPIController:
                 inputs=[
                     self.d.qpos, self.d.qvel, self.d.ctrl, 
                     terminal, self.goal_wp, self.indices_wp,
-                    self.d.xpos, self.d.xquat  # Add these two
+                    self.d.xpos, self.d.xquat,
+                    self.weights_wp
                 ],
                 outputs=[self.costs_wp],
             )

@@ -21,28 +21,6 @@ from .base import BaseTask, ContactComplexity, TaskSpec, register
 # ---------------------------------------------------------------------------
 
 # Predefined home position for the manipulator joints (e.g., 16 joints for Allegro Hand)
-# ---------------------------------------------------------------------------
-# GraspReorient cost weights (paper Eq. 15)
-# Tune ω_k and (ε1, ε2) based on object mass and geometry.
-# ---------------------------------------------------------------------------
-
-# Running-cost weights
-GRASP_W_QUAT    = 1.5    # ω1 — orientation error  c_quat = 1 − (q_target·q_obj)²
-GRASP_W_PX      = 1.0    # ω2 — absolute x-position error
-GRASP_W_PY      = 1.0    # ω3 — absolute y-position error
-GRASP_W_PZ      = 1.0    # ω4 — absolute z-position error
-GRASP_W_CONTACT = 0.1    # ω5 — fingertip-to-object-center distance (single-env only)
-GRASP_W_JOINT   = 0.01   # ω6 — deviation of robot joints from home pose
-GRASP_W_FALLEN  = 100.0  # Ω  — large penalty when object is dropped
-
-# Terminal-cost weights
-GRASP_EPS1 = 10.0   # ε1 — ||p_obj − p_target||²
-GRASP_EPS2 = 10.0   # ε2 — (1 − (q_target·q_obj)²)
-
-# Drop-detection: object is considered fallen if its z-coordinate drops
-# below this threshold (the "box above the hand" lower boundary, in metres).
-GRASP_FALLEN_Z = 0.05
-
 # Fingertip site names for the Allegro hand (order: index, middle, ring, thumb)
 ALLEGRO_FINGERTIP_SITES = [
     "index_fingertip",
@@ -57,28 +35,32 @@ ALLEGRO_FINGERTIP_SITES = [
 
 @wp.func
 def push_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float), 
-                 terminal: bool, goal: wp.array(dtype=float), indices: wp.array(dtype=int)) -> float:
+                 terminal: bool, goal: wp.array(dtype=float), indices: wp.array(dtype=int),
+                 xpos: wp.array(dtype=wp.vec3), xquat: wp.array(dtype=wp.quat),
+                 weights: wp.array(dtype=float)) -> float:
     # indices[0]: Box qpos address
     adr = indices[0]
     dx = qpos[adr] - goal[0]
     dy = qpos[adr + 1] - goal[1]
     dist = wp.sqrt(dx*dx + dy*dy)
     if terminal:
-        return dist * 10.0
-    return dist
+        return dist * weights[1]
+    return dist * weights[0]
 
 @wp.func
 def peg_in_hole_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float), 
-                        terminal: bool, goal: wp.array(dtype=float), indices: wp.array(dtype=int)) -> float:
+                        terminal: bool, goal: wp.array(dtype=float), indices: wp.array(dtype=int),
+                        xpos: wp.array(dtype=wp.vec3), xquat: wp.array(dtype=wp.quat),
+                        weights: wp.array(dtype=float)) -> float:
     # indices[0]: Peg qpos address. goal: [target_z, target_x, target_y]
     adr = indices[0]
     z_err = wp.abs(qpos[adr + 2] - goal[0])
     dx = qpos[adr] - goal[1]
     dy = qpos[adr + 1] - goal[2]
     xy_err = wp.sqrt(dx*dx + dy*dy)
-    cost = z_err + 5.0 * xy_err
+    cost = weights[0] * z_err + weights[1] * xy_err
     if terminal:
-        return cost * 30.0
+        return cost * weights[2]
     return cost
 
 # ---------------------------------------------------------------------------
@@ -101,6 +83,7 @@ class PushTask(BaseTask):
             xml_path_template = "tasks/push_{geometry}.xml",
             max_steps         = 200,
             success_threshold = 0.02,  # 2 cm
+            cost_weights      = {"running": 1.0, "terminal": 10.0}
         )
 
     def initialize_task(self):
@@ -144,6 +127,9 @@ class PushTask(BaseTask):
         self.index_vector_wp = wp.array(self.index_vector, dtype=wp.int32, device="cuda")
         self.goal_vector_wp = wp.array(self.goal_vector, dtype=wp.float32, device="cuda")
 
+        w = self.spec.cost_weights
+        self.weights_wp = wp.array([w["running"], w["terminal"]], dtype=wp.float32, device="cuda")
+
     def sample_initial_state(self, rng: np.random.Generator):
         mjm = self.mjm
         if mjm.nkey > 0:
@@ -173,8 +159,8 @@ class PushTask(BaseTask):
         return cost
 
     @property
-    def cost_fn_wp(self) -> tuple[wp.func, wp.array, wp.array]:
-        return push_cost_wp, self.goal_vector_wp, self.index_vector_wp
+    def cost_fn_wp(self) -> tuple[wp.func, wp.array, wp.array, wp.array]:
+        return push_cost_wp, self.goal_vector_wp, self.index_vector_wp, self.weights_wp
 
     def is_success(self, mjd: mujoco.MjData) -> bool:
         box_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "box")
@@ -200,7 +186,8 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
                            goal: wp.array(dtype=float), 
                            indices: wp.array(dtype=int),
                            xpos: wp.array(dtype=wp.vec3),   
-                           xquat: wp.array(dtype=wp.quat)) -> float:
+                           xquat: wp.array(dtype=wp.quat),
+                           weights: wp.array(dtype=float)) -> float:
     # Index Mapping MUST match initialize_task
     obj_qpos_adr   = indices[0]
     robot_qpos_adr = indices[2]
@@ -239,9 +226,9 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
     if qpos[obj_qpos_adr + 2] < 0.05:
         fallen = 1.0
 
-    cost = (1.0 * c_quat) + (0.5 * c_pos) + (0.10 * c_contact) + (0.10 * c_joint) + 10.0*fallen
+    cost = (weights[0] * c_quat) + (weights[1] * c_pos) + (weights[2] * c_contact) + (weights[3] * c_joint) + weights[4]*fallen
     if terminal:
-        cost = (10.0 * c_quat) + (5.0 * c_pos) + 20.0*fallen
+        cost = (weights[5] * c_quat) + (weights[6] * c_pos) + weights[7]*fallen
     return cost
 
 @register("grasp_reorient")
@@ -260,6 +247,16 @@ class GraspReorientTask(BaseTask):
             xml_path_template = "scenes/test_data/allegro/allegro_right_hand_armature.xml",
             max_steps         = 1000,
             success_threshold = 0.05,  # combined pose error
+            cost_weights      = {
+                "w_quat": 1.0, 
+                "w_pos": 0.5, 
+                "w_contact": 0.1, 
+                "w_joint": 0.1, 
+                "w_fallen": 10.0,
+                "w_quat_term": 10.0, 
+                "w_pos_term": 5.0, 
+                "w_fallen_term": 20.0
+            }
         )
 
     def initialize_task(self):
@@ -307,6 +304,13 @@ class GraspReorientTask(BaseTask):
         self.index_vector_wp = wp.array(self.index_vector, dtype=wp.int32, device="cuda")
         self.goal_vector_wp = wp.array(self.goal_vector, dtype=wp.float32, device="cuda")
 
+        w = self.spec.cost_weights
+        weights_list = [
+            w["w_quat"], w["w_pos"], w["w_contact"], w["w_joint"], w["w_fallen"],
+            w["w_quat_term"], w["w_pos_term"], w["w_fallen_term"]
+        ]
+        self.weights_wp = wp.array(weights_list, dtype=wp.float32, device="cuda")
+
     def sample_initial_state(self, rng: np.random.Generator):
         mjm = self.mjm
         if mjm.nkey > 0:
@@ -320,8 +324,8 @@ class GraspReorientTask(BaseTask):
         return q0, v0, ctrl0
 
     @property
-    def cost_fn_wp(self) -> tuple[wp.func, wp.array, wp.array]:
-        return grasp_reorient_cost_wp, self.goal_vector_wp, self.index_vector_wp
+    def cost_fn_wp(self) -> tuple[wp.func, wp.array, wp.array, wp.array]:
+        return grasp_reorient_cost_wp, self.goal_vector_wp, self.index_vector_wp, self.weights_wp
 
     def is_success(self, mjd: mujoco.MjData) -> bool:
         mjm = self.mjm
@@ -357,6 +361,7 @@ class PegInHoleTask(BaseTask):
             xml_path_template = "tasks/peg_in_hole_{geometry}.xml",
             max_steps         = 400,
             success_threshold = 0.005,  # 5 mm insertion depth
+            cost_weights      = {"w_z": 1.0, "w_xy": 5.0, "w_term": 30.0}
         )
 
     def initialize_task(self):
@@ -369,6 +374,9 @@ class PegInHoleTask(BaseTask):
         
         self.index_vector_wp = wp.array(self.index_vector, dtype=wp.int32, device="cuda")
         self.goal_vector_wp = wp.array(self.goal_vector, dtype=wp.float32, device="cuda")
+
+        w = self.spec.cost_weights
+        self.weights_wp = wp.array([w["w_z"], w["w_xy"], w["w_term"]], dtype=wp.float32, device="cuda")
 
     def sample_initial_state(self, rng: np.random.Generator):
         mjm = self.mjm
@@ -396,8 +404,8 @@ class PegInHoleTask(BaseTask):
         return cost
 
     @property
-    def cost_fn_wp(self) -> tuple[wp.func, wp.array, wp.array]:
-        return peg_in_hole_cost_wp, self.goal_vector_wp, self.index_vector_wp
+    def cost_fn_wp(self) -> tuple[wp.func, wp.array, wp.array, wp.array]:
+        return peg_in_hole_cost_wp, self.goal_vector_wp, self.index_vector_wp, self.weights_wp
 
     def is_success(self, mjd: mujoco.MjData) -> bool:
         peg_id  = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "peg")
