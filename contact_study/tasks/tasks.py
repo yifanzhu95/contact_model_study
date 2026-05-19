@@ -21,13 +21,6 @@ from .base import BaseTask, ContactComplexity, TaskSpec, register
 # ---------------------------------------------------------------------------
 
 # Predefined home position for the manipulator joints (e.g., 16 joints for Allegro Hand)
-MANIPULATOR_HOME_STATE = np.array([
-    0.127, 0.5, 1.5, 1.0,  # Index
-    0.0, 0.3, 1.42, 1.0,  # Middle
-    -0.127, 0.5, 1.5, 1.0,  # Ring
-    0.25, 1.5, 1.7, 1.0   # Thumb
-], dtype=np.float32)
-
 # ---------------------------------------------------------------------------
 # GraspReorient cost weights (paper Eq. 15)
 # Tune ω_k and (ε1, ε2) based on object mass and geometry.
@@ -130,13 +123,22 @@ class PushTask(BaseTask):
             *tip_ids                  # 5-8: fingertip ids
         ], dtype=np.int32)
         
+        # Determine the reference posture (manipulator home state)
+        if mjm.nkey > 0:
+            # Use the robot part of the first keyframe for the posture reference
+            robot_start = self.index_vector[2]
+            n_manip = self.index_vector[3]
+            home_state = mjm.key_qpos[0, robot_start : robot_start + n_manip].copy()
+        else:
+            raise ValueError("No keyframe defined in the XML model. A keyframe is required to define the manipulator's home state.")
+
         # 2. Goal Vector Mapping
         target_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
         # goal stores: [pos(3), quat(4), q_ref(16)]
         self.goal_vector = np.concatenate([
             mjm.site_pos[target_id], 
             mjm.site_quat[target_id], 
-            MANIPULATOR_HOME_STATE
+            home_state
         ]).astype(np.float32)
         
         self.index_vector_wp = wp.array(self.index_vector, dtype=wp.int32, device="cuda")
@@ -144,13 +146,20 @@ class PushTask(BaseTask):
 
     def sample_initial_state(self, rng: np.random.Generator):
         mjm = self.mjm
-        q0  = mjm.qpos0.copy()
+        if mjm.nkey > 0:
+            # Use the first keyframe defined in the XML (e.g., key0)
+            q0 = mjm.key_qpos[0].copy()
+            v0 = mjm.key_qvel[0].copy()
+            ctrl0 = mjm.key_ctrl[0].copy()
+        else:
+            raise ValueError("No keyframe defined in the XML model. A keyframe is required for the initial state.")
+
         # Randomize box x,y position within ±0.1 m of nominal
         box_qpos_adr = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "box_freejoint")
         if box_qpos_adr >= 0:
             adr = mjm.jnt_qposadr[box_qpos_adr]
             q0[adr:adr+2] += rng.uniform(-0.1, 0.1, 2)
-        return q0, np.zeros(mjm.nv), None
+        return q0, v0, ctrl0
 
     def cost_fn(self, qpos, qvel, ctrl, terminal: bool, goal, indices) -> np.ndarray:
         """L2 distance of box position to target."""
@@ -280,9 +289,19 @@ class GraspReorientTask(BaseTask):
         target_pos = mjm.site_pos[target_id]
         target_quat = mjm.site_quat[target_id]
         
+        # Use keyframe for reference posture (home state) if available
+        if mjm.nkey > 0:
+            # Keyframe index 1 is used as goal if it exists, otherwise key0 for posture reference
+            key_idx = 1 if mjm.nkey > 1 else 0
+            robot_start = self.index_vector[2]
+            n_manip = self.index_vector[3]
+            home_state = mjm.key_qpos[key_idx, robot_start : robot_start + n_manip].copy()
+        else:
+            raise ValueError("No keyframe defined in the XML model. A keyframe is required to define the manipulator's home state.")
+
         # Concatenate pos (3), quat (4), and manipulator home pose (16)
         self.goal_vector = np.concatenate([
-            target_pos, target_quat, MANIPULATOR_HOME_STATE
+            target_pos, target_quat, home_state
         ]).astype(np.float32)
         
         self.index_vector_wp = wp.array(self.index_vector, dtype=wp.int32, device="cuda")
@@ -296,15 +315,7 @@ class GraspReorientTask(BaseTask):
             v0 = mjm.key_qvel[0].copy()
             ctrl0 = mjm.key_ctrl[0].copy()
         else:
-            q0 = mjm.qpos0.copy()
-            v0 = np.zeros(mjm.nv, dtype=np.float32)
-            ctrl0 = np.zeros(mjm.nu, dtype=np.float32)
-
-            n_manip = len(MANIPULATOR_HOME_STATE)
-            if mjm.nq >= n_manip:
-                q0[:n_manip] = MANIPULATOR_HOME_STATE
-            if mjm.nu >= n_manip:
-                ctrl0[:n_manip] = MANIPULATOR_HOME_STATE
+            raise ValueError("No keyframe defined in the XML model. A keyframe is required for the initial state.")
 
         return q0, v0, ctrl0
 

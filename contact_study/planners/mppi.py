@@ -138,6 +138,8 @@ class MPPIController:
 
         # --- Pre-sample static spline noise (sampled once, reused every plan call) ---
         N, H, nu = mppi_cfg.n_samples, mppi_cfg.horizon, mjm.nu
+
+
         t_knots  = np.linspace(0, H - 1, self.pc.n_spline_points)
         t_dense  = np.arange(H)
 
@@ -165,16 +167,7 @@ class MPPIController:
 
         # ---- GPU buffers -------------------------------------------------
         N, H, nu = mppi_cfg.n_samples, mppi_cfg.horizon, mjm.nu
-
-        # Mean action sequence: (H, nu)
-        # if initial_ctrl_sequence is not None:
-        #     # Tile the initial control sequence for the entire horizon
-        #     self.U_wp = wp.array(
-        #         np.tile(initial_ctrl_sequence, (H, 1)),
-        #         dtype=wp.float32,
-        #         device="cuda"
-        #     )
-        # else:
+        
         self.U_wp = wp.zeros((H, nu), dtype=wp.float32, device="cuda")
 
         # Candidate perturbed sequences: (N, H, nu)
