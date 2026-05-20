@@ -220,7 +220,6 @@ def run(
                 idx_wp    = idx_wp,
                 weights_wp= weights_wp,
                 rng       = rng,
-                initial_ctrl_sequence = u0,
             )
 
             mjd = mujoco.MjData(mjm)

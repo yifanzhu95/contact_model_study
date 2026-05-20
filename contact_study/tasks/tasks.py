@@ -15,20 +15,6 @@ import warp as wp
 from contact_study.contact_models.config import GeometryVariant
 from .base import BaseTask, ContactComplexity, TaskSpec, register
 
-
-# ---------------------------------------------------------------------------
-# Global Task Constants
-# ---------------------------------------------------------------------------
-
-# Predefined home position for the manipulator joints (e.g., 16 joints for Allegro Hand)
-# Fingertip site names for the Allegro hand (order: index, middle, ring, thumb)
-ALLEGRO_FINGERTIP_SITES = [
-    "index_fingertip",
-    "middle_fingertip",
-    "ring_fingertip",
-    "thumb_fingertip",
-]
-
 # ---------------------------------------------------------------------------
 # Warp Cost Functions (GPU-side)
 # ---------------------------------------------------------------------------
@@ -245,17 +231,17 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "scenes/test_data/allegro/allegro_right_hand_armature.xml",
-            max_steps         = 500,
+            max_steps         = 2000,
             success_threshold = 0.05,  # combined pose error
             cost_weights      = {
-                "w_quat": 1.0, 
-                "w_pos": 0.5, 
-                "w_contact": 0.1, 
-                "w_joint": 0.1, 
-                "w_fallen": 10.0,
-                "w_quat_term": 10.0, 
-                "w_pos_term": 5.0, 
-                "w_fallen_term": 20.0
+                "w_quat": 0.0,#0.5, 
+                "w_pos": 0.0,#0.1, 
+                "w_contact": 0.5,#0.5, 
+                "w_joint": 0.01, 
+                "w_fallen": 10.0,#50.0,
+                "w_quat_term": 20.0,#10.0, 
+                "w_pos_term": 5.0,#5.0, 
+                "w_fallen_term": 100.0,#100.0
             }
         )
 
@@ -292,7 +278,7 @@ class GraspReorientTask(BaseTask):
             key_idx = 1 if mjm.nkey > 1 else 0
             robot_start = self.index_vector[2]
             n_manip = self.index_vector[3]
-            home_state = mjm.key_qpos[key_idx, robot_start : robot_start + n_manip].copy()
+            home_state = mjm.key_ctrl[key_idx, robot_start : robot_start + n_manip].copy()
         else:
             raise ValueError("No keyframe defined in the XML model. A keyframe is required to define the manipulator's home state.")
 
