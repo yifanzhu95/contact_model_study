@@ -42,10 +42,8 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 import warp as wp
-try:
-    import mediapy as media
-except ImportError:
-    media = None
+import mediapy as media
+
 
 from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
 from contact_study.planners.mppi import MPPIController, MPPIConfig
@@ -244,6 +242,8 @@ def run(
             ep_start         = time.perf_counter()
             frames           = []
 
+            substeps = mppi_cfg.substeps
+
             for t in range(max_steps):
                 step_start = time.perf_counter()
 
@@ -268,7 +268,20 @@ def run(
                     ctrl = controller.plan(mjd)
 
                 mjd.ctrl[:] += ctrl
-                mujoco.mj_step(mjm, mjd)
+
+                for _ in range(substeps):
+                    mujoco.mj_step(mjm, mjd)
+                    
+                    # (Optional) Check success or render during substeps if needed
+                    if render_mode == "viewer" and v is not None:
+                        mjd_view.qpos[:] = mjd.qpos
+                        mjd_view.qvel[:] = mjd.qvel
+                        mjd_view.ctrl[:] = mjd.ctrl
+                        mujoco.mj_forward(mjm, mjd_view)
+                        v.sync()
+                    elif render_mode == "video" and renderer is not None:
+                        renderer.update_scene(mjd)
+                        frames.append(renderer.render())
 
                 step_times.append(time.perf_counter() - step_start)
 
@@ -288,18 +301,6 @@ def run(
                         if debug:
                             print(f"  ✓  ep {ep:02d} succeeded at step {steps_to_success}")
                     # Keep simulating so timing is comparable across episodes
-
-                # --- Rendering ---
-                if render_mode == "viewer" and v is not None:
-                    mjd_view.qpos[:] = mjd.qpos
-                    mjd_view.qvel[:] = mjd.qvel
-                    mjd_view.ctrl[:] = mjd.ctrl
-                    mujoco.mj_forward(mjm, mjd_view)
-                    v.sync()
-                elif render_mode == "video" and renderer is not None:
-                    renderer.update_scene(mjd)
-                    frames.append(renderer.render())
-
             ep_elapsed = time.perf_counter() - ep_start
 
             if render_mode == "video" and frames and media is not None:

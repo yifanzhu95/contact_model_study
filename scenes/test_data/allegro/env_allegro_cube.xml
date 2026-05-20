@@ -39,7 +39,7 @@
               />
     </body>
     <site name="obj_target" type="box" material="obj_material" size="0.03 0.03 0.03" 
-      rgba="1.0 1.0 0 0.1" pos="-0.007 -0.0007  0.06" euler="0 -1.0 1"
+      rgba="1.0 1.0 0 0.1" pos="-0.007 -0.0007  0.06" euler="0 -1.5708 1"
       />
     <!--
     <site name="obj_target" type="box" material="obj_material" size="0.035 0.035 0.035" 

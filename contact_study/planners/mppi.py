@@ -42,8 +42,9 @@ class MPPIConfig:
     use_spline_noise: bool = False   # toggle between spline and Gaussian noise
     n_spline_points: int   = 5      # control points for spline-smoothed noise
     njmax:           int   = 500
+    substeps:        int   = 10
     debug:           bool  = True
-    delta_range:     tuple[float, float] = (-0.01, 0.01)
+    delta_range:     tuple[float, float] = (-0.05, 0.05)
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +238,7 @@ class MPPIController:
         N  = self.pc.n_samples
         H  = self.pc.horizon
         nu = self.nu
+        substeps = self.pc.substeps
 
         wp.capture_begin(device="cuda")
 
@@ -254,7 +256,8 @@ class MPPIController:
             )
 
             # 2. Advance physics for all N worlds.
-            api.step(self.m, self.d)
+            for _ in range(substeps):
+                api.step(self.m, self.d)
 
             # 3. Accumulate per-world costs.
             wp.launch(
@@ -294,7 +297,9 @@ class MPPIController:
         lam   = self.pc.temperature
         sigma = self.pc.noise_sigma
 
-        start_time = time.perf_counter()
+        time_flag = False
+        if time_flag:
+            start_time = time.perf_counter()
 
         for iteration in range(self.pc.n_iterations):
             # ----------------------------------------------------------
@@ -306,7 +311,8 @@ class MPPIController:
             eps_np = self._static_eps_np
             eps_wp = self._static_eps_wp
 
-            print(time.perf_counter() - start_time)
+            if time_flag:
+                print(time.perf_counter() - start_time)
 
             wp.launch(
                 _add_noise_and_clip_kernel,
@@ -315,7 +321,8 @@ class MPPIController:
                 outputs=[self.V_wp],
             )
 
-            print(time.perf_counter() - start_time)
+            if time_flag:
+                print(time.perf_counter() - start_time)
 
             # ----------------------------------------------------------
             # 3. Initialise all N worlds from the current environment state
@@ -324,7 +331,8 @@ class MPPIController:
 
             #print("should be const",self.d.qpos)
             #print(self.indices_wp)
-            print(time.perf_counter() - start_time)
+            if time_flag:
+                print(time.perf_counter() - start_time)
 
             # ----------------------------------------------------------
             # 4. Run the full H-step rollout — single GPU graph launch
@@ -332,7 +340,8 @@ class MPPIController:
             # ----------------------------------------------------------
             wp.capture_launch(self._rollout_graph)
 
-            print(time.perf_counter() - start_time)
+            if time_flag:
+                print(time.perf_counter() - start_time)
 
             # ----------------------------------------------------------
             # 5. Single sync + single transfer: bring costs to CPU
@@ -358,7 +367,8 @@ class MPPIController:
             new_U = self.U_wp.numpy() + dU
             self.U_wp.assign(new_U.astype(np.float32))
 
-            print(time.perf_counter() - start_time)
+            if time_flag:
+                print(time.perf_counter() - start_time)
 
             if self.pc.debug:
                 # Extract object position (3D) from the qpos vector using task indices

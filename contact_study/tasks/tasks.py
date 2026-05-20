@@ -234,13 +234,13 @@ class GraspReorientTask(BaseTask):
             max_steps         = 500,
             success_threshold = 0.05,  # combined pose error
             cost_weights      = {
-                "w_quat": 0.0,#0.5, 
-                "w_pos": 0.0,#0.1, 
-                "w_contact": 0.5,#0.5, 
-                "w_joint": 0.01, 
+                "w_quat": 0.005,#0.5, 
+                "w_pos": 0.001,#0.1, 
+                "w_contact": 0.1,#0.5, 
+                "w_joint": 0.001, 
                 "w_fallen": 10.0,#50.0,
-                "w_quat_term": 20.0,#10.0, 
-                "w_pos_term": 5.0,#5.0, 
+                "w_quat_term": 25.0,#10.0, 
+                "w_pos_term": 10.0,#5.0, 
                 "w_fallen_term": 100.0,#100.0
             }
         )
