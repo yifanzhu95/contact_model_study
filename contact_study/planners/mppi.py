@@ -51,6 +51,14 @@ class MPPIConfig:
 # ---------------------------------------------------------------------------
 
 @wp.kernel
+def _broadcast_1d_to_2d_kernel(
+    src: wp.array(dtype=float),
+    dst: wp.array2d(dtype=float)
+):
+    n, i = wp.tid()
+    dst[n, i] = src[i]
+
+@wp.kernel
 def _add_noise_and_clip_kernel(
     U_mean:     wp.array2d(dtype=float),   # (H, nu)
     eps:        wp.array3d(dtype=float),   # (N, H, nu)
@@ -286,7 +294,7 @@ class MPPIController:
         lam   = self.pc.temperature
         sigma = self.pc.noise_sigma
 
-        #start_time = time.perf_counter()
+        start_time = time.perf_counter()
 
         for iteration in range(self.pc.n_iterations):
             # ----------------------------------------------------------
@@ -298,7 +306,7 @@ class MPPIController:
             eps_np = self._static_eps_np
             eps_wp = self._static_eps_wp
 
-            #print(time.perf_counter() - start_time)
+            print(time.perf_counter() - start_time)
 
             wp.launch(
                 _add_noise_and_clip_kernel,
@@ -307,7 +315,7 @@ class MPPIController:
                 outputs=[self.V_wp],
             )
 
-            #print(time.perf_counter() - start_time)
+            print(time.perf_counter() - start_time)
 
             # ----------------------------------------------------------
             # 3. Initialise all N worlds from the current environment state
@@ -316,7 +324,7 @@ class MPPIController:
 
             #print("should be const",self.d.qpos)
             #print(self.indices_wp)
-            #print(time.perf_counter() - start_time)
+            print(time.perf_counter() - start_time)
 
             # ----------------------------------------------------------
             # 4. Run the full H-step rollout — single GPU graph launch
@@ -324,7 +332,7 @@ class MPPIController:
             # ----------------------------------------------------------
             wp.capture_launch(self._rollout_graph)
 
-            #print(time.perf_counter() - start_time)
+            print(time.perf_counter() - start_time)
 
             # ----------------------------------------------------------
             # 5. Single sync + single transfer: bring costs to CPU
@@ -350,7 +358,7 @@ class MPPIController:
             new_U = self.U_wp.numpy() + dU
             self.U_wp.assign(new_U.astype(np.float32))
 
-            #print(time.perf_counter() - start_time)
+            print(time.perf_counter() - start_time)
 
             if self.pc.debug:
                 # Extract object position (3D) from the qpos vector using task indices
@@ -382,17 +390,16 @@ class MPPIController:
     # ------------------------------------------------------------------
 
     def _set_batch_state(self, mjd: mujoco.MjData):
-        """Upload the current environment state to all N parallel worlds."""
-        #print("BEFORE")
-        #print(self.d.qpos)
+        """Upload the single state once, and broadcast on the GPU."""
         api.reset_data(self.mjm, self.m, self.d)
-        self.d.qpos.assign(
-            np.tile(mjd.qpos, (self.pc.n_samples, 1)).astype(np.float32)
-        )
-        self.d.qvel.assign(
-            np.tile(mjd.qvel, (self.pc.n_samples, 1)).astype(np.float32)
-        )
-        self.d.ctrl.assign(
-            np.tile(mjd.ctrl, (self.pc.n_samples, 1)).astype(np.float32)
-        )
+        
+        # 1. Transfer the single state to GPU (very fast)
+        qpos_wp = wp.array(mjd.qpos, dtype=wp.float32, device="cuda")
+        qvel_wp = wp.array(mjd.qvel, dtype=wp.float32, device="cuda")
+        ctrl_wp = wp.array(mjd.ctrl, dtype=wp.float32, device="cuda")
+
+        # 2. Broadcast across all N worlds directly on the GPU
+        wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nq), inputs=[qpos_wp, self.d.qpos])
+        wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nv), inputs=[qvel_wp, self.d.qvel])
+        wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nu), inputs=[ctrl_wp, self.d.ctrl])
         #print(self.d.qpos)

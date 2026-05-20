@@ -2,7 +2,7 @@
   <include file="allegro_right_hand.xml"/>
 
   <statistic center="0 0 0" extent="0.3"/>
-  <option ccd_iterations="2000" timestep="0.001" gravity="4.9 0 -8.49"/>
+  <option ccd_iterations="200" timestep="0.001" gravity="4.9 0 -8.49"/>
 
   <visual>
     <rgba haze="0.15 0.25 0.35 1"/>
