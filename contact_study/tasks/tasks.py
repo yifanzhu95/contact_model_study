@@ -230,7 +230,7 @@ class GraspReorientTask(BaseTask):
         return TaskSpec(
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
-            xml_path_template = "scenes/test_data/allegro/allegro_right_hand_armature.xml",
+            xml_path_template = "scenes/leap_hand/env_leap_cube.xml",#"scenes/test_data/allegro/allegro_right_hand_armature.xml",
             max_steps         = 500,
             success_threshold = 0.001,  # combined pose error
             cost_weights      = {
@@ -252,10 +252,10 @@ class GraspReorientTask(BaseTask):
         # Required Body IDs for xpos/xquat
         obj_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
         tip_ids = [
-            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "ff_tip"),
-            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "mf_tip"),
-            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "rf_tip"),
-            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "th_tip")
+            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "if_ds"),
+            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "mf_ds"),
+            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "rf_ds"),
+            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "th_ds")
         ]
 
         # Construct index vector (Length 9)

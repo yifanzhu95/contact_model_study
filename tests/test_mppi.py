@@ -362,7 +362,7 @@ def main():
     )
     parser.add_argument("--task",    type=str, default="grasp_reorient",
                         help="Registered task name. Set to 'none' to use --xml only.")
-    parser.add_argument("--xml",     type=str, default="scenes/test_data/allegro/env_allegro_cube.xml",
+    parser.add_argument("--xml",     type=str, default="scenes/leap_hand/env_leap_cube.xml",
                         help="Override / standalone XML scene path.")
     parser.add_argument("--backend", type=str, default="mjwarp",
                         choices=["mjwarp", "mjwarp_hard", "comfree", "xpbd", "all"])
