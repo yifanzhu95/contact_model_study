@@ -179,7 +179,7 @@ def run(
         n_samples  = n_samples,
         horizon    = horizon,
         temperature = 0.01,
-        noise_sigma = 0.005,
+        noise_sigma = 0.02,
         warm_start = True,
         debug = debug
     )
@@ -227,6 +227,7 @@ def run(
             mujoco.mj_forward(mjm, mjd)
 
             # Allow model to settle (e.g., objects falling to rest)
+            print(mjm.opt.timestep)
             settle_steps = int(settle_seconds / mjm.opt.timestep)
             for _ in range(settle_steps):
                 mujoco.mj_step(mjm, mjd)
@@ -235,6 +236,7 @@ def run(
                     mjd_view.qvel[:] = mjd.qvel
                     mujoco.mj_forward(mjm, mjd_view)
                     v.sync()
+           #print("setteling done")
 
             success          = False
             steps_to_success = None
@@ -362,7 +364,7 @@ def main():
     )
     parser.add_argument("--task",    type=str, default="grasp_reorient",
                         help="Registered task name. Set to 'none' to use --xml only.")
-    parser.add_argument("--xml",     type=str, default="scenes/leap_hand/env_leap_cube.xml",
+    parser.add_argument("--xml",     type=str, default="scenes/leap_hand/scene_leap_cube.xml",
                         help="Override / standalone XML scene path.")
     parser.add_argument("--backend", type=str, default="mjwarp",
                         choices=["mjwarp", "mjwarp_hard", "comfree", "xpbd", "all"])

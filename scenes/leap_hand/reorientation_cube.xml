@@ -22,7 +22,7 @@
   </asset>
 
   <worldbody>
-    <body name="cube" pos="0.11 0.0 0.1" quat="1 0 0 0" childclass="cube">
+    <body name="obj" pos="0.11 0.0 0.1" quat="1 0 0 0" childclass="cube">
       <freejoint name="cube_freejoint"/>
       <geom type="mesh" mesh="cube_mesh" material="dexcube" contype="0" conaffinity="0" density="0" group="2"/>
       <geom name="cube" type="box" size=".035 .035 .035" mass=".108" group="3"/>

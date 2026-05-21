@@ -230,18 +230,18 @@ class GraspReorientTask(BaseTask):
         return TaskSpec(
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
-            xml_path_template = "scenes/leap_hand/env_leap_cube.xml",#"scenes/test_data/allegro/allegro_right_hand_armature.xml",
-            max_steps         = 500,
+            xml_path_template = "scenes/leap_hand/scene_leap_cube.xml",#"scenes/test_data/allegro/allegro_right_hand_armature.xml",
+            max_steps         = 100,
             success_threshold = 0.001,  # combined pose error
             cost_weights      = {
-                "w_quat": 0.002,#0.5, 
-                "w_pos": 0.1,#0.1, 
-                "w_contact": 0.50,#0.5, 
-                "w_joint": 0.001, 
+                "w_quat": 0.05,#0.5, 
+                "w_pos": 0.01,#0.1, 
+                "w_contact": 0.15,#0.5, 
+                "w_joint": 0.02, 
                 "w_fallen": 20.0,#50.0,
-                "w_quat_term": 20.0,#10.0, 
-                "w_pos_term": 00.0,#5.0, 
-                "w_fallen_term": 100.0,#100.0
+                "w_quat_term": 10.0,#10.0, 
+                "w_pos_term": 10.0,#5.0, 
+                "w_fallen_term": 0.0,#100.0
             }
         )
 
@@ -252,10 +252,10 @@ class GraspReorientTask(BaseTask):
         # Required Body IDs for xpos/xquat
         obj_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
         tip_ids = [
-            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "if_ds"),
-            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "mf_ds"),
-            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "rf_ds"),
-            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "th_ds")
+            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "if_tip"),
+            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "mf_tip"),
+            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "rf_tip"),
+            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "th_tip")
         ]
 
         # Construct index vector (Length 9)
@@ -269,8 +269,8 @@ class GraspReorientTask(BaseTask):
         ], dtype=np.int32)
         
         target_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
-        target_pos = mjm.site_pos[target_id]
-        target_quat = mjm.site_quat[target_id]
+        self.target_pos = mjm.site_pos[target_id]
+        self.target_quat = mjm.site_quat[target_id]
         
         # Use keyframe for reference posture (home state) if available
         if mjm.nkey > 0:
@@ -284,7 +284,7 @@ class GraspReorientTask(BaseTask):
 
         # Concatenate pos (3), quat (4), and manipulator home pose (16)
         self.goal_vector = np.concatenate([
-            target_pos, target_quat, home_state
+            self.target_pos, self.target_quat, home_state
         ]).astype(np.float32)
         
         self.index_vector_wp = wp.array(self.index_vector, dtype=wp.int32, device="cuda")
@@ -316,15 +316,16 @@ class GraspReorientTask(BaseTask):
     def is_success(self, mjd: mujoco.MjData) -> bool:
         mjm = self.mjm
         obj_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
-        target_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
+        #target_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
 
-        if obj_id < 0 or target_id < 0:
-            return False
+        #if obj_id < 0 or target_id < 0:
+        #    return False
+        self.target_pos
 
-        pos_err = np.linalg.norm(mjd.xpos[obj_id] - mjd.site_xpos[target_id])
+        pos_err = np.linalg.norm(mjd.xpos[obj_id] - self.target_pos)
         obj_quat = mjd.xquat[obj_id]
-        target_quat = mjm.site_quat[target_id]
-        quat_err = 1.0 - np.dot(obj_quat, target_quat)**2
+        #target_quat = mjm.site_quat[target_id]
+        quat_err = 1.0 - np.dot(obj_quat, self.target_quat)**2
         
         return bool(pos_err < self.spec.success_threshold and quat_err < self.spec.success_threshold)
 # ---------------------------------------------------------------------------

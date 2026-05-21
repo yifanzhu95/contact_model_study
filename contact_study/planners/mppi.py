@@ -42,9 +42,9 @@ class MPPIConfig:
     use_spline_noise: bool = False   # toggle between spline and Gaussian noise
     n_spline_points: int   = 5      # control points for spline-smoothed noise
     njmax:           int   = 500
-    substeps:        int   = 10
+    substeps:        int   = 5
     debug:           bool  = True
-    delta_range:     tuple[float, float] = (-0.05, 0.05)
+    delta_range:     tuple[float, float] = (-0.1, 0.1)
 
 
 # ---------------------------------------------------------------------------
@@ -357,10 +357,10 @@ class MPPIController:
             eta  = w.sum() + 1e-8
             w   /= eta
 
-            if eta > 10.0:
-                self.pc.temperature = 0.9*self.pc.temperature
-            elif eta < 5.0:
-                self.pc.temperature = 1.1*self.pc.temperature
+            # if eta > 10.0:
+            #     self.pc.temperature = 0.9*self.pc.temperature
+            # elif eta < 5.0:
+            #     self.pc.temperature = 1.1*self.pc.temperature
 
             low, high = self.pc.delta_range
             dU = np.einsum("n,nht->ht", w, eps_np).clip(low, high)   # (H, nu)
@@ -374,16 +374,12 @@ class MPPIController:
                 # Extract object position (3D) from the qpos vector using task indices
                 indices_cpu = self.indices_wp.numpy()
                 obj_pos = mjd.qpos[indices_cpu[0] : indices_cpu[0] + 3]
-                target_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
-                target_pos = self.mjm.site_pos[target_id]
-                target_quat = self.mjm.site_quat[target_id]
                 print(
                     f"avg cost: {costs_np.mean():.4f} +/- {costs_np.std():.4f} "
                     f"min cost: {beta:.4f}  "
                     f"eta: {eta:.4f} "
                     f"lam: {lam:.6f} "
                     f"obj_pos: {obj_pos} "
-                    f"trgt_pos: {target_pos} "
                 )
 
         # ------------------------------------------------------------------
