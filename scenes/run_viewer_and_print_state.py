@@ -3,16 +3,16 @@ import mujoco
 import mujoco.viewer
 
 # Load a built-in sample model (Humanoid) that contains pre-saved keyframes
-model = mujoco.MjModel.from_xml_path("scenes/leap_hand/env_leap_cube.xml")
+model = mujoco.MjModel.from_xml_path("scenes/leap_hand/scene_leap_cube.xml")
 data = mujoco.MjData(model)
 
 # Verify the model actually has a 2nd keyframe (index 1)
-if model.nkey < 2:
+if model.nkey < 1:
     raise ValueError(f"The loaded model only has {model.nkey} keyframe(s). Need at least 2.")
 
 # Extract the control vector from the 2nd keyframe (index 1)
 # model.key_ctrl holds a flattened array of shape (nkey, nact)
-target_ctrl = model.key_ctrl[1]
+target_ctrl = model.key_ctrl[0]
 
 print(f"Successfully loaded control from 2nd keyframe: {target_ctrl}")
 
