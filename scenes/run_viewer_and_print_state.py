@@ -3,12 +3,10 @@ import mujoco
 import mujoco.viewer
 
 # Load a built-in sample model (Humanoid) that contains pre-saved keyframes
-model = mujoco.MjModel.from_xml_path("scenes/leap_hand/scene_leap_cube.xml")
+model = mujoco.MjModel.from_xml_path("scenes/peg_in_hole/peg_in_hole_scene.xml")
 data = mujoco.MjData(model)
 
 # Verify the model actually has a 2nd keyframe (index 1)
-if model.nkey < 1:
-    raise ValueError(f"The loaded model only has {model.nkey} keyframe(s). Need at least 2.")
 
 # Extract the control vector from the 2nd keyframe (index 1)
 # model.key_ctrl holds a flattened array of shape (nkey, nact)
@@ -32,16 +30,13 @@ with mujoco.viewer.launch_passive(model, data) as viewer:
 
         # 3. Print the current states
         print(
-            f"Ctrl: {data.ctrl} ",
-            end="\r"
+            "Ctrl:",data.ctrl
         )
         print(
-            f"Qpos: {data.qpos} ",
-            end="\r"
+            "Qpos:",data.qpos
         )
         print(
-            f"Qvel: {data.qvel}",
-            end="\r"
+            "Qvel:",data.qvel
         ) 
 
         # 4. Sync the viewer

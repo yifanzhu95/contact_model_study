@@ -1,0 +1,75 @@
+<mujoco model="right_allegro_hand scene">
+  <include file="./leap_right_hand_2.xml"/>
+
+  <statistic center="0 0 0" extent="0.3"/>
+
+  <visual>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <quality shadowsize="8192"/>
+    <global azimuth="130" elevation="-40" offwidth="1280" offheight="960"/>
+  </visual>
+
+  <asset>
+    <texture name='cube_surface' file="./textures/iris_block.png" gridsize="3 4" gridlayout=".U..LFRB.D.."/>
+    <material name="obj_material" texture="cube_surface" specular="5" shininess=".0"/>
+    
+    <mesh name="rubber_duck_mesh" file="../../objects/rubber_duck.stl" maxhullvert="15"/>
+    <!-- <mesh name="rubber_duck_mesh" file="../../objects/duck_adjusted.obj"/> -->
+
+    <!-- <mesh file="../../ducks/rubber_duck_3_hulls/rubber_duck_collision_0.obj" maxhullvert="30"/>
+    <mesh file="../../ducks/rubber_duck_3_hulls/rubber_duck_collision_1.obj" maxhullvert="30"/>
+    <mesh file="../../ducks/rubber_duck_3_hulls/rubber_duck_collision_2.obj" maxhullvert="30"/> -->
+    <!-- <mesh file="../../ducks/rubber_duck_4_hulls/rubber_duck_collision_3.obj" maxhullvert="30"/> -->
+
+    <mesh file="../../objects/ducks/rubber_duck_8_hulls/rubber_duck_collision_0.obj" maxhullvert="30"/>
+    <mesh file="../../objects/ducks/rubber_duck_8_hulls/rubber_duck_collision_1.obj" maxhullvert="30"/>
+    <mesh file="../../objects/ducks/rubber_duck_8_hulls/rubber_duck_collision_2.obj" maxhullvert="30"/>
+    <mesh file="../../objects/ducks/rubber_duck_8_hulls/rubber_duck_collision_3.obj" maxhullvert="30"/>
+    <mesh file="../../objects/ducks/rubber_duck_8_hulls/rubber_duck_collision_4.obj" maxhullvert="30"/>
+    <mesh file="../../objects/ducks/rubber_duck_8_hulls/rubber_duck_collision_5.obj" maxhullvert="30"/>
+    <mesh file="../../objects/ducks/rubber_duck_8_hulls/rubber_duck_collision_6.obj" maxhullvert="30"/>
+    <mesh file="../../objects/ducks/rubber_duck_8_hulls/rubber_duck_collision_7.obj" maxhullvert="30"/>
+    
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+      markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0."/>
+  </asset>
+
+  <worldbody>
+    <light directional="true" ambient="0.2 0.2 0.2" diffuse="0.8 0.8 0.8"  castshadow="false" pos="0 1 4" dir="0 0 -1" name="light0"/>
+    <camera name="demo-cam" pos="-0.003 -0.393 0.317" xyaxes="1.000 -0.000 0.000 0.000 0.462 0.887"/>
+
+    <geom name="floor" pos="0 0 -0.1" size="0 0 0.05" type="plane" material="groundplane" rgba="1 1 1 0.75"/>
+
+    <body name="goal" pos="-0.01 -0.1 0.2" quat="0.707 0 0 -0.707">
+      <geom name="goal-visual-above" type="mesh" mesh="rubber_duck_mesh" conaffinity="0" contype="0"
+        pos="0 0 0" quat="1 0 0 0" rgba="0.97 0.6 0 0.3"/>
+    </body>
+    
+    <body name="obj" pos="0.01 0.035 0.1">
+        <freejoint name="cube_table"/>
+        <geom type="mesh" mesh="rubber_duck_mesh" friction="0.5" rgba="0.97 0.6 0 0.8" conaffinity="0" contype="0"/>
+
+        <!-- <geom type="mesh" mesh="rubber_duck_collision_0" rgba="0.9909314043975451 0.27625373322012614 0.1738987770894782 1"/>
+        <geom type="mesh" mesh="rubber_duck_collision_1" rgba="0.967053170824638 0.11680587319571234 0.11087793515699562 1"/>
+        <geom type="mesh" mesh="rubber_duck_collision_2" rgba="0.21857155683837937 0.6007722366486206 0.4358911977292488 1"/> -->
+
+        <!-- <geom type="mesh" mesh="rubber_duck_collision_3" rgba="0.02222645102768006 0.9001758651591799 0.7904868222198979 1"/>
+        <geom type="mesh" mesh="rubber_duck_collision_4" rgba="0.6779295287364845 0.9448722533928271 0.3856126504671491 1"/>
+        <geom type="mesh" mesh="rubber_duck_collision_5" rgba="0.25726196822082226 0.9865016020974317 0.8958947296165829 1"/>
+        <geom type="mesh" mesh="rubber_duck_collision_6" rgba="0.5724334072035917 0.79524676933259 0.9569494353873428 1"/>
+        <geom type="mesh" mesh="rubber_duck_collision_7" rgba="0.20459424864816478 0.5793317490155067 0.45514807817811087 1"/> -->
+
+        <geom type="capsule" mesh="rubber_duck_collision_0" friction="0.5" rgba="0.9909314043975451 0.27625373322012614 0.1738987770894782 0"/>
+        <geom type="capsule" mesh="rubber_duck_collision_1" friction="0.5" rgba="0.967053170824638 0.11680587319571234 0.11087793515699562 0"/>
+        <geom type="capsule" mesh="rubber_duck_collision_2" friction="0.5" rgba="0.21857155683837937 0.6007722366486206 0.4358911977292488 0"/>
+        <geom type="capsule" mesh="rubber_duck_collision_3" friction="0.5" rgba="0.02222645102768006 0.9001758651591799 0.7904868222198979 0"/>
+        <geom type="capsule" mesh="rubber_duck_collision_5" friction="0.5" rgba="0.25726196822082226 0.9865016020974317 0.8958947296165829 0"/>
+        <geom type="capsule" mesh="rubber_duck_collision_6" friction="0.5" rgba="0.5724334072035917 0.79524676933259 0.9569494353873428 0"/>
+        <geom type="capsule" mesh="rubber_duck_collision_4" friction="0.5" rgba="0.6779295287364845 0.9448722533928271 0.3856126504671491 0"/>
+        <geom type="capsule" mesh="rubber_duck_collision_7" friction="0.5" rgba="0.20459424864816478 0.5793317490155067 0.45514807817811087 0"/>
+        
+    </body>
+    
+  </worldbody>
+</mujoco>

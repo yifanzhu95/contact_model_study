@@ -28,5 +28,6 @@
       <geom name="cube" type="box" size=".035 .035 .035" mass=".108" group="3"/>
       <site name="cube_center" pos="0 0 0" group="4"/>
     </body>
+
   </worldbody>
 </mujoco>
