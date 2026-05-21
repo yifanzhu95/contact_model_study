@@ -12,7 +12,7 @@ if model.nkey < 2:
 
 # Extract the control vector from the 2nd keyframe (index 1)
 # model.key_ctrl holds a flattened array of shape (nkey, nact)
-target_ctrl = model.key_ctrl[0]
+target_ctrl = model.key_ctrl[1]
 
 print(f"Successfully loaded control from 2nd keyframe: {target_ctrl}")
 
