@@ -1,0 +1,65 @@
+<mujoco model="right leap hand scene">
+  <include file="right_hand.xml"/>
+
+  <statistic center="0 0 0.1" extent="0.3"/>
+  <option gravity="4.9 0 -8.49"/>
+  
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="35" elevation="-50"/>
+  </visual>
+
+  <asset>
+    <texture name='cube_surface' file="iris_block.png" gridsize="3 4" gridlayout=".U..LFRB.D.."/>
+    <material name="obj_material" texture="cube_surface" specular="5" shininess=".0"/>
+
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+      markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1" dir="0 0 -1" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+    <camera name="demo-cam" pos="-0.003 -0.393 0.317" xyaxes="1.000 -0.000 0.000 0.000 0.462 0.887"/>
+
+    <body name="obj" >
+        <freejoint name="obj_freejoint"/>
+        <geom name="obj" type="box" material="obj_material" size="0.035 0.035 0.035" friction="0.5" rgba="1.0 1.0 0 0.99"
+        pos="0.0 0.035 0.175" euler="0 0 0"
+        />
+    </body>
+
+    <body name="obj_target_body" >
+      <site name="obj_target" type="box" material="obj_material" size="0.035 0.035 0.035" 
+        rgba="1.0 1.0 0 0.1"
+        pos="0.0 0.035 0.175" euler="0 0 0" />
+    </body>
+    <!--
+    <site name="obj_target" type="box" material="obj_material" size="0.035 0.035 0.035" 
+      rgba="1.0 1.0 0 0.1" pos="0.03 0.00 0.05" euler="0 0 1"
+      />
+    -->
+    
+  </worldbody>
+
+  <keyframe>
+    <key name="key0"
+    time="0.0"
+    qpos="0.04864248 -0.59550804  1.2235472   0.78993949  0.30146904 -0.02481569 0.59610245  1.03045177  0.3264567   0.33463926  1.04470526  1.10345972 1.19488822  1.12228693  1.00893987  1.00298168  0.01216583  0.01469165"
+    qvel=" 1.17410987e-15 -1.82878871e-14  5.15975128e-14 -2.22798321e-14 1.56085193e-06 -2.62456414e-06 -2.33326206e-06  1.88172770e-07 9.17740937e-15  9.26713989e-15  5.24879132e-14 -4.65983709e-14 -2.89035016e-10 -1.18367309e-12 -4.67020072e-12 5.61635615e-13 -3.63614477e-08 -5.04607565e-07 7.98891262e-08 -3.76266548e-06"    
+    ctrl="0.0676 -0.59679 1.227475 0.78984 0.37288 -0.02094 0.605815 1.03064 0.34744 0.33504 1.04815 1.10288 1.19009 1.129015 1.0 1.0"
+    />
+
+    <key name="key1"
+    ctrl="0.0676 -0.59679 1.227475 0.78984 0.37288 -0.02094 0.605815 1.03064 0.34744 0.33504 1.04815 1.10288 1.19009 1.129015 1.0 1.0"
+    />
+
+    <key name="key2"
+    ctrl="0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0"
+    />
+  </keyframe>
+
+</mujoco>
