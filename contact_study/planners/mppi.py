@@ -374,12 +374,16 @@ class MPPIController:
                 # Extract object position (3D) from the qpos vector using task indices
                 indices_cpu = self.indices_wp.numpy()
                 obj_pos = mjd.qpos[indices_cpu[0] : indices_cpu[0] + 3]
+                target_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
+                target_pos = self.mjm.site_pos[target_id]
+                target_quat = self.mjm.site_quat[target_id]
                 print(
                     f"avg cost: {costs_np.mean():.4f} +/- {costs_np.std():.4f} "
                     f"min cost: {beta:.4f}  "
                     f"eta: {eta:.4f} "
                     f"lam: {lam:.6f} "
-                    f"obj_pos: {obj_pos}"
+                    f"obj_pos: {obj_pos} "
+                    f"trgt_pos: {target_pos} "
                 )
 
         # ------------------------------------------------------------------

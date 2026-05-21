@@ -44,7 +44,6 @@ import numpy as np
 import warp as wp
 import mediapy as media
 
-
 from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
 from contact_study.planners.mppi import MPPIController, MPPIConfig
 from contact_study.utils.rollout import fixed_budget_rollout
