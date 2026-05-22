@@ -207,6 +207,11 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
         dq = qpos[robot_qpos_adr + i] - goal[7 + i]
         c_joint = c_joint + dq * dq
 
+    c_joint_velo = float(0.0) 
+    for i in range(n_manip):
+        dq = qvel[robot_qpos_adr + i]
+        c_joint_velo = c_joint_velo + dq * dq
+
     # 4. Contact cost
     c_contact = float(0.0)
     for i in range(5, 9):
@@ -219,7 +224,18 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
     if qpos[obj_qpos_adr + 2] < 0.0:
         fallen = 1.0
 
-    cost = (weights[0] * c_quat) + (weights[1] * c_pos) + (weights[2] * c_contact) + (weights[3] * c_joint) + weights[4]*fallen
+    #6 object velocity
+    c_velo = wp.dot(v_obj, v_obj)
+
+    cost = (
+        weights[0] * c_quat + 
+        weights[1] * c_pos + 
+        weights[2] * c_contact +
+        weights[3] * c_joint + 
+        weights[4] * fallen +
+        0.5 * c_velo +
+        0.5 * c_joint_velo
+    )
     if terminal:
         cost = (weights[5] * c_quat) + (weights[6] * c_pos) + weights[7]*fallen
     return cost
@@ -241,8 +257,8 @@ class GraspReorientTask(BaseTask):
             max_steps         = 500,
             success_threshold = 0.05,  # combined pose error
             cost_weights      = {
-                "w_quat": 0.1, #0.5, 
-                "w_pos": 0.1,#0.1, 
+                "w_quat": 1.0, #0.5, 
+                "w_pos": 1.0,#0.1, 
                 "w_contact": 5.0,#0.5, 
                 "w_joint": 0.2, 
                 "w_joint_velo": 0.1, 
