@@ -303,13 +303,13 @@ class GraspReorientTask(BaseTask):
             key_idx = 1 if mjm.nkey > 1 else 0
             robot_start = self.index_vector[2]
             n_manip = self.index_vector[3]
-            home_state = mjm.key_ctrl[key_idx, robot_start : robot_start + n_manip].copy()
+            self.home_state = mjm.key_ctrl[key_idx, robot_start : robot_start + n_manip].copy()
         else:
             raise ValueError("No keyframe defined in the XML model. A keyframe is required to define the manipulator's home state.")
 
         # Concatenate pos (3), quat (4), and manipulator home pose (16)
         self.goal_vector = np.concatenate([
-            self.target_pos, self.target_quat, home_state
+            self.target_pos, self.target_quat, self.home_state
         ]).astype(np.float32)
         
         self.index_vector_wp = wp.array(self.index_vector, dtype=wp.int32, device="cuda")
@@ -349,6 +349,30 @@ class GraspReorientTask(BaseTask):
         quat_err = 1.0 - np.dot(obj_quat, self.target_quat)**2
         
         return bool(pos_err < self.spec.success_threshold and quat_err < self.spec.success_threshold)
+
+    def sample_new_goal(self, mjd: mujoco.MjData, rng: np.random.Generator):
+        """Sample a new goal orientation around the current one and update the mocap body and goal vector."""
+        # Sample a small perturbation for the orientation
+        noise = rng.standard_normal(4) * 0.1
+        new_quat = self.target_quat + noise
+        new_quat /= np.linalg.norm(new_quat)
+
+        # Update mocap body orientation in the simulation data
+        target_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "obj_target")
+        if target_id >= 0:
+            mocap_id = self.mjm.body_mocapid[target_id]
+            if mocap_id >= 0:
+                mjd.mocap_quat[mocap_id] = new_quat
+
+        # Update internal cached target and rebuild the goal vector
+        self.target_quat = new_quat.copy()
+        self.goal_vector = np.concatenate([
+            self.target_pos, self.target_quat, self.home_state
+        ]).astype(np.float32)
+
+        # Assign the new goal vector to the Warp array (planner will see this on next step)
+        if self.goal_vector_wp is not None:
+            self.goal_vector_wp.assign(self.goal_vector)
 # ---------------------------------------------------------------------------
 # Task 3: Peg-in-Hole Assembly (HIGH complexity)
 # ---------------------------------------------------------------------------

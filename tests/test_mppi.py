@@ -292,6 +292,10 @@ def run(
 
                 # --- Success check ---
                 if task is not None and task.is_success(mjd):
+                    # Update goal orientation dynamically for grasp_reorient task
+                    if task_name == "grasp_reorient" and hasattr(task, 'sample_new_goal'):
+                        task.sample_new_goal(mjd, rng)
+
                     if steps_to_success is None:
                         steps_to_success = t + 1
                         success = True
