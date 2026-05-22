@@ -39,12 +39,12 @@ class MPPIConfig:
     n_iterations:    int   = 1      # number of MPPI update iterations per call
     warm_start:      bool  = True   # shift action sequence one step forward
     nconmax:         int   = 200
-    use_spline_noise: bool = False   # toggle between spline and Gaussian noise
+    use_spline_noise: bool = True   # toggle between spline and Gaussian noise
     n_spline_points: int   = 3      # control points for spline-smoothed noise
     njmax:           int   = 500
-    substeps:        int   = 1
+    substeps:        int   = 5
     debug:           bool  = True
-    delta_range:     tuple[float, float] = (-0.05, 0.05)
+    delta_range:     tuple[float, float] = (-0.1, 0.1)
 
 
 # ---------------------------------------------------------------------------
@@ -379,7 +379,7 @@ class MPPIController:
                 indices_cpu = self.indices_wp.numpy()
                 #print(indices_cpu)
                 obj_pos = mjd.qpos[indices_cpu[0] : indices_cpu[0] + 3]
-                obj_quat = mjd.qvel[indices_cpu[0] : indices_cpu[0] + 4]
+                obj_quat = mjd.qpos[indices_cpu[0]+ 3: indices_cpu[0] + 3 + 4]
                 print(
                     f"avg cost: {costs_np.mean():.4f} +/- {costs_np.std():.4f} "
                     f"min cost: {beta:.4f}  "
