@@ -202,7 +202,7 @@ def run(
     try:
         for ep in range(n_episodes):
             
-            q0, v0, u0 = task.sample_initial_state(rng)
+            q0, v0, u0 = task.get_inital_state(rng)
 
             controller = MPPIController(
                 mjm       = mjm,

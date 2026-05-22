@@ -298,10 +298,6 @@ class MPPIController:
         lam   = self.pc.temperature
         sigma = self.pc.noise_sigma
 
-        time_flag = False
-        if time_flag:
-            start_time = time.perf_counter()
-
         for iteration in range(self.pc.n_iterations):
             # ----------------------------------------------------------
             # 1. Use pre-sampled static noise
@@ -312,9 +308,6 @@ class MPPIController:
             eps_np = self._static_eps_np
             eps_wp = self._static_eps_wp
 
-            if time_flag:
-                print(time.perf_counter() - start_time)
-
             wp.launch(
                 _add_noise_and_clip_kernel,
                 dim=(N, H, self.nu),
@@ -322,27 +315,16 @@ class MPPIController:
                 outputs=[self.V_wp],
             )
 
-            if time_flag:
-                print(time.perf_counter() - start_time)
-
             # ----------------------------------------------------------
             # 3. Initialise all N worlds from the current environment state
             # ----------------------------------------------------------
             self._set_batch_state(mjd)
-
-            #print("should be const",self.d.qpos)
-            #print(self.indices_wp)
-            if time_flag:
-                print(time.perf_counter() - start_time)
 
             # ----------------------------------------------------------
             # 4. Run the full H-step rollout — single GPU graph launch
             #    (costs_wp is zeroed inside the graph)
             # ----------------------------------------------------------
             wp.capture_launch(self._rollout_graph)
-
-            if time_flag:
-                print(time.perf_counter() - start_time)
 
             # ----------------------------------------------------------
             # 5. Single sync + single transfer: bring costs to CPU
@@ -368,9 +350,6 @@ class MPPIController:
             dU = np.einsum("n,nht->ht", w, eps_np).clip(low, high)   # (H, nu)
             new_U = self.U_wp.numpy() + dU
             self.U_wp.assign(new_U.astype(np.float32))
-
-            if time_flag:
-                print(time.perf_counter() - start_time)
 
             if self.pc.debug:
                 # Extract object position (3D) from the qpos vector using task indices

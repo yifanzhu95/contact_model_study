@@ -22,7 +22,7 @@ import warp as wp
 
 from contact_study.contact_models.config import GeometryVariant
 
-SCENES_DIR = Path(__file__).parents[3] / "scenes"
+SCENES_DIR = Path(__file__).parents[2] / "scenes"
 
 
 class ContactComplexity(enum.IntEnum):
