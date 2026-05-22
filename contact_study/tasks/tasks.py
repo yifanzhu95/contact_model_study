@@ -292,9 +292,10 @@ class GraspReorientTask(BaseTask):
             *tip_ids                  # 5, 6, 7, 8
         ], dtype=np.int32)
         
-        target_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
-        self.target_pos = mjm.site_pos[target_id]
-        self.target_quat = mjm.site_quat[target_id]
+        target_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj_target")
+        mocap_id = mjm.body_mocapid[target_id]
+        self.target_pos = self._mjd.mocap_pos[mocap_id]
+        self.target_quat = self._mjd.mocap_quat[mocap_id]
         
         # Use keyframe for reference posture (home state) if available
         if mjm.nkey > 0:
