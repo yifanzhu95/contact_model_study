@@ -181,15 +181,17 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
                            weights: wp.array(dtype=float)) -> float:
     # Index Mapping MUST match initialize_task
     obj_qpos_adr   = indices[0]
+    obj_qvel_adr   = indices[1]
     robot_qpos_adr = indices[2]
     n_manip        = indices[3]
-    obj_id         = indices[4]
 
-    p_obj = xpos[obj_id]
-    q_obj = xquat[obj_id]
+    p_obj = wp.vec3(qpos[obj_qpos_adr], qpos[obj_qpos_adr + 1], qpos[obj_qpos_adr + 2])
+    q_obj_v4 = wp.vec4(qpos[obj_qpos_adr + 3], qpos[obj_qpos_adr + 4], qpos[obj_qpos_adr + 5], qpos[obj_qpos_adr + 6])
+    v_obj = wp.vec3(qvel[obj_qvel_adr], qvel[obj_qvel_adr + 1], qvel[obj_qvel_adr + 2])
+    w_obj = wp.vec3(qvel[obj_qvel_adr + 3], qvel[obj_qvel_adr + 4], qvel[obj_qvel_adr + 5])
+
     p_target = wp.vec3(goal[0], goal[1], goal[2])
     q_target = wp.vec4(goal[3], goal[4], goal[5], goal[6])
-    q_obj_v4 = wp.vec4(q_obj.w, q_obj.x, q_obj.y, q_obj.z)
 
     # 1. Orientation error
     dot_prod = wp.dot(q_target, q_obj_v4)
