@@ -120,7 +120,7 @@ class PushTask(BaseTask):
         w = self.spec.cost_weights
         self.weights_wp = wp.array([w["running"], w["terminal"]], dtype=wp.float32, device="cuda")
 
-    def sample_initial_state(self, rng: np.random.Generator):
+    def get_inital_state(self, rng: np.random.Generator):
         mjm = self.mjm
         if mjm.nkey > 0:
             # Use the first keyframe defined in the XML (e.g., key0)
@@ -385,7 +385,7 @@ class PegInHoleTask(BaseTask):
         w = self.spec.cost_weights
         self.weights_wp = wp.array([w["w_z"], w["w_xy"], w["w_term"]], dtype=wp.float32, device="cuda")
 
-    def sample_initial_state(self, rng: np.random.Generator):
+    def get_inital_state(self, rng: np.random.Generator):
         mjm = self.mjm
         q0  = mjm.qpos0.copy()
         # Small random offset in x,y above the hole

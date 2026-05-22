@@ -93,7 +93,7 @@ class BaseTask(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def sample_initial_state(self, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    def get_inital_state(self, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
         """Return (qpos, qvel, ctrl) for a random initial state."""
         ...
 
