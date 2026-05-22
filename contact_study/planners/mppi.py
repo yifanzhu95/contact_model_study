@@ -377,14 +377,18 @@ class MPPIController:
             if self.pc.debug:
                 # Extract object position (3D) from the qpos vector using task indices
                 indices_cpu = self.indices_wp.numpy()
+                #print(indices_cpu)
                 obj_pos = mjd.qpos[indices_cpu[0] : indices_cpu[0] + 3]
+                obj_quat = mjd.qvel[indices_cpu[0] : indices_cpu[0] + 4]
                 print(
                     f"avg cost: {costs_np.mean():.4f} +/- {costs_np.std():.4f} "
                     f"min cost: {beta:.4f}  "
                     f"eta: {eta:.4f} "
                     f"lam: {lam:.6f} "
                     f"obj_pos: {obj_pos} "
+                    f"obj_quat: {obj_quat} "
                 )
+                #print(mjd.qpos)
 
         # ------------------------------------------------------------------
         # Extract and return the first action
