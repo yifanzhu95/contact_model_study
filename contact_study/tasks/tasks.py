@@ -172,12 +172,10 @@ class PushTask(BaseTask):
 def grasp_reorient_cost_wp(qpos: wp.array(dtype=float), 
                            qvel: wp.array(dtype=float), 
                            ctrl: wp.array(dtype=float), 
+                           site_xpos: wp.array(dtype=wp.vec3),
                            terminal: bool, 
                            goal: wp.array(dtype=float), 
                            indices: wp.array(dtype=int),
-                           xpos: wp.array(dtype=wp.vec3),
-                           xquat: wp.array(dtype=wp.quat),
-                           site_xpos: wp.array(dtype=wp.vec3),
                            weights: wp.array(dtype=float)) -> float:
     # Index Mapping MUST match initialize_task
     obj_qpos_adr   = indices[0]
@@ -225,16 +223,17 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
         fallen = 1.0
 
     #6 object velocity
-    c_velo = wp.dot(v_obj, v_obj)
+    c_velo = wp.dot(v_obj, v_obj) + wp.dot(w_obj, w_obj)
+
 
     cost = (
         weights[0] * c_quat + 
         weights[1] * c_pos + 
-        weights[2] * c_contact +
-        weights[3] * c_joint + 
-        weights[4] * fallen +
-        0.5 * c_velo +
-        0.5 * c_joint_velo
+        weights[2] * c_velo +
+        weights[3] * c_contact +
+        weights[4] * c_joint + 
+        weights[5] * c_joint_velo +
+        weights[6] * fallen
     )
     if terminal:
         cost = (weights[5] * c_quat) + (weights[6] * c_pos) + weights[7]*fallen
@@ -254,15 +253,15 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "leap_hand/scene_leap_cube.xml",#"scenes/test_data/allegro/allegro_right_hand_armature.xml",
-            max_steps         = 500,
+            max_steps         = 200,
             success_threshold = 0.05,  # combined pose error
             cost_weights      = {
                 "w_quat": 1.0, #0.5, 
                 "w_pos": 1.0,#0.1, 
+                "w_velo": 0.1,
                 "w_contact": 5.0,#0.5, 
                 "w_joint": 0.2, 
-                "w_joint_velo": 0.1, 
-                "w_obj_velo": 0.1,
+                "w_joint_velo": 0.01, 
                 "w_fallen": 20.0,#50.0,
                 "w_quat_term": 10.0,#10.0, 
                 "w_pos_term": 10.0,#5.0, 
@@ -317,14 +316,14 @@ class GraspReorientTask(BaseTask):
 
         w = self.spec.cost_weights
         weights_list = [
-            w["w_quat"], w["w_pos"], w["w_contact"], w["w_joint"],
-            w["w_joint_velo"], w["w_obj_velo"],
+            w["w_quat"], w["w_pos"], w["w_velo"],
+            w["w_contact"], w["w_joint"], w["w_joint_velo"],
             w["w_fallen"],
             w["w_quat_term"], w["w_pos_term"], w["w_fallen_term"]
         ]
         self.weights_wp = wp.array(weights_list, dtype=wp.float32, device="cuda")
 
-    def sample_initial_state(self, rng: np.random.Generator):
+    def get_inital_state(self, rng: np.random.Generator):
         mjm = self.mjm
         if mjm.nkey > 0:
             # Use the first keyframe defined in the XML (e.g., key0)
