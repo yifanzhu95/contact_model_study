@@ -237,7 +237,7 @@ class GraspReorientTask(BaseTask):
         return TaskSpec(
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
-            xml_path_template = "scenes/leap_hand/scene_leap_cube.xml",#"scenes/test_data/allegro/allegro_right_hand_armature.xml",
+            xml_path_template = "leap_hand/scene_leap_cube.xml",#"scenes/test_data/allegro/allegro_right_hand_armature.xml",
             max_steps         = 500,
             success_threshold = 0.05,  # combined pose error
             cost_weights      = {
@@ -245,6 +245,8 @@ class GraspReorientTask(BaseTask):
                 "w_pos": 0.1,#0.1, 
                 "w_contact": 5.0,#0.5, 
                 "w_joint": 0.2, 
+                "w_joint_velo": 0.1, 
+                "w_obj_velo": 0.1,
                 "w_fallen": 20.0,#50.0,
                 "w_quat_term": 10.0,#10.0, 
                 "w_pos_term": 10.0,#5.0, 
@@ -299,7 +301,9 @@ class GraspReorientTask(BaseTask):
 
         w = self.spec.cost_weights
         weights_list = [
-            w["w_quat"], w["w_pos"], w["w_contact"], w["w_joint"], w["w_fallen"],
+            w["w_quat"], w["w_pos"], w["w_contact"], w["w_joint"],
+            w["w_joint_velo"], w["w_obj_velo"],
+            w["w_fallen"],
             w["w_quat_term"], w["w_pos_term"], w["w_fallen_term"]
         ]
         self.weights_wp = wp.array(weights_list, dtype=wp.float32, device="cuda")

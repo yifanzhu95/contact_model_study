@@ -100,7 +100,6 @@ def _fallback_cost_func(
 
 def run(
     task_name:         str | None = "grasp_reorient",
-    xml_path:          str | None = None,
     backend:           str   = "comfree",      # "mjwarp" | "comfree" | "mjwarp_hard"
     condition:         str        = "B",        # "A" = fixed_budget_rollout, "B" = MPPIController
     n_episodes:        int        = 3,
@@ -160,11 +159,7 @@ def run(
     print(f"{'='*60}")
 
     task = get_task(task_name, geometry=geo)
-    if xml_path is not None:
-        mjm, _ = task.load(xml_path)
-    else:
-        mjm, _ = task.load()
-    mjm     = apply_physics_noise(mjm, noise, rng)
+    mjm  = apply_physics_noise(mjm, noise, rng)
     task._mjm = mjm
     max_steps = task.spec.max_steps
 
@@ -257,7 +252,7 @@ def run(
                         cfg            = cfg,
                         budget_seconds = budget_seconds,
                         horizon        = horizon,
-                        cost_fn        = cost_fn,
+                        #cost_fn        = cost_fn,
                         initial_qpos   = mjd.qpos,
                         initial_qvel   = mjd.qvel,
                         rng            = rng,
@@ -364,8 +359,8 @@ def main():
     )
     parser.add_argument("--task",    type=str, default="grasp_reorient",
                         help="Registered task name. Set to 'none' to use --xml only.")
-    parser.add_argument("--xml",     type=str, default="scenes/leap_hand/scene_leap_cube.xml",
-                        help="Override / standalone XML scene path.")
+    # parser.add_argument("--xml",     type=str, default="scenes/leap_hand/scene_leap_cube.xml",
+    #                     help="Override / standalone XML scene path.")
     parser.add_argument("--backend", type=str, default="mjwarp",
                         choices=["mjwarp", "mjwarp_hard", "comfree", "xpbd", "all"])
     parser.add_argument("--condition", type=str, default="B", choices=["A", "B"],
@@ -409,7 +404,6 @@ def main():
 
         stats = run(
             task_name         = task_name,
-            xml_path          = args.xml,
             backend           = backend,
             condition         = args.condition,
             n_episodes        = args.n_episodes,
