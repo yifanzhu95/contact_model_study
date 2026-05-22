@@ -40,8 +40,8 @@
       <geom type="box" size=".035 .035 .035" mass=".108" group="3"/>
     </body>
     -->
-    <body name="obj" >
-      <freejoint name="obj_freejoint" pos="-0.01 0.04 0.08" quat = "1 0 0 0"/>
+    <body name="obj" pos="-0.01 0.04 0.08" quat = "1 0 0 0" >
+      <freejoint name="obj_freejoint" />
       <geom name="obj" type="box" material="obj_material" size="0.035 0.035 0.035" 
         friction="0.5" rgba="1.0 1.0 0 0.99" mass="0.14"
         />
