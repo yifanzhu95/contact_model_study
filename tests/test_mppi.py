@@ -159,6 +159,7 @@ def run(
     print(f"{'='*60}")
 
     task = get_task(task_name, geometry=geo)
+    mjm, _ = task.load()
     mjm  = apply_physics_noise(mjm, noise, rng)
     task._mjm = mjm
     max_steps = task.spec.max_steps
