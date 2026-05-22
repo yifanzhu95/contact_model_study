@@ -22,7 +22,7 @@ from .base import BaseTask, ContactComplexity, TaskSpec, register
 @wp.func
 def push_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float), 
                  terminal: bool, goal: wp.array(dtype=float), indices: wp.array(dtype=int),
-                 xpos: wp.array(dtype=wp.vec3), xquat: wp.array(dtype=wp.quat),
+                 site_xpos: wp.array(dtype=wp.vec3), site_xquat: wp.array(dtype=wp.quat),
                  weights: wp.array(dtype=float)) -> float:
     # indices[0]: Box qpos address
     adr = indices[0]
@@ -36,7 +36,7 @@ def push_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl:
 @wp.func
 def peg_in_hole_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float), 
                         terminal: bool, goal: wp.array(dtype=float), indices: wp.array(dtype=int),
-                        xpos: wp.array(dtype=wp.vec3), xquat: wp.array(dtype=wp.quat),
+                        site_xpos: wp.array(dtype=wp.vec3), site_xquat: wp.array(dtype=wp.quat),
                         weights: wp.array(dtype=float)) -> float:
     # indices[0]: Peg qpos address. goal: [target_z, target_x, target_y]
     adr = indices[0]
@@ -76,11 +76,11 @@ class PushTask(BaseTask):
         mjm = self.mjm
         # Get joint and body indices
         obj_jnt = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "obj_freejoint")
-        obj_body = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
+        obj_site = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "obj")
         
-        # Fingertip body IDs for contact cost
+        # Fingertip site IDs for contact cost
         tips = ["ff_tip", "mf_tip", "rf_tip", "th_tip"]
-        tip_ids = [mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, t) for t in tips]
+        tip_ids = [mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, t) for t in tips]
 
         # 1. Index Vector Mapping
         self.index_vector = np.array([
@@ -88,7 +88,7 @@ class PushTask(BaseTask):
             mjm.jnt_dofadr[obj_jnt],  # 1: obj qvel
             0,                        # 2: robot qpos starts at 0
             16,                       # 3: n_manip (Allegro has 16 joints)
-            obj_body,                 # 4: obj body id
+            obj_site,                 # 4: obj site id
             *tip_ids                  # 5-8: fingertip ids
         ], dtype=np.int32)
         
@@ -149,13 +149,13 @@ class PushTask(BaseTask):
         return push_cost_wp, self.goal_vector_wp, self.index_vector_wp, self.weights_wp
 
     def is_success(self, mjd: mujoco.MjData) -> bool:
-        box_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "box")
-        if box_id < 0:
+        box_site_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_SITE, "obj")
+        if box_site_id < 0:
             return False
-        target_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_SITE, "target")
+        target_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
         if target_id < 0:
             return False
-        box_pos    = mjd.xpos[box_id, :2]
+        box_pos    = mjd.site_xpos[box_site_id, :2]
         target_pos = mjd.site_xpos[target_id, :2]
         return bool(np.linalg.norm(box_pos - target_pos) < self.spec.success_threshold)
 
@@ -171,17 +171,17 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
                            terminal: bool, 
                            goal: wp.array(dtype=float), 
                            indices: wp.array(dtype=int),
-                           xpos: wp.array(dtype=wp.vec3),   
-                           xquat: wp.array(dtype=wp.quat),
+                           site_xpos: wp.array(dtype=wp.vec3),   
+                           site_xquat: wp.array(dtype=wp.quat),
                            weights: wp.array(dtype=float)) -> float:
     # Index Mapping MUST match initialize_task
     obj_qpos_adr   = indices[0]
     robot_qpos_adr = indices[2]
     n_manip        = indices[3]
-    obj_id         = indices[4]
+    obj_site_id    = indices[4]
 
-    p_obj = xpos[obj_id]
-    q_obj = xquat[obj_id] 
+    p_obj = site_xpos[obj_site_id]
+    q_obj = site_xquat[obj_site_id] 
     p_target = wp.vec3(goal[0], goal[1], goal[2])
     q_target = wp.vec4(goal[3], goal[4], goal[5], goal[6])
     q_obj_v4 = wp.vec4(q_obj.w, q_obj.x, q_obj.y, q_obj.z)
@@ -203,7 +203,7 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
     # 4. Contact cost
     c_contact = float(0.0)
     for i in range(5, 9):
-        p_tip = xpos[indices[i]]
+        p_tip = site_xpos[indices[i]]
         dp = p_obj - p_tip
         c_contact = c_contact + wp.dot(dp, dp)
 
@@ -249,8 +249,8 @@ class GraspReorientTask(BaseTask):
         mjm = self.mjm
         obj_jnt = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "obj_freejoint")
         
-        # Required Body IDs for xpos/xquat
-        obj_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
+        # Required Site IDs for site_xpos/site_xquat
+        obj_site_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "obj")
         tip_ids = [
             mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "if_tip"),
             mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "mf_tip"),
@@ -264,7 +264,7 @@ class GraspReorientTask(BaseTask):
             mjm.jnt_dofadr[obj_jnt],  # 1
             0,                        # 2: robot_qpos_adr (Hand is first in XML)
             16,                       # 3: n_manip (Allegro has 16 joints)
-            obj_id,                   # 4
+            obj_site_id,              # 4
             *tip_ids                  # 5, 6, 7, 8
         ], dtype=np.int32)
         
@@ -315,15 +315,15 @@ class GraspReorientTask(BaseTask):
 
     def is_success(self, mjd: mujoco.MjData) -> bool:
         mjm = self.mjm
-        obj_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
+        obj_site_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "obj")
         #target_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "obj_target")
 
         #if obj_id < 0 or target_id < 0:
         #    return False
         self.target_pos
 
-        pos_err = np.linalg.norm(mjd.xpos[obj_id] - self.target_pos)
-        obj_quat = mjd.xquat[obj_id]
+        pos_err = np.linalg.norm(mjd.site_xpos[obj_site_id] - self.target_pos)
+        obj_quat = mjd.site_xquat[obj_site_id]
         #target_quat = mjm.site_quat[target_id]
         quat_err = 1.0 - np.dot(obj_quat, self.target_quat)**2
         
@@ -395,11 +395,11 @@ class PegInHoleTask(BaseTask):
         return peg_in_hole_cost_wp, self.goal_vector_wp, self.index_vector_wp, self.weights_wp
 
     def is_success(self, mjd: mujoco.MjData) -> bool:
-        peg_id  = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "peg")
+        peg_site_id  = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_SITE, "peg")
         hole_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_SITE, "hole_bottom")
-        if peg_id < 0 or hole_id < 0:
+        if peg_site_id < 0 or hole_id < 0:
             return False
-        peg_tip  = mjd.xpos[peg_id].copy()
+        peg_tip  = mjd.site_xpos[peg_site_id].copy()
         hole_pos = mjd.site_xpos[hole_id].copy()
         depth    = hole_pos[2] - peg_tip[2]
         lateral  = np.linalg.norm(peg_tip[:2] - hole_pos[:2])
