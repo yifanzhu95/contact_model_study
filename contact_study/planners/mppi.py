@@ -39,10 +39,12 @@ class MPPIConfig:
     n_iterations:    int   = 1      # number of MPPI update iterations per call
     warm_start:      bool  = True   # shift action sequence one step forward
     nconmax:         int   = 200
-    use_spline_noise: bool = True   # toggle between spline and Gaussian noise
-    n_spline_points: int   = 3      # control points for spline-smoothed noise
     njmax:           int   = 500
     substeps:        int   = 5
+    adaptive_temp:   bool  = False
+    adp_temp_params: tuple[float, float, float, float] = (10.0, 5.0, 0.9, 1.1)
+    use_spline_noise:bool  = True   # toggle between spline and Gaussian noise
+    n_spline_points: int   = 3      # control points for spline-smoothed noise
     debug:           bool  = True
     delta_range:     tuple[float, float] = (-0.1, 0.1)
 
@@ -361,10 +363,11 @@ class MPPIController:
             eta  = w.sum() + 1e-8
             w   /= eta
 
-            if eta > 10.0:
-                self.pc.temperature = 0.9*self.pc.temperature
-            elif eta < 5.0:
-                self.pc.temperature = 1.1*self.pc.temperature
+            if self.pc.adaptive_temp:
+                if eta > self.pc.adp_temp_params[0]:
+                    self.pc.temperature = self.pc.adp_temp_params[2]*self.pc.temperature
+                elif eta < self.pc.adp_temp_params[1]:
+                    self.pc.temperature = self.pc.adp_temp_params[3]*self.pc.temperature
 
             low, high = self.pc.delta_range
             dU = np.einsum("n,nht->ht", w, eps_np).clip(low, high)   # (H, nu)
