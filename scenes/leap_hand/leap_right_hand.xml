@@ -63,8 +63,10 @@ Naming Conventions
 -->
 
 <mujoco model="leap_rh">
-  <compiler angle="radian" meshdir="./leap_hand/assets/"/>
-  <!-- <option integrator="implicitfast" cone="elliptic" impratio="100"/> -->
+  <compiler angle="radian" meshdir="./assets/"/>
+  <!--
+  <option integrator="implicitfast" cone="elliptic" impratio="100"/>  
+  -->
 
   <!-- mesh assets -->
   <asset>
@@ -91,7 +93,7 @@ Naming Conventions
     <!-- actuator defaults -->
     <position kp="3.0" kv="0.01" />
     <joint damping="0.03" frictionloss="0.001"/>
-
+    <!-- ADDED THE ARMATURE AND FORCE RANGE AND IT STABALIZED THE SIM A LOT!  armature="0.0015" -->
     <!-- geom class defaults -->
     <default class="visual">
       <geom group="1" type="mesh" contype="0" conaffinity="0" density="0" material="black" />

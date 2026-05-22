@@ -1,9 +1,7 @@
 <mujoco model="leap_rh">
   <compiler angle="radian" autolimits="true"/>
 
-  <option timestep="0.01" integrator="Euler" iterations="5" ls_iterations="8">
-    <flag eulerdamp="disable"/>
-  </option>
+  <option integrator="implicitfast" cone="elliptic" impratio="100"/>
 
   <custom>
     <numeric data="30" name="max_contact_points"/>
