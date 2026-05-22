@@ -95,14 +95,16 @@ def _make_accumulate_kernel(cost_fn_wp: wp.func):
         terminal:  bool,
         goal:      wp.array(dtype=float),
         indices:   wp.array(dtype=int),
+        xpos:      wp.array2d(dtype=wp.vec3),
+        xquat:     wp.array2d(dtype=wp.quat),
         site_xpos: wp.array2d(dtype=wp.vec3),
-        site_xquat: wp.array2d(dtype=wp.quat),
         weights:   wp.array(dtype=float),
         costs_out: wp.array(dtype=float),
     ):
         w = wp.tid()
         costs_out[w] += cost_fn_wp(
-            qpos[w], qvel[w], ctrl[w], terminal, goal, indices, site_xpos[w], site_xquat[w], weights
+            qpos[w], qvel[w], ctrl[w], terminal, goal, indices, 
+            xpos[w], xquat[w], site_xpos[w], weights
         )
     return _kernel
 
@@ -266,7 +268,9 @@ class MPPIController:
                 inputs=[
                     self.d.qpos, self.d.qvel, self.d.ctrl, 
                     terminal, self.goal_wp, self.indices_wp,
-                    self.d.site_xpos, self.d.site_xquat,
+                    self.d.xpos,
+                    self.d.xquat,
+                    self.d.site_xpos,
                     self.weights_wp
                 ],
                 outputs=[self.costs_wp],
