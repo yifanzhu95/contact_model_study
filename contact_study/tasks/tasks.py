@@ -253,7 +253,7 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "leap_hand/scene_leap_cube.xml",#"scenes/test_data/allegro/allegro_right_hand_armature.xml",
-            max_steps         = 50,
+            max_steps         = 500,
             success_threshold = 0.05,  # combined pose error
             cost_weights      = {
                 "w_quat": 5.0, #0.5, 

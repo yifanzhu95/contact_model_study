@@ -277,7 +277,7 @@ def run(
                         mujoco.mj_forward(mjm, mjd_view)
                         v.sync()
                     elif render_mode == "video" and renderer is not None:
-                        renderer.update_scene(mjd, camera="top")
+                        renderer.update_scene(mjd, camera="top") #<---- make this set as a arg
                         frames.append(renderer.render())
 
                 step_times.append(time.perf_counter() - step_start)
