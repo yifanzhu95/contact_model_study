@@ -219,7 +219,7 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
 
     #5 
     fallen = float(0.0)
-    if qpos[obj_qpos_adr + 2] < 0.0:
+    if qpos[obj_qpos_adr + 2] < 0.00:
         fallen = 1.0
 
     #6 object velocity
@@ -253,15 +253,15 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "leap_hand/scene_leap_cube.xml",#"scenes/test_data/allegro/allegro_right_hand_armature.xml",
-            max_steps         = 200,
+            max_steps         = 50,
             success_threshold = 0.05,  # combined pose error
             cost_weights      = {
                 "w_quat": 5.0, #0.5, 
                 "w_pos": 5.0,#0.1, 
-                "w_velo": 0.01,
+                "w_velo": 1e-6,
                 "w_contact": 5.0,#0.5, 
-                "w_joint": 0.2, 
-                "w_joint_velo": 0.01, 
+                "w_joint": 1.0, 
+                "w_joint_velo": 1e-6, 
                 "w_fallen": 20.0,#50.0,
                 "w_quat_term": 10.0,#10.0, 
                 "w_pos_term": 10.0,#5.0, 
@@ -353,7 +353,7 @@ class GraspReorientTask(BaseTask):
     def sample_new_goal(self, mjd: mujoco.MjData, rng: np.random.Generator):
         """Sample a new goal orientation around the current one and update the mocap body and goal vector."""
         # Sample a small perturbation for the orientation
-        noise = rng.standard_normal(4) * 0.1
+        noise = rng.standard_normal(4) * 1.0
         new_quat = self.target_quat + noise
         new_quat /= np.linalg.norm(new_quat)
 

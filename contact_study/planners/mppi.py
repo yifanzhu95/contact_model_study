@@ -44,7 +44,7 @@ class MPPIConfig:
     adaptive_temp:   bool  = True
     adp_temp_params: tuple[float, float, float, float] = (10.0, 5.0, 0.9, 1.1)
     use_spline_noise:bool  = True   # toggle between spline and Gaussian noise
-    n_spline_points: int   = 3      # control points for spline-smoothed noise
+    n_spline_points: int   = 5      # control points for spline-smoothed noise
     debug:           bool  = True
     delta_range:     tuple[float, float] = (-0.1, 0.1)
 

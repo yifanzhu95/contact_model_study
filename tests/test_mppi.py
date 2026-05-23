@@ -175,7 +175,7 @@ def run(
         n_samples  = n_samples,
         horizon    = horizon,
         temperature = 0.01,
-        noise_sigma = 0.02,
+        noise_sigma = 0.001,
         warm_start = True,
         debug = debug
     )
@@ -189,7 +189,7 @@ def run(
     if render_mode == "viewer":
         v = mujoco.viewer.launch_passive(mjm, mjd_view)
     elif render_mode == "video":
-        renderer = mujoco.Renderer(mjm)
+        renderer = mujoco.Renderer(mjm, height=480, width=640)
 
     # ------------------------------------------------------------------
     # Episode loop
@@ -277,7 +277,7 @@ def run(
                         mujoco.mj_forward(mjm, mjd_view)
                         v.sync()
                     elif render_mode == "video" and renderer is not None:
-                        renderer.update_scene(mjd)
+                        renderer.update_scene(mjd, camera="top")
                         frames.append(renderer.render())
 
                 step_times.append(time.perf_counter() - step_start)
@@ -294,6 +294,7 @@ def run(
                 if task is not None and task.is_success(mjd):
                     # Update goal orientation dynamically for grasp_reorient task
                     if task_name == "grasp_reorient" and hasattr(task, 'sample_new_goal'):
+                        print("SAMPLING NEWE GOAL!")
                         task.sample_new_goal(mjd, rng)
 
                     if steps_to_success is None:
@@ -374,7 +375,7 @@ def main():
     parser.add_argument("--budget_seconds", type=float, default=0.1,
                         help="Per-step time budget for Condition A")
     parser.add_argument("--n_samples",      type=int,   default=256)
-    parser.add_argument("--horizon",        type=int,   default=48)
+    parser.add_argument("--horizon",        type=int,   default=50)
     parser.add_argument("--seed",           type=int,   default=42)
     parser.add_argument("--geometry",       type=str,   default="accurate",
                         choices=[g.value for g in GeometryVariant])
