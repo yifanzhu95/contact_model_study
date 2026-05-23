@@ -43,31 +43,38 @@ with mujoco.viewer.launch_passive(model, data) as viewer:
 
         cam = viewer.cam
         
+        # Convert azimuth and elevation to radians
         az = np.radians(cam.azimuth)
         el = np.radians(cam.elevation)
         
-        forward = np.array([
-            np.sin(az) * np.cos(el),
-            -np.cos(az) * np.cos(el),
+        # 1. Right vector (local X axis of the camera)
+        right = np.array([
+            np.cos(az), 
+            np.sin(az), 
+            0.0
+        ])
+        
+        # 2. Up vector (local Y axis of the camera)
+        up = np.array([
+            -np.sin(el) * np.sin(az), 
+            np.sin(el) * np.cos(az), 
+            np.cos(el)
+        ])
+        
+        # 3. Backwards vector (local Z axis pointing from lookat -> camera position)
+        backwards = np.array([
+            np.cos(el) * np.sin(az), 
+            -np.cos(el) * np.cos(az), 
             np.sin(el)
         ])
         
-        pos = cam.lookat - cam.distance * forward
+        # Camera position is lookat PLUS distance along the backwards vector
+        pos = cam.lookat + cam.distance * backwards
         
-        world_up = np.array([0, 0, 1])
-
-        if np.abs(np.dot(forward, world_up)) > 0.9998:
-            right = np.array([1, 0, 0]) if forward[2] < 0 else np.array([-1, 0, 0])
-        else:
-            right = np.cross(forward, world_up)
-            right /= np.linalg.norm(right)
-        up = np.cross(right, forward)
-        up /= np.linalg.norm(up)
-
+        # Format strings for MuJoCo XML
         pos_str = f"{pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f}"
         xyaxis_str = f"{right[0]:.4f} {right[1]:.4f} {right[2]:.4f} {up[0]:.4f} {up[1]:.4f} {up[2]:.4f}"
-                
-        print(f'<camera name="exported_cam" pos="{pos_str}" xyaxis="{xyaxis_str}" />')
+        print(f'<camera name="exported_cam" pos="{pos_str}" xyaxes="{xyaxis_str}" />')
         # 4. Sync the viewer
         viewer.sync()
 
