@@ -351,7 +351,7 @@ class GraspReorientTask(BaseTask):
         return bool(pos_err < self.spec.success_threshold and quat_err < self.spec.success_threshold)
 
     def sample_new_goal(self, mjd: mujoco.MjData, rng: np.random.Generator):
-        """Sample a new goal orientation by rotating +/- 90 degrees around a cardinal axis."""
+        """Sample a new goal orientation by rotating +/- 90 degrees around an object-local cardinal axis."""
         # Select a cardinal axis (0:X, 1:Y, 2:Z)
         axis_idx = rng.integers(0, 3)
         axis = np.zeros(3)
@@ -365,9 +365,9 @@ class GraspReorientTask(BaseTask):
         s = np.sin(angle / 2.0)
         q_rot = np.array([c, s * axis[0], s * axis[1], s * axis[2]])
 
-        # Apply rotation to the current target orientation: new = q_rot * current
+        # Apply rotation around local axes: new = current * q_rot
         new_quat = np.zeros(4)
-        mujoco.mju_mulQuat(new_quat, q_rot, self.target_quat)
+        mujoco.mju_mulQuat(new_quat, self.target_quat, q_rot)
 
         # Update mocap body orientation in the simulation data
         target_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "obj_target")
