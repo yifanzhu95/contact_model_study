@@ -171,11 +171,11 @@ def run(
     print(f"  dof_damping     : min={mjm.dof_damping.min():.2e}  "
           f"max={mjm.dof_damping.max():.2e}")
 
-    mppi_init_temp = 0.01
+    #mppi_init_temp = 0.01
     mppi_cfg = MPPIConfig(
         n_samples  = n_samples,
         horizon    = horizon,
-        temperature = mppi_init_temp,
+        temperature = 0.01,
         noise_sigma = 0.001,
         warm_start = True,
         debug = debug
@@ -206,7 +206,7 @@ def run(
             q0, v0, u0 = task.get_inital_state(rng)
 
             # Ensure temperature starts at the initial value for each episode
-            mppi_cfg.temperature = mppi_init_temp
+            #mppi_cfg.temperature = mppi_init_temp
 
             controller = MPPIController(
                 mjm       = mjm,
@@ -303,7 +303,7 @@ def run(
                         
                         # Reset the warm-started action sequence and adaptive temperature
                         controller.reset()
-                        controller.pc.temperature = mppi_init_temp
+                        controller.lam = controller.pc.temperature
 
                     if steps_to_success is None:
                         steps_to_success = t + 1
@@ -382,7 +382,7 @@ def main():
     parser.add_argument("--n_episodes",     type=int,   default=1)
     parser.add_argument("--budget_seconds", type=float, default=0.1,
                         help="Per-step time budget for Condition A")
-    parser.add_argument("--n_samples",      type=int,   default=512)
+    parser.add_argument("--n_samples",      type=int,   default=1024)
     parser.add_argument("--horizon",        type=int,   default=50)
     parser.add_argument("--seed",           type=int,   default=42)
     parser.add_argument("--geometry",       type=str,   default="accurate",

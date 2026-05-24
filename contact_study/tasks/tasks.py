@@ -220,7 +220,7 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
 
     #5 
     fallen = float(0.0)
-    if qpos[obj_qpos_adr + 2] < 0.06:
+    if qpos[obj_qpos_adr + 2] < 0.05:
         fallen = 1.0
 
     #6 object velocity
@@ -254,16 +254,16 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "leap_hand/scene_leap_cube.xml",#"scenes/test_data/allegro/allegro_right_hand_armature.xml",
-            max_steps         = 100,
-            success_threshold = 0.025,  # combined pose error
+            max_steps         = 300,
+            success_threshold = 0.05,  # combined pose error
             cost_weights      = {
                 "w_quat": 5.0, #0.5,
                 "w_pos": 5.0,#0.1,
-                "w_velo": 0.01,
-                "w_contact": 2.0,#0.5,
-                "w_joint": 0.5,
+                "w_velo": 0.002,
+                "w_contact": 1.0,#0.5,
+                "w_joint": 0.07,
                 "w_joint_velo": 0.0,
-                "w_fallen": 20.0,#50.0,
+                "w_fallen": 50.0,#50.0,
                 "w_quat_term": 10.0,#10.0,
                 "w_pos_term": 10.0,#5.0,
                 "w_fallen_term": 0.0,#100.0

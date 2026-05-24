@@ -40,13 +40,13 @@ class MPPIConfig:
     warm_start:      bool  = True   # shift action sequence one step forward
     nconmax:         int   = 200
     njmax:           int   = 500
-    substeps:        int   = 5
+    substeps:        int   = 1
     adaptive_temp:   bool  = True
     adp_temp_params: tuple[float, float, float, float] = (10.0, 5.0, 0.9, 1.1)
     use_spline_noise:bool  = True   # toggle between spline and Gaussian noise
     n_spline_points: int   = 3      # control points for spline-smoothed noise
     debug:           bool  = True
-    delta_range:     tuple[float, float] = (-0.05, 0.05)
+    delta_range:     tuple[float, float] = (-0.01, 0.01)
 
 
 # ---------------------------------------------------------------------------
