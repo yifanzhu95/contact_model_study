@@ -171,11 +171,12 @@ def run(
     print(f"  dof_damping     : min={mjm.dof_damping.min():.2e}  "
           f"max={mjm.dof_damping.max():.2e}")
 
+    mppi_init_temp = 0.01
     mppi_cfg = MPPIConfig(
         n_samples  = n_samples,
         horizon    = horizon,
-        temperature = 0.01,
-        noise_sigma = 0.005,
+        temperature = mppi_init_temp,
+        noise_sigma = 0.001,
         warm_start = True,
         debug = debug
     )
@@ -203,6 +204,9 @@ def run(
         for ep in range(n_episodes):
             
             q0, v0, u0 = task.get_inital_state(rng)
+
+            # Ensure temperature starts at the initial value for each episode
+            mppi_cfg.temperature = mppi_init_temp
 
             controller = MPPIController(
                 mjm       = mjm,
@@ -296,6 +300,10 @@ def run(
                     if task_name == "grasp_reorient" and hasattr(task, 'sample_new_goal'):
                         print("SAMPLING NEWE GOAL!")
                         task.sample_new_goal(mjd, rng)
+                        
+                        # Reset the warm-started action sequence and adaptive temperature
+                        controller.reset()
+                        controller.pc.temperature = mppi_init_temp
 
                     if steps_to_success is None:
                         steps_to_success = t + 1
