@@ -40,6 +40,7 @@ class TaskSpec:
     max_steps:         int
     success_threshold: float  # task-specific (e.g., position error in meters)
     cost_weights:      dict
+    velocity_threshold: float = 1.0  # Threshold for object velocity (settled check)
 
 
 class BaseTask(abc.ABC):
@@ -107,6 +108,10 @@ class BaseTask(abc.ABC):
     def is_success(self, mjd: mujoco.MjData) -> bool:
         """Check whether the current state satisfies the task goal."""
         ...
+
+    def has_fallen(self, mjd: mujoco.MjData) -> bool:
+        """Check whether the object has fallen or left the workspace."""
+        return False
 
     def evaluate_episode(
         self,

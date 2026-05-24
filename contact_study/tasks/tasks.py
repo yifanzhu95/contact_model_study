@@ -254,8 +254,9 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "leap_hand/scene_leap_cube.xml",#"scenes/test_data/allegro/allegro_right_hand_armature.xml",
-            max_steps         = 300,
+            max_steps         = 100,
             success_threshold = 0.05,  # combined pose error
+            velocity_threshold = 0.1,    # settled velocity threshold (m/s and rad/s)
             cost_weights      = {
                 "w_quat": 5.0, #0.5,
                 "w_pos": 5.0,#0.1,
@@ -345,11 +346,27 @@ class GraspReorientTask(BaseTask):
         mjm = self.mjm
         obj_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
 
+        # Check for the check: ensure the object exists in the model
+        if obj_id < 0:
+            return False
+
         pos_err = np.linalg.norm(mjd.xpos[obj_id] - self.target_pos)
         obj_quat = mjd.xquat[obj_id]
         quat_err = 1.0 - np.dot(obj_quat, self.target_quat)**2
-        
-        return bool(pos_err < self.spec.success_threshold and quat_err < self.spec.success_threshold)
+
+        # Check for the check: only proceed to velocity check if pose is satisfied
+        pose_ok = pos_err < self.spec.success_threshold and quat_err < self.spec.success_threshold
+        if not pose_ok:
+            return False
+
+        # Verify object has settled (velocity below threshold)
+        vel_threshold = getattr(self.spec, "velocity_threshold", 1.0)
+        return bool(np.linalg.norm(mjd.cvel[obj_id]) < vel_threshold)
+
+    def has_fallen(self, mjd: mujoco.MjData) -> bool:
+        # Check Z height of the freejoint object (qpos[2] is Z)
+        obj_qpos_adr = self.index_vector[0]
+        return bool(mjd.qpos[obj_qpos_adr + 2] < 0.06)
 
     def sample_new_goal(self, mjd: mujoco.MjData, rng: np.random.Generator):
         """Sample a new goal orientation by rotating +/- 90 degrees around an object-local cardinal axis."""
