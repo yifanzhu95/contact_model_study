@@ -44,9 +44,9 @@ class MPPIConfig:
     adaptive_temp:   bool  = True
     adp_temp_params: tuple[float, float, float, float] = (10.0, 5.0, 0.9, 1.1)
     use_spline_noise:bool  = True   # toggle between spline and Gaussian noise
-    n_spline_points: int   = 5      # control points for spline-smoothed noise
+    n_spline_points: int   = 3      # control points for spline-smoothed noise
     debug:           bool  = True
-    delta_range:     tuple[float, float] = (-0.1, 0.1)
+    delta_range:     tuple[float, float] = (-0.05, 0.05)
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +143,7 @@ class MPPIController:
         self.cfg = cfg
         self.pc  = mppi_cfg
         self.rng = rng or np.random.default_rng()
+        self.lam = self.pc.temperature
 
         self.nu = mjm.nu
         self.nq = mjm.nq
@@ -295,7 +296,7 @@ class MPPIController:
         """
         N     = self.pc.n_samples
         H     = self.pc.horizon
-        lam   = self.pc.temperature
+        lam   = self.lam
         sigma = self.pc.noise_sigma
 
         for iteration in range(self.pc.n_iterations):
@@ -342,9 +343,9 @@ class MPPIController:
 
             if self.pc.adaptive_temp:
                 if eta > self.pc.adp_temp_params[0]:
-                    self.pc.temperature = self.pc.adp_temp_params[2]*self.pc.temperature
+                    self.lam = self.pc.adp_temp_params[2]*self.lam
                 elif eta < self.pc.adp_temp_params[1]:
-                    self.pc.temperature = self.pc.adp_temp_params[3]*self.pc.temperature
+                    self.lam = self.pc.adp_temp_params[3]*self.lam
 
             low, high = self.pc.delta_range
             dU = np.einsum("n,nht->ht", w, eps_np).clip(low, high)   # (H, nu)
