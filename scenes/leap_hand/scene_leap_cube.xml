@@ -5,8 +5,12 @@
   <include file="leap_rh.xml"/>
   -->
 
-  <option timestep="0.005" ccd_iterations="100">
+  <option timestep="0.001" ccd_iterations="100">
+  <!--
+    timestep="0.005" ccd_iterations="100"
     <flag multiccd="enable"/>
+    <flag nativeccd="disable"/>
+  -->
   </option>
 
   <statistic center="0.15 0 0" extent="0.4" meansize="0.01"/>
@@ -52,12 +56,12 @@
         friction="0.5" rgba="1.0 1.0 0 0.99" mass="0.14"
         />
     </body>
-    <body name="obj_target" mocap="true" pos="0.012 0.04 0.085" euler="0 0.5235 1.5708" >
+    <body name="obj_target" mocap="true" pos="0.012 0.04 0.08" euler="0 0.5235 1.5708" >
       <site name="obj_target" type="box" material="obj_material" size="0.035 0.035 0.035" 
         rgba="1.0 1.0 0 0.1"
       />
     </body>
-    <!-- pos="0.03 0.03 0.08" euler="0 0.5235 1" -->
+    <!-- pos="0.03 0.03 0.08" "0.012 0.04 0.085"" euler="0 0.5235 1" -->
 
 
   </worldbody>

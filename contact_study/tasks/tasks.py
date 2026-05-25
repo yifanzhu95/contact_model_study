@@ -258,16 +258,16 @@ class GraspReorientTask(BaseTask):
             success_threshold = 0.05,  # combined pose error
             velocity_threshold = 0.1,    # settled velocity threshold (m/s and rad/s)
             cost_weights      = {
-                "w_quat": 5.0, #0.5,
-                "w_pos": 5.0,#0.1,
-                "w_velo": 0.002,
-                "w_contact": 1.0,#0.5,
-                "w_joint": 0.07,
+                "w_quat": 7.5,
+                "w_pos": 10.0,
+                "w_velo": 0.004, #0.004
+                "w_contact": 3.5,
+                "w_joint": 0.05, #0.1
                 "w_joint_velo": 0.0,
-                "w_fallen": 50.0,#50.0,
-                "w_quat_term": 10.0,#10.0,
-                "w_pos_term": 10.0,#5.0,
-                "w_fallen_term": 0.0,#100.0
+                "w_fallen": 50.0,
+                "w_quat_term": 15.0,
+                "w_pos_term": 10.0,
+                "w_fallen_term": 0.0,
             }
         )
 
@@ -364,9 +364,14 @@ class GraspReorientTask(BaseTask):
         return bool(np.linalg.norm(mjd.cvel[obj_id]) < vel_threshold)
 
     def has_fallen(self, mjd: mujoco.MjData) -> bool:
-        # Check Z height of the freejoint object (qpos[2] is Z)
-        obj_qpos_adr = self.index_vector[0]
-        return bool(mjd.qpos[obj_qpos_adr + 2] < 0.06)
+        mjm = self.mjm
+        obj_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
+
+        # Check for the check: ensure the object exists in the model
+        if obj_id < 0:
+            return False
+        
+        return bool(mjd.xpos[obj_id][2] < 0.0)
 
     def sample_new_goal(self, mjd: mujoco.MjData, rng: np.random.Generator):
         """Sample a new goal orientation by rotating +/- 90 degrees around an object-local cardinal axis."""

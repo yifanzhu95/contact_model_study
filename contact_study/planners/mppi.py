@@ -40,13 +40,13 @@ class MPPIConfig:
     warm_start:      bool  = True   # shift action sequence one step forward
     nconmax:         int   = 200
     njmax:           int   = 500
-    substeps:        int   = 1
+    substeps:        int   = 16
     adaptive_temp:   bool  = True
     adp_temp_params: tuple[float, float, float, float] = (10.0, 5.0, 0.9, 1.1)
     use_spline_noise:bool  = True   # toggle between spline and Gaussian noise
     n_spline_points: int   = 3      # control points for spline-smoothed noise
     debug:           bool  = True
-    delta_range:     tuple[float, float] = (-0.01, 0.01)
+    delta_range:     tuple[float, float] = (-0.005, 0.005)
 
 
 # ---------------------------------------------------------------------------
@@ -261,18 +261,17 @@ class MPPIController:
             # 2. Advance physics for all N worlds.
             for _ in range(substeps):
                 api.step(self.m, self.d)
-
-            # 3. Accumulate per-world costs.
-            wp.launch(
-                self._accumulate_costs_kernel,
-                dim=N,
-                inputs=[
-                    self.d.qpos, self.d.qvel, self.d.ctrl, self.d.site_xpos,
-                    terminal, self.goal_wp, self.indices_wp,
-                    self.weights_wp
-                ],
-                outputs=[self.costs_wp],
-            )
+                # 3. Accumulate per-world costs.
+                wp.launch(
+                    self._accumulate_costs_kernel,
+                    dim=N,
+                    inputs=[
+                        self.d.qpos, self.d.qvel, self.d.ctrl, self.d.site_xpos,
+                        terminal, self.goal_wp, self.indices_wp,
+                        self.weights_wp
+                    ],
+                    outputs=[self.costs_wp],
+                )
 
         return wp.capture_end(device="cuda")
 

@@ -176,7 +176,7 @@ def run(
         n_samples  = n_samples,
         horizon    = horizon,
         temperature = 0.01,
-        noise_sigma = 0.001,
+        noise_sigma = 0.0005, #0.001
         warm_start = True,
         debug = debug
     )
@@ -311,10 +311,10 @@ def run(
                         if debug:
                             print(f"  ✓  ep {ep:02d} succeeded at step {steps_to_success}")
                     # Keep simulating so timing is comparable across episodes
-                    if task is not None and task.has_fallen(mjd):
-                        if debug:
-                            print(f"  ⚠  ep {ep:02d} terminated early: object fell at step {t}")
-                        break
+                if task is not None and task.has_fallen(mjd):
+                    if debug:
+                        print(f"  ⚠  ep {ep:02d} terminated early: object fell at step {t}")
+                    break
             ep_elapsed = time.perf_counter() - ep_start
 
             if render_mode == "video" and frames and media is not None:
