@@ -1,19 +1,9 @@
 """Model Predictive Path Integral (MPPI) controller.
 
 All rollouts are executed in parallel on GPU via the batched step()
-interface (nworld = N samples). The MPPI weight update and action
-resampling runs on CPU/numpy after a wp.synchronize().
-
-Model Predictive Path Integral (MPPI) controller.
-
-All rollouts are executed in parallel on GPU via the batched step()
-interface (nworld = N samples). The inner H-step rollout loop is recorded
-as a CUDA graph during __init__ and replayed with a single
-wp.capture_launch() call per MPPI iteration, eliminating all Python-level
-orchestration overhead within the rollout. The MPPI weight update and
-action resampling run on CPU/numpy after a single wp.synchronize() once
-the full rollout graph has completed.
-
+interface (nworld = N samples). The physics step and state resets are 
+encapsulated in CUDA graphs, eliminating slow CPU-side data resets 
+during the MPPI loop.
 """
 
 from __future__ import annotations
@@ -40,13 +30,13 @@ class MPPIConfig:
     warm_start:      bool  = True   # shift action sequence one step forward
     nconmax:         int   = 200
     njmax:           int   = 500
-    substeps:        int   = 16
+    substeps:        int   = 1
     adaptive_temp:   bool  = True
     adp_temp_params: tuple[float, float, float, float] = (10.0, 5.0, 0.9, 1.1)
     use_spline_noise:bool  = True   # toggle between spline and Gaussian noise
     n_spline_points: int   = 3      # control points for spline-smoothed noise
     debug:           bool  = True
-    delta_range:     tuple[float, float] = (-0.005, 0.005)
+    delta_range:     tuple[float, float] = (-0.01, 0.01)
 
 
 # ---------------------------------------------------------------------------
@@ -76,17 +66,15 @@ def _add_noise_and_clip_kernel(
         val = wp.clamp(val, ctrl_range[u, 0], ctrl_range[u, 1])
     V_out[n, h, u] = val
 
-
 @wp.kernel
 def _assign_ctrl_kernel(
     V:    wp.array3d(dtype=float),   # (N, H, nu)
-    t:    int,                        # timestep index — baked in at graph capture
+    t:    int,                       # timestep index
     ctrl: wp.array2d(dtype=float),   # (N, nu)  [out]
 ):
     """Copy the t-th slice of V into d.ctrl without a Python-side round-trip."""
     n, u = wp.tid()
     ctrl[n, u] += V[n, t, u]
-
 
 def _make_accumulate_kernel(cost_fn_wp: wp.func):
     @wp.kernel
@@ -108,25 +96,12 @@ def _make_accumulate_kernel(cost_fn_wp: wp.func):
         )
     return _kernel
 
-
 # ---------------------------------------------------------------------------
 # Controller
 # ---------------------------------------------------------------------------
 
 class MPPIController:
-    """MPPI controller backed by a contact model.
-
-    Args:
-        mjm:       Host MuJoCo model (already configured with desired geometry).
-        cfg:       Contact model config (selects physics backend).
-        mppi_cfg:  MPPI hyperparameters.
-                   Reference: Williams et al. 2017, "Information Theoretic MPC
-                   for Model-Based Reinforcement Learning".
-        cost_fn:   A @wp.func with signature
-                       (qpos, qvel, ctrl: wp.array(float), terminal: bool) -> float
-                   called once per world per timestep on the GPU.
-        rng:       NumPy RNG for reproducible noise sampling.
-    """
+    """MPPI controller backed by a contact model."""
 
     def __init__(
         self,
@@ -149,14 +124,44 @@ class MPPIController:
         self.nq = mjm.nq
         self.nv = mjm.nv
 
-        # --- Pre-sample static noise (sampled once, reused every plan call) ---
-        N, H, nu = mppi_cfg.n_samples, mppi_cfg.horizon, self.nu
+        # Handle potential tuple from cost_fn_wp
+        self.cost_fn_wp_func = cost_fn
+        self.goal_wp = goals_wp
+        self.indices_wp = idx_wp
+        self.weights_wp = weights_wp
+        self._accumulate_costs_kernel = _make_accumulate_kernel(self.cost_fn_wp_func)
 
-        if mppi_cfg.use_spline_noise:
-            t_knots  = np.linspace(0, H - 1, mppi_cfg.n_spline_points)
+        self._setup_warp_arrays()
+        self._setup_warp_backend()
+
+    def _setup_warp_arrays(self):
+        """Allocate Warp arrays on GPU once (avoids runtime host copies)."""
+        N, H, nu = self.pc.n_samples, self.pc.horizon, self.nu
+
+        # Pre-allocate reset buffers
+        self.qpos_reset = wp.empty(self.nq, dtype=wp.float32, device="cuda")
+        self.qvel_reset = wp.empty(self.nv, dtype=wp.float32, device="cuda")
+        self.ctrl_reset = wp.empty(self.nu, dtype=wp.float32, device="cuda")
+
+        self.U_wp = wp.zeros((H, nu), dtype=wp.float32, device="cuda")
+        self.V_wp = wp.zeros((N, H, nu), dtype=wp.float32, device="cuda")
+        self.costs_wp = wp.zeros(N, dtype=wp.float32, device="cuda")
+
+        # Actuator limits
+        delta_low, delta_high = self.pc.delta_range
+        delta_range_np = np.empty((self.nu, 2), dtype=np.float32)
+        delta_range_np[:, 0] = delta_low
+        delta_range_np[:, 1] = delta_high
+
+        self._ctrl_range_wp = wp.array(delta_range_np, dtype=wp.float32, device="cuda")
+        self._has_limits_wp = wp.array(np.ones(self.nu, dtype=bool), dtype=wp.bool, device="cuda")
+
+        # Pre-sample static noise (reused every plan call)
+        if self.pc.use_spline_noise:
+            t_knots  = np.linspace(0, H - 1, self.pc.n_spline_points)
             t_dense  = np.arange(H)
             knot_noise = self.rng.normal(
-                0, mppi_cfg.noise_sigma, (N, mppi_cfg.n_spline_points, nu)
+                0, self.pc.noise_sigma, (N, self.pc.n_spline_points, nu)
             ).astype(np.float32)
             
             static_eps_np = np.empty((N, H, nu), dtype=np.float32)
@@ -165,106 +170,75 @@ class MPPIController:
                     static_eps_np[n, :, j] = CubicSpline(t_knots, knot_noise[n, :, j])(t_dense)
         else:
             static_eps_np = self.rng.normal(
-                loc=0.0, scale=mppi_cfg.noise_sigma, size=(N, H, nu)
+                loc=0.0, scale=self.pc.noise_sigma, size=(N, H, nu)
             ).astype(np.float32)
 
         self._static_eps_np = static_eps_np
         self._static_eps_wp = wp.array(static_eps_np, dtype=wp.float32, device="cuda")
 
-        # Handle potential tuple from cost_fn_wp
-        self.cost_fn_wp_func = cost_fn
-        self.goal_wp = goals_wp
-        self.indices_wp = idx_wp
-        self.weights_wp = weights_wp
-
-        # Build the cost-accumulation kernel with this task's cost function
-        # baked in at compile time (see factory docstring above).
-        self._accumulate_costs_kernel = _make_accumulate_kernel(self.cost_fn_wp_func)
-
-        # ---- GPU buffers -------------------------------------------------
-        N, H, nu = mppi_cfg.n_samples, mppi_cfg.horizon, mjm.nu
-        
-        self.U_wp = wp.zeros((H, nu), dtype=wp.float32, device="cuda")
-
-        # Candidate perturbed sequences: (N, H, nu)
-        self.V_wp = wp.zeros((N, H, nu), dtype=wp.float32, device="cuda")
-
-        # Per-sample rollout costs: (N,)
-        self.costs_wp = wp.zeros(N, dtype=wp.float32, device="cuda")
-
-        # Actuator limits
-        delta_low, delta_high = mppi_cfg.delta_range
-        delta_range_np = np.empty((self.nu, 2), dtype=np.float32)
-        delta_range_np[:, 0] = delta_low
-        delta_range_np[:, 1] = delta_high
-
-        self._ctrl_range_wp = wp.array(
-            delta_range_np, dtype=wp.float32, device="cuda"
-        )
-        # Always enable clipping for deltas in incremental mode
-        self._has_limits_wp = wp.array(np.ones(self.nu, dtype=bool), dtype=wp.bool, device="cuda")
-
-        # ---- Batched physics model ---------------------------------------
-        self.m = api.put_model(mjm, cfg)
+    def _setup_warp_backend(self):
+        """Initialize the batched MuJoCo backends and CUDA graphs."""
+        self.m = api.put_model(self.mjm, self.cfg)
         self.d = api.make_data(
-            mjm, self.m,
-            nworld=N,
-            nconmax=mppi_cfg.nconmax,
-            njmax=mppi_cfg.njmax,
+            self.mjm, self.m,
+            nworld=self.pc.n_samples,
+            nconmax=self.pc.nconmax,
+            njmax=self.pc.njmax,
         )
 
-        # ---- CUDA graph for the inner rollout loop -----------------------
-        # Captured once here; replayed every MPPI iteration in plan().
-        self._rollout_graph = self._build_rollout_graph()
+        self.reset_graph = self.create_reset_graph()
+        self.step_graph = self.create_step_graph()
+        self.rollout_graph = self.create_rollout_graph()
 
-    # ------------------------------------------------------------------
-    # Graph construction
-    # ------------------------------------------------------------------
+    def create_reset_graph(self):
+        """Create a graph to broadcast environment states and zero costs across N worlds."""
+        with wp.ScopedCapture() as capture:
+            # Broadcast state
+            wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nq), inputs=[self.qpos_reset, self.d.qpos])
+            wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nv), inputs=[self.qvel_reset, self.d.qvel])
+            wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nu), inputs=[self.ctrl_reset, self.d.ctrl])
+            
+            # Zero out the costs
+            self.costs_wp.zero_()
+        return capture.graph
 
-    def _build_rollout_graph(self) -> wp.context.Graph:
-        """Record the H-step rollout as a CUDA graph.
-
-        The graph encodes, for each timestep t in [0, H):
-            1. _assign_ctrl_kernel  — write V_wp[:, t, :] → d.ctrl   (GPU→GPU)
-            2. api.step             — advance all N worlds one step    (GPU)
-            3. _accumulate_costs_kernel — add step cost to costs_wp   (GPU)
-
-        Because t is a compile-time integer argument baked into each kernel
-        launch at capture time, no Python loop runs during graph replay.
-        costs_wp is zeroed as the first node so the graph is fully
-        self-contained per iteration.
-
-        Note: api.step() must not perform host-device synchronisation
-        internally for graph capture to succeed. Warp-based MuJoCo backends
-        satisfy this requirement.
-        """
-        N  = self.pc.n_samples
-        H  = self.pc.horizon
-        nu = self.nu
-        substeps = self.pc.substeps
-
-        wp.capture_begin(device="cuda")
-
-        # Zero costs at the start of every rollout.
-        self.costs_wp.zero_()
-
-        for t in range(H):
-            terminal = (t == H - 1)
-
-            # 1. Write the t-th action slice into d.ctrl — no Python round-trip.
-            wp.launch(
-                _assign_ctrl_kernel,
-                dim=(N, nu),
-                inputs=[self.V_wp, t, self.d.ctrl],
-            )
-
-            # 2. Advance physics for all N worlds.
-            for _ in range(substeps):
+    def create_step_graph(self):
+        """Create a graph to advance physics by 'substeps' per MPPI timestep."""
+        with wp.ScopedCapture() as capture:
+            for _ in range(self.pc.substeps):
                 api.step(self.m, self.d)
-                # 3. Accumulate per-world costs.
+        return capture.graph
+
+    def create_rollout_graph(self):
+        """Captures the reset AND the entire H-step unroll into a single CUDA graph."""
+        with wp.ScopedCapture() as capture:
+            # 1. Broadcast initial state across all N samples
+            wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nq), inputs=[self.qpos_reset, self.d.qpos])
+            wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nv), inputs=[self.qvel_reset, self.d.qvel])
+            wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nu), inputs=[self.ctrl_reset, self.d.ctrl])
+            
+            # 2. Zero out costs
+            self.costs_wp.zero_()
+
+            # 3. Unroll the entire horizon at capture time
+            for t in range(self.pc.horizon):
+                terminal = (t == self.pc.horizon - 1)
+
+                # Assign controls
+                wp.launch(
+                    _assign_ctrl_kernel,
+                    dim=(self.pc.n_samples, self.nu),
+                    inputs=[self.V_wp, t, self.d.ctrl],
+                )
+
+                # Advance physics
+                for _ in range(self.pc.substeps):
+                    api.step(self.m, self.d)
+
+                # Accumulate costs dynamically
                 wp.launch(
                     self._accumulate_costs_kernel,
-                    dim=N,
+                    dim=self.pc.n_samples,
                     inputs=[
                         self.d.qpos, self.d.qvel, self.d.ctrl, self.d.site_xpos,
                         terminal, self.goal_wp, self.indices_wp,
@@ -273,99 +247,68 @@ class MPPIController:
                     outputs=[self.costs_wp],
                 )
 
-        return wp.capture_end(device="cuda")
-
-    # ------------------------------------------------------------------
-    # Public interface
-    # ------------------------------------------------------------------
+        return capture.graph
 
     def reset(self):
         """Clear the action sequence (call at the start of a new episode)."""
         self.U_wp.zero_()
 
-    def plan(self, mjd: mujoco.MjData) -> np.ndarray:
-        """Run MPPI and return the first action of the optimal sequence.
+    def plan_(self, mjd: mujoco.MjData) -> np.ndarray:
+        """Run MPPI and return the first action of the optimal sequence."""
+        N = self.pc.n_samples
+        H = self.pc.horizon
 
-        CPU↔GPU transfer summary per call
-        ----------------------------------
-        INTO GPU  : eps (noise)  — once per iteration, before the graph
-                    qpos / qvel  — once per iteration, in _set_batch_state
-        OUT OF GPU: costs        — once per iteration, after the graph
-                    U_wp[0]      — once total, after all iterations
-        """
-        N     = self.pc.n_samples
-        H     = self.pc.horizon
-        lam   = self.lam
-        sigma = self.pc.noise_sigma
+        # 1. Zero-allocation host-to-device copy
+        # .assign() pushes numpy arrays directly to the pre-allocated GPU buffer
+        self.qpos_reset.assign(mjd.qpos)
+        self.qvel_reset.assign(mjd.qvel)
+        self.ctrl_reset.assign(mjd.ctrl)
 
         for iteration in range(self.pc.n_iterations):
-            # ----------------------------------------------------------
-            # 1. Use pre-sampled static noise
-            # ----------------------------------------------------------
-            # Note: The noise (self._static_eps_np / _static_eps_wp) is sampled
-            # once during initialization and reused here. This deviates from
-            # standard MPPI behavior which re-samples noise at each planning step.
-            eps_np = self._static_eps_np
-            eps_wp = self._static_eps_wp
 
+            # 2. Add noise and clip control sequences
             wp.launch(
                 _add_noise_and_clip_kernel,
                 dim=(N, H, self.nu),
-                inputs=[self.U_wp, eps_wp, self._ctrl_range_wp, self._has_limits_wp],
+                inputs=[self.U_wp, self._static_eps_wp, self._ctrl_range_wp, self._has_limits_wp],
                 outputs=[self.V_wp],
             )
 
-            # ----------------------------------------------------------
-            # 3. Initialise all N worlds from the current environment state
-            # ----------------------------------------------------------
-            self._set_batch_state(mjd)
+            # 3. Fire the Mega-Graph: executes reset + (H * substeps) physics ticks instantly
+            wp.capture_launch(self.rollout_graph)
 
-            # ----------------------------------------------------------
-            # 4. Run the full H-step rollout — single GPU graph launch
-            #    (costs_wp is zeroed inside the graph)
-            # ----------------------------------------------------------
-            wp.capture_launch(self._rollout_graph)
-
-            # ----------------------------------------------------------
-            # 5. Single sync + single transfer: bring costs to CPU
-            # ----------------------------------------------------------
+            # 4. Synchronize once per iteration to fetch final accumulated costs
             wp.synchronize()
             costs_np = self.costs_wp.numpy()
 
-            # ----------------------------------------------------------
-            # 6. MPPI weight update (CPU)
-            # ----------------------------------------------------------
+            # 5. MPPI weight update (CPU)
             beta = costs_np.min()
-            w    = np.exp(-(costs_np - beta) / lam)
+            w    = np.exp(-(costs_np - beta) / self.lam)
             eta  = w.sum() + 1e-8
             w   /= eta
 
             if self.pc.adaptive_temp:
                 if eta > self.pc.adp_temp_params[0]:
-                    self.lam = self.pc.adp_temp_params[2]*self.lam
+                    self.lam = self.pc.adp_temp_params[2] * self.lam
                 elif eta < self.pc.adp_temp_params[1]:
-                    self.lam = self.pc.adp_temp_params[3]*self.lam
+                    self.lam = self.pc.adp_temp_params[3] * self.lam
 
             low, high = self.pc.delta_range
-            dU = np.einsum("n,nht->ht", w, eps_np).clip(low, high)   # (H, nu)
+            dU = np.einsum("n,nht->ht", w, self._static_eps_np).clip(low, high)
+            
+            # Zero-allocation update
             new_U = self.U_wp.numpy() + dU
             self.U_wp.assign(new_U.astype(np.float32))
 
             if self.pc.debug:
-                # Extract object position (3D) from the qpos vector using task indices
                 indices_cpu = self.indices_wp.numpy()
-                #print(indices_cpu)
                 obj_pos = mjd.qpos[indices_cpu[0] : indices_cpu[0] + 3]
-                obj_quat = mjd.qpos[indices_cpu[0]+ 3: indices_cpu[0] + 3 + 4]
                 print(
-                    f"avg cost: {costs_np.mean():.4f} +/- {costs_np.std():.4f} "
+                    f"avg cost: {costs_np.mean():.4f} "
                     f"min cost: {beta:.4f}  "
                     f"eta: {eta:.4f} "
-                    f"lam: {lam:.6f} "
-                    f"obj_pos: {obj_pos} "
-                    f"obj_quat: {obj_quat} "
+                    f"lam: {self.lam:.6f}"
                 )
-                #print(mjd.qpos)
 
         # ------------------------------------------------------------------
         # Extract and return the first action
@@ -380,21 +323,101 @@ class MPPIController:
 
         return action_np
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+    def plan(self, mjd: mujoco.MjData) -> np.ndarray:
+        """
+        Run MPPI and return the first action of the optimal sequence.
+        This one uses the Reset and Step Graphs. 
+        """
+        N = self.pc.n_samples
+        H = self.pc.horizon
 
-    def _set_batch_state(self, mjd: mujoco.MjData):
-        """Upload the single state once, and broadcast on the GPU."""
-        api.reset_data(self.mjm, self.m, self.d)
-        
-        # 1. Transfer the single state to GPU (very fast)
-        qpos_wp = wp.array(mjd.qpos, dtype=wp.float32, device="cuda")
-        qvel_wp = wp.array(mjd.qvel, dtype=wp.float32, device="cuda")
-        ctrl_wp = wp.array(mjd.ctrl, dtype=wp.float32, device="cuda")
+        # 1. Transfer single state to device buffers once per planning step (avoids api.reset_data CPU overhead)
+        wp.copy(self.qpos_reset, wp.array(mjd.qpos, dtype=wp.float32, device="cuda"))
+        wp.copy(self.qvel_reset, wp.array(mjd.qvel, dtype=wp.float32, device="cuda"))
+        wp.copy(self.ctrl_reset, wp.array(mjd.ctrl, dtype=wp.float32, device="cuda"))
 
-        # 2. Broadcast across all N worlds directly on the GPU
-        wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nq), inputs=[qpos_wp, self.d.qpos])
-        wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nv), inputs=[qvel_wp, self.d.qvel])
-        wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nu), inputs=[ctrl_wp, self.d.ctrl])
-        #print(self.d.qpos)
+        for iteration in range(self.pc.n_iterations):
+
+            # 2. Add noise and clip control sequences
+            wp.launch(
+                _add_noise_and_clip_kernel,
+                dim=(N, H, self.nu),
+                inputs=[self.U_wp, self._static_eps_wp, self._ctrl_range_wp, self._has_limits_wp],
+                outputs=[self.V_wp],
+            )
+
+            # 3. Reset states efficiently purely on GPU
+            wp.capture_launch(self.reset_graph)
+
+            # 4. Unroll simulation over horizon (structurally mirrored from your controller.py)
+            for t in range(H):
+                terminal = (t == H - 1)
+
+                # Set controls for current timestep
+                wp.launch(
+                    _assign_ctrl_kernel,
+                    dim=(N, self.nu),
+                    inputs=[self.V_wp, t, self.d.ctrl],
+                )
+
+                # Step dynamics graph
+                wp.capture_launch(self.step_graph)
+
+                # Accumulate costs dynamically
+                wp.launch(
+                    self._accumulate_costs_kernel,
+                    dim=N,
+                    inputs=[
+                        self.d.qpos, self.d.qvel, self.d.ctrl, self.d.site_xpos,
+                        terminal, self.goal_wp, self.indices_wp,
+                        self.weights_wp
+                    ],
+                    outputs=[self.costs_wp],
+                )
+
+            # 5. Only synchronize once per iteration to fetch costs
+            wp.synchronize()
+            costs_np = self.costs_wp.numpy()
+
+            # 6. MPPI weight update (CPU)
+            beta = costs_np.min()
+            w    = np.exp(-(costs_np - beta) / self.lam)
+            eta  = w.sum() + 1e-8
+            w   /= eta
+
+            if self.pc.adaptive_temp:
+                if eta > self.pc.adp_temp_params[0]:
+                    self.lam = self.pc.adp_temp_params[2]*self.lam
+                elif eta < self.pc.adp_temp_params[1]:
+                    self.lam = self.pc.adp_temp_params[3]*self.lam
+
+            low, high = self.pc.delta_range
+            dU = np.einsum("n,nht->ht", w, self._static_eps_np).clip(low, high)   # (H, nu)
+            new_U = self.U_wp.numpy() + dU
+            self.U_wp.assign(new_U.astype(np.float32))
+
+            if self.pc.debug:
+                indices_cpu = self.indices_wp.numpy()
+                obj_pos = mjd.qpos[indices_cpu[0] : indices_cpu[0] + 3]
+                obj_quat = mjd.qpos[indices_cpu[0]+ 3: indices_cpu[0] + 3 + 4]
+                print(
+                    f"avg cost: {costs_np.mean():.4f} +/- {costs_np.std():.4f} "
+                    f"min cost: {beta:.4f}  "
+                    f"eta: {eta:.4f} "
+                    f"lam: {self.lam:.6f} "
+                    f"obj_pos: {obj_pos} "
+                    f"obj_quat: {obj_quat} "
+                )
+
+        # ------------------------------------------------------------------
+        # Extract and return the first action
+        # ------------------------------------------------------------------
+        action_np = self.U_wp[0].numpy().copy()
+
+        if self.pc.warm_start:
+            U_np       = self.U_wp.numpy()
+            U_np[:-1]  = U_np[1:]
+            U_np[-1]   = 0.0
+            self.U_wp.assign(U_np)
+
+        return action_np

@@ -176,7 +176,7 @@ def run(
         n_samples  = n_samples,
         horizon    = horizon,
         temperature = 0.01,
-        noise_sigma = 0.0005, #0.001
+        noise_sigma = 0.001, #0.001
         warm_start = True,
         debug = debug
     )
