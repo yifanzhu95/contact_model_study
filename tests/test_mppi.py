@@ -50,7 +50,7 @@ from contact_study.utils.rollout import fixed_budget_rollout
 from contact_study.utils.physics_noise import PhysicsNoiseParams, apply_physics_noise
 
 # Ensure tasks are registered before calling get_task
-import contact_study.tasks.tasks  # noqa: F401
+import contact_study.tasks  # noqa: F401
 from contact_study.tasks.base import get_task
 
 #$from contact_study.contact_models.config import GeometryVariant

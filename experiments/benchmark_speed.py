@@ -33,7 +33,7 @@ import mujoco
 import numpy as np
 import warp as wp
 
-import contact_study.tasks.tasks  # noqa: F401  (register tasks)
+import contact_study.tasks  # noqa: F401  (register tasks)
 from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
 from contact_study.contact_models import api
 from contact_study.tasks.base import get_task

@@ -43,7 +43,7 @@ import mujoco
 import numpy as np
 
 # Ensure tasks are registered
-import contact_study.tasks.tasks  # noqa: F401
+import contact_study.tasks  # noqa: F401
 
 from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
 from contact_study.contact_models.benchmarks import (

@@ -35,7 +35,7 @@ import matplotlib.pyplot as plt
 import mujoco
 import numpy as np
 
-import contact_study.tasks.tasks  # noqa: F401
+import contact_study.tasks  # noqa: F401
 from contact_study.contact_models.benchmarks import measure_approximation_error
 from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
 from contact_study.tasks.base import get_task
