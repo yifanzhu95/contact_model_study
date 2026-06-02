@@ -107,15 +107,9 @@ def _make_accumulate_kernel(cost_fn_wp: wp.func):
 def _find_min_kernel(
     costs:   wp.array(dtype=float),
     min_val: wp.array(dtype=float),
-    N:       int,
 ):
-    # Single thread, fixed traversal order → fully deterministic.
-    # atomic_min for float32 is non-deterministic across runs due to
-    # thread scheduling; a sequential scan avoids that entirely.
-    min_val[0] = costs[0]
-    for n in range(1, N):
-        if costs[n] < min_val[0]:
-            min_val[0] = costs[n]
+    n = wp.tid()
+    wp.atomic_min(min_val, 0, costs[n])
 
 @wp.kernel
 def _compute_weights_kernel(
@@ -131,14 +125,9 @@ def _compute_weights_kernel(
 def _sum_reduce_kernel(
     arr:   wp.array(dtype=float),
     total: wp.array(dtype=float),   # 1-element accumulator
-    N:     int,
 ):
-    # Single thread, fixed traversal order → fully deterministic.
-    # atomic_add accumulates in non-deterministic order across threads,
-    # producing slightly different float sums each run.
-    total[0] = float(0.0)
-    for n in range(N):
-        total[0] = total[0] + arr[n]
+    n = wp.tid()
+    wp.atomic_add(total, 0, arr[n])
 
 @wp.kernel
 def _normalize_kernel(
@@ -228,6 +217,7 @@ class MPPIController:
         self.dU_wp       = wp.zeros((H, nu),  dtype=wp.float32, device="cuda")
         self.min_cost_wp = wp.zeros(1,        dtype=wp.float32, device="cuda")
         self.eta_wp      = wp.zeros(1,        dtype=wp.float32, device="cuda")
+        self._big_float_np = np.array([1e30], dtype=np.float32)
 
         # Actuator limits
         delta_low, delta_high = self.pc.delta_range
@@ -331,15 +321,17 @@ class MPPIController:
         N, H, nu = self.pc.n_samples, self.pc.horizon, self.nu
         low, high = self.pc.delta_range
 
-        # Find minimum cost (sequential, deterministic)
-        wp.launch(_find_min_kernel, dim=1, inputs=[self.costs_wp, self.min_cost_wp, N])
+        # Find minimum cost
+        self.min_cost_wp.assign(self._big_float_np)
+        wp.launch(_find_min_kernel, dim=N, inputs=[self.costs_wp, self.min_cost_wp])
 
         # Compute unnormalized weights: w[n] = exp(-(cost[n] - beta) / lam)
         wp.launch(_compute_weights_kernel, dim=N,
                   inputs=[self.costs_wp, self.min_cost_wp, self.lam, self.w_wp])
 
-        # Sum weights for normalization and adaptive temperature (sequential, deterministic)
-        wp.launch(_sum_reduce_kernel, dim=1, inputs=[self.w_wp, self.eta_wp, N])
+        # Sum weights for normalization and adaptive temperature
+        self.eta_wp.zero_()
+        wp.launch(_sum_reduce_kernel, dim=N, inputs=[self.w_wp, self.eta_wp])
 
         # Normalize weights in-place
         wp.launch(_normalize_kernel, dim=N, inputs=[self.w_wp, self.eta_wp])
