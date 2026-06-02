@@ -1,8 +1,8 @@
 """Model Predictive Path Integral (MPPI) controller.
 
 All rollouts are executed in parallel on GPU via the batched step()
-interface (nworld = N samples). The physics step and state resets are 
-encapsulated in CUDA graphs, eliminating slow CPU-side data resets 
+interface (nworld = N samples). The physics step and state resets are
+encapsulated in CUDA graphs, eliminating slow CPU-side data resets
 during the MPPI loop.
 """
 
@@ -37,6 +37,8 @@ class MPPIConfig:
     n_spline_points: int   = 3      # control points for spline-smoothed noise
     debug:           bool  = True
     delta_range:     tuple[float, float] = (-0.01, 0.01)
+    use_full_graph:  bool  = True   # True=single mega CUDA graph, False=step+reset graphs
+    seed:            int | None = None  # seed for deterministic noise sampling
 
 
 # ---------------------------------------------------------------------------
@@ -91,10 +93,85 @@ def _make_accumulate_kernel(cost_fn_wp: wp.func):
     ):
         w = wp.tid()
         costs_out[w] += cost_fn_wp(
-            qpos[w], qvel[w], ctrl[w], site_xpos[w], 
+            qpos[w], qvel[w], ctrl[w], site_xpos[w],
             terminal, goal, indices, weights
         )
     return _kernel
+
+
+# ---------------------------------------------------------------------------
+# GPU weight-computation kernels (keep weight calc entirely on device)
+# ---------------------------------------------------------------------------
+
+@wp.kernel
+def _find_min_kernel(
+    costs:   wp.array(dtype=float),
+    min_val: wp.array(dtype=float),
+    N:       int,
+):
+    # Single thread, fixed traversal order → fully deterministic.
+    # atomic_min for float32 is non-deterministic across runs due to
+    # thread scheduling; a sequential scan avoids that entirely.
+    min_val[0] = costs[0]
+    for n in range(1, N):
+        if costs[n] < min_val[0]:
+            min_val[0] = costs[n]
+
+@wp.kernel
+def _compute_weights_kernel(
+    costs:   wp.array(dtype=float),
+    beta:    wp.array(dtype=float),   # 1-element: min cost
+    lam:     float,
+    w_out:   wp.array(dtype=float),
+):
+    n = wp.tid()
+    w_out[n] = wp.exp(-(costs[n] - beta[0]) / lam)
+
+@wp.kernel
+def _sum_reduce_kernel(
+    arr:   wp.array(dtype=float),
+    total: wp.array(dtype=float),   # 1-element accumulator
+    N:     int,
+):
+    # Single thread, fixed traversal order → fully deterministic.
+    # atomic_add accumulates in non-deterministic order across threads,
+    # producing slightly different float sums each run.
+    total[0] = float(0.0)
+    for n in range(N):
+        total[0] = total[0] + arr[n]
+
+@wp.kernel
+def _normalize_kernel(
+    arr:   wp.array(dtype=float),
+    total: wp.array(dtype=float),   # 1-element sum (before adding eps)
+):
+    n = wp.tid()
+    arr[n] = arr[n] / (total[0] + float(1e-8))
+
+@wp.kernel
+def _weighted_sum_kernel(
+    weights: wp.array(dtype=float),    # (N,)
+    eps:     wp.array3d(dtype=float),  # (N, H, nu)
+    dU:      wp.array2d(dtype=float),  # (H, nu)
+    N:       int,
+):
+    """One thread per (h, u); inner loop over N avoids atomic collisions."""
+    h, u = wp.tid()
+    val = float(0.0)
+    for n in range(N):
+        val = val + weights[n] * eps[n, h, u]
+    dU[h, u] = val
+
+@wp.kernel
+def _apply_dU_kernel(
+    U:    wp.array2d(dtype=float),  # (H, nu)
+    dU:   wp.array2d(dtype=float),  # (H, nu)
+    low:  float,
+    high: float,
+):
+    h, u = wp.tid()
+    U[h, u] = U[h, u] + wp.clamp(dU[h, u], low, high)
+
 
 # ---------------------------------------------------------------------------
 # Controller
@@ -124,7 +201,6 @@ class MPPIController:
         self.nq = mjm.nq
         self.nv = mjm.nv
 
-        # Handle potential tuple from cost_fn_wp
         self.cost_fn_wp_func = cost_fn
         self.goal_wp = goals_wp
         self.indices_wp = idx_wp
@@ -147,6 +223,12 @@ class MPPIController:
         self.V_wp = wp.zeros((N, H, nu), dtype=wp.float32, device="cuda")
         self.costs_wp = wp.zeros(N, dtype=wp.float32, device="cuda")
 
+        # GPU arrays for weight computation (costs never transferred to CPU)
+        self.w_wp        = wp.zeros(N,        dtype=wp.float32, device="cuda")
+        self.dU_wp       = wp.zeros((H, nu),  dtype=wp.float32, device="cuda")
+        self.min_cost_wp = wp.zeros(1,        dtype=wp.float32, device="cuda")
+        self.eta_wp      = wp.zeros(1,        dtype=wp.float32, device="cuda")
+
         # Actuator limits
         delta_low, delta_high = self.pc.delta_range
         delta_range_np = np.empty((self.nu, 2), dtype=np.float32)
@@ -156,24 +238,24 @@ class MPPIController:
         self._ctrl_range_wp = wp.array(delta_range_np, dtype=wp.float32, device="cuda")
         self._has_limits_wp = wp.array(np.ones(self.nu, dtype=bool), dtype=wp.bool, device="cuda")
 
-        # Pre-sample static noise (reused every plan call)
+        # Deterministic noise: use seed from config if provided, else fall back to shared rng
+        noise_rng = np.random.default_rng(self.pc.seed) if self.pc.seed is not None else self.rng
+
         if self.pc.use_spline_noise:
-            t_knots  = np.linspace(0, H - 1, self.pc.n_spline_points)
-            t_dense  = np.arange(H)
-            knot_noise = self.rng.normal(
+            t_knots    = np.linspace(0, H - 1, self.pc.n_spline_points)
+            t_dense    = np.arange(H)
+            knot_noise = noise_rng.normal(
                 0, self.pc.noise_sigma, (N, self.pc.n_spline_points, nu)
             ).astype(np.float32)
-            
             static_eps_np = np.empty((N, H, nu), dtype=np.float32)
             for n in range(N):
                 for j in range(nu):
                     static_eps_np[n, :, j] = CubicSpline(t_knots, knot_noise[n, :, j])(t_dense)
         else:
-            static_eps_np = self.rng.normal(
+            static_eps_np = noise_rng.normal(
                 loc=0.0, scale=self.pc.noise_sigma, size=(N, H, nu)
             ).astype(np.float32)
 
-        self._static_eps_np = static_eps_np
         self._static_eps_wp = wp.array(static_eps_np, dtype=wp.float32, device="cuda")
 
     def _setup_warp_backend(self):
@@ -193,12 +275,9 @@ class MPPIController:
     def create_reset_graph(self):
         """Create a graph to broadcast environment states and zero costs across N worlds."""
         with wp.ScopedCapture() as capture:
-            # Broadcast state
             wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nq), inputs=[self.qpos_reset, self.d.qpos])
             wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nv), inputs=[self.qvel_reset, self.d.qvel])
             wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nu), inputs=[self.ctrl_reset, self.d.ctrl])
-            
-            # Zero out the costs
             self.costs_wp.zero_()
         return capture.graph
 
@@ -212,37 +291,26 @@ class MPPIController:
     def create_rollout_graph(self):
         """Captures the reset AND the entire H-step unroll into a single CUDA graph."""
         with wp.ScopedCapture() as capture:
-            # 1. Broadcast initial state across all N samples
             wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nq), inputs=[self.qpos_reset, self.d.qpos])
             wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nv), inputs=[self.qvel_reset, self.d.qvel])
             wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nu), inputs=[self.ctrl_reset, self.d.ctrl])
-            
-            # 2. Zero out costs
             self.costs_wp.zero_()
 
-            # 3. Unroll the entire horizon at capture time
             for t in range(self.pc.horizon):
                 terminal = (t == self.pc.horizon - 1)
-
-                # Assign controls
                 wp.launch(
                     _assign_ctrl_kernel,
                     dim=(self.pc.n_samples, self.nu),
                     inputs=[self.V_wp, t, self.d.ctrl],
                 )
-
-                # Advance physics
                 for _ in range(self.pc.substeps):
                     api.step(self.m, self.d)
-
-                # Accumulate costs dynamically
                 wp.launch(
                     self._accumulate_costs_kernel,
                     dim=self.pc.n_samples,
                     inputs=[
                         self.d.qpos, self.d.qvel, self.d.ctrl, self.d.site_xpos,
-                        terminal, self.goal_wp, self.indices_wp,
-                        self.weights_wp
+                        terminal, self.goal_wp, self.indices_wp, self.weights_wp
                     ],
                     outputs=[self.costs_wp],
                 )
@@ -253,171 +321,144 @@ class MPPIController:
         """Clear the action sequence (call at the start of a new episode)."""
         self.U_wp.zero_()
 
-    def plan_(self, mjd: mujoco.MjData) -> np.ndarray:
-        """Run MPPI and return the first action of the optimal sequence."""
-        N = self.pc.n_samples
-        H = self.pc.horizon
+    def _gpu_weight_update(self) -> tuple[float, float]:
+        """Compute MPPI weights and U update entirely on GPU.
 
-        # 1. Zero-allocation host-to-device copy
-        # .assign() pushes numpy arrays directly to the pre-allocated GPU buffer
+        Returns (eta, beta) as Python scalars — the only values transferred
+        from device to host. eta is used for adaptive temperature; beta
+        (min cost) is returned for optional debug logging.
+        """
+        N, H, nu = self.pc.n_samples, self.pc.horizon, self.nu
+        low, high = self.pc.delta_range
+
+        # Find minimum cost (sequential, deterministic)
+        wp.launch(_find_min_kernel, dim=1, inputs=[self.costs_wp, self.min_cost_wp, N])
+
+        # Compute unnormalized weights: w[n] = exp(-(cost[n] - beta) / lam)
+        wp.launch(_compute_weights_kernel, dim=N,
+                  inputs=[self.costs_wp, self.min_cost_wp, self.lam, self.w_wp])
+
+        # Sum weights for normalization and adaptive temperature (sequential, deterministic)
+        wp.launch(_sum_reduce_kernel, dim=1, inputs=[self.w_wp, self.eta_wp, N])
+
+        # Normalize weights in-place
+        wp.launch(_normalize_kernel, dim=N, inputs=[self.w_wp, self.eta_wp])
+
+        # Compute weighted noise sum: dU[h,u] = sum_n w[n]*eps[n,h,u]
+        self.dU_wp.zero_()
+        wp.launch(_weighted_sum_kernel, dim=(H, nu),
+                  inputs=[self.w_wp, self._static_eps_wp, self.dU_wp, N])
+
+        # Clip dU and add to U, all on GPU
+        wp.launch(_apply_dU_kernel, dim=(H, nu),
+                  inputs=[self.U_wp, self.dU_wp, low, high])
+
+        # Single sync: only scalars cross device→host boundary
+        wp.synchronize()
+        eta  = float(self.eta_wp.numpy()[0]) + 1e-8
+        beta = float(self.min_cost_wp.numpy()[0])
+        return eta, beta
+
+    def _update_adaptive_temp(self, eta: float):
+        if self.pc.adaptive_temp:
+            if eta > self.pc.adp_temp_params[0]:
+                self.lam = self.pc.adp_temp_params[2] * self.lam
+            elif eta < self.pc.adp_temp_params[1]:
+                self.lam = self.pc.adp_temp_params[3] * self.lam
+
+    def _print_debug(self, mjd: mujoco.MjData, beta: float, eta: float):
+        if self.indices_wp is not None and len(self.indices_wp) >= 1:
+            idx      = self.indices_wp.numpy()
+            obj_pos  = mjd.qpos[idx[0] : idx[0] + 3]
+            obj_quat = mjd.qpos[idx[0] + 3 : idx[0] + 7]
+            print(
+                f"min cost: {beta:.4f}  "
+                f"eta: {eta:.4f}  "
+                f"lam: {self.lam:.6f}  "
+                f"obj_pos: {obj_pos}  "
+                f"obj_quat: {obj_quat}"
+            )
+        else:
+            print(f"min cost: {beta:.4f}  eta: {eta:.4f}  lam: {self.lam:.6f}")
+
+    def _extract_action(self) -> np.ndarray:
+        action_np = self.U_wp[0].numpy().copy()
+        if self.pc.warm_start:
+            U_np      = self.U_wp.numpy()
+            U_np[:-1] = U_np[1:]
+            U_np[-1]  = 0.0
+            self.U_wp.assign(U_np)
+        return action_np
+
+    def plan(self, mjd: mujoco.MjData) -> np.ndarray:
+        """Run MPPI and return the first action. Dispatches based on use_full_graph."""
+        if self.pc.use_full_graph:
+            return self._plan_full_graph(mjd)
+        else:
+            return self._plan_step_graphs(mjd)
+
+    def _plan_full_graph(self, mjd: mujoco.MjData) -> np.ndarray:
+        """Single mega CUDA graph: reset + full H-step unroll captured together."""
+        N, H = self.pc.n_samples, self.pc.horizon
+
         self.qpos_reset.assign(mjd.qpos)
         self.qvel_reset.assign(mjd.qvel)
         self.ctrl_reset.assign(mjd.ctrl)
 
-        for iteration in range(self.pc.n_iterations):
-
-            # 2. Add noise and clip control sequences
+        for _ in range(self.pc.n_iterations):
             wp.launch(
                 _add_noise_and_clip_kernel,
                 dim=(N, H, self.nu),
                 inputs=[self.U_wp, self._static_eps_wp, self._ctrl_range_wp, self._has_limits_wp],
                 outputs=[self.V_wp],
             )
-
-            # 3. Fire the Mega-Graph: executes reset + (H * substeps) physics ticks instantly
             wp.capture_launch(self.rollout_graph)
 
-            # 4. Synchronize once per iteration to fetch final accumulated costs
-            wp.synchronize()
-            costs_np = self.costs_wp.numpy()
-
-            # 5. MPPI weight update (CPU)
-            beta = costs_np.min()
-            w    = np.exp(-(costs_np - beta) / self.lam)
-            eta  = w.sum() + 1e-8
-            w   /= eta
-
-            if self.pc.adaptive_temp:
-                if eta > self.pc.adp_temp_params[0]:
-                    self.lam = self.pc.adp_temp_params[2] * self.lam
-                elif eta < self.pc.adp_temp_params[1]:
-                    self.lam = self.pc.adp_temp_params[3] * self.lam
-
-            low, high = self.pc.delta_range
-            dU = np.einsum("n,nht->ht", w, self._static_eps_np).clip(low, high)
-            
-            # Zero-allocation update
-            new_U = self.U_wp.numpy() + dU
-            self.U_wp.assign(new_U.astype(np.float32))
-
+            eta, beta = self._gpu_weight_update()
+            self._update_adaptive_temp(eta)
             if self.pc.debug:
-                indices_cpu = self.indices_wp.numpy()
-                obj_pos = mjd.qpos[indices_cpu[0] : indices_cpu[0] + 3]
-                print(
-                    f"avg cost: {costs_np.mean():.4f} "
-                    f"min cost: {beta:.4f}  "
-                    f"eta: {eta:.4f} "
-                    f"lam: {self.lam:.6f}"
-                )
+                self._print_debug(mjd, beta, eta)
 
-        # ------------------------------------------------------------------
-        # Extract and return the first action
-        # ------------------------------------------------------------------
-        action_np = self.U_wp[0].numpy().copy()
+        return self._extract_action()
 
-        if self.pc.warm_start:
-            U_np       = self.U_wp.numpy()
-            U_np[:-1]  = U_np[1:]
-            U_np[-1]   = 0.0
-            self.U_wp.assign(U_np)
+    def _plan_step_graphs(self, mjd: mujoco.MjData) -> np.ndarray:
+        """Separate reset + step graphs: reset once, then loop over H steps."""
+        N, H = self.pc.n_samples, self.pc.horizon
 
-        return action_np
+        self.qpos_reset.assign(mjd.qpos)
+        self.qvel_reset.assign(mjd.qvel)
+        self.ctrl_reset.assign(mjd.ctrl)
 
-    def plan(self, mjd: mujoco.MjData) -> np.ndarray:
-        """
-        Run MPPI and return the first action of the optimal sequence.
-        This one uses the Reset and Step Graphs. 
-        """
-        N = self.pc.n_samples
-        H = self.pc.horizon
-
-        # 1. Transfer single state to device buffers once per planning step (avoids api.reset_data CPU overhead)
-        wp.copy(self.qpos_reset, wp.array(mjd.qpos, dtype=wp.float32, device="cuda"))
-        wp.copy(self.qvel_reset, wp.array(mjd.qvel, dtype=wp.float32, device="cuda"))
-        wp.copy(self.ctrl_reset, wp.array(mjd.ctrl, dtype=wp.float32, device="cuda"))
-
-        for iteration in range(self.pc.n_iterations):
-
-            # 2. Add noise and clip control sequences
+        for _ in range(self.pc.n_iterations):
             wp.launch(
                 _add_noise_and_clip_kernel,
                 dim=(N, H, self.nu),
                 inputs=[self.U_wp, self._static_eps_wp, self._ctrl_range_wp, self._has_limits_wp],
                 outputs=[self.V_wp],
             )
-
-            # 3. Reset states efficiently purely on GPU
             wp.capture_launch(self.reset_graph)
 
-            # 4. Unroll simulation over horizon (structurally mirrored from your controller.py)
             for t in range(H):
                 terminal = (t == H - 1)
-
-                # Set controls for current timestep
                 wp.launch(
                     _assign_ctrl_kernel,
                     dim=(N, self.nu),
                     inputs=[self.V_wp, t, self.d.ctrl],
                 )
-
-                # Step dynamics graph
                 wp.capture_launch(self.step_graph)
-
-                # Accumulate costs dynamically
                 wp.launch(
                     self._accumulate_costs_kernel,
                     dim=N,
                     inputs=[
                         self.d.qpos, self.d.qvel, self.d.ctrl, self.d.site_xpos,
-                        terminal, self.goal_wp, self.indices_wp,
-                        self.weights_wp
+                        terminal, self.goal_wp, self.indices_wp, self.weights_wp
                     ],
                     outputs=[self.costs_wp],
                 )
 
-            # 5. Only synchronize once per iteration to fetch costs
-            wp.synchronize()
-            costs_np = self.costs_wp.numpy()
-
-            # 6. MPPI weight update (CPU)
-            beta = costs_np.min()
-            w    = np.exp(-(costs_np - beta) / self.lam)
-            eta  = w.sum() + 1e-8
-            w   /= eta
-
-            if self.pc.adaptive_temp:
-                if eta > self.pc.adp_temp_params[0]:
-                    self.lam = self.pc.adp_temp_params[2]*self.lam
-                elif eta < self.pc.adp_temp_params[1]:
-                    self.lam = self.pc.adp_temp_params[3]*self.lam
-
-            low, high = self.pc.delta_range
-            dU = np.einsum("n,nht->ht", w, self._static_eps_np).clip(low, high)   # (H, nu)
-            new_U = self.U_wp.numpy() + dU
-            self.U_wp.assign(new_U.astype(np.float32))
-
+            eta, beta = self._gpu_weight_update()
+            self._update_adaptive_temp(eta)
             if self.pc.debug:
-                indices_cpu = self.indices_wp.numpy()
-                obj_pos = mjd.qpos[indices_cpu[0] : indices_cpu[0] + 3]
-                obj_quat = mjd.qpos[indices_cpu[0]+ 3: indices_cpu[0] + 3 + 4]
-                print(
-                    f"avg cost: {costs_np.mean():.4f} +/- {costs_np.std():.4f} "
-                    f"min cost: {beta:.4f}  "
-                    f"eta: {eta:.4f} "
-                    f"lam: {self.lam:.6f} "
-                    f"obj_pos: {obj_pos} "
-                    f"obj_quat: {obj_quat} "
-                )
+                self._print_debug(mjd, beta, eta)
 
-        # ------------------------------------------------------------------
-        # Extract and return the first action
-        # ------------------------------------------------------------------
-        action_np = self.U_wp[0].numpy().copy()
-
-        if self.pc.warm_start:
-            U_np       = self.U_wp.numpy()
-            U_np[:-1]  = U_np[1:]
-            U_np[-1]   = 0.0
-            self.U_wp.assign(U_np)
-
-        return action_np
+        return self._extract_action()

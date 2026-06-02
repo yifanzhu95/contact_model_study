@@ -56,6 +56,7 @@ class BaseTask(abc.ABC):
         self.index_vector: np.ndarray | None = None
         self.goal_vector_wp: wp.array | None = None
         self.index_vector_wp: wp.array | None = None
+        self.weights_wp: wp.array | None = None
 
     @property
     @abc.abstractmethod
@@ -100,17 +101,32 @@ class BaseTask(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def cost_fn_wp(self) -> tuple[wp.func, wp.array, wp.array]:
-        """Return (nworld,) cost array. Called inside the MPC rollout."""
+    def cost_fn_wp(self) -> wp.func:
+        """Return the Warp cost function for this task."""
         ...
+
+    @property
+    def cost_goal_wp(self) -> wp.array:
+        """Return the goal array for the cost function."""
+        return self.goal_vector_wp
+
+    @property
+    def cost_idx_wp(self) -> wp.array:
+        """Return the index array for the cost function."""
+        return self.index_vector_wp
+
+    @property
+    def cost_weights_wp(self) -> wp.array:
+        """Return the weights array for the cost function."""
+        return self.weights_wp
 
     @abc.abstractmethod
     def is_success(self, mjd: mujoco.MjData) -> bool:
         """Check whether the current state satisfies the task goal."""
         ...
 
-    def has_fallen(self, mjd: mujoco.MjData) -> bool:
-        """Check whether the object has fallen or left the workspace."""
+    def has_failed(self, mjd: mujoco.MjData) -> bool:
+        """Check whether the episode has failed (e.g. object fell). Override per task."""
         return False
 
     def evaluate_episode(

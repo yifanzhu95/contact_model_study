@@ -459,11 +459,13 @@ def put_data(
 def get_data_into(
     mjm: mujoco.MjModel, m: XPBDModel, d: XPBDData, mjd: mujoco.MjData
 ):
-    return _mjw.get_data_into(mjm, m._m, d._d, mjd)
+    # library signature: get_data_into(result, mjm, d, world_id=0)
+    return _mjw.get_data_into(mjd, mjm, d._d)
 
 
 def reset_data(mjm: mujoco.MjModel, m: XPBDModel, d: XPBDData):
-    return _mjw.reset_data(mjm, m._m, d._d)
+    # library signature: reset_data(m, d, reset=None)
+    return _mjw.reset_data(m._m, d._d)
 
 
 # ═══════════════════════════════════════════════════════════════════

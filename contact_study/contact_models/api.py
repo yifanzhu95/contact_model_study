@@ -244,10 +244,11 @@ def put_data(mjm: mujoco.MjModel, mjd: mujoco.MjData, m,
 def get_data_into(mjm: mujoco.MjModel, m, d, mjd: mujoco.MjData):
     """Download device-side data back to host."""
     cfg = m.contact_cfg
-    if cfg.backend in (Backend.MUJOCO_HARD, Backend.MUJOCO_SOFT):
-        return _mujoco_warp().get_data_into(mjm, m, d, mjd)
-    if cfg.backend == Backend.COMFREE:
-        return _comfree_warp().get_data_into(mjm, m, d, mjd)
+    if cfg.backend in (Backend.MUJOCO_HARD, Backend.MUJOCO_SOFT, Backend.COMFREE):
+        # library signature: get_data_into(result, mjm, d, world_id=0)
+        # comfree_warp's wrapper incorrectly post-processes the None return value,
+        # so call the underlying mjwarp function directly for all three backends.
+        return _mujoco_warp().get_data_into(mjd, mjm, d)
     if cfg.backend == Backend.XPBD:
         return _xpbd_backend().get_data_into(mjm, m, d, mjd)
     raise ValueError(f"Unknown backend: {cfg.backend}")
@@ -257,10 +258,9 @@ def reset_data(mjm: mujoco.MjModel, m, d):
     """Reset device-side data to the model default state."""
     cfg = m.contact_cfg
     if cfg.backend in (Backend.MUJOCO_HARD, Backend.MUJOCO_SOFT):
-        #return _mujoco_warp().reset_data(mjm, m, d)
         return _mujoco_warp().reset_data(m, d)
     if cfg.backend == Backend.COMFREE:
-        return _comfree_warp().reset_data(mjm, m, d)
+        return _comfree_warp().reset_data(m, d)
     if cfg.backend == Backend.XPBD:
         return _xpbd_backend().reset_data(mjm, m, d)
     raise ValueError(f"Unknown backend: {cfg.backend}")

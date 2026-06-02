@@ -85,13 +85,13 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "leap_hand/scene_leap_cube.xml",
-            max_steps         = 1000,
+            max_steps         = 100,
             success_threshold = 0.05,
             velocity_threshold = 0.1,
             cost_weights      = {
                 "w_quat": 5.0,
                 "w_pos": 10.0,
-                "w_velo": 0.002,
+                "w_velo": 0.0,
                 "w_contact": 3.5,
                 "w_joint": 0.1,
                 "w_joint_velo": 0.0,
@@ -163,8 +163,8 @@ class GraspReorientTask(BaseTask):
         return q0, v0, ctrl0
 
     @property
-    def cost_fn_wp(self) -> tuple[wp.func, wp.array, wp.array, wp.array]:
-        return grasp_reorient_cost_wp, self.goal_vector_wp, self.index_vector_wp, self.weights_wp
+    def cost_fn_wp(self) -> wp.func:
+        return grasp_reorient_cost_wp
 
     def is_success(self, mjd: mujoco.MjData) -> bool:
         mjm = self.mjm
@@ -183,7 +183,7 @@ class GraspReorientTask(BaseTask):
         vel_threshold = getattr(self.spec, "velocity_threshold", 1.0)
         return bool(np.linalg.norm(mjd.cvel[obj_id]) < vel_threshold)
 
-    def has_fallen(self, mjd: mujoco.MjData) -> bool:
+    def has_failed(self, mjd: mujoco.MjData) -> bool:
         mjm = self.mjm
         obj_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
         if obj_id < 0:

@@ -39,6 +39,8 @@ def measure_rollout_speed(
     n_warmup:   int     = 5,
     n_trials:   int     = 20,
     ctrl_fn:    Callable | None = None,
+    nconmax:    int     = 200,
+    njmax:      int     = 500,
 ) -> BenchmarkResult:
     """Measure mean wall-clock time per H-step rollout for one contact model.
 
@@ -56,7 +58,7 @@ def measure_rollout_speed(
         BenchmarkResult with mean/std timing in milliseconds.
     """
     m = api.put_model(mjm, cfg)
-    d = api.make_data(mjm, m, nworld=n_worlds)
+    d = api.make_data(mjm, m, nworld=n_worlds, nconmax=nconmax, njmax=njmax)
 
     def _run_one():
         api.reset_data(mjm, m, d)
@@ -93,6 +95,8 @@ def measure_approximation_error(
     test_states:   np.ndarray,            # (N, nq+nv) array of initial states
     horizon:       int = 20,
     ctrl_sequences: np.ndarray | None = None,  # (N, H, nu) or None
+    nconmax:       int = 200,
+    njmax:         int = 500,
 ) -> tuple[float, float]:
     """Measure mean L2 error in (qpos, qvel) after `horizon` steps.
 
@@ -127,7 +131,7 @@ def measure_approximation_error(
         def _rollout(m):
             mjd.qpos[:] = q0
             mjd.qvel[:] = v0
-            d = api.put_data(mjm, mjd, m)
+            d = api.put_data(mjm, mjd, m, nconmax=nconmax, njmax=njmax)
             for t in range(horizon):
                 if ctrl_sequences is not None:
                     d.ctrl.assign(ctrl_sequences[i, t])

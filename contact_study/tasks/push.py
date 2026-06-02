@@ -104,8 +104,8 @@ class PushTask(BaseTask):
         return cost
 
     @property
-    def cost_fn_wp(self) -> tuple[wp.func, wp.array, wp.array, wp.array]:
-        return push_cost_wp, self.goal_vector_wp, self.index_vector_wp, self.weights_wp
+    def cost_fn_wp(self) -> wp.func:
+        return push_cost_wp
 
     def is_success(self, mjd: mujoco.MjData) -> bool:
         box_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")

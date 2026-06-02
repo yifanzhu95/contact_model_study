@@ -11,22 +11,24 @@ outer loop. Geometry and physics noise are deliberately NOT part of
 ContactModelConfig — they live on orthogonal axes and are applied here
 at load time.
 
+NOTE: Geometry variants (--geometry) are accepted and recorded in output
+labels but are not yet implemented — the simulation always uses the
+'accurate' variant regardless of the flag value.
+
 Usage:
-    # Clean baseline
+    # Clean baseline (condition B, warm-started MPPI)
     python experiments/run_experiment.py \
         --tasks push grasp_reorient peg_in_hole \
         --models M1 M2 M3 M4 \
-        --conditions A B \
-        --n_episodes 20 \
-        --budget_seconds 0.1 \
-        --n_samples_b 1024
+        --conditions B \
+        --n_episodes 20
 
-    # Old "M5" equivalent: M2 + convex-hull geometry
+    # Both conditions, all models
     python experiments/run_experiment.py \
-        --models M2 \
-        --geometry convex_hull
+        --conditions A B \
+        --n_samples 1024 --horizon 50
 
-    # Old "M8" equivalent: M4 + friction noise
+    # Physics noise ablation
     python experiments/run_experiment.py \
         --models M4 \
         --friction_sigma 0.2 --mass_sigma 0.1
@@ -41,6 +43,7 @@ from pathlib import Path
 
 import mujoco
 import numpy as np
+import warp as wp
 
 # Ensure tasks are registered
 import contact_study.tasks  # noqa: F401
@@ -66,9 +69,11 @@ from contact_study.utils.rollout import fixed_budget_rollout, fixed_sample_rollo
 
 RESULTS_DIR = Path(__file__).parent.parent / "results"
 
+wp.init()
+
 
 # ---------------------------------------------------------------------------
-# Contact model factory table — M1..M4 only
+# Contact model factory table — M1..M4
 # ---------------------------------------------------------------------------
 
 MODEL_FACTORIES = {
@@ -80,9 +85,7 @@ MODEL_FACTORIES = {
 
 
 # ---------------------------------------------------------------------------
-# Helper: load a task's MjModel with a chosen geometry variant and
-# optional physics noise applied. Returned MjModel is ready to hand
-# to api.put_model under any contact config.
+# Helper: load a task model with optional physics noise applied
 # ---------------------------------------------------------------------------
 
 def load_mjm_for_study(
@@ -90,12 +93,10 @@ def load_mjm_for_study(
     geometry:  GeometryVariant,
     noise:     PhysicsNoiseParams,
     rng:       np.random.Generator,
-) -> tuple[mujoco.MjModel, "BaseTask"]:
+) -> tuple[mujoco.MjModel, object]:
     task = get_task(task_name, geometry=geometry)
     mjm, _ = task.load()
     mjm = apply_physics_noise(mjm, noise, rng)
-    # Re-bind so the task's later helper methods (success check, etc.)
-    # see the perturbed model.
     task._mjm = mjm
     return mjm, task
 
@@ -110,32 +111,63 @@ def run_one_episode(
     task,
     condition:      str,
     budget_seconds: float,
-    n_samples_b:    int,
+    n_samples:      int,
     horizon:        int,
+    seed:           int,
     rng:            np.random.Generator,
+    settle_seconds: float = 1.0,
+    use_full_graph: bool  = True,
+    nconmax:        int   = 200,
+    njmax:          int   = 500,
+    debug:          bool  = False,
 ) -> EpisodeResult:
     """Run one closed-loop episode under Condition A or B."""
+
+    cost_fn_wp = task.cost_fn_wp
+    goal_wp    = task.cost_goal_wp
+    idx_wp     = task.cost_idx_wp
+    weights_wp = task.cost_weights_wp
+
     mppi_cfg = MPPIConfig(
-        n_samples  = n_samples_b,
-        horizon    = horizon,
-        warm_start = True,
+        n_samples      = n_samples,
+        horizon        = horizon,
+        temperature    = 0.01,
+        noise_sigma    = 0.001,
+        warm_start     = True,
+        use_full_graph = use_full_graph,
+        nconmax        = nconmax,
+        njmax          = njmax,
+        seed           = seed,
+        debug          = debug,
     )
+
     controller = MPPIController(
-        mjm      = mjm,
-        cfg      = cfg,
-        mppi_cfg = mppi_cfg,
-        cost_fn  = task.cost_fn,
-        rng      = rng,
+        mjm        = mjm,
+        cfg        = cfg,
+        mppi_cfg   = mppi_cfg,
+        cost_fn    = cost_fn_wp,
+        goals_wp   = goal_wp,
+        idx_wp     = idx_wp,
+        weights_wp = weights_wp,
+        rng        = rng,
     )
 
     mjd = mujoco.MjData(mjm)
-    q0, v0 = task.sample_initial_state(rng)
+    q0, v0, u0 = task.get_inital_state(rng)
     mjd.qpos[:] = q0
     mjd.qvel[:] = v0
+    if u0 is not None:
+        mjd.ctrl[:] = u0
     mujoco.mj_forward(mjm, mjd)
+
+    settle_steps = int(settle_seconds / mjm.opt.timestep)
+    for _ in range(settle_steps):
+        mujoco.mj_step(mjm, mjd)
 
     steps_to_success = None
     episode_start    = time.perf_counter()
+    substeps         = mppi_cfg.substeps
+    n_used           = n_samples
 
     for t in range(task.spec.max_steps):
         if condition == "A":
@@ -144,23 +176,25 @@ def run_one_episode(
                 cfg            = cfg,
                 budget_seconds = budget_seconds,
                 horizon        = horizon,
-                cost_fn        = task.cost_fn,
                 initial_qpos   = mjd.qpos,
                 initial_qvel   = mjd.qvel,
                 rng            = rng,
             )
             best_idx = int(np.argmin(result["costs"]))
-            ctrl     = result["final_qpos"][best_idx][:mjm.nu]  # placeholder
+            ctrl     = result["final_qpos"][best_idx][:mjm.nu]
             n_used   = result["n_samples"]
         else:
-            ctrl   = controller.plan(mjd)
-            n_used = n_samples_b
+            ctrl = controller.plan(mjd)
 
-        mjd.ctrl[:] = ctrl
-        mujoco.mj_step(mjm, mjd)
+        mjd.ctrl[:] += ctrl
+        for _ in range(substeps):
+            mujoco.mj_step(mjm, mjd)
 
         if task.is_success(mjd) and steps_to_success is None:
             steps_to_success = t + 1
+
+        if task.has_failed(mjd):
+            break
 
     elapsed = time.perf_counter() - episode_start
 
@@ -186,20 +220,27 @@ def run_study(
     conditions:     list[str],
     n_episodes:     int,
     budget_seconds: float,
-    n_samples_b:    int,
+    n_samples:      int,
     horizon:        int,
     seed:           int,
     geometry:       GeometryVariant,
     noise:          PhysicsNoiseParams,
-    baseline_model: str = "M2",
+    settle_seconds: float = 1.0,
+    use_full_graph: bool  = True,
+    nconmax:        int   = 200,
+    njmax:          int   = 500,
+    baseline_model: str   = "M2",
 ) -> list[AggregatedResult]:
 
     rng = np.random.default_rng(seed)
     aggregated: list[AggregatedResult] = []
     all_cfgs = {name: MODEL_FACTORIES[name]() for name in model_names}
 
-    # Cell tag appended to every label so the output JSON records the
-    # (geometry, noise) context of this run.
+    # Geometry variants not yet implemented — always simulate with ACCURATE.
+    # The requested geometry value is still recorded in cell_tag so output
+    # labels remain self-describing for when it is added.
+    active_geometry = GeometryVariant.ACCURATE
+
     cell_tag_parts = []
     if geometry != GeometryVariant.ACCURATE:
         cell_tag_parts.append(geometry.value)
@@ -216,32 +257,33 @@ def run_study(
     error_cache: dict[str, float] = {}
 
     for task_name in task_names:
-        mjm, task = load_mjm_for_study(task_name, geometry, noise, rng)
+        mjm, task = load_mjm_for_study(task_name, active_geometry, noise, rng)
 
         baseline_cfg  = all_cfgs[baseline_model]
-        baseline_r    = measure_rollout_speed(mjm, baseline_cfg)
+        baseline_r    = measure_rollout_speed(mjm, baseline_cfg, nconmax=nconmax, njmax=njmax)
         baseline_time = baseline_r.mean_ms
 
         test_states = np.stack([
-            np.concatenate(task.sample_initial_state(rng))
+            np.concatenate(task.get_inital_state(rng)[:2])
             for _ in range(20)
         ])
 
         for name, cfg in all_cfgs.items():
             key = f"{task_name}/{name}"
 
-            speed_r = measure_rollout_speed(mjm, cfg)
+            speed_r = measure_rollout_speed(mjm, cfg, nconmax=nconmax, njmax=njmax)
             speed_cache[key] = baseline_time / speed_r.mean_ms
 
             mean_err, _ = measure_approximation_error(
-                mjm, baseline_cfg, cfg, test_states, horizon=horizon
+                mjm, baseline_cfg, cfg, test_states, horizon=horizon,
+                nconmax=nconmax, njmax=njmax,
             )
             error_cache[key] = mean_err
             print(f"  {key}: speedup={speed_cache[key]:.2f}x  err={error_cache[key]:.4f}")
 
     print("\n=== Running episodes ===")
     for task_name in task_names:
-        mjm, task = load_mjm_for_study(task_name, geometry, noise, rng)
+        mjm, task = load_mjm_for_study(task_name, active_geometry, noise, rng)
 
         for model_name in model_names:
             cfg = all_cfgs[model_name]
@@ -257,13 +299,15 @@ def run_study(
                         task           = task,
                         condition      = condition,
                         budget_seconds = budget_seconds,
-                        n_samples_b    = n_samples_b,
+                        n_samples      = n_samples,
                         horizon        = horizon,
+                        seed           = seed,
                         rng            = rng,
+                        settle_seconds = settle_seconds,
+                        use_full_graph = use_full_graph,
+                        nconmax        = nconmax,
+                        njmax          = njmax,
                     )
-                    # Tag the label with the (geometry, noise) cell so
-                    # downstream plots don't mix rows from different
-                    # ablation cells.
                     result.model_label = cfg.label + cell_tag
                     episodes.append(result)
 
@@ -282,24 +326,43 @@ def run_study(
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Master MPPI experiment runner — tasks × models × conditions."
+    )
     parser.add_argument("--tasks",    nargs="+",
-                        default=["push", "grasp_reorient", "peg_in_hole"])
+                        default=["grasp_reorient"],
+                        help="Task names to evaluate")
     parser.add_argument("--models",   nargs="+",
                         default=["M1", "M2", "M3", "M4"],
                         choices=list(MODEL_FACTORIES.keys()))
-    parser.add_argument("--conditions", nargs="+", default=["A", "B"])
+    parser.add_argument("--conditions", nargs="+", default=["B"],
+                        choices=["A", "B"],
+                        help="A=fixed_budget_rollout  B=warm-started MPPI")
     parser.add_argument("--n_episodes",     type=int,   default=20)
-    parser.add_argument("--budget_seconds", type=float, default=0.1)
-    parser.add_argument("--n_samples_b",    type=int,   default=1024)
-    parser.add_argument("--horizon",        type=int,   default=30)
+    parser.add_argument("--budget_seconds", type=float, default=0.1,
+                        help="Per-step time budget for Condition A")
+    parser.add_argument("--n_samples",      type=int,   default=1024)
+    parser.add_argument("--horizon",        type=int,   default=50)
     parser.add_argument("--seed",           type=int,   default=42)
-    parser.add_argument("--output",         type=str,   default=None)
+    parser.add_argument("--settle",         type=float, default=1.0,
+                        help="Seconds to allow physics to settle before planning starts")
+    parser.add_argument("--use_full_graph", action=argparse.BooleanOptionalAction, default=True,
+                        help="Use a single mega CUDA graph (default) or separate step/reset graphs")
+    parser.add_argument("--nconmax",        type=int,   default=200,
+                        help="Max contacts per world for the Warp backend")
+    parser.add_argument("--njmax",          type=int,   default=500,
+                        help="Max constraint rows per world for the Warp backend")
+    parser.add_argument("--output",         type=str,   default=None,
+                        help="Path for results JSON (auto-timestamped if omitted)")
 
     # --- Orthogonal ablation axes ---
+    # NOTE: geometry variants are not yet implemented.
+    # --geometry is accepted and recorded in output labels but the simulation
+    # always uses 'accurate'. This argument will be wired up when geometry
+    # loading is added to the task XML paths.
     parser.add_argument("--geometry", type=str, default="accurate",
                         choices=[g.value for g in GeometryVariant],
-                        help="Geometry variant XML to pair with every contact model")
+                        help="(not yet implemented) Geometry variant — recorded in output labels only")
     parser.add_argument("--mass_sigma",     type=float, default=0.0)
     parser.add_argument("--inertia_sigma",  type=float, default=0.0)
     parser.add_argument("--friction_sigma", type=float, default=0.0)
@@ -307,7 +370,7 @@ def main():
 
     args = parser.parse_args()
 
-    noise = PhysicsNoiseParams(
+    noise    = PhysicsNoiseParams(
         mass_sigma     = args.mass_sigma,
         inertia_sigma  = args.inertia_sigma,
         friction_sigma = args.friction_sigma,
@@ -315,17 +378,25 @@ def main():
     )
     geometry = GeometryVariant(args.geometry)
 
+    if geometry != GeometryVariant.ACCURATE:
+        print(f"[WARNING] --geometry={geometry.value} requested but geometry variants "
+              f"are not yet implemented. Falling back to 'accurate'.")
+
     results = run_study(
         task_names     = args.tasks,
         model_names    = args.models,
         conditions     = args.conditions,
         n_episodes     = args.n_episodes,
         budget_seconds = args.budget_seconds,
-        n_samples_b    = args.n_samples_b,
+        n_samples      = args.n_samples,
         horizon        = args.horizon,
         seed           = args.seed,
         geometry       = geometry,
         noise          = noise,
+        settle_seconds = args.settle,
+        use_full_graph = args.use_full_graph,
+        nconmax        = args.nconmax,
+        njmax          = args.njmax,
     )
 
     ts  = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

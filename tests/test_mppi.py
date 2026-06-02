@@ -115,6 +115,7 @@ def run(
     settle_seconds:    float      = 10.0,
     render_mode:       str        = "none",
     warmup_episodes:   int        = 1,
+    use_full_graph:    bool       = True,
     debug:             bool       = False,
 ) -> dict:
     """Run n_episodes of closed-loop MPPI and return aggregate stats.
@@ -164,21 +165,25 @@ def run(
     task._mjm = mjm
     max_steps = task.spec.max_steps
 
-    cost_fn_wp, goal_wp, idx_wp, weights_wp = task.cost_fn_wp
+    cost_fn_wp  = task.cost_fn_wp
+    goal_wp     = task.cost_goal_wp
+    idx_wp      = task.cost_idx_wp
+    weights_wp  = task.cost_weights_wp
 
     print(f"  nq={mjm.nq}  nv={mjm.nv}  nu={mjm.nu}  max_steps={max_steps}")
     print(f"  integrator      = {mjm.opt.integrator}")
     print(f"  dof_damping     : min={mjm.dof_damping.min():.2e}  "
           f"max={mjm.dof_damping.max():.2e}")
 
-    #mppi_init_temp = 0.01
     mppi_cfg = MPPIConfig(
-        n_samples  = n_samples,
-        horizon    = horizon,
-        temperature = 0.01,
-        noise_sigma = 0.001, #0.001
-        warm_start = True,
-        debug = debug
+        n_samples      = n_samples,
+        horizon        = horizon,
+        temperature    = 0.01,
+        noise_sigma    = 0.001,
+        warm_start     = True,
+        use_full_graph = use_full_graph,
+        seed           = seed,
+        debug          = debug,
     )
 
     # ------------------------------------------------------------------
@@ -311,9 +316,9 @@ def run(
                         if debug:
                             print(f"  ✓  ep {ep:02d} succeeded at step {steps_to_success}")
                     # Keep simulating so timing is comparable across episodes
-                if task is not None and task.has_fallen(mjd):
+                if task is not None and task.has_failed(mjd):
                     if debug:
-                        print(f"  ⚠  ep {ep:02d} terminated early: object fell at step {t}")
+                        print(f"  ⚠  ep {ep:02d} terminated early: task failed at step {t}")
                     break
             ep_elapsed = time.perf_counter() - ep_start
 
@@ -375,7 +380,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Closed-loop MPPI debugger — mirrors test_allegro.py structure."
     )
-    parser.add_argument("--task",    type=str, default="peg_in_hole",#"grasp_reorient",
+    parser.add_argument("--task",    type=str, default="grasp_reorient",#"peg_in_hole","grasp_reorient",
                         help="Registered task name. Set to 'none' to use --xml only.")
     # parser.add_argument("--xml",     type=str, default="scenes/leap_hand/scene_leap_cube.xml",
     #                     help="Override / standalone XML scene path.")
@@ -386,7 +391,7 @@ def main():
     parser.add_argument("--n_episodes",     type=int,   default=1)
     parser.add_argument("--budget_seconds", type=float, default=0.1,
                         help="Per-step time budget for Condition A")
-    parser.add_argument("--n_samples",      type=int,   default=1024)
+    parser.add_argument("--n_samples",      type=int,   default=256)
     parser.add_argument("--horizon",        type=int,   default=50)
     parser.add_argument("--seed",           type=int,   default=42)
     parser.add_argument("--geometry",       type=str,   default="accurate",
@@ -401,6 +406,8 @@ def main():
                         help="Rendering mode: none, viewer (live), or video (save mp4)")
     parser.add_argument("--warmup",         type=int,   default=1,
                         help="Episodes to skip when computing aggregate stats")
+    parser.add_argument("--use_full_graph", action=argparse.BooleanOptionalAction, default=True,
+                        help="Use a single mega CUDA graph (default) or separate step/reset graphs")
     parser.add_argument("--debug",          action="store_true",
                         help="Print per-step diagnostics")
     args = parser.parse_args()
@@ -437,6 +444,7 @@ def main():
             settle_seconds    = args.settle,
             render_mode       = current_render,
             warmup_episodes   = args.warmup,
+            use_full_graph    = args.use_full_graph,
             debug             = args.debug,
         )
         all_stats.append(stats)
