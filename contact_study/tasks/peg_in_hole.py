@@ -38,7 +38,7 @@ class PegInHoleTask(BaseTask):
         return TaskSpec(
             name              = "peg_in_hole",
             complexity        = ContactComplexity.HIGH,
-            xml_path_template = "tasks/peg_in_hole_{geometry}.xml",
+            xml_path_template = 'peg_in_hole/peg_in_hole_scene.xml',#"tasks/peg_in_hole_{geometry}.xml",
             max_steps         = 400,
             success_threshold = 0.005,
             cost_weights      = {"w_z": 1.0, "w_xy": 5.0, "w_term": 30.0}

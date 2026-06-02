@@ -375,7 +375,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Closed-loop MPPI debugger — mirrors test_allegro.py structure."
     )
-    parser.add_argument("--task",    type=str, default="grasp_reorient",
+    parser.add_argument("--task",    type=str, default="peg_in_hole",#"grasp_reorient",
                         help="Registered task name. Set to 'none' to use --xml only.")
     # parser.add_argument("--xml",     type=str, default="scenes/leap_hand/scene_leap_cube.xml",
     #                     help="Override / standalone XML scene path.")

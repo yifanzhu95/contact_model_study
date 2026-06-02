@@ -6,7 +6,6 @@ import warp as wp
 
 from .base import BaseTask, ContactComplexity, TaskSpec, register
 
-
 @wp.func
 def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
                            qvel: wp.array(dtype=float),
