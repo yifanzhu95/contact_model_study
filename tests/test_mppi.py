@@ -323,7 +323,7 @@ def run(
             ep_elapsed = time.perf_counter() - ep_start
 
             if render_mode == "video" and frames and media is not None:
-                video_path = f"video_{task_name or 'raw'}_{backend}_{condition}_ep{ep}.mp4"
+                video_path = f"videos/video_{task_name or 'raw'}_{backend}_{condition}_ep{ep}.mp4"
                 media.write_video(video_path, frames, fps=int(1.0/mjm.opt.timestep))
                 print(f"  Saved video to {video_path}")
 

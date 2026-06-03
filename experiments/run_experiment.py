@@ -83,7 +83,6 @@ MODEL_FACTORIES = {
     "M4": ContactModelConfig.M4,
 }
 
-
 # ---------------------------------------------------------------------------
 # Helper: load a task model with optional physics noise applied
 # ---------------------------------------------------------------------------
@@ -119,7 +118,7 @@ def run_one_episode(
     use_full_graph: bool  = True,
     nconmax:        int   = 200,
     njmax:          int   = 500,
-    debug:          bool  = False,
+    debug:          bool  = True,
 ) -> EpisodeResult:
     """Run one closed-loop episode under Condition A or B."""
 
@@ -164,6 +163,9 @@ def run_one_episode(
     for _ in range(settle_steps):
         mujoco.mj_step(mjm, mjd)
 
+    if hasattr(task, "sample_new_goal"):
+        task.sample_new_goal(mjd, rng)
+
     steps_to_success = None
     episode_start    = time.perf_counter()
     substeps         = mppi_cfg.substeps
@@ -192,6 +194,7 @@ def run_one_episode(
 
         if task.is_success(mjd) and steps_to_success is None:
             steps_to_success = t + 1
+            break
 
         if task.has_failed(mjd):
             break
@@ -204,7 +207,7 @@ def run_one_episode(
         condition        = condition,
         success          = steps_to_success is not None,
         steps_to_success = steps_to_success,
-        final_cost       = float(np.linalg.norm(mjd.qpos - q0)),
+        final_cost       = float(np.linalg.norm(mjd.qpos - q0)), # THIS IS WRONG
         n_samples_used   = n_used,
         elapsed_seconds  = elapsed,
     )
@@ -293,6 +296,7 @@ def run_study(
                 print(f"  {task_name} | {model_name}{cell_tag} | Cond {condition} | {n_episodes} eps")
                 episodes = []
                 for ep in range(n_episodes):
+                    print("Starting New Episode")
                     result = run_one_episode(
                         mjm            = mjm,
                         cfg            = cfg,
@@ -338,7 +342,7 @@ def main():
     parser.add_argument("--conditions", nargs="+", default=["B"],
                         choices=["A", "B"],
                         help="A=fixed_budget_rollout  B=warm-started MPPI")
-    parser.add_argument("--n_episodes",     type=int,   default=20)
+    parser.add_argument("--n_episodes",     type=int,   default=2)
     parser.add_argument("--budget_seconds", type=float, default=0.1,
                         help="Per-step time budget for Condition A")
     parser.add_argument("--n_samples",      type=int,   default=1024)

@@ -85,19 +85,19 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "leap_hand/scene_leap_cube.xml",
-            max_steps         = 3000,
+            max_steps         = 1000,
             success_threshold = 0.05,
             velocity_threshold = 0.1,
             cost_weights      = {
-                "w_quat": 5.0,
-                "w_pos": 11.5,
+                "w_quat": 10.0,
+                "w_pos": 10.0,
                 "w_velo": 0.0,
                 "w_contact": 3.5,
                 "w_joint": 0.1,
                 "w_joint_velo": 0.0,
-                "w_fallen": 15.0,
-                "w_quat_term": 10.0,
-                "w_pos_term": 10.0,
+                "w_fallen": 30.0,
+                "w_quat_term": 15.0,
+                "w_pos_term": 15.0,
                 "w_fallen_term": 0.0,
             }
         )
@@ -125,8 +125,10 @@ class GraspReorientTask(BaseTask):
 
         target_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj_target")
         mocap_id = mjm.body_mocapid[target_id]
-        self.target_pos = self._mjd.mocap_pos[mocap_id]
-        self.target_quat = self._mjd.mocap_quat[mocap_id]
+        self.target_pos          = self._mjd.mocap_pos[mocap_id]
+        self.target_quat         = self._mjd.mocap_quat[mocap_id].copy()
+        self._canonical_quat     = self.target_quat.copy()
+        self._face_index         = 0
 
         if mjm.nkey > 0:
             key_idx = 1 if mjm.nkey > 1 else 0
@@ -191,6 +193,78 @@ class GraspReorientTask(BaseTask):
         return bool(mjd.xpos[obj_id][2] < 0.0)
 
     def sample_new_goal(self, mjd: mujoco.MjData, rng: np.random.Generator):
+        """Sample a new goal orientation corresponding to a different cube face.
+
+        All 6 face orientations are derived from the canonical goal quaternion
+        (set at load time) by right-multiplying with one of 6 object-frame
+        rotations — one per cube face.  The current face index is tracked so
+        the selected face is always different from the previous goal.
+        """
+        # Six object-frame rotations, one per cube face (right-multiply onto
+        # canonical quat).  Using Rx/Ry only ensures all 6 faces are distinct:
+        #   face 0 — identity          (initial face)
+        #   face 1 — Rx +90°
+        #   face 2 — Rx -90°
+        #   face 3 — Rx 180°           (opposite face)
+        #   face 4 — Ry +90°
+        #   face 5 — Ry -90°
+        def _aa(axis, angle):
+            c, s = np.cos(angle / 2), np.sin(angle / 2)
+            return np.array([c, s * axis[0], s * axis[1], s * axis[2]])
+
+        face_rots = [
+            _aa([1, 0, 0],  0.0),
+            _aa([1, 0, 0],  np.pi / 2),
+            _aa([1, 0, 0], -np.pi / 2),
+            _aa([1, 0, 0],  np.pi),
+            _aa([0, 1, 0],  np.pi / 2),
+            _aa([0, 1, 0], -np.pi / 2),
+        ]
+
+        # Twist axes in the object frame for each face (the axis normal to that face).
+        # Derived by applying the inverse face rotation to [0,0,1]:
+        #   face 0 (+Z up)  → twist Z  |  face 3 (-Z up) → twist Z
+        #   face 1 (+Y up)  → twist Y  |  face 2 (-Y up) → twist Y
+        #   face 4 (-X up)  → twist X  |  face 5 (+X up) → twist X
+        face_twist_axes = [
+            [0., 0., 1.],  # face 0
+            [0., 1., 0.],  # face 1
+            [0., 1., 0.],  # face 2
+            [0., 0., 1.],  # face 3
+            [1., 0., 0.],  # face 4
+            [1., 0., 0.],  # face 5
+        ]
+
+        # Pick uniformly from the 5 faces that are not the current one
+        candidates = [i for i in range(6) if i != self._face_index]
+        self._face_index = int(rng.choice(candidates))
+
+        # Random 90° twist (0°/90°/180°/270°) around the selected face's normal
+        twist_angle = int(rng.integers(0, 4)) * (np.pi / 2)
+        q_twist = _aa(face_twist_axes[self._face_index], twist_angle)
+
+        # Combine: face rotation then twist (both in object frame)
+        q_face_twist = np.zeros(4)
+        mujoco.mju_mulQuat(q_face_twist, face_rots[self._face_index], q_twist)
+
+        new_quat = np.zeros(4)
+        mujoco.mju_mulQuat(new_quat, self._canonical_quat, q_face_twist)
+
+        target_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "obj_target")
+        if target_id >= 0:
+            mocap_id = self.mjm.body_mocapid[target_id]
+            if mocap_id >= 0:
+                mjd.mocap_quat[mocap_id] = new_quat
+
+        self.target_quat = new_quat.copy()
+        self.goal_vector = np.concatenate([
+            self.target_pos, self.target_quat, self.home_state
+        ]).astype(np.float32)
+
+        if self.goal_vector_wp is not None:
+            self.goal_vector_wp.assign(self.goal_vector)
+    
+    def sample_new_goal_(self, mjd: mujoco.MjData, rng: np.random.Generator):
         """Sample a new goal orientation by rotating +/- 90 degrees around an object-local cardinal axis."""
         axis_idx = rng.integers(0, 3)
         axis = np.zeros(3)

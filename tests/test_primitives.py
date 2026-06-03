@@ -21,6 +21,9 @@ Usage:
     python test_primitives.py --backend mujoco_soft --nworld 16
 """
 
+import os
+os.environ["MUJOCO_GL"] = "egl"  # must be set before importing mujoco
+
 import argparse
 import time
 
@@ -28,6 +31,7 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 import warp as wp
+import mediapy as media
 
 from contact_study.contact_models.config import ContactModelConfig
 from contact_study.contact_models import api
@@ -71,16 +75,16 @@ def run(
     num_steps: int = 10000,
     comfree_stiffness: float = 0.1,
     comfree_damping: float = 0.001,
-    viewer: bool = True,
+    render_mode: str = "none",
     realtime: bool = True,
     warmup_steps: int = 50,
 ) -> dict:
     print(f"\n{'=' * 60}")
-    print(f"  backend : {backend}")
-    print(f"  xml     : {xml_path}")
-    print(f"  nworld  : {nworld}")
-    print(f"  steps   : {num_steps}")
-    print(f"  viewer  : {viewer}  (realtime={realtime})")
+    print(f"  backend     : {backend}")
+    print(f"  xml         : {xml_path}")
+    print(f"  nworld      : {nworld}")
+    print(f"  steps       : {num_steps}")
+    print(f"  render_mode : {render_mode}  (realtime={realtime})")
     print(f"{'=' * 60}")
 
     # ------------------------------------------------------------------
@@ -122,10 +126,16 @@ def run(
     print("Done.")
 
     # ------------------------------------------------------------------
-    # Optional viewer
+    # Rendering setup
     # ------------------------------------------------------------------
-    v = mujoco.viewer.launch_passive(mjm, mjd) if viewer else None
-    time.sleep(0.5)
+    v = None
+    renderer = None
+    frames = []
+    if render_mode == "viewer":
+        v = mujoco.viewer.launch_passive(mjm, mjd)
+        time.sleep(0.5)
+    elif render_mode == "video":
+        renderer = mujoco.Renderer(mjm, height=480, width=640)
 
     # ------------------------------------------------------------------
     # Step loop
@@ -146,16 +156,21 @@ def run(
             if realtime and elapsed < dt:
                 time.sleep(dt - elapsed)
 
-            # Viewer sync (world 0)
-            if v is not None:
+            # Viewer / video sync (world 0)
+            if render_mode == "viewer" and v is not None:
                 inner_d = _get_inner_data(d)
                 _mjwarp.get_data_into(mjd, mjm, inner_d, world_id=0)
                 v.sync()
+            elif render_mode == "video" and renderer is not None:
+                inner_d = _get_inner_data(d)
+                _mjwarp.get_data_into(mjd, mjm, inner_d, world_id=0)
+                renderer.update_scene(mjd)
+                frames.append(renderer.render())
 
             if step_i % 100 == 0:
                 print(f"Step {step_i:5d}  compute={elapsed * 1e3:7.3f} ms")
 
-            if v is not None and not v.is_running():
+            if render_mode == "viewer" and v is not None and not v.is_running():
                 print("viewer closed by user")
                 break
 
@@ -164,6 +179,11 @@ def run(
         del graph
         if v is not None:
             v.close()
+
+    if render_mode == "video" and frames:
+        video_path = f"videos/video_primitives_{backend}.mp4"
+        media.write_video(video_path, frames, fps=int(1.0 / mjm.opt.timestep))
+        print(f"  Saved video to {video_path}")
 
     # ------------------------------------------------------------------
     # Stats
@@ -191,7 +211,7 @@ def run(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--xml", default="scenes/test_data/primitives.xml")
-    parser.add_argument("--backend", default="comfree",
+    parser.add_argument("--backend", default="xpbd",
                         choices=["mjwarp", "comfree", "mjwarp_hard", "xpbd", "all"])
     parser.add_argument("--nworld", type=int, default=1)
     parser.add_argument("--nconmax", type=int, default=1000)
@@ -199,11 +219,13 @@ def main():
     parser.add_argument("--steps", type=int, default=1000)
     parser.add_argument("--stiffness", type=float, default=0.1)
     parser.add_argument("--damping", type=float, default=0.001)
-    parser.add_argument("--no-viewer", dest="viewer", action="store_false")
+    parser.add_argument("--render", type=str, default="video",
+                        choices=["none", "viewer", "video"],
+                        help="Rendering mode: none, viewer (live window), or video (save mp4)")
     parser.add_argument("--no-realtime", dest="realtime", action="store_false",
                         help="Disable real-time pacing (run as fast as possible)")
     parser.add_argument("--warmup", type=int, default=50)
-    parser.set_defaults(viewer=True, realtime=True)
+    parser.set_defaults(realtime=True)
     args = parser.parse_args()
 
     backends = (
@@ -214,6 +236,11 @@ def main():
 
     all_stats = []
     for i, backend in enumerate(backends):
+        # Only open viewer for first backend when running all backends
+        current_render = args.render
+        if args.render == "viewer" and i > 0:
+            current_render = "none"
+
         stats = run(
             xml_path=args.xml,
             backend=backend,
@@ -223,7 +250,7 @@ def main():
             num_steps=args.steps,
             comfree_stiffness=args.stiffness,
             comfree_damping=args.damping,
-            viewer=args.viewer and (i == 0),
+            render_mode=current_render,
             realtime=args.realtime,
             warmup_steps=args.warmup,
         )
