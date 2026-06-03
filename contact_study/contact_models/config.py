@@ -97,8 +97,9 @@ class XPBDParams:
     See contact_study.contact_models.xpbd_backend for what each field does.
     """
     substeps:            int   = 1
-    vmax_depenetration:  float = 1.0
+    vmax_depenetration:  float = 1.0 #WE MIGHT WANT TO REMOVE THIS NOT SURE ITS IN THE XPBD PAPER
     iterations:          int   = 1
+    relaxation:          float = 0.01
 
 
 @dataclasses.dataclass

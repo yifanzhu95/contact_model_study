@@ -334,6 +334,13 @@ def _xpbd_unified_sweep(
         # vmax·dt of penetration in a single substep.
         if C_e < -vmax_depen * dt:
             C_e = -vmax_depen * dt
+        # Also clamp v_e for contact rows: large relative velocities
+        # (e.g. from unstable rollouts) would otherwise produce extreme
+        # d_lambda values that blow up qfrc_constraint → NaN qvel/qpos.
+        if v_e > vmax_depen:
+            v_e = vmax_depen
+        elif v_e < -vmax_depen:
+            v_e = -vmax_depen
         relax = relax_contact
         is_unilateral = True
     elif is_limit:
@@ -345,6 +352,7 @@ def _xpbd_unified_sweep(
 
     # XPBD increment.
     d_lambda = -relax * (v_e + C_e / dt) / denom
+    #print(d_lambda)
 
     old_l = lambda_efc[worldid, efcid]
     new_l = old_l + d_lambda
