@@ -172,34 +172,52 @@ def put_model(mjm: mujoco.MjModel, cfg: ContactModelConfig):
     Args:
         mjm:  Host-side MuJoCo model. Any geometry/physics-parameter
               degradation should already be baked into this MjModel
-              before it reaches here. NOTE: this function mutates mjm
-              in place (see module docstring).
+              before it reaches here.
         cfg:  Contact model configuration (selects backend + params).
 
     Returns:
         Backend-specific model object with a .contact_cfg attribute
         carrying the ContactModelConfig for downstream dispatch.
     """
-    if cfg.backend in (Backend.MUJOCO_HARD, Backend.MUJOCO_SOFT):
-        _patch_mujoco_options(mjm, cfg)
-        m = _mujoco_warp().put_model(mjm)
+    # Save all mjm fields that _patch_mujoco_options / _apply_hard_contact_preset
+    # may mutate so the caller sees no side effects (e.g. when sweeping over
+    # multiple configs with the same MjModel in the episodes loop).
+    _saved_opt = (mjm.opt.cone, mjm.opt.solver, mjm.opt.iterations, mjm.opt.tolerance)
+    _saved_geom_solref = mjm.geom_solref.copy() if mjm.ngeom > 0 else None
+    _saved_geom_solimp = mjm.geom_solimp.copy() if mjm.ngeom > 0 else None
+    _saved_pair_solref = mjm.pair_solref.copy() if mjm.npair > 0 else None
+    _saved_pair_solimp = mjm.pair_solimp.copy() if mjm.npair > 0 else None
 
-    elif cfg.backend == Backend.COMFREE:
-        _patch_mujoco_options(mjm, cfg)
-        m = _comfree_warp().put_model(
-            mjm,
-            comfree_stiffness=cfg.comfree.stiffness,
-            comfree_damping=cfg.comfree.damping,
-        )
+    try:
+        if cfg.backend in (Backend.MUJOCO_HARD, Backend.MUJOCO_SOFT):
+            _patch_mujoco_options(mjm, cfg)
+            m = _mujoco_warp().put_model(mjm)
 
-    elif cfg.backend == Backend.XPBD:
-        _patch_mujoco_options(mjm, cfg)
-        # XPBD kernel recovers tangent Jacobians from pyramidal edge rows.
-        mjm.opt.cone = mujoco.mjtCone.mjCONE_PYRAMIDAL
-        m = _xpbd_backend().put_model(mjm, cfg.xpbd)
+        elif cfg.backend == Backend.COMFREE:
+            _patch_mujoco_options(mjm, cfg)
+            m = _comfree_warp().put_model(
+                mjm,
+                comfree_stiffness=cfg.comfree.stiffness,
+                comfree_damping=cfg.comfree.damping,
+            )
 
-    else:
-        raise ValueError(f"Unknown backend: {cfg.backend}")
+        elif cfg.backend == Backend.XPBD:
+            _patch_mujoco_options(mjm, cfg)
+            mjm.opt.cone = mujoco.mjtCone.mjCONE_PYRAMIDAL
+            m = _xpbd_backend().put_model(mjm, cfg.xpbd)
+
+        else:
+            raise ValueError(f"Unknown backend: {cfg.backend}")
+
+    finally:
+        # Restore mjm to its pre-call state regardless of success or failure.
+        mjm.opt.cone, mjm.opt.solver, mjm.opt.iterations, mjm.opt.tolerance = _saved_opt
+        if _saved_geom_solref is not None:
+            mjm.geom_solref[:] = _saved_geom_solref
+            mjm.geom_solimp[:] = _saved_geom_solimp
+        if _saved_pair_solref is not None:
+            mjm.pair_solref[:] = _saved_pair_solref
+            mjm.pair_solimp[:] = _saved_pair_solimp
 
     m.contact_cfg = cfg
     return m

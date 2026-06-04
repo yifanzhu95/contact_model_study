@@ -101,6 +101,25 @@ def load_mjm_for_study(
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _print_settled_keyframe(mjd: mujoco.MjData) -> None:
+    """Print qpos/qvel/ctrl after settling in MuJoCo XML keyframe format."""
+    def _rows(arr: np.ndarray, per_line: int = 4) -> str:
+        lines = []
+        for i in range(0, len(arr), per_line):
+            lines.append("      " + "  ".join(f"{v:.8g}" for v in arr[i:i+per_line]))
+        return "\n".join(lines)
+
+    print('<key name="settled"')
+    print(f'      qpos="\n{_rows(mjd.qpos)}"\n')
+    print(f'      qvel="\n{_rows(mjd.qvel)}"\n')
+    print(f'      ctrl="\n{_rows(mjd.ctrl)}"\n')
+    print('      />')
+
+
+# ---------------------------------------------------------------------------
 # Single episode runner
 # ---------------------------------------------------------------------------
 
@@ -166,6 +185,8 @@ def run_one_episode(
     if hasattr(task, "sample_new_goal"):
         task.sample_new_goal(mjd, rng)
 
+    _print_settled_keyframe(mjd)
+
     steps_to_success = None
     episode_start    = time.perf_counter()
     substeps         = mppi_cfg.substeps
@@ -194,9 +215,11 @@ def run_one_episode(
 
         if task.is_success(mjd) and steps_to_success is None:
             steps_to_success = t + 1
+            print("Episode Success!")
             break
 
         if task.has_failed(mjd):
+            print("Episode Failed!")
             break
 
     elapsed = time.perf_counter() - episode_start
@@ -269,7 +292,7 @@ def run_study(
         test_states = np.stack([
             np.concatenate(task.get_inital_state(rng)[:2])
             for _ in range(20)
-        ])
+        ]) #this is useless change
 
         for name, cfg in all_cfgs.items():
             key = f"{task_name}/{name}"
@@ -342,7 +365,7 @@ def main():
     parser.add_argument("--conditions", nargs="+", default=["B"],
                         choices=["A", "B"],
                         help="A=fixed_budget_rollout  B=warm-started MPPI")
-    parser.add_argument("--n_episodes",     type=int,   default=2)
+    parser.add_argument("--n_episodes",     type=int,   default=40)
     parser.add_argument("--budget_seconds", type=float, default=0.1,
                         help="Per-step time budget for Condition A")
     parser.add_argument("--n_samples",      type=int,   default=1024)

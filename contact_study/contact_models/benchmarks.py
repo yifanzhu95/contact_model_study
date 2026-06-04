@@ -119,33 +119,42 @@ def measure_approximation_error(
     nq = mjm.nq
     nv = mjm.nv
 
-    m_gt  = api.put_model(mjm, cfg_gt)
-    m_ap  = api.put_model(mjm, cfg_approx)
-    mjd   = mujoco.MjData(mjm)
+    m_gt = api.put_model(mjm, cfg_gt)
+    m_ap = api.put_model(mjm, cfg_approx)
+
+    def _rollout(m, q0, v0, step_idx):
+        # Fresh MjData each call — prevents NaN from one backend
+        # contaminating the next rollout via shared mjd fields (ctrl, qacc, …).
+        mjd = mujoco.MjData(mjm)
+        mjd.qpos[:] = q0
+        mjd.qvel[:] = v0
+        d = api.put_data(mjm, mjd, m, nconmax=nconmax, njmax=njmax)
+        for t in range(horizon):
+            if ctrl_sequences is not None:
+                d.ctrl.assign(ctrl_sequences[step_idx, t])
+           #print(t,d.qpos.numpy())
+            api.step(m, d)
+        wp.synchronize()
+        api.get_data_into(mjm, m, d, mjd)
+        return mjd.qpos.copy(), mjd.qvel.copy()
 
     errs = []
     for i in range(N):
         q0 = test_states[i, :nq]
         v0 = test_states[i, nq:nq+nv]
+        #print("inits",q0,v0)
 
-        def _rollout(m):
-            mjd.qpos[:] = q0
-            mjd.qvel[:] = v0
-            d = api.put_data(mjm, mjd, m, nconmax=nconmax, njmax=njmax)
-            for t in range(horizon):
-                if ctrl_sequences is not None:
-                    d.ctrl.assign(ctrl_sequences[i, t])
-                api.step(m, d)
-            wp.synchronize()
-            api.get_data_into(mjm, m, d, mjd)
-            return mjd.qpos.copy(), mjd.qvel.copy()
+        qpos_gt, _  = _rollout(m_gt, q0, v0, i)
+        qpos_ap, _  = _rollout(m_ap, q0, v0, i)
+        #print("fin",qpos_gt,qpos_ap)
 
-        qpos_gt,  qvel_gt  = _rollout(m_gt)
-        qpos_ap, _qvel_ap  = _rollout(m_ap)
+        if np.any(np.isnan(qpos_gt)) or np.any(np.isnan(qpos_ap)):
+            continue  # skip diverged states rather than poisoning the mean
 
-        err = np.linalg.norm(qpos_gt - qpos_ap)
-        errs.append(err)
+        errs.append(np.linalg.norm(qpos_gt - qpos_ap))
 
+    if not errs:
+        return float("nan"), float("nan")
     errs = np.array(errs)
     return float(np.mean(errs)), float(np.std(errs))
 

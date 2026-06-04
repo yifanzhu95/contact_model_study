@@ -77,7 +77,30 @@ class GraspReorientTask(BaseTask):
 
     Contact complexity: MEDIUM (4+ contacts between gripper fingers and object,
     dynamic lifting and rotation).
+
+    Goal difficulty levels (set via task.goal_difficulty):
+        1 — Easiest: ±90° spin around the normal of the currently-shown face.
+            The face stays the same; only the in-plane orientation changes.
+        2 — Medium:  ±90° rotation around a randomly-chosen object-frame axis
+            (X, Y, or Z).  May change which face is shown.
+        3 — Hard:    Jump to a completely different cube face (5 candidates),
+            with a random 90° twist on top.
     """
+
+    # Controls which sampling method sample_new_goal dispatches to.
+    # Override on an instance before the first episode to change difficulty.
+    goal_difficulty: int = 1
+
+    # Object-frame axis that is the surface normal for each face index.
+    # Matches the face_twist_axes table in sample_new_goal_by_face.
+    _FACE_NORMALS = [
+        [0., 0., 1.],  # face 0: +Z up  (initial)
+        [0., 1., 0.],  # face 1: +Y up
+        [0., 1., 0.],  # face 2: -Y up
+        [0., 0., 1.],  # face 3: -Z up
+        [1., 0., 0.],  # face 4: -X up
+        [1., 0., 0.],  # face 5: +X up
+    ]
 
     @property
     def spec(self) -> TaskSpec:
@@ -85,7 +108,7 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "leap_hand/scene_leap_cube.xml",
-            max_steps         = 1000,
+            max_steps         = 10000,
             success_threshold = 0.05,
             velocity_threshold = 0.1,
             cost_weights      = {
@@ -192,7 +215,7 @@ class GraspReorientTask(BaseTask):
             return False
         return bool(mjd.xpos[obj_id][2] < 0.0)
 
-    def sample_new_goal(self, mjd: mujoco.MjData, rng: np.random.Generator):
+    def sample_new_goal_by_face(self, mjd: mujoco.MjData, rng: np.random.Generator):
         """Sample a new goal orientation corresponding to a different cube face.
 
         All 6 face orientations are derived from the canonical goal quaternion
@@ -221,27 +244,13 @@ class GraspReorientTask(BaseTask):
             _aa([0, 1, 0], -np.pi / 2),
         ]
 
-        # Twist axes in the object frame for each face (the axis normal to that face).
-        # Derived by applying the inverse face rotation to [0,0,1]:
-        #   face 0 (+Z up)  → twist Z  |  face 3 (-Z up) → twist Z
-        #   face 1 (+Y up)  → twist Y  |  face 2 (-Y up) → twist Y
-        #   face 4 (-X up)  → twist X  |  face 5 (+X up) → twist X
-        face_twist_axes = [
-            [0., 0., 1.],  # face 0
-            [0., 1., 0.],  # face 1
-            [0., 1., 0.],  # face 2
-            [0., 0., 1.],  # face 3
-            [1., 0., 0.],  # face 4
-            [1., 0., 0.],  # face 5
-        ]
-
         # Pick uniformly from the 5 faces that are not the current one
         candidates = [i for i in range(6) if i != self._face_index]
         self._face_index = int(rng.choice(candidates))
 
         # Random 90° twist (0°/90°/180°/270°) around the selected face's normal
         twist_angle = int(rng.integers(0, 4)) * (np.pi / 2)
-        q_twist = _aa(face_twist_axes[self._face_index], twist_angle)
+        q_twist = _aa(self._FACE_NORMALS[self._face_index], twist_angle)
 
         # Combine: face rotation then twist (both in object frame)
         q_face_twist = np.zeros(4)
@@ -250,21 +259,9 @@ class GraspReorientTask(BaseTask):
         new_quat = np.zeros(4)
         mujoco.mju_mulQuat(new_quat, self._canonical_quat, q_face_twist)
 
-        target_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "obj_target")
-        if target_id >= 0:
-            mocap_id = self.mjm.body_mocapid[target_id]
-            if mocap_id >= 0:
-                mjd.mocap_quat[mocap_id] = new_quat
+        self._update_goal(mjd, new_quat)
 
-        self.target_quat = new_quat.copy()
-        self.goal_vector = np.concatenate([
-            self.target_pos, self.target_quat, self.home_state
-        ]).astype(np.float32)
-
-        if self.goal_vector_wp is not None:
-            self.goal_vector_wp.assign(self.goal_vector)
-    
-    def sample_new_goal_(self, mjd: mujoco.MjData, rng: np.random.Generator):
+    def sample_new_goal_by_rot(self, mjd: mujoco.MjData, rng: np.random.Generator):
         """Sample a new goal orientation by rotating +/- 90 degrees around an object-local cardinal axis."""
         axis_idx = rng.integers(0, 3)
         axis = np.zeros(3)
@@ -279,6 +276,37 @@ class GraspReorientTask(BaseTask):
         new_quat = np.zeros(4)
         mujoco.mju_mulQuat(new_quat, self.target_quat, q_rot)
 
+        self._update_goal(mjd, new_quat)
+
+    def sample_new_goal_by_z_rot(self, mjd: mujoco.MjData, rng: np.random.Generator):
+        """Difficulty 1: ±90° spin around the normal of the currently-shown face.
+
+        The face stays the same — only the in-plane orientation changes.
+        This is the easiest goal because the controller never needs to tip
+        the cube onto a new face.
+        """
+        axis = np.array(self._FACE_NORMALS[self._face_index], dtype=float)
+        angle = rng.choice([np.pi / 2.0, -np.pi / 2.0])
+
+        c, s = np.cos(angle / 2.0), np.sin(angle / 2.0)
+        q_rot = np.array([c, s * axis[0], s * axis[1], s * axis[2]])
+
+        new_quat = np.zeros(4)
+        mujoco.mju_mulQuat(new_quat, self.target_quat, q_rot)
+
+        self._update_goal(mjd, new_quat)
+
+    def sample_new_goal(self, mjd: mujoco.MjData, rng: np.random.Generator):
+        """Dispatch to the appropriate sampler based on self.goal_difficulty."""
+        if self.goal_difficulty == 1:
+            self.sample_new_goal_by_z_rot(mjd, rng)
+        elif self.goal_difficulty == 2:
+            self.sample_new_goal_by_rot(mjd, rng)
+        else:
+            self.sample_new_goal_by_face(mjd, rng)
+
+    def _update_goal(self, mjd: mujoco.MjData, new_quat: np.ndarray) -> None:
+        """Write a new target quaternion to the mocap body, goal vector, and GPU array."""
         target_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "obj_target")
         if target_id >= 0:
             mocap_id = self.mjm.body_mocapid[target_id]
