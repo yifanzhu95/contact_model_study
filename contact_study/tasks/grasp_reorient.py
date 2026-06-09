@@ -192,21 +192,26 @@ class GraspReorientTask(BaseTask):
         return grasp_reorient_cost_wp
 
     def is_success(self, mjd: mujoco.MjData) -> bool:
-        mjm = self.mjm
-        obj_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
-        if obj_id < 0:
-            return False
+        obj_qpos_adr = int(self.index_vector[0])
+        obj_qvel_adr = int(self.index_vector[1])
 
-        pos_err = np.linalg.norm(mjd.xpos[obj_id] - self.target_pos)
-        obj_quat = mjd.xquat[obj_id]
-        quat_err = 1.0 - np.dot(obj_quat, self.target_quat)**2
+        pos  = mjd.qpos[obj_qpos_adr     : obj_qpos_adr + 3]
+        quat = mjd.qpos[obj_qpos_adr + 3 : obj_qpos_adr + 7]
+        vel  = mjd.qvel[obj_qvel_adr     : obj_qvel_adr + 6]
+
+        pos_err  = np.linalg.norm(pos - self.target_pos)
+        quat_err = 1.0 - np.dot(quat, self.target_quat) ** 2
+
+        #print(pos,self.target_pos)
+        #print(quat, self.target_quat)
+        #print(pos_err,quat_err)
 
         pose_ok = pos_err < self.spec.success_threshold and quat_err < self.spec.success_threshold
         if not pose_ok:
             return False
 
         vel_threshold = getattr(self.spec, "velocity_threshold", 1.0)
-        return bool(np.linalg.norm(mjd.cvel[obj_id]) < vel_threshold)
+        return bool(np.linalg.norm(vel) < vel_threshold)
 
     def has_failed(self, mjd: mujoco.MjData) -> bool:
         mjm = self.mjm

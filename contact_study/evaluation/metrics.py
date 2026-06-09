@@ -34,6 +34,8 @@ class EpisodeResult:
     final_cost:        float
     n_samples_used:    int
     elapsed_seconds:   float
+    mean_step_ms:      float = 0.0
+    std_step_ms:       float = 0.0
 
 
 @dataclass
@@ -53,6 +55,8 @@ class AggregatedResult:
 
     mean_n_samples:         float    # avg samples per planning cycle (Condition A varies)
     mean_elapsed:           float    # avg wall-clock per episode
+    mean_step_ms:           float = 0.0   # avg per-control-step planning time
+    std_step_ms:            float = 0.0
 
     # Speed / accuracy metadata (filled by run_full_study)
     speedup_vs_baseline:    float = 1.0
@@ -84,6 +88,9 @@ def aggregate_episodes(
     samples  = [e.n_samples_used for e in episodes]
     elapsed  = [e.elapsed_seconds for e in episodes]
 
+    step_ms     = [e.mean_step_ms for e in episodes]
+    all_step_sd = [e.std_step_ms  for e in episodes]
+
     return AggregatedResult(
         task_name             = task_name,
         model_label           = model_label,
@@ -96,6 +103,8 @@ def aggregate_episodes(
         std_final_cost        = float(np.std(costs)),
         mean_n_samples        = float(np.mean(samples)),
         mean_elapsed          = float(np.mean(elapsed)),
+        mean_step_ms          = float(np.mean(step_ms)),
+        std_step_ms           = float(np.mean(all_step_sd)),
     )
 
 

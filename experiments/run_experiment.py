@@ -67,7 +67,7 @@ from contact_study.utils.physics_noise import (
 )
 from contact_study.utils.rollout import fixed_budget_rollout, fixed_sample_rollout
 
-RESULTS_DIR = Path(__file__).parent.parent / "results"
+RESULTS_DIR = "results"#Path(__file__).parent.parent / "results"
 
 wp.init()
 
@@ -185,7 +185,7 @@ def run_one_episode(
     if hasattr(task, "sample_new_goal"):
         task.sample_new_goal(mjd, rng)
 
-    _print_settled_keyframe(mjd)
+    #_print_settled_keyframe(mjd)
 
     steps_to_success = None
     episode_start    = time.perf_counter()
