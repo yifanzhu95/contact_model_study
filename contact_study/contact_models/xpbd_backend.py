@@ -220,6 +220,26 @@ def _sum2(
     out[w, i] = a[w, i] + b[w, i]
 
 
+@wp.kernel
+def _count_contact_rows_per_dof(
+        nv:       int,
+        efc_J:    wp.array3d(dtype=float),
+        efc_type: wp.array2d(dtype=int),
+        nefc:     wp.array(dtype=int),
+        # out
+        dof_con_count: wp.array2d(dtype=float),
+    ):
+        worldid, efcid = wp.tid()
+        if efcid >= nefc[worldid]:
+            return
+        ctype = efc_type[worldid, efcid]
+        if not (ctype == _CT_CONTACT_FRICTIONLESS or ctype == _CT_CONTACT_PYRAMIDAL):
+            return
+        for i in range(nv):
+            if wp.abs(efc_J[worldid, efcid, i]) > 1.0e-9:
+                wp.atomic_add(dof_con_count, worldid, i, 1.0)
+
+
 # ── XPBD unified sweep (all efc rows) ────────────────────────────
 
 @wp.kernel
@@ -237,6 +257,7 @@ def _xpbd_unified_sweep(
     efc_frictionloss: wp.array2d(dtype=float),  
     nefc:     wp.array(dtype=int),
     qvel_pred: wp.array2d(dtype=float),
+    dof_con_count: wp.array2d(dtype=float),
     # in/out
     lambda_efc:      wp.array2d(dtype=float),
     efc_force:       wp.array2d(dtype=float),
@@ -346,7 +367,18 @@ def _xpbd_unified_sweep(
             v_e = vmax_depen
         elif v_e < -vmax_depen:
             v_e = -vmax_depen
-        relax = relax_contact
+        # relax = relax_contact
+        # is_unilateral = True
+        # Adaptive SOR: divide out Jacobi over-counting using the number
+        # of contact rows on this row's most-loaded DOF. relax_contact is
+        # now a safety multiplier (~0.8–1.0), not the raw 1/K compensation.
+        n_red = float(1.0)
+        for i in range(nv):
+            if wp.abs(efc_J[worldid, efcid, i]) > 1.0e-9:
+                c = dof_con_count[worldid, i]
+                if c > n_red:
+                    n_red = c
+        relax = relax_contact / n_red
         is_unilateral = True
     elif is_limit:
         # Joint or tendon limit. Unilateral, but typically not
@@ -434,6 +466,9 @@ class XPBDData:
         # Backup of m.opt.timestep so we can patch it for substepping.
         self.timestep_orig = wp.zeros(n_opt_timestep, dtype=float,
                                       device=device)
+        
+        # Per-dof count of contact rows touching that dof (adaptive SOR).
+        self.dof_con_count = wp.zeros((nworld, nv), dtype=float, device=device)
 
     def __getattr__(self, name):
         return getattr(self._d, name)
@@ -624,6 +659,16 @@ def _xpbd_solve(m: XPBDModel, d: XPBDData):
     wp.launch(_zero_2d, dim=(nw, nv), inputs=[inner_d.qfrc_constraint])
     d.lambda_efc.zero_()
 
+    # ── 2b. count contact rows per dof (for adaptive SOR) ──
+    d.dof_con_count.zero_()
+    if njmax_pad > 0:
+        wp.launch(
+            _count_contact_rows_per_dof,
+            dim=(nw, njmax_pad),
+            inputs=[nv, inner_d.efc.J, inner_d.efc.type, inner_d.nefc],
+            outputs=[d.dof_con_count],
+        )
+
     # ── 3-4. unified XPBD sweep(s) ──
     for it in range(n_iter):
         if njmax_pad > 0:
@@ -642,6 +687,7 @@ def _xpbd_solve(m: XPBDModel, d: XPBDData):
                     inner_d.efc.frictionloss, 
                     inner_d.nefc,
                     d.qvel_pred,
+                    d.dof_con_count,
                 ],
                 outputs=[
                     d.lambda_efc,
