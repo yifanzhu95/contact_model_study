@@ -9,6 +9,7 @@ during the MPPI loop.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import time
 
 from scipy.interpolate import CubicSpline
@@ -257,10 +258,11 @@ class MPPIController:
             nconmax=self.pc.nconmax,
             njmax=self.pc.njmax,
         )
-
-        self.reset_graph = self.create_reset_graph()
-        self.step_graph = self.create_step_graph()
-        self.rollout_graph = self.create_rollout_graph()
+        if self.pc.use_full_graph:
+            self.rollout_graph = self.create_rollout_graph()
+        else:
+            self.reset_graph = self.create_reset_graph()
+            self.step_graph = self.create_step_graph()
 
     def create_reset_graph(self):
         """Create a graph to broadcast environment states and zero costs across N worlds."""
@@ -272,10 +274,14 @@ class MPPIController:
         return capture.graph
 
     def create_step_graph(self):
-        """Create a graph to advance physics by 'substeps' per MPPI timestep."""
+        """Capture a single physics step.
+
+        When use_full_graph=False, substeps are handled by launching this
+        graph substeps-times in the Python loop rather than baking them into
+        the graph.  This keeps the graph small regardless of substep count.
+        """
         with wp.ScopedCapture() as capture:
-            for _ in range(self.pc.substeps):
-                api.step(self.m, self.d)
+            api.step(self.m, self.d)
         return capture.graph
 
     def create_rollout_graph(self):
@@ -382,6 +388,13 @@ class MPPIController:
             self.U_wp.assign(U_np)
         return action_np
 
+    # Costs at or above this value mean wp.atomic_min was never written (all NaN rollouts).
+    _COST_SENTINEL = 1e29
+
+    def _is_degenerate(self, beta: float, eta: float) -> bool:
+        """True when all rollout costs were NaN or otherwise unusable."""
+        return beta >= self._COST_SENTINEL or math.isnan(eta) or math.isinf(eta)
+
     def plan(self, mjd: mujoco.MjData) -> np.ndarray:
         """Run MPPI and return the first action. Dispatches based on use_full_graph."""
         if self.pc.use_full_graph:
@@ -407,9 +420,19 @@ class MPPIController:
             wp.capture_launch(self.rollout_graph)
 
             eta, beta = self._gpu_weight_update()
-            self._update_adaptive_temp(eta)
+
             if self.pc.debug:
                 self._print_debug(mjd, beta, eta)
+
+            if self._is_degenerate(beta, eta):
+                # All rollouts produced NaN costs; weight update may have written
+                # NaN into U_wp — reset it so the next call starts clean.
+                self.U_wp.zero_()
+                if self.pc.debug:
+                    print(f"  [MPPI] degenerate (beta={beta:.2e}, eta={eta}) — zero action")
+                return np.zeros(self.nu, dtype=np.float32)
+
+            self._update_adaptive_temp(eta)
 
         return self._extract_action()
 
@@ -437,7 +460,11 @@ class MPPIController:
                     dim=(N, self.nu),
                     inputs=[self.V_wp, t, self.d.ctrl],
                 )
-                wp.capture_launch(self.step_graph)
+                # Launch one-step graph substeps times — keeps the graph small
+                # regardless of substep count (unlike the full-graph path which
+                # bakes all substeps into a single captured graph).
+                for _ in range(self.pc.substeps):
+                    wp.capture_launch(self.step_graph)
                 wp.launch(
                     self._accumulate_costs_kernel,
                     dim=N,
@@ -449,8 +476,16 @@ class MPPIController:
                 )
 
             eta, beta = self._gpu_weight_update()
-            self._update_adaptive_temp(eta)
+
             if self.pc.debug:
                 self._print_debug(mjd, beta, eta)
+
+            if self._is_degenerate(beta, eta):
+                self.U_wp.zero_()
+                if self.pc.debug:
+                    print(f"  [MPPI] degenerate (beta={beta:.2e}, eta={eta}) — zero action")
+                return np.zeros(self.nu, dtype=np.float32)
+
+            self._update_adaptive_temp(eta)
 
         return self._extract_action()

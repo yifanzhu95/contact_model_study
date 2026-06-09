@@ -179,8 +179,8 @@ def run(
         n_samples      = n_samples,
         horizon        = horizon,
         temperature    = 0.01,
-        noise_sigma    = 0.005,
-        substeps       = 10,
+        noise_sigma    = 0.001,
+        substeps       = 1,
         warm_start     = True,
         use_full_graph = use_full_graph,
         seed           = seed,
@@ -393,7 +393,7 @@ def main():
     parser.add_argument("--budget_seconds", type=float, default=0.1,
                         help="Per-step time budget for Condition A")
     parser.add_argument("--n_samples",      type=int,   default=256)
-    parser.add_argument("--horizon",        type=int,   default=50)
+    parser.add_argument("--horizon",        type=int,   default=48)
     parser.add_argument("--seed",           type=int,   default=None)
     parser.add_argument("--geometry",       type=str,   default="accurate",
                         choices=[g.value for g in GeometryVariant])
@@ -407,7 +407,7 @@ def main():
                         help="Rendering mode: none, viewer (live), or video (save mp4)")
     parser.add_argument("--warmup",         type=int,   default=1,
                         help="Episodes to skip when computing aggregate stats")
-    parser.add_argument("--use_full_graph", action=argparse.BooleanOptionalAction, default=True,
+    parser.add_argument("--use_full_graph", action=argparse.BooleanOptionalAction, default=False,
                         help="Use a single mega CUDA graph (default) or separate step/reset graphs")
     parser.add_argument("--debug",          action="store_true",
                         help="Print per-step diagnostics")
