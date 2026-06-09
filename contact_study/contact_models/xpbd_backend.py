@@ -234,6 +234,7 @@ def _xpbd_unified_sweep(
     efc_pos:  wp.array2d(dtype=float),
     efc_D:    wp.array2d(dtype=float),
     efc_type: wp.array2d(dtype=int),
+    efc_frictionloss: wp.array2d(dtype=float),  
     nefc:     wp.array(dtype=int),
     qvel_pred: wp.array2d(dtype=float),
     # in/out
@@ -324,6 +325,10 @@ def _xpbd_unified_sweep(
         ctype == _CT_LIMIT_JOINT
         or ctype == _CT_LIMIT_TENDON
     )
+    is_friction_loss = (
+        ctype == _CT_FRICTION_DOF
+        or ctype == _CT_FRICTION_TENDON
+    )
 
     C_e = efc_pos[worldid, efcid]
     relax = float(1.0)
@@ -347,8 +352,11 @@ def _xpbd_unified_sweep(
         # Joint or tendon limit. Unilateral, but typically not
         # redundant on the same dof, so no SOR needed.
         is_unilateral = True
-    # else: equality or friction-loss → bilateral default
-    #       (relax = 1, no clamp, no vmax cap)
+    elif is_friction_loss:
+        # MuJoCo frictionloss is dry friction: it resists velocity,
+        # but it is NOT a position constraint. Do not use efc_pos/dt.
+        C_e = 0.0
+        relax = float(1.0)
 
     # XPBD increment.
     d_lambda = -relax * (v_e + C_e / dt) / denom
@@ -356,8 +364,23 @@ def _xpbd_unified_sweep(
 
     old_l = lambda_efc[worldid, efcid]
     new_l = old_l + d_lambda
-    if is_unilateral and new_l < 0.0:
+
+    if is_friction_loss:
+        # efc_frictionloss is a FORCE/TORQUE bound.
+        # lambda_efc is an impulse, and efc_force = lambda / dt in this backend,
+        # so the impulse bound is frictionloss * dt.
+        max_l = efc_frictionloss[worldid, efcid] * dt
+
+        if max_l <= 0.0:
+            new_l = 0.0
+        elif new_l > max_l:
+            new_l = max_l
+        elif new_l < -max_l:
+            new_l = -max_l
+
+    elif is_unilateral and new_l < 0.0:
         new_l = 0.0
+
     d_lambda = new_l - old_l
     lambda_efc[worldid, efcid] = new_l
 
@@ -616,6 +639,7 @@ def _xpbd_solve(m: XPBDModel, d: XPBDData):
                     inner_d.efc.pos,
                     inner_d.efc.D,
                     inner_d.efc.type,
+                    inner_d.efc.frictionloss, 
                     inner_d.nefc,
                     d.qvel_pred,
                 ],
