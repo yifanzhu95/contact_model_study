@@ -179,7 +179,8 @@ def run(
         n_samples      = n_samples,
         horizon        = horizon,
         temperature    = 0.01,
-        noise_sigma    = 0.001,
+        noise_sigma    = 0.005,
+        substeps       = 10,
         warm_start     = True,
         use_full_graph = use_full_graph,
         seed           = seed,
@@ -391,7 +392,7 @@ def main():
     parser.add_argument("--n_episodes",     type=int,   default=1)
     parser.add_argument("--budget_seconds", type=float, default=0.1,
                         help="Per-step time budget for Condition A")
-    parser.add_argument("--n_samples",      type=int,   default=1024)
+    parser.add_argument("--n_samples",      type=int,   default=256)
     parser.add_argument("--horizon",        type=int,   default=50)
     parser.add_argument("--seed",           type=int,   default=None)
     parser.add_argument("--geometry",       type=str,   default="accurate",

@@ -108,7 +108,7 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "leap_hand/scene_leap_cube.xml",
-            max_steps         = 1000,
+            max_steps         = 500,
             success_threshold = 0.05,
             velocity_threshold = 0.1,
             cost_weights      = {
