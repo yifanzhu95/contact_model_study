@@ -1,190 +1,178 @@
-"""analysis/plot_results.py
+"""plot_results.py
 
-Generates all figures for the study.
+Plot aggregated experiment results from a JSON file produced by
+run_experiment.py / evaluation.metrics.save_results.
 
-Figures produced:
-  1. accuracy_speed_frontier.pdf  - Pareto plot (approx_err vs speedup), one per task
-  2. success_rate_table.pdf        - heatmap: models × tasks × condition
-  3. condition_ab_delta.pdf        - bar chart: success rate change A→B per model
-  4. contact_complexity_curve.pdf  - success rate vs. contact complexity for each Mk
+Usage:
+    python tests/plot_results.py results/experiment_20260604_112018.json
+    python tests/plot_results.py          # auto-picks latest file in results/
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import numpy as np
 
-from contact_study.evaluation.metrics import (
-    load_results,
-    build_results_table,
-    accuracy_speed_frontier,
-    AggregatedResult,
-)
+RESULTS_DIR = Path(__file__).parent.parent / "results"
 
-FIG_DIR = Path(__file__).parent.parent / "figures"
-FIG_DIR.mkdir(exist_ok=True)
+# (display_title, json_field, error_field_or_None, y_axis_label, is_fraction_0_1)
+METRICS = [
+    ("Success Rate",              "success_rate",           "success_rate_se",   "Rate",    True),
+    ("Mean Steps to Success",     "mean_steps_to_success",  None,                "Steps",   False),
+    ("Mean Final Cost",           "mean_final_cost",        "std_final_cost",    "Cost",    False),
+    ("Speedup vs Baseline",       "speedup_vs_baseline",    None,                "×",       False),
+    ("Approx. Error vs Baseline", "approx_err_vs_baseline", None,                "L2 err",  False),
+    ("Mean Episode Time (s)",     "mean_elapsed",           None,                "seconds", False),
+]
 
-TASK_ORDER  = ["push", "grasp_reorient", "peg_in_hole"]
-TASK_LABELS = {"push": "Push (Low)", "grasp_reorient": "Grasp/Reorient (Med)", "peg_in_hole": "Peg-in-Hole (High)"}
-COND_COLORS = {"A": "#2196F3", "B": "#FF5722"}
-
-
-# ---------------------------------------------------------------------------
-# Figure 1: Accuracy-Speed Frontier
-# ---------------------------------------------------------------------------
-
-def plot_frontier(results: list[AggregatedResult], task_name: str, condition: str = "A"):
-    errs, speedups, labels = accuracy_speed_frontier(results, task_name, condition)
-    if len(errs) == 0:
-        return
-
-    fig, ax = plt.subplots(figsize=(5, 4))
-    ax.scatter(errs, speedups, s=60, zorder=3)
-    for x, y, lbl in zip(errs, speedups, labels):
-        ax.annotate(lbl, (x, y), xytext=(4, 4), textcoords="offset points", fontsize=7)
-
-    ax.set_xlabel("Approximation error $\\epsilon_k$ (L2 pos, meters)")
-    ax.set_ylabel("Speedup vs M2 baseline")
-    ax.set_title(f"Accuracy–Speed Frontier\n{TASK_LABELS.get(task_name, task_name)} — Condition {condition}")
-    ax.axhline(1.0, color="gray", linestyle="--", linewidth=0.8, label="Baseline (M2)")
-    ax.legend(fontsize=7)
-    ax.grid(True, alpha=0.3)
-
-    out = FIG_DIR / f"frontier_{task_name}_cond{condition}.pdf"
-    fig.savefig(out, bbox_inches="tight")
-    plt.close(fig)
-    print(f"Saved {out}")
+# Consistent per-model colours — fall back to the prop_cycle for unknown labels
+_MODEL_COLORS: dict[str, str] = {
+    "M1_stiff_pyramidal": "#4C72B0",
+    "M2_mjwarp_soft":     "#DD8452",
+    "M3_comfree":         "#55A868",
+    "M4_xpbd":            "#C44E52",
+}
+_FALLBACK_COLORS = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
 
-# ---------------------------------------------------------------------------
-# Figure 2: Success Rate Heatmap
-# ---------------------------------------------------------------------------
-
-def plot_success_heatmap(results: list[AggregatedResult], condition: str = "A"):
-    model_labels = sorted(set(r.model_label for r in results))
-    task_names   = TASK_ORDER
-
-    mat = build_results_table(results, task_names, model_labels, condition, "success_rate")
-
-    fig, ax = plt.subplots(figsize=(len(task_names) * 1.8 + 1, len(model_labels) * 0.5 + 1))
-    im = ax.imshow(mat, vmin=0, vmax=1, cmap="RdYlGn", aspect="auto")
-    plt.colorbar(im, ax=ax, label="Success Rate")
-
-    ax.set_xticks(range(len(task_names)))
-    ax.set_xticklabels([TASK_LABELS.get(t, t) for t in task_names], rotation=20, ha="right")
-    ax.set_yticks(range(len(model_labels)))
-    ax.set_yticklabels(model_labels, fontsize=8)
-    ax.set_title(f"Success Rate — Condition {condition}")
-
-    # Annotate cells
-    for i in range(len(model_labels)):
-        for j in range(len(task_names)):
-            v = mat[i, j]
-            if not np.isnan(v):
-                ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=7,
-                        color="white" if v < 0.4 or v > 0.8 else "black")
-
-    out = FIG_DIR / f"success_heatmap_cond{condition}.pdf"
-    fig.savefig(out, bbox_inches="tight")
-    plt.close(fig)
-    print(f"Saved {out}")
+def _color(label: str, idx: int) -> str:
+    return _MODEL_COLORS.get(label, _FALLBACK_COLORS[idx % len(_FALLBACK_COLORS)])
 
 
-# ---------------------------------------------------------------------------
-# Figure 3: Condition A vs B delta
-# ---------------------------------------------------------------------------
-
-def plot_condition_delta(results: list[AggregatedResult]):
-    """Bar chart: success_rate(A) - success_rate(B) per model, for each task."""
-    model_labels = sorted(set(r.model_label for r in results))
-
-    fig, axes = plt.subplots(1, len(TASK_ORDER), figsize=(4 * len(TASK_ORDER), 4), sharey=True)
-
-    for ax, task_name in zip(axes, TASK_ORDER):
-        deltas = []
-        for ml in model_labels:
-            sr_a = next((r.success_rate for r in results
-                         if r.model_label == ml and r.task_name == task_name and r.condition == "A"), np.nan)
-            sr_b = next((r.success_rate for r in results
-                         if r.model_label == ml and r.task_name == task_name and r.condition == "B"), np.nan)
-            deltas.append(sr_a - sr_b)
-
-        colors = ["#2196F3" if d >= 0 else "#FF5722" for d in deltas]
-        ax.bar(range(len(model_labels)), deltas, color=colors, edgecolor="black", linewidth=0.5)
-        ax.axhline(0, color="black", linewidth=0.8)
-        ax.set_xticks(range(len(model_labels)))
-        ax.set_xticklabels(model_labels, rotation=45, ha="right", fontsize=7)
-        ax.set_title(TASK_LABELS.get(task_name, task_name), fontsize=9)
-        ax.set_ylim(-0.5, 0.5)
-
-    axes[0].set_ylabel("$\\Delta$ Success Rate (A − B)")
-    fig.suptitle("Condition A vs B: Effect of Sample Count vs Model Speed", fontsize=10)
-    out = FIG_DIR / "condition_ab_delta.pdf"
-    fig.savefig(out, bbox_inches="tight")
-    plt.close(fig)
-    print(f"Saved {out}")
+def load_results(path: Path) -> list[dict]:
+    with open(path) as f:
+        return json.load(f)
 
 
-# ---------------------------------------------------------------------------
-# Figure 4: Success rate vs. contact complexity
-# ---------------------------------------------------------------------------
-
-def plot_complexity_curve(results: list[AggregatedResult], condition: str = "A"):
-    """Line plot: x=task (ordered by complexity), y=success_rate, one line per model."""
-    model_labels = sorted(set(r.model_label for r in results))
-    x = np.arange(len(TASK_ORDER))
-
-    fig, ax = plt.subplots(figsize=(6, 4))
-    for ml in model_labels:
-        y = [
-            next((r.success_rate for r in results
-                  if r.model_label == ml and r.task_name == t and r.condition == condition), np.nan)
-            for t in TASK_ORDER
-        ]
-        ax.plot(x, y, marker="o", label=ml, linewidth=1.5, markersize=5)
-
-    ax.set_xticks(x)
-    ax.set_xticklabels([TASK_LABELS.get(t, t) for t in TASK_ORDER])
-    ax.set_ylabel("Success Rate")
-    ax.set_ylim(0, 1.05)
-    ax.set_title(f"Success Rate vs. Contact Complexity — Condition {condition}")
-    ax.legend(fontsize=7, ncol=2)
-    ax.grid(True, alpha=0.3)
-
-    out = FIG_DIR / f"complexity_curve_cond{condition}.pdf"
-    fig.savefig(out, bbox_inches="tight")
-    plt.close(fig)
-    print(f"Saved {out}")
+def _latest_results_file() -> Path:
+    files = sorted(RESULTS_DIR.glob("experiment_*.json"))
+    if not files:
+        raise FileNotFoundError(f"No experiment_*.json files found in {RESULTS_DIR}")
+    return files[-1]
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
+def _bar_label(field: str, value: float, is_pct: bool, missing: bool) -> str:
+    if missing:
+        return "N/A"
+    if is_pct:
+        return f"{value:.0%}"
+    if field in ("mean_steps_to_success",):
+        return f"{value:.0f}"
+    if field == "speedup_vs_baseline":
+        return f"{value:.2f}×"
+    return f"{value:.3g}"
+
+
+def plot_task(task_name: str, entries: list[dict], save_dir: Path) -> None:
+    """Create one PNG per (task, condition) with six metric subplots."""
+    conditions = sorted({e["condition"] for e in entries})
+
+    for condition in conditions:
+        cond_entries = [e for e in entries if e["condition"] == condition]
+        models = [e["model_label"] for e in cond_entries]
+        x = np.arange(len(models))
+        width = 0.55
+
+        ncols = 3
+        nrows = (len(METRICS) + ncols - 1) // ncols
+        fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows))
+        fig.suptitle(
+            f"{task_name}  ·  Condition {condition}  "
+            f"({cond_entries[0]['n_episodes']} episodes / model)",
+            fontsize=13, fontweight="bold",
+        )
+
+        for ax_idx, (ax, (title, field, err_field, ylabel, is_pct)) in enumerate(
+            zip(axes.flat, METRICS)
+        ):
+            values, errors, missing = [], [], []
+            for e in cond_entries:
+                raw = e.get(field)
+                missing.append(raw is None)
+                values.append(float(raw) if raw is not None else 0.0)
+                if err_field:
+                    ev = e.get(err_field)
+                    errors.append(float(ev) if ev is not None else 0.0)
+                else:
+                    errors.append(0.0)
+
+            colors = [_color(lbl, i) for i, lbl in enumerate(models)]
+            bars = ax.bar(
+                x, values, width,
+                yerr=errors if any(e > 0 for e in errors) else None,
+                color=colors,
+                capsize=4,
+                error_kw={"linewidth": 1.2, "ecolor": "black"},
+                zorder=3,
+            )
+
+            # Value labels above each bar
+            y_top = max(values) if values else 1.0
+            label_pad = y_top * 0.03 if y_top > 0 else 0.02
+            for bar, v, miss in zip(bars, values, missing):
+                label = _bar_label(field, v, is_pct, miss)
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + label_pad,
+                    label,
+                    ha="center", va="bottom", fontsize=7.5, color="#333333",
+                )
+
+            ax.set_title(title, fontsize=10, pad=4)
+            ax.set_xticks(x)
+            ax.set_xticklabels(models, rotation=30, ha="right", fontsize=8)
+            ax.set_ylim(bottom=0)
+            ax.spines[["top", "right"]].set_visible(False)
+            ax.grid(axis="y", linewidth=0.4, color="#dddddd", zorder=0)
+
+            if is_pct:
+                ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
+                ax.set_ylim(0, 1.15)
+            else:
+                ax.set_ylabel(ylabel, fontsize=8)
+
+        # Hide any unused subplot slots
+        for ax in list(axes.flat)[len(METRICS):]:
+            ax.set_visible(False)
+
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+        out = save_dir / f"results_{task_name}_cond{condition}.png"
+        fig.savefig(out, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  Saved: {out}")
+
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("results_json", type=str)
+    parser = argparse.ArgumentParser(description="Plot experiment results bar charts")
+    parser.add_argument(
+        "results_file", nargs="?", type=Path,
+        help="Path to experiment JSON. Defaults to latest file in results/",
+    )
     args = parser.parse_args()
 
-    results = load_results(args.results_json)
-    print(f"Loaded {len(results)} aggregated results.")
+    path = args.results_file or _latest_results_file()
+    print(f"Loading: {path}")
 
-    for task in TASK_ORDER:
-        plot_frontier(results, task, "A")
-        plot_frontier(results, task, "B")
+    results = load_results(path)
+    save_dir = path.parent
 
-    plot_success_heatmap(results, "A")
-    plot_success_heatmap(results, "B")
-    plot_condition_delta(results)
-    plot_complexity_curve(results, "A")
-    plot_complexity_curve(results, "B")
+    # Group by task name
+    tasks: dict[str, list[dict]] = {}
+    for entry in results:
+        tasks.setdefault(entry["task_name"], []).append(entry)
 
-    print(f"\nAll figures saved to {FIG_DIR}/")
+    for task_name, entries in tasks.items():
+        conditions = sorted({e["condition"] for e in entries})
+        print(f"\nTask: {task_name}  |  conditions: {conditions}  |  {len(entries)} rows")
+        plot_task(task_name, entries, save_dir)
+
+    print("\nDone.")
 
 
 if __name__ == "__main__":

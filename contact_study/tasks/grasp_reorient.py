@@ -108,14 +108,15 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "leap_hand/scene_leap_cube.xml",
-            max_steps         = 100,
-            success_threshold = 0.05,
-            velocity_threshold = 0.1,
+            max_steps              = 1000,
+            pos_success_threshold  = 0.05,
+            quat_success_threshold = 0.05,
+            velocity_threshold     = 0.1,
             cost_weights      = {
                 "w_quat": 10.0,
-                "w_pos": 10.0,
+                "w_pos": 20.0,
                 "w_velo": 0.0,
-                "w_contact": 3.5,
+                "w_contact": 1.0,
                 "w_joint": 0.1,
                 "w_joint_velo": 0.0,
                 "w_fallen": 30.0,
@@ -206,7 +207,7 @@ class GraspReorientTask(BaseTask):
         #print(quat, self.target_quat)
         #print(pos_err,quat_err)
 
-        pose_ok = pos_err < self.spec.success_threshold and quat_err < self.spec.success_threshold
+        pose_ok = pos_err < self.spec.pos_success_threshold and quat_err < self.spec.quat_success_threshold
         if not pose_ok:
             return False
 

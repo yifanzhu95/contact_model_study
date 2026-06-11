@@ -64,9 +64,6 @@ WEIGHT_SEARCH_SPACE: dict[str, list[float]] = {
     "w_pos":     [5.0, 10.0, 20.0],
     "w_contact": [1.0, 3.5, 7.0],
     "w_joint":   [0.05, 0.1, 0.2], 
-    "w_fallen":   [10.0, 20.0, 40.0],
-    "w_quat_term":   [10.0, 20.0, 40.0],
-    "w_pos_term":   [10.0, 20.0, 40.0], 
 }
 
 wp.init()

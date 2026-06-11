@@ -326,7 +326,7 @@ def main():
     parser.add_argument("--com_sigma",      type=float, default=0.0)
     parser.add_argument("--settle",         type=float, default=10.0,
                         help="Seconds to allow physics to settle before planning starts")
-    parser.add_argument("--render", type=str, default="none",
+    parser.add_argument("--render", type=str, default="video",
                         choices=["none", "viewer", "video"],
                         help="none | viewer (live window) | video (save mp4)")
     parser.add_argument("--use_full_graph", action=argparse.BooleanOptionalAction, default=False)
