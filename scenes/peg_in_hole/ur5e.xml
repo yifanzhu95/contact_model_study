@@ -119,9 +119,11 @@
                   <joint name="wrist_3_joint" class="size1"/>
                   <geom material="linkgray" mesh="wrist3" class="visual"/>
                   <geom class="eef_collision" pos="0 0.08 0" quat="1 1 0 0" size="0.04 0.02"/>
-                  <site name="attachment_site" pos="0 0.1 0" quat="-1 1 0 0"/>
-                  <body name="Grasped_Body" pos="0.2 0.1 0.0" quat="-1 1 0 0">
-                    <geom type="mesh" mesh="cylinder_peg" material="steel"/>
+                  <site name="attachment_site" type="sphere" size="0.01" pos="0 0.1 0" quat="-1 1 0 0" rgba="0.5 0.5 0.5 1"/>
+                  <body name="grasped_body" pos="0 0.1 0" quat="-1 1 0 0">
+                    <geom type="mesh" mesh="cylinder_peg" material="steel" pos="0.197 0 0"/>
+                    <site name="peg_tip" size="0.01" pos="0 0 0.05" quat="1 0 0 0" rgba="1 0.0 0.0 1" />
+                    <!-- x= towards the base y = up from groundplane z = out of ee-->
                   </body>
                 </body>
               </body>
