@@ -11,6 +11,7 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
                            qvel: wp.array(dtype=float),
                            ctrl: wp.array(dtype=float),
                            site_xpos: wp.array(dtype=wp.vec3),
+                           site_xmat: wp.array(dtype=wp.mat33),
                            terminal: bool,
                            goal: wp.array(dtype=float),
                            indices: wp.array(dtype=int),
@@ -108,10 +109,8 @@ class GraspReorientTask(BaseTask):
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
             xml_path_template = "leap_hand/scene_leap_cube.xml",
-            max_steps              = 1000,
-            pos_success_threshold  = 0.05,
-            quat_success_threshold = 0.05,
-            velocity_threshold     = 0.1,
+            max_steps          = 100,
+            success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
             cost_weights      = {
                 "w_quat": 10.0,
                 "w_pos": 20.0,
@@ -207,12 +206,12 @@ class GraspReorientTask(BaseTask):
         #print(quat, self.target_quat)
         #print(pos_err,quat_err)
 
-        pose_ok = pos_err < self.spec.pos_success_threshold and quat_err < self.spec.quat_success_threshold
+        thr     = self.spec.success_thresholds
+        pose_ok = pos_err < thr["pos"] and quat_err < thr["quat"]
         if not pose_ok:
             return False
 
-        vel_threshold = getattr(self.spec, "velocity_threshold", 1.0)
-        return bool(np.linalg.norm(vel) < vel_threshold)
+        return bool(np.linalg.norm(vel) < self.spec.success_thresholds["vel"])
 
     def has_failed(self, mjd: mujoco.MjData) -> bool:
         mjm = self.mjm

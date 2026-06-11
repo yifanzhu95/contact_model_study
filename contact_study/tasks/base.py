@@ -37,11 +37,9 @@ class TaskSpec:
     name:              str
     complexity:        ContactComplexity
     xml_path_template: str    # format string with {geometry} placeholder
-    max_steps:         int
-    pos_success_threshold:  float  # position error (metres)
-    quat_success_threshold: float  # 1 − dot(q, q_target)² quaternion distance
-    cost_weights:      dict
-    velocity_threshold: float = 1.0  # Threshold for object velocity (settled check)
+    max_steps:           int
+    success_thresholds:  dict   # e.g. {"pos": 0.05, "quat": 0.05, "vel": 0.1} or {"dist": 0.005}
+    cost_weights:        dict
 
 
 class BaseTask(abc.ABC):

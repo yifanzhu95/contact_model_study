@@ -8,11 +8,14 @@ from .base import BaseTask, ContactComplexity, TaskSpec, register
 
 
 @wp.func
-def push_cost_wp(qpos: wp.array(dtype=float), qvel: wp.array(dtype=float), ctrl: wp.array(dtype=float),
-                 terminal: bool, goal: wp.array(dtype=float), indices: wp.array(dtype=int),
-                 xpos: wp.array(dtype=wp.vec3),
-                 xquat: wp.array(dtype=wp.quat),
+def push_cost_wp(qpos: wp.array(dtype=float),
+                 qvel: wp.array(dtype=float),
+                 ctrl: wp.array(dtype=float),
                  site_xpos: wp.array(dtype=wp.vec3),
+                 site_xmat: wp.array(dtype=wp.mat33),
+                 terminal: bool,
+                 goal: wp.array(dtype=float),
+                 indices: wp.array(dtype=int),
                  weights: wp.array(dtype=float)) -> float:
     adr = indices[0]
     dx = qpos[adr] - goal[0]
@@ -38,7 +41,7 @@ class PushTask(BaseTask):
             complexity        = ContactComplexity.LOW,
             xml_path_template = "tasks/push_{geometry}.xml",
             max_steps         = 200,
-            success_threshold = 0.02,
+            success_thresholds = {"dist": 0.02},
             cost_weights      = {"running": 1.0, "terminal": 10.0}
         )
 
@@ -116,4 +119,4 @@ class PushTask(BaseTask):
             return False
         box_pos    = mjd.xpos[box_id, :2]
         target_pos = mjd.site_xpos[target_id, :2]
-        return bool(np.linalg.norm(box_pos - target_pos) < self.spec.success_threshold)
+        return bool(np.linalg.norm(box_pos - target_pos) < self.spec.success_thresholds["dist"])

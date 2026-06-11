@@ -5,7 +5,7 @@ import numpy as np
 
 
 # Load a built-in sample model (Humanoid) that contains pre-saved keyframes
-model = mujoco.MjModel.from_xml_path("scenes/leap_hand/scene_leap_cube.xml")
+model = mujoco.MjModel.from_xml_path("scenes/peg_in_hole/peg_in_hole_scene.xml")#"scenes/leap_hand/scene_leap_cube.xml")
 data = mujoco.MjData(model)
 
 # Verify the model actually has a 2nd keyframe (index 1)
