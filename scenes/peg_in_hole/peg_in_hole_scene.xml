@@ -33,6 +33,7 @@
 
       <geom type="box" size="0.012331 0.0075 0.0127" pos="-0.147669 -0.09503 0.0127" euler="0 0 0" group="3"/>
       <geom type="box" size="0.140169 0.0075 0.0127" pos="0.019831 -0.09503 0.0127" euler="0 0 0" group="3"/>
+      <geom type="box" size="0.16 0.125 0.00163" pos="0 0.018735 0.00163" euler="0 0 0" group="3"/>
       <site name="bottom_of_hole" size="0.01" pos="-0.127838 -0.09503 0.003" quat="1 0 0 0" rgba="1 0.0 0.0 1" group="4"/>
     </body>
     <!-- 

@@ -91,8 +91,8 @@ def run_episode(
     settle_seconds: float = 1.0,
     render_mode:    str   = "none",
     video_path:     str | None = None,
-    debug:                   bool  = False,
-    ep_idx:                  int   = 0,
+    debug:          bool  = False,
+    ep_idx:         int   = 0,
     fin_ep_on_success: bool = True,
 ) -> EpisodeResult:
     """Run one closed-loop MPPI episode and return an EpisodeResult.
@@ -316,7 +316,7 @@ def main():
     parser.add_argument("--n_samples",      type=int,   default=1024)
     parser.add_argument("--horizon",        type=int,   default=48)
     parser.add_argument("--temperature",    type=float, default=0.01)
-    parser.add_argument("--noise_sigma",    type=float, default=0.00005)
+    parser.add_argument("--noise_sigma",    type=float, default=0.0005)
     parser.add_argument("--seed",           type=int,   default=None)
     parser.add_argument("--geometry",       type=str,   default="accurate",
                         choices=[g.value for g in GeometryVariant])
