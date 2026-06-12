@@ -64,13 +64,13 @@ class PegInHoleTask(BaseTask):
             name               = "peg_in_hole",
             complexity         = ContactComplexity.HIGH,
             xml_path_template  = "peg_in_hole/peg_in_hole_scene.xml",
-            max_steps          = 1000,
+            max_steps          = 5000,
             success_thresholds = {"dist": 0.005},
             cost_weights       = {
-                "w_dist":        1.0,
-                "w_dist_term":   5.0,
+                "w_dist":        2.5,
+                "w_dist_term":   10.0,
                 "w_orient":      1.0,
-                "w_vel":         0.005,
+                "w_vel":         0.0,
                 "w_orient_term": 5.0,
             },
         )
