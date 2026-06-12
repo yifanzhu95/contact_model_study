@@ -1,13 +1,13 @@
 <mujoco model="leap_scene">
-  <include file="leap_right_hand.xml"/>
+  <include file="leap_right_hand copy.xml"/>
   <!--
   <include file="leap_right_hand.xml"/> 
   <include file="leap_rh.xml"/>
   -->
 
-  <option timestep="0.005" ccd_iterations="50">
+  <option timestep="0.005" ccd_iterations="25">
   <!--
-    timestep="0.005" ccd_iterations="100"
+    timestep="0.005" ccd_iterations="100" integrator="Euler"
     <flag multiccd="enable"/>
     <flag nativeccd="disable"/>
   -->

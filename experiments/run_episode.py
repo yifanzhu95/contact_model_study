@@ -313,10 +313,10 @@ def main():
     parser.add_argument("--n_episodes",     type=int,   default=1)
     parser.add_argument("--budget_seconds", type=float, default=0.1,
                         help="Per-step time budget for Condition A")
-    parser.add_argument("--n_samples",      type=int,   default=1024)
+    parser.add_argument("--n_samples",      type=int,   default=256)
     parser.add_argument("--horizon",        type=int,   default=48)
     parser.add_argument("--temperature",    type=float, default=0.01)
-    parser.add_argument("--noise_sigma",    type=float, default=0.0005)
+    parser.add_argument("--noise_sigma",    type=float, default=0.001)
     parser.add_argument("--seed",           type=int,   default=None)
     parser.add_argument("--geometry",       type=str,   default="accurate",
                         choices=[g.value for g in GeometryVariant])
