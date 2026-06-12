@@ -56,7 +56,7 @@ RESULTS_DIR = Path(__file__).parent.parent / "results"
 # ---------------------------------------------------------------------------
 # Edit this list to change the sweep values
 # ---------------------------------------------------------------------------
-SUBSTEPS_SWEEP = [1, 2, 4, 8, 16, 32]
+SUBSTEPS_SWEEP = [1, 3, 5, 7, 9, 11, 13, 15]
 
 wp.init()
 
