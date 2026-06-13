@@ -64,9 +64,8 @@ Naming Conventions
 
 <mujoco model="leap_rh">
   <compiler angle="radian" meshdir="./assets/"/>
-  <!--
+  <!-- -->
   <option integrator="implicitfast" cone="elliptic" impratio="100"/>  
-  -->
 
   <!-- mesh assets -->
   <asset>
@@ -87,9 +86,8 @@ Naming Conventions
 
   <!-- defaults -->
   <default>
-    <!-- constraint stiffness 
-    <geom solimp="0.999 0.999 0.001 0.0001 1" solref="0.008 1" friction=".5"/>
-    -->
+    <!-- constraint stiffness solref="0.008 1" solimp="0.999 0.999 0.001 0.0001 1" -->
+    <geom solimp="0.95 0.99 0.0001 0.5 2" solref="0.008 1" />
 
     <!-- actuator defaults -->
     <position kp="3.0" kv="0.01" />
