@@ -121,7 +121,14 @@ def _compute_weights_kernel(
     w_out:   wp.array(dtype=float),
 ):
     n = wp.tid()
-    w_out[n] = wp.exp(-(costs[n] - beta[0]) / lam)
+    c = costs[n]
+    if wp.isnan(c):
+        # NaN rollout (sim blew up): contribute zero weight so valid rollouts
+        # still drive the update.  wp.atomic_min already ignores NaN, so beta
+        # already reflects only the valid minimum.
+        w_out[n] = float(0.0)
+    else:
+        w_out[n] = wp.exp(-(c - beta[0]) / lam)
 
 @wp.kernel
 def _sum_reduce_kernel(
@@ -393,7 +400,12 @@ class MPPIController:
     _COST_SENTINEL = 1e29
 
     def _is_degenerate(self, beta: float, eta: float) -> bool:
-        """True when all rollout costs were NaN or otherwise unusable."""
+        """True only when *all* rollout costs were NaN (beta never left the sentinel).
+
+        Partial NaN is handled upstream in _compute_weights_kernel, which zeroes
+        out NaN-cost weights so valid rollouts still drive the update.  This check
+        fires only when no valid rollout exists at all.
+        """
         return beta >= self._COST_SENTINEL or math.isnan(eta) or math.isinf(eta)
 
     def plan(self, mjd: mujoco.MjData) -> np.ndarray:
@@ -430,7 +442,7 @@ class MPPIController:
                 # NaN into U_wp — reset it so the next call starts clean.
                 self.U_wp.zero_()
                 if self.pc.debug:
-                    print(f"  [MPPI] degenerate (beta={beta:.2e}, eta={eta}) — zero action")
+                    print(f"  [MPPI] all rollouts NaN (beta={beta:.2e}, eta={eta}) — zero action")
                 return np.zeros(self.nu, dtype=np.float32)
 
             self._update_adaptive_temp(eta)
@@ -484,7 +496,7 @@ class MPPIController:
             if self._is_degenerate(beta, eta):
                 self.U_wp.zero_()
                 if self.pc.debug:
-                    print(f"  [MPPI] degenerate (beta={beta:.2e}, eta={eta}) — zero action")
+                    print(f"  [MPPI] all rollouts NaN (beta={beta:.2e}, eta={eta}) — zero action")
                 return np.zeros(self.nu, dtype=np.float32)
 
             self._update_adaptive_temp(eta)

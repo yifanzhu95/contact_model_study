@@ -315,7 +315,7 @@ def main():
                         help="Per-step time budget for Condition A")
     parser.add_argument("--n_samples",      type=int,   default=256)
     parser.add_argument("--horizon",        type=int,   default=48)
-    parser.add_argument("--temperature",    type=float, default=0.2)
+    parser.add_argument("--temperature",    type=float, default=0.25)
     parser.add_argument("--noise_sigma",    type=float, default=0.005)
     parser.add_argument("--seed",           type=int,   default=None)
     parser.add_argument("--geometry",       type=str,   default="accurate",

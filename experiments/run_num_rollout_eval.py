@@ -65,13 +65,13 @@ def main():
                         help="Contact model keys to evaluate (e.g. M1 M2 M3 M4).")
     parser.add_argument("--condition", type=str, default="B", choices=["A", "B"],
                         help="A=fixed_budget_rollout  B=warm-started MPPIController")
-    parser.add_argument("--n_episodes",     type=int,   default=10,
+    parser.add_argument("--n_episodes",     type=int,   default=20,
                         help="Episodes to run per (model, n_samples) cell.")
     parser.add_argument("--budget_seconds", type=float, default=0.1,
                         help="Per-step wall-time budget for Condition A.")
     parser.add_argument("--horizon",        type=int,   default=48)
-    parser.add_argument("--temperature",    type=float, default=0.01)
-    parser.add_argument("--noise_sigma",    type=float, default=0.001)
+    parser.add_argument("--temperature",    type=float, default=0.5)
+    parser.add_argument("--noise_sigma",    type=float, default=0.01)
     parser.add_argument("--seed",           type=int,   default=None)
     parser.add_argument("--geometry",       type=str,   default="accurate",
                         choices=[g.value for g in GeometryVariant])
