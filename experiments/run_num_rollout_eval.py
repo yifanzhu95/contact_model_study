@@ -69,9 +69,9 @@ def main():
                         help="Episodes to run per (model, n_samples) cell.")
     parser.add_argument("--budget_seconds", type=float, default=0.1,
                         help="Per-step wall-time budget for Condition A.")
-    parser.add_argument("--horizon",        type=int,   default=48)
-    parser.add_argument("--temperature",    type=float, default=0.5)
-    parser.add_argument("--noise_sigma",    type=float, default=0.01)
+    parser.add_argument("--horizon",        type=int,   default=128)
+    parser.add_argument("--temperature",    type=float, default=0.05)
+    parser.add_argument("--noise_sigma",    type=float, default=0.001)
     parser.add_argument("--seed",           type=int,   default=None)
     parser.add_argument("--geometry",       type=str,   default="accurate",
                         choices=[g.value for g in GeometryVariant])

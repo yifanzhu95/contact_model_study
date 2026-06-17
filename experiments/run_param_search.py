@@ -61,8 +61,8 @@ RESULTS_DIR = Path(__file__).parent.parent / "results"
 # ---------------------------------------------------------------------------
 WEIGHT_SEARCH_SPACE: dict[str, list[float]] = {
     "w_quat":    [5.0, 10.0, 20.0],
-    "w_pos":     [5.0, 10.0, 20.0],
-    "w_contact": [1.0, 3.5, 7.0],
+    "w_pos":     [10.0, 20.0, 40.0],
+    "w_contact": [2.5, 5.0, 10.0],
     "w_joint":   [0.05, 0.1, 0.2], 
 }
 
@@ -110,12 +110,12 @@ def main():
     parser.add_argument("--models",  nargs="+", default=list(MODEL_FACTORIES.keys()),
                         choices=list(MODEL_FACTORIES.keys()))
     parser.add_argument("--condition", type=str, default="B", choices=["A", "B"])
-    parser.add_argument("--n_episodes",     type=int,   default=5,
+    parser.add_argument("--n_episodes",     type=int,   default=10,
                         help="Episodes per (model × weight combo) cell.")
     parser.add_argument("--budget_seconds", type=float, default=0.1)
     parser.add_argument("--n_samples",      type=int,   default=256)
-    parser.add_argument("--horizon",        type=int,   default=48)
-    parser.add_argument("--temperature",    type=float, default=0.01)
+    parser.add_argument("--horizon",        type=int,   default=128)
+    parser.add_argument("--temperature",    type=float, default=0.05)
     parser.add_argument("--noise_sigma",    type=float, default=0.001)
     parser.add_argument("--seed",           type=int,   default=None)
     parser.add_argument("--geometry",       type=str,   default="accurate",
