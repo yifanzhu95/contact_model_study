@@ -1,7 +1,7 @@
 <mujoco model="peg in hole scene">
   <!--
   --> 
-  <include file="ur5e.xml"/>
+  <include file="ur5e_peg_in_hole.xml"/>
   
 
   <statistic center="0.3 0 0.4" extent="0.8"/>
@@ -18,7 +18,7 @@
       markrgb="0.8 0.8 0.8" width="300" height="300"/>
     <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
 
-    <mesh name="board" file="task_board_meshes/nist_atb_m1.stl" scale="0.01 0.01 0.01"/>
+    <mesh name="board" file="peg_in_hole/task_board_meshes/nist_atb_m1.stl" scale="0.01 0.01 0.01"/>
   </asset>
 
   <worldbody>
