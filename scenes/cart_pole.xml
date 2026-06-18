@@ -1,0 +1,21 @@
+<mujoco model="CartPole">
+  <compiler angle="radian"/>
+
+  <option timestep="0.02" integrator="implicitfast"/>
+
+  <worldbody>
+    <body name="Cart">
+      <inertial pos="0 0 0" mass="10" diaginertia="1e-06 1e-06 1e-06"/>
+      <joint name="CartSlider" pos="0 0 0" axis="1 0 0" type="slide" range="-10 10" actuatorfrcrange="-100 100"/>
+      <body name="Pole">
+        <inertial pos="0 0 -0.5" mass="1" diaginertia="1e-06 1e-06 1e-06"/>
+        <joint name="PolePin" pos="0 0 0" axis="0 -1 0"/>
+        <site name="pole_tip" pos="0 0 -0.5"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <general name="cart_force" joint="CartSlider" ctrllimited="true" ctrlrange="-100 100"/>
+  </actuator>
+</mujoco>
