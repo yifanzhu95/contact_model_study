@@ -231,8 +231,8 @@ node_modules
 # test folder
 test/
 logs/
-videos/
-results/
+videos/*
+results/*
 
 # uv
 uv.lock
