@@ -84,10 +84,22 @@ def run_eval_episode(
     sim.reset(np.asarray(q0, dtype=float), np.asarray(v0, dtype=float))
     u = np.asarray(u0, dtype=float).copy()
 
-    # Settle (objects fall to rest) — no-op for cart_pole.
+    # Settle (objects fall to rest / hand closes onto the object). Hold the
+    # initial command each substep so a position-controlled hand doesn't go limp.
     if settle_seconds > 0.0:
         n_settle = int(settle_seconds / sim.timestep)
-        sim.step(n_settle)
+        for _ in range(n_settle):
+            sim.apply_control(u)
+            sim.step(1)
+
+    # Sample a fresh goal on the settled state BEFORE planning, so the controller
+    # (which holds the in-place goal array) targets it. No-op for cart_pole.
+    if hasattr(rollout_task, "sample_new_goal"):
+        st = sim.get_state()
+        mjd.qpos[:] = st.qpos
+        mjd.qvel[:] = st.qvel
+        mujoco.mj_forward(mjm, mjd)
+        rollout_task.sample_new_goal(mjd, rng)
 
     # ---- absolute command clip (force for cart_pole; ctrlrange for hands) -
     if cfg.force_limits is not None:

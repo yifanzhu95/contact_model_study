@@ -4,7 +4,49 @@ import numpy as np
 import mujoco
 import warp as wp
 
-from .base import BaseTask, ContactComplexity, TaskSpec, register
+from .base import BaseTask, ContactComplexity, TaskSpec, register, SCENES_DIR
+from .config import TaskConfig, EvalSimulatorKind
+
+# --- LEAP hand: MuJoCo(rollout) <-> URDF(Drake eval) joint correspondence -----
+# MuJoCo control/qpos order is [if_mcp,if_rot,if_pip,if_dip, mf_*, rf_*,
+# th_cmc,th_axl,th_mcp,th_ipl]. The URDF (scenes/leap_hand/leap_hand_right.urdf)
+# names joints "0".."15" in a different order; this list maps MuJoCo control
+# index -> URDF joint name by *kinematic chain position* (validated against the
+# per-joint limits — the 12 finger joints match exactly; see KNOWN GAP below).
+#
+# KNOWN GAP (eval fidelity): the two thumb middle joints (th_axl, th_mcp) have
+# DIFFERENT limit ranges between the URDF and the MuJoCo hand, i.e. the thumb
+# kinematics/zero-references differ between the two models. Finger behavior is
+# faithful; thumb eval will be approximate until the URDF thumb is recalibrated.
+_MJ_CTRL_TO_URDF_JOINT = [
+    "1", "0", "2", "3",     # index : if_mcp, if_rot, if_pip, if_dip
+    "5", "4", "6", "7",     # middle: mf_mcp, mf_rot, mf_pip, mf_dip
+    "9", "8", "10", "11",   # ring  : rf_mcp, rf_rot, rf_pip, rf_dip
+    "12", "13", "14", "15", # thumb : th_cmc, th_axl, th_mcp, th_ipl
+]
+
+# MuJoCo palm world pose (scenes/leap_hand_old/leap_right_hand.xml). The Drake
+# hand's palm_lower link is welded here so the Drake world frame coincides with
+# the MuJoCo world frame (so mirrored cube poses and the ground plane line up).
+_PALM_POS  = (0.0, 0.0, 0.01)
+_PALM_QUAT = (0.0, 0.97236992, 0.0, -0.23344536)  # wxyz
+# URDF base_joint origin (base -> palm_lower), needed to weld the *base* link
+# (the URDF root) such that palm_lower lands at the MuJoCo palm pose. (Welding
+# palm_lower directly is rejected by Drake: it already has the base_joint inboard.)
+_BASE_TO_PALM_XYZ = (0.0, 0.038, 0.098)
+_BASE_TO_PALM_RPY = (0.0, -1.57079, 0.0)
+
+# Free cube (matches scenes/leap_hand_old/scene_leap_cube.xml obj geom).
+_CUBE_HALF = 0.035
+_CUBE_MASS = 0.14
+_CUBE_FRIC = 0.5
+_FLOOR_Z   = -0.25       # MuJoCo floor height in world
+
+# MuJoCo position-servo gains (leap_right_hand.xml default: kp=3.0 kv=0.01).
+# MuJoCo's servo has no force limit here, so 0.95 (the URDF effort) is too weak
+# to hold the hand; use a higher clamp. All three are starting points to tune
+# against Drake's solver on the user's machine.
+_PD_KP, _PD_KD, _PD_EFFORT = 3.0, 0.01, 5.0
 
 @wp.func
 def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
@@ -103,12 +145,38 @@ class GraspReorientTask(BaseTask):
         [1., 0., 0.],  # face 5: +X up
     ]
 
+    def __init__(self, geometry=None, role=None):
+        kwargs = {}
+        if geometry is not None:
+            kwargs["geometry"] = geometry
+        if role is not None:
+            kwargs["role"] = role
+        super().__init__(**kwargs)
+
+        s = self.spec  # legacy TaskSpec (rollout path); mirror into the config.
+        self.config = TaskConfig(
+            name               = s.name,
+            complexity         = s.complexity,
+            max_steps          = s.max_steps,
+            cost_weights       = s.cost_weights,
+            success_thresholds = s.success_thresholds,
+            xml_path_template  = s.xml_path_template,
+            rollout_model_path = str(SCENES_DIR / s.xml_path_template),
+            rollout_is_urdf    = False,
+            eval_sim           = EvalSimulatorKind.DRAKE,
+            eval_model_path    = str(SCENES_DIR / "leap_hand/leap_hand_right.urdf"),
+            cam_pos            = (0.0, -0.35, 0.12),
+            cam_fps            = 30.0,
+            timestep           = 0.005,
+            difficulty         = self.goal_difficulty,
+        )
+
     @property
     def spec(self) -> TaskSpec:
         return TaskSpec(
             name              = "grasp_reorient",
             complexity        = ContactComplexity.MEDIUM,
-            xml_path_template = "leap_hand/scene_leap_cube.xml",
+            xml_path_template = "leap_hand_old/scene_leap_cube.xml",
             max_steps          = 2500,
             success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
             cost_weights      = {
@@ -325,3 +393,90 @@ class GraspReorientTask(BaseTask):
 
         if self.goal_vector_wp is not None:
             self.goal_vector_wp.assign(self.goal_vector)
+
+    # --- Drake eval simulator ----------------------------------------------
+    def make_eval_simulator(self, video_path: str | None = None, render: bool = True):
+        if self.config.eval_sim != EvalSimulatorKind.DRAKE:
+            return super().make_eval_simulator(video_path=video_path, render=render)
+
+        import numpy as _np
+        from pydrake.math import RigidTransform, RotationMatrix, RollPitchYaw
+        from pydrake.common.eigen_geometry import Quaternion
+        from pydrake.multibody.tree import SpatialInertia, UnitInertia
+        from pydrake.geometry import Box, HalfSpace
+        from pydrake.multibody.plant import CoulombFriction
+
+        from contact_study.contact_models.drake_sim import (
+            DrakeSimulator, DrakeJointChannel, DrakeFreeBodyChannel, DrakePdActuation,
+        )
+
+        side = 2.0 * _CUBE_HALF
+
+        def _build_scene(plant):
+            # Weld the hand's *base* link (the URDF root) so palm_lower lands at
+            # the MuJoCo palm world pose -> the Drake and MuJoCo world frames
+            # coincide (cube poses + ground line up). Welding palm_lower directly
+            # is rejected by Drake (it already has the base_joint inboard).
+            qw, qx, qy, qz = _PALM_QUAT
+            X_world_palm = RigidTransform(
+                RotationMatrix(Quaternion(w=qw, x=qx, y=qy, z=qz)), list(_PALM_POS)
+            )
+            X_base_palm = RigidTransform(
+                RotationMatrix(RollPitchYaw(*_BASE_TO_PALM_RPY)), list(_BASE_TO_PALM_XYZ)
+            )
+            X_world_base = X_world_palm @ X_base_palm.inverse()
+            base = plant.GetBodyByName("base")
+            plant.WeldFrames(plant.world_frame(), base.body_frame(), X_world_base)
+
+            # Free cube (matches the MuJoCo obj geom).
+            inst = plant.AddModelInstance("objects")
+            G = UnitInertia.SolidBox(side, side, side)
+            M = SpatialInertia(_CUBE_MASS, _np.zeros(3), G)
+            cube = plant.AddRigidBody("obj", inst, M)
+            fric = CoulombFriction(_CUBE_FRIC, _CUBE_FRIC)
+            box = Box(side, side, side)
+            plant.RegisterCollisionGeometry(cube, RigidTransform(), box, "obj_col", fric)
+            plant.RegisterVisualGeometry(
+                cube, RigidTransform(), box, "obj_vis", _np.array([1.0, 1.0, 0.0, 1.0])
+            )
+
+            # Ground plane (matches the MuJoCo floor height).
+            plant.RegisterCollisionGeometry(
+                plant.world_body(), RigidTransform([0.0, 0.0, _FLOOR_Z]),
+                HalfSpace(), "ground", CoulombFriction(1.0, 1.0),
+            )
+
+        joint_channels = [
+            DrakeJointChannel(_MJ_CTRL_TO_URDF_JOINT[i], "revolute", q_adr=i, v_adr=i)
+            for i in range(16)
+        ]
+        float_channels = [
+            DrakeFreeBodyChannel(
+                "obj", q_adr=int(self.index_vector[0]), v_adr=int(self.index_vector[1])
+            )
+        ]
+        pd = DrakePdActuation(
+            kp=_PD_KP, kd=_PD_KD,
+            ctrl_joint_names=list(_MJ_CTRL_TO_URDF_JOINT), effort=_PD_EFFORT,
+        )
+
+        return DrakeSimulator(
+            model_path     = self.config.eval_model_path,
+            config         = self.config,
+            nq             = self.mjm.nq,
+            nv             = self.mjm.nv,
+            joint_channels = joint_channels,
+            float_channels = float_channels,
+            n_ctrl         = 0,
+            weld_base      = False,            # the scene builder welds the palm
+            video_path     = video_path,
+            # Position control: prefer Drake's native PD-controlled actuators on
+            # a discrete plant at this dt (implicit -> stable, fast). DrakeSimulator
+            # auto-falls-back to manual PD on a continuous plant when the installed
+            # Drake lacks native PD actuators (e.g. 1.12). `time_step` is ignored
+            # when pd is set (the mode picks it).
+            time_step      = 0.0,
+            pd_native_dt   = 0.005,
+            extra_models_fn = _build_scene,
+            pd             = pd,
+        )
