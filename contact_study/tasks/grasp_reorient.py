@@ -112,10 +112,10 @@ class GraspReorientTask(BaseTask):
             max_steps          = 2500,
             success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
             cost_weights      = {
-                "w_quat": 10.0,
-                "w_pos": 20.0,
+                "w_quat": 5.0,
+                "w_pos": 40.0,
                 "w_velo": 0.0,
-                "w_contact": 5.0,
+                "w_contact": 2.5,
                 "w_joint": 0.1,
                 "w_joint_velo": 0.0,
                 "w_fallen": 30.0,
