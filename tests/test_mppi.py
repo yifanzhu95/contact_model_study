@@ -165,11 +165,6 @@ def run(
     task._mjm = mjm
     max_steps = task.spec.max_steps
 
-    cost_fn_wp  = task.cost_fn_wp
-    goal_wp     = task.cost_goal_wp
-    idx_wp      = task.cost_idx_wp
-    weights_wp  = task.cost_weights_wp
-
     print(f"  nq={mjm.nq}  nv={mjm.nv}  nu={mjm.nu}  max_steps={max_steps}")
     print(f"  integrator      = {mjm.opt.integrator}")
     print(f"  dof_damping     : min={mjm.dof_damping.min():.2e}  "
@@ -215,13 +210,9 @@ def run(
             #mppi_cfg.temperature = mppi_init_temp
 
             controller = MPPIController(
-                mjm       = mjm,
+                task      = task,
                 cfg       = cfg,
                 mppi_cfg  = mppi_cfg,
-                cost_fn   = cost_fn_wp,
-                goals_wp  = goal_wp,
-                idx_wp    = idx_wp,
-                weights_wp= weights_wp,
                 rng       = rng,
             )
 

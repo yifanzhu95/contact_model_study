@@ -180,29 +180,31 @@ class MPPIController:
 
     def __init__(
         self,
-        mjm:      mujoco.MjModel,
+        task,
         cfg:      ContactModelConfig,
         mppi_cfg: MPPIConfig,
-        cost_fn:  wp.func,
-        goals_wp: wp.array,
-        idx_wp:   wp.array,
-        weights_wp: wp.array,
         rng:      np.random.Generator | None = None,
     ):
-        self.mjm = mjm
+        # The (ROLLOUT) task is a thin adapter supplying the planning model and
+        # the cost arrays. The GPU rollout env, CUDA graphs and plan() below are
+        # unchanged — they only ever read self.mjm / self.cost_fn_wp_func /
+        # self.goal_wp / self.indices_wp / self.weights_wp (the same five objects
+        # that used to be passed loosely), so behavior is identical.
+        self.task = task
+        self.mjm = task.mjm
         self.cfg = cfg
         self.pc  = mppi_cfg
         self.rng = rng or np.random.default_rng()
         self.lam = self.pc.temperature
 
-        self.nu = mjm.nu
-        self.nq = mjm.nq
-        self.nv = mjm.nv
+        self.nu = self.mjm.nu
+        self.nq = self.mjm.nq
+        self.nv = self.mjm.nv
 
-        self.cost_fn_wp_func = cost_fn
-        self.goal_wp = goals_wp
-        self.indices_wp = idx_wp
-        self.weights_wp = weights_wp
+        self.cost_fn_wp_func = task.cost_fn_wp
+        self.goal_wp = task.cost_goal_wp
+        self.indices_wp = task.cost_idx_wp
+        self.weights_wp = task.cost_weights_wp
         self._accumulate_costs_kernel = _make_accumulate_kernel(self.cost_fn_wp_func)
 
         self._setup_warp_arrays()

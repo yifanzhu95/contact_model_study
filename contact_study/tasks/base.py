@@ -11,8 +11,6 @@ Each task defines:
 from __future__ import annotations
 
 import abc
-import enum
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Any
 
@@ -21,34 +19,36 @@ import numpy as np
 import warp as wp
 
 from contact_study.contact_models.config import GeometryVariant
+# ContactComplexity / TaskSpec now live in config.py (to avoid a base<->config
+# import cycle) and are re-exported here for backward compatibility.
+from contact_study.tasks.config import (
+    ContactComplexity,
+    TaskSpec,
+    TaskConfig,
+    TaskRole,
+    EvalSimulatorKind,
+)
 
 SCENES_DIR = Path(__file__).parents[2] / "scenes"
-
-
-class ContactComplexity(enum.IntEnum):
-    """Qualitative contact complexity level, used to sort tasks in results."""
-    LOW    = 1   # pushing: ≤2 contacts, quasi-static
-    MEDIUM = 2   # grasp-reorient: ~4 contacts, dynamic
-    HIGH   = 3   # peg-in-hole assembly: tight clearance, multi-contact
-
-
-@dataclass
-class TaskSpec:
-    name:              str
-    complexity:        ContactComplexity
-    xml_path_template: str    # format string with {geometry} placeholder
-    max_steps:           int
-    success_thresholds:  dict   # e.g. {"pos": 0.05, "quat": 0.05, "vel": 0.1} or {"dist": 0.005}
-    cost_weights:        dict
 
 
 class BaseTask(abc.ABC):
     """Abstract base class for all manipulation tasks."""
 
-    def __init__(self, geometry: GeometryVariant = GeometryVariant.ACCURATE):
+    def __init__(
+        self,
+        geometry: GeometryVariant = GeometryVariant.ACCURATE,
+        role: TaskRole = TaskRole.ROLLOUT,
+    ):
         self.geometry = geometry
+        self.role = role
         self._mjm: mujoco.MjModel | None = None
         self._mjd: mujoco.MjData  | None = None
+
+        # Editable per-task configuration. Tasks migrated to TaskConfig set this
+        # in their constructor; legacy tasks (push, peg_in_hole) leave it None
+        # and instead override the `spec` property to return a TaskSpec.
+        self.config: TaskConfig | None = None
 
         # Task-specific metadata extracted at load time
         self.goal_vector: np.ndarray | None = None
@@ -58,9 +58,16 @@ class BaseTask(abc.ABC):
         self.weights_wp: wp.array | None = None
 
     @property
-    @abc.abstractmethod
-    def spec(self) -> TaskSpec: ...
-    
+    def spec(self):
+        """Task spec/config. TaskConfig is a superset of TaskSpec and exposes
+        the same attribute names, so `task.spec.X` works for either. Legacy
+        tasks override this property to return a TaskSpec instead."""
+        if self.config is None:
+            raise NotImplementedError(
+                f"{type(self).__name__} must set self.config or override spec."
+            )
+        return self.config
+
     def load(self, full_path: str | None = None) -> tuple[mujoco.MjModel, mujoco.MjData]:
         """Load the MuJoCo model for this task and geometry variant."""
         if full_path is None:
@@ -128,6 +135,25 @@ class BaseTask(abc.ABC):
         """Check whether the episode has failed (e.g. object fell). Override per task."""
         return False
 
+    def make_eval_simulator(self, video_path: str | None = None, render: bool = True):
+        """Build the eval/"real" simulator selected by self.config.eval_sim.
+
+        The MuJoCo branch is generic. The Drake branch needs a task-specific
+        joint-channel/actuation map, so tasks that support Drake eval override
+        this method (delegating MuJoCo back to super()).
+        """
+        if self.config is None:
+            raise NotImplementedError(
+                f"{type(self).__name__} has no config; cannot build an eval simulator."
+            )
+        if self.config.eval_sim == EvalSimulatorKind.MUJOCO:
+            from contact_study.sim.mujoco_sim import MujocoSimulator
+            return MujocoSimulator(self.mjm, self.config, render=render)
+        raise NotImplementedError(
+            f"Drake eval for {type(self).__name__} requires a task-specific channel "
+            f"map; override make_eval_simulator()."
+        )
+
     def evaluate_episode(
         self,
         mjm: mujoco.MjModel,
@@ -190,10 +216,14 @@ def register(name: str):
         return cls
     return decorator
 
-def get_task(name: str, geometry: GeometryVariant = GeometryVariant.ACCURATE) -> BaseTask:
+def get_task(
+    name: str,
+    geometry: GeometryVariant = GeometryVariant.ACCURATE,
+    role: TaskRole = TaskRole.ROLLOUT,
+) -> BaseTask:
     if name not in _REGISTRY:
         raise KeyError(f"Unknown task '{name}'. Available: {list(_REGISTRY)}")
-    return _REGISTRY[name](geometry=geometry)
+    return _REGISTRY[name](geometry=geometry, role=role)
 
 def list_tasks() -> list[str]:
     return list(_REGISTRY.keys())

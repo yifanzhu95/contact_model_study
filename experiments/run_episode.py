@@ -178,13 +178,9 @@ def run_episode(
             task.sample_new_goal(mjd, rng)
 
         controller = MPPIController(
-            mjm        = mjm,
+            task       = task,
             cfg        = cfg,
             mppi_cfg   = mppi_cfg,
-            cost_fn    = task.cost_fn_wp,
-            goals_wp   = task.cost_goal_wp,
-            idx_wp     = task.cost_idx_wp,
-            weights_wp = task.cost_weights_wp,
             rng        = rng,
         )
 

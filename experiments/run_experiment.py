@@ -141,11 +141,6 @@ def run_one_episode(
 ) -> EpisodeResult:
     """Run one closed-loop episode under Condition A or B."""
 
-    cost_fn_wp = task.cost_fn_wp
-    goal_wp    = task.cost_goal_wp
-    idx_wp     = task.cost_idx_wp
-    weights_wp = task.cost_weights_wp
-
     mppi_cfg = MPPIConfig(
         n_samples      = n_samples,
         horizon        = horizon,
@@ -160,13 +155,9 @@ def run_one_episode(
     )
 
     controller = MPPIController(
-        mjm        = mjm,
+        task       = task,
         cfg        = cfg,
         mppi_cfg   = mppi_cfg,
-        cost_fn    = cost_fn_wp,
-        goals_wp   = goal_wp,
-        idx_wp     = idx_wp,
-        weights_wp = weights_wp,
         rng        = rng,
     )
 
