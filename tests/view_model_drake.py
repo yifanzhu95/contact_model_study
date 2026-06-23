@@ -66,7 +66,12 @@ def run(
 ):
     builder = DiagramBuilder()
     plant, scene_graph = AddMultibodyPlantSceneGraph(builder, 0.0)  # continuous
-    Parser(plant).AddModels(model_path)
+    model_instances = Parser(plant).AddModels(model_path)
+
+    root_body_index = plant.GetBodyIndices(model_instances[0])[0]
+    root_body = plant.get_body(root_body_index)
+    plant.WeldFrames(plant.world_frame(), root_body.body_frame())
+
     plant.Finalize()
 
     nu = plant.get_actuation_input_port().size()
@@ -79,7 +84,7 @@ def run(
         [0.0, 0.0, 1.0],
         [0.0, -1.0, 0.0],
     ]))
-    camera_pose = RigidTransform(R_world_camera, [0.0, -2.5, 0.25])
+    camera_pose = RigidTransform(R_world_camera, [0.0, -1, 0.25])
 
     if video_path is None:
         VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
