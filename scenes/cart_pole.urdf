@@ -1,0 +1,66 @@
+<?xml version="1.0"?>
+<!-- Cart-pole URDF used to build the MuJoCo *planning* model.
+
+     This MUST be kept parameter-consistent with cart_pole.sdf (the Drake
+     "real"/eval model):
+       * Cart  : 10 kg box 0.24 x 0.12 x 0.12
+       * Pole  : 1 kg point mass 0.5 m below the cart, 0.5 m rod
+       * Slider: prismatic along world +x
+       * Pin   : revolute (continuous) about world -y, angle 0 => pole hangs
+                 straight down, angle +/-pi => pole upright.
+
+     MuJoCo cannot parse SDF, so this URDF is the source for the MuJoCo model.
+     The "base" link is welded to the world by MuJoCo's parser, and the cart
+     slides relative to it along x (matching the SDF's world<->Cart prismatic).
+     Inertias are tiny (point-mass / no rotational DOF participation), matching
+     the SDF comments. -->
+<robot name="CartPole">
+
+  <!-- Fixed rail. MuJoCo welds the root link to the world. -->
+  <link name="base"/>
+
+  <link name="Cart">
+    <inertial>
+      <mass value="10.0"/>
+      <!-- Cart has no rotational DOF; inertia values do not participate. -->
+      <inertia ixx="1e-6" iyy="1e-6" izz="1e-6" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <geometry><box size="0.24 0.12 0.12"/></geometry>
+    </visual>
+  </link>
+
+  <link name="Pole">
+    <!-- Point mass 0.5 m below the pin (the pin sits at the cart origin). -->
+    <inertial>
+      <origin xyz="0 0 -0.5"/>
+      <mass value="1.0"/>
+      <inertia ixx="1e-6" iyy="1e-6" izz="1e-6" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 -0.5"/>
+      <geometry><sphere radius="0.05"/></geometry>
+    </visual>
+    <visual>
+      <origin xyz="0 0 -0.25"/>
+      <geometry><cylinder radius="0.025" length="0.5"/></geometry>
+    </visual>
+  </link>
+
+  <!-- Cart slides along world +x. Actuated (the actuator is added in MuJoCo
+       via MjSpec at load time). -->
+  <joint name="CartSlider" type="prismatic">
+    <parent link="base"/>
+    <child link="Cart"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="100" lower="-10" upper="10" velocity="100"/>
+  </joint>
+
+  <!-- Unactuated pin. Continuous so the pole can swing all the way up. -->
+  <joint name="PolePin" type="continuous">
+    <parent link="Cart"/>
+    <child link="Pole"/>
+    <axis xyz="0 -1 0"/>
+  </joint>
+
+</robot>
