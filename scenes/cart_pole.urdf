@@ -47,8 +47,7 @@
     </visual>
   </link>
 
-  <!-- Cart slides along world +x. Actuated (the actuator is added in MuJoCo
-       via MjSpec at load time). -->
+  <!-- Cart slides along world +x. Actuated. -->
   <joint name="CartSlider" type="prismatic">
     <parent link="base"/>
     <child link="Cart"/>
@@ -62,5 +61,16 @@
     <child link="Pole"/>
     <axis xyz="0 -1 0"/>
   </joint>
+
+  <transmission name="CartSlider_transmission">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="CartSlider">
+      <hardwareInterface>EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="CartSlider_motor">
+      <hardwareInterface>EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
 
 </robot>
