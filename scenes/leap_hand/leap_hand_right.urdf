@@ -5,7 +5,10 @@
   <joint name="base_joint" type="fixed">
     <parent link="base"/>
     <child link="palm_lower"/>
-    <origin xyz="0 0.038 0.098" rpy="0 -1.57079 0"/>
+    <origin xyz="0 0 0" rpy="3.14159 0.523599 0"/>
+    <!-- 
+    <origin xyz="0 0.038 0.098" rpy="3.14159 0 0"/>
+    -->
   </joint>
 
   <link name="palm_lower">
@@ -16,7 +19,7 @@
       </geometry>
     </visual>
     <collision>     <!-- palm_lower -->
-      <origin xyz="-0.009 0.008 -0.011" rpy="0 0 0"/>
+      <origin xyz="-0.009 0.0085 -0.011" rpy="0 0 0"/>
       <geometry>
         <box size="0.022 0.026 0.034"/>
       </geometry>
@@ -238,6 +241,16 @@
     <limit effort="0.95" velocity="8.48" lower="-1.047" upper="1.047"/>
     <joint_properties friction="0.0"/>
   </joint>
+
+  <transmission name="0_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="0">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="0_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
   <joint name="1" type="revolute">
     <origin xyz="-0.0070 0.0230 -0.0187" rpy="1.57079 1.57079 0"/>
     <parent link="palm_lower"/>
@@ -246,6 +259,16 @@
     <limit effort="0.95" velocity="8.48" lower="-0.314" upper="2.23"/>
     <joint_properties friction="0.0"/>
   </joint>
+
+  <transmission name="1_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="1">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="1_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
   <joint name="2" type="revolute">
     <origin xyz="0.015 0.0143 -0.013" rpy="1.57079 -1.57079 0"/>
     <parent link="pip"/>
@@ -254,6 +277,16 @@
     <limit effort="0.95" velocity="8.48" lower="-0.506" upper="1.885"/>
     <joint_properties friction="0.0"/>
   </joint>
+
+  <transmission name="2_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="2">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="2_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
   <joint name="3" type="revolute">
     <origin xyz="0 -0.0361 0.0002" rpy="0 0 0"/>
     <parent link="dip"/>
@@ -262,6 +295,16 @@
     <limit effort="0.95" velocity="8.48" lower="-0.366" upper="2.042"/>
     <joint_properties friction="0.0"/>
   </joint>
+
+  <transmission name="3_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="3">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="3_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
   <link name="mcp_joint_2">
     <visual>
       <origin xyz="0.0084 0.0077 0.01465" rpy="0 0 0"/>
@@ -418,6 +461,16 @@
     <limit effort="0.95" velocity="8.48" lower="-1.047" upper="1.047"/>
     <joint_properties friction="0.0"/>
   </joint>
+
+  <transmission name="4_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="4">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="4_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
   <joint name="5" type="revolute">
     <origin xyz="-0.0071 -0.0224 -0.0187" rpy="1.57079 1.57079 0"/>
     <parent link="palm_lower"/>
@@ -426,6 +479,16 @@
     <limit effort="0.95" velocity="8.48" lower="-0.314" upper="2.23"/>
     <joint_properties friction="0.0"/>
   </joint>
+
+  <transmission name="5_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="5">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="5_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
   <joint name="6" type="revolute">
     <origin xyz="0.015 0.0143 -0.013" rpy="1.57079 -1.57079 0"/>
     <parent link="pip_2"/>
@@ -434,6 +497,16 @@
     <limit effort="0.95" velocity="8.48" lower="-0.506" upper="1.885"/>
     <joint_properties friction="0.0"/>
   </joint>
+
+  <transmission name="6_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="6">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="6_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
   <joint name="7" type="revolute">
     <origin xyz="0 -0.0361 0.0002" rpy="0 0 0"/>
     <parent link="dip_2"/>
@@ -442,6 +515,16 @@
     <limit effort="0.95" velocity="8.48" lower="-0.366" upper="2.042"/>
     <joint_properties friction="0.0"/>
   </joint>
+
+  <transmission name="7_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="7">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="7_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
   <link name="mcp_joint_3">
     <visual>
       <origin xyz="0.0084 0.0077 0.01465" rpy="0 0 0"/>
@@ -598,6 +681,16 @@
     <limit effort="0.95" velocity="8.48" lower="-1.047" upper="1.047"/>
     <joint_properties friction="0.0"/>
   </joint>
+
+  <transmission name="8_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="8">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="8_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
   <joint name="9" type="revolute">
     <origin xyz="-0.00709 -0.0678 -0.0187" rpy="1.57079 1.57079 0"/>
     <parent link="palm_lower"/>
@@ -606,6 +699,16 @@
     <limit effort="0.95" velocity="8.48" lower="-0.314" upper="2.23"/>
     <joint_properties friction="0.0"/>
   </joint>
+
+  <transmission name="9_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="9">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="9_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
   <joint name="10" type="revolute">
     <origin xyz="0.015 0.0143 -0.013" rpy="1.57079 -1.57079 0"/>
     <parent link="pip_3"/>
@@ -614,6 +717,16 @@
     <limit effort="0.95" velocity="8.48" lower="-0.506" upper="1.885"/>
     <joint_properties friction="0.0"/>
   </joint>
+
+  <transmission name="10_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="10">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="10_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
   <joint name="11" type="revolute">
     <origin xyz="0 -0.03609 0.0002" rpy="0 0 0"/>
     <parent link="dip_3"/>
@@ -622,6 +735,16 @@
     <limit effort="0.95" velocity="8.48" lower="-0.366" upper="2.042"/>
     <joint_properties friction="0.0"/>
   </joint>
+
+  <transmission name="11_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="11">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="11_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
   <link name="thumb_temp_base">
     <visual>
       <origin xyz="-0.0053 0.0003 0.00078" rpy="-1.57079 -1.57079 0"/>
@@ -760,6 +883,16 @@
     <limit effort="0.95" velocity="8.48" lower="-0.349" upper="2.094"/>
     <joint_properties friction="0.0"/>
   </joint>
+
+  <transmission name="12_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="12">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="12_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
   <joint name="13" type="revolute">
     <origin xyz="0 0.0143 -0.013" rpy="1.57079 -1.57079 0"/>
     <parent link="thumb_temp_base"/>
@@ -768,6 +901,16 @@
     <limit effort="0.95" velocity="8.48" lower="-0.47" upper="2.443"/>
     <joint_properties friction="0.0"/>
   </joint>
+
+  <transmission name="13_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="13">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="13_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
   <joint name="14" type="revolute">
     <origin xyz="0 0.0145 -0.017" rpy="-1.57079 0 0"/>
     <parent link="thumb_pip"/>
@@ -776,6 +919,16 @@
     <limit effort="0.95" velocity="8.48" lower="-1.20" upper="1.90"/>
     <joint_properties friction="0.0"/>
   </joint>
+
+  <transmission name="14_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="14">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="14_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
   <joint name="15" type="revolute">
     <origin xyz="0 0.0466 0.0002" rpy="0 0 3.14159"/>
     <parent link="thumb_dip"/>
@@ -785,9 +938,19 @@
     <joint_properties friction="0.0"/>
   </joint>
 
+  <transmission name="15_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="15">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="15_motor">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
   <!-- Static floor (children of "base", which scene-building welds to the
-       world at identity -- see DrakeSimulator(weld_base=True) and the MuJoCo
-       compiler's static-tree fusion -- so this origin is a world-frame offset). -->
+       world at identity - see DrakeSimulator(weld_base=True) and the MuJoCo
+       compiler's static-tree fusion - so this origin is a world-frame offset). -->
   <link name="floor">
     <visual>
       <geometry><box size="2.0 2.0 0.02"/></geometry>
@@ -824,7 +987,7 @@
     </inertial>
   </link>
   <joint name="obj_joint" type="floating">
-    <origin xyz="0.0816 0.0258 0.0707" rpy="0 0 0"/>
+    <origin xyz="0.01 0.0258 0.08" rpy="0 0.523599 0"/>
     <parent link="base"/>
     <child link="obj"/>
   </joint>
