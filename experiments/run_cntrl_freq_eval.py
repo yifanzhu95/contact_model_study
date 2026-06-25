@@ -121,8 +121,9 @@ def main():
 
         # Load once just to print model dimensions before the sweep.
         _mjm, _task = load_task(args.task, geometry, noise, rng)
+        _task_cfg = _task.config or _task.spec
         print(f"\n  [{model_key}]  nq={_mjm.nq}  nv={_mjm.nv}  nu={_mjm.nu}  "
-              f"max_steps={_task.spec.max_steps}")
+              f"max_steps={_task_cfg.max_steps}")
 
         for substeps in SUBSTEPS_SWEEP:
             mppi_cfg = MPPIConfig(

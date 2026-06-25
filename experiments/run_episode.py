@@ -129,6 +129,8 @@ def run_episode(
         Episode index used in logging and auto video naming.
     """
 
+    task_cfg = task.config or task.spec
+
     mjd = mujoco.MjData(mjm)
     q0, v0, u0 = task.get_inital_state(rng)
     mjd.qpos[:] = q0
@@ -192,7 +194,7 @@ def run_episode(
         step_times: list[float] = []
         ep_start = time.perf_counter()
 
-        for t in range(task.spec.max_steps):
+        for t in range(task_cfg.max_steps):
             step_start = time.perf_counter()
             if condition == "A":
                 result   = fixed_budget_rollout(
@@ -252,7 +254,7 @@ def run_episode(
         if render_mode == "video" and frames:
             if video_path is None:
                 Path("videos").mkdir(exist_ok=True)
-                video_path = f"videos/ep{ep_idx}_{task.spec.name}_{cfg.label}.mp4"
+                video_path = f"videos/ep{ep_idx}_{task_cfg.name}_{cfg.label}.mp4"
             media.write_video(video_path, frames, fps=int(1.0 / mjm.opt.timestep))
             print(f"  Saved video → {video_path}")
 
@@ -262,7 +264,7 @@ def run_episode(
 
     step_arr = np.asarray(step_times)
     return EpisodeResult(
-        task_name        = task.spec.name,
+        task_name        = task_cfg.name,
         model_label      = cfg.label,
         condition        = condition,
         success          = steps_to_success is not None,
@@ -376,7 +378,7 @@ def main():
             print(f"  budget    : {args.budget_seconds*1e3:.1f} ms")
         print(f"{'='*60}")
         print(f"  nq={mjm.nq}  nv={mjm.nv}  nu={mjm.nu}  "
-              f"max_steps={task.spec.max_steps}")
+              f"max_steps={(task.config or task.spec).max_steps}")
 
         # Only show viewer for the first backend when comparing all
         render_mode = args.render if (i == 0 or args.render == "video") else "none"

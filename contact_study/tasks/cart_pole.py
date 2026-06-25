@@ -1,10 +1,11 @@
 """Cart-pole swing-up task — testing vehicle for the Drake eval pipeline.
 
 The MuJoCo *rollout* model is built from scenes/cart_pole.urdf via MjSpec (a
-force actuator is added on the cart slider, a pole-tip site is added, and the
+position servo is added on the cart slider, a pole-tip site is added, and the
 compiled model is saved as scenes/cart_pole.xml). The *eval* environment is
 Drake, loading scenes/cart_pole.sdf (already exposes one CartSlider actuator and
-welds the cart to the world). The URDF and SDF must stay parameter-consistent.
+welds the cart to the world), PID-controlled to the same desired cart position.
+The URDF and SDF must stay parameter-consistent.
 
 Moved out of tests/test_drake.py and registered so it loads through the standard
 task registry. The pole hangs down at hinge angle 0 and is upright at ±π.
@@ -30,9 +31,17 @@ URDF     = SCENES / "cart_pole.urdf"   # source for the MuJoCo rollout model
 MJCF_OUT = SCENES / "cart_pole.xml"    # generated MJCF ("save as MJCF")
 SDF      = SCENES / "cart_pole.sdf"    # Drake "real" env model
 
-TIMESTEP  = 0.02          # MuJoCo planning timestep (s); also the control dt
-FORCE_MAX = 100.0         # cart actuator force limit (N)
-UPRIGHT   = float(np.pi)  # pole angle (rad) that points straight up
+TIMESTEP   = 0.02          # MuJoCo planning timestep (s); also the control dt
+UPRIGHT    = float(np.pi)  # pole angle (rad) that points straight up
+# Desired cart x-position command range (m). The rail is +/-10 m (URDF); the
+# command is clipped to this so the cart stays in the camera's view (the strong
+# w_pos cost keeps it near 0 anyway, so this is plenty of room).
+CART_RANGE = 1.0
+
+# Position-control gains shared by the Drake PidController eval and the MuJoCo
+# rollout position servo, so the control signal (a desired cart x-position)
+# drives both identically: force = kp*(x* - x) - kd*x_dot. Starting points to tune.
+PID_KP, PID_KI, PID_KD = 150.0, 0.0, 25.0
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +119,7 @@ class CartPoleTask(BaseTask):
             cam_pos            = (0.0, -2.5, 0.25),
             cam_fps            = 30.0,
             timestep           = TIMESTEP,
-            force_limits       = (-FORCE_MAX, FORCE_MAX),
+            control_limits     = (-CART_RANGE, CART_RANGE),
         )
 
     # --- load: URDF -> add actuator -> compile -> save MJCF -----------------
@@ -120,16 +129,20 @@ class CartPoleTask(BaseTask):
         spec.option.timestep   = self.config.timestep
         spec.option.integrator = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
 
-        # Force actuator on the cart slider (force = ctrl; a default general
-        # actuator is gain-fixed/bias-none, i.e. a motor).
+        # Position servo on the cart slider matching the Drake PID eval, so the
+        # control signal means the same thing in rollout and eval: a desired cart
+        # x-position. A fixed-gain / affine-bias actuator yields
+        # force = kp*(ctrl - x) - kv*x_dot  (gainprm[0]=kp, biasprm=[0,-kp,-kv]).
         act = spec.add_actuator()
-        act.name        = "cart_force"
+        act.name        = "cart_position"
         act.target      = "CartSlider"
         act.trntype     = mujoco.mjtTrn.mjTRN_JOINT
         act.gaintype    = mujoco.mjtGain.mjGAIN_FIXED
-        act.gainprm     = [1.0] + list(act.gainprm[1:])
+        act.gainprm     = [PID_KP, 0.0, 0.0] + list(act.gainprm[3:])
+        act.biastype    = mujoco.mjtBias.mjBIAS_AFFINE
+        act.biasprm     = [0.0, -PID_KP, -PID_KD] + list(act.biasprm[3:])
         act.ctrllimited = mujoco.mjtLimited.mjLIMITED_TRUE
-        act.ctrlrange   = list(self.config.force_limits)
+        act.ctrlrange   = list(self.config.control_limits)
 
         # A pole-tip site keeps the cost kernel's site arrays non-empty.
         tip = spec.body("Pole").add_site()
@@ -197,7 +210,7 @@ class CartPoleTask(BaseTask):
     def make_eval_simulator(self, video_path: str | None = None, render: bool = True):
         if self.config.eval_sim == EvalSimulatorKind.DRAKE:
             from contact_study.contact_models.drake_sim import (
-                DrakeSimulator, DrakeJointChannel,
+                DrakeSimulator, DrakeJointChannel, DrakePidActuation,
             )
             iv = self.index_vector
             channels = [
@@ -213,6 +226,12 @@ class CartPoleTask(BaseTask):
                 n_ctrl         = self.mjm.nu,
                 weld_base      = False,   # SDF already welds the cart to world
                 video_path     = video_path,
+                # PID position control of the (only) actuated joint, the cart
+                # slider. The unactuated PolePin is left out of the projection.
+                pid            = DrakePidActuation(
+                    kp=PID_KP, ki=PID_KI, kd=PID_KD, ctrl_joint_names=["CartSlider"],
+                ),
+                pid_plant_dt   = 0.0,   # continuous plant (no contact; accurate)
             )
         return super().make_eval_simulator(video_path=video_path, render=render)
 

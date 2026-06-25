@@ -163,7 +163,7 @@ def run(
     mjm, _ = task.load()
     mjm  = apply_physics_noise(mjm, noise, rng)
     task._mjm = mjm
-    max_steps = task.spec.max_steps
+    max_steps = (task.config or task.spec).max_steps
 
     print(f"  nq={mjm.nq}  nv={mjm.nv}  nu={mjm.nu}  max_steps={max_steps}")
     print(f"  integrator      = {mjm.opt.integrator}")

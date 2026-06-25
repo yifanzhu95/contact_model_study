@@ -164,11 +164,11 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--task",        type=str,   default="cart_pole")
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
-    p.add_argument("--n_samples",   type=int,   default=512)
-    p.add_argument("--horizon",     type=int,   default=100)
-    p.add_argument("--temperature", type=float, default=0.025)
-    p.add_argument("--noise_sigma", type=float, default=0.50)
-    p.add_argument("--delta",       type=float, default=10.0,
+    p.add_argument("--n_samples",   type=int,   default=256)
+    p.add_argument("--horizon",     type=int,   default=50)
+    p.add_argument("--temperature", type=float, default=0.01)
+    p.add_argument("--noise_sigma", type=float, default=0.001)
+    p.add_argument("--delta",       type=float, default=0.01,
                    help="Per-step MPPI delta clip magnitude (action units).")
     p.add_argument("--substeps",    type=int,   default=1)
     p.add_argument("--sim_time",    type=float, default=10.0)
@@ -197,8 +197,8 @@ def main():
         warm_start     = True,
         use_full_graph = False,
         delta_range    = (-args.delta, args.delta),
-        nconmax        = 12,
-        njmax          = 24,
+        nconmax        = 200,
+        njmax          = 500,
         seed           = args.seed,
         debug          = False,
     )

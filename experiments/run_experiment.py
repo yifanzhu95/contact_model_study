@@ -140,6 +140,7 @@ def run_one_episode(
     debug:          bool  = True,
 ) -> EpisodeResult:
     """Run one closed-loop episode under Condition A or B."""
+    task_cfg = task.config or task.spec
 
     mppi_cfg = MPPIConfig(
         n_samples      = n_samples,
@@ -183,7 +184,7 @@ def run_one_episode(
     substeps         = mppi_cfg.substeps
     n_used           = n_samples
 
-    for t in range(task.spec.max_steps):
+    for t in range(task_cfg.max_steps):
         if condition == "A":
             result = fixed_budget_rollout(
                 mjm            = mjm,
@@ -216,7 +217,7 @@ def run_one_episode(
     elapsed = time.perf_counter() - episode_start
 
     return EpisodeResult(
-        task_name        = task.spec.name,
+        task_name        = task_cfg.name,
         model_label      = cfg.label,
         condition        = condition,
         success          = steps_to_success is not None,

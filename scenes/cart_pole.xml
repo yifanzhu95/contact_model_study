@@ -16,6 +16,6 @@
   </worldbody>
 
   <actuator>
-    <general name="cart_force" joint="CartSlider" ctrllimited="true" ctrlrange="-100 100"/>
+    <general name="cart_position" joint="CartSlider" ctrllimited="true" ctrlrange="-1 1" biastype="affine" gainprm="150" biasprm="0 -150 -25"/>
   </actuator>
 </mujoco>

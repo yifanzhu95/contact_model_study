@@ -47,7 +47,7 @@ class BaseTask(abc.ABC):
 
         # Editable per-task configuration. Tasks migrated to TaskConfig set this
         # in their constructor; legacy tasks (push, peg_in_hole) leave it None
-        # and instead override the `spec` property to return a TaskSpec.
+        # and instead override the `spec` property (TaskSpec) themselves.
         self.config: TaskConfig | None = None
 
         # Task-specific metadata extracted at load time
@@ -57,21 +57,15 @@ class BaseTask(abc.ABC):
         self.index_vector_wp: wp.array | None = None
         self.weights_wp: wp.array | None = None
 
-    @property
-    def spec(self):
-        """Task spec/config. TaskConfig is a superset of TaskSpec and exposes
-        the same attribute names, so `task.spec.X` works for either. Legacy
-        tasks override this property to return a TaskSpec instead."""
-        if self.config is None:
-            raise NotImplementedError(
-                f"{type(self).__name__} must set self.config or override spec."
-            )
-        return self.config
-
     def load(self, full_path: str | None = None) -> tuple[mujoco.MjModel, mujoco.MjData]:
-        """Load the MuJoCo model for this task and geometry variant."""
+        """Load the MuJoCo model for this task and geometry variant.
+
+        Tasks that set self.config (TaskConfig) use it directly here. Legacy
+        tasks (push, peg_in_hole) leave self.config None and override `load()`
+        or `spec` themselves — see those modules.
+        """
         if full_path is None:
-            xml_path = self.spec.xml_path_template.format(geometry=self.geometry.value)
+            xml_path = self.config.xml_path_template.format(geometry=self.geometry.value)
             full_path = SCENES_DIR / xml_path
         self._mjm = mujoco.MjModel.from_xml_path(str(full_path))
         self._mjd = mujoco.MjData(self._mjm)
@@ -175,7 +169,7 @@ class BaseTask(abc.ABC):
         """
         rng = rng or np.random.default_rng()
         mjd = mujoco.MjData(mjm)
-        T   = max_steps or self.spec.max_steps
+        T   = max_steps or self.config.max_steps
 
         q0, v0, u0 = self.sample_initial_state(rng)
         mjd.qpos[:] = q0

@@ -76,12 +76,13 @@ wp.init()
 def apply_weight_overrides(task, overrides: dict[str, float]) -> None:
     """Merge overrides into the task's default weights and rebuild weights_wp.
 
-    The dict key order of task.spec.cost_weights must match the array order
-    used in the task's initialize_task — this holds for all built-in tasks.
+    The dict key order of cost_weights must match the array order used in the
+    task's initialize_task — this holds for all built-in tasks.
     """
-    weights = dict(task.spec.cost_weights)
+    task_cfg = task.config or task.spec
+    weights = dict(task_cfg.cost_weights)
     weights.update(overrides)
-    weights_arr = np.array([weights[k] for k in task.spec.cost_weights], dtype=np.float32)
+    weights_arr = np.array([weights[k] for k in task_cfg.cost_weights], dtype=np.float32)
     task.weights_wp = wp.array(weights_arr, dtype=wp.float32, device="cuda")
 
 
@@ -177,9 +178,10 @@ def main():
 
         # Peek at model dimensions once.
         _mjm, _task = load_task(args.task, geometry, noise, rng)
-        default_weights = dict(_task.spec.cost_weights)
+        _task_cfg = _task.config or _task.spec
+        default_weights = dict(_task_cfg.cost_weights)
         print(f"\n  [{model_key}]  nq={_mjm.nq}  nv={_mjm.nv}  nu={_mjm.nu}  "
-              f"max_steps={_task.spec.max_steps}")
+              f"max_steps={_task_cfg.max_steps}")
         print(f"  default weights: {default_weights}")
 
         for overrides in grid:

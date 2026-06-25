@@ -3,10 +3,15 @@
 `TaskConfig` is the editable, per-task configuration: construct it, tweak any
 field, then hand it to a task constructor. It is a superset of the legacy
 `TaskSpec` (it carries the same field names — name/complexity/max_steps/
-cost_weights/success_thresholds/xml_path_template — so every `task.spec.X`
-reader keeps working) plus the new fields needed to drive a selectable eval
-simulator: which simulator backs the "real" environment, the eval model path,
-the camera pose used for rendering, and dynamics/control limits.
+cost_weights/success_thresholds/xml_path_template) plus the new fields needed
+to drive a selectable eval simulator: which simulator backs the "real"
+environment, the eval model path, the camera pose used for rendering, and
+dynamics/control limits.
+
+Tasks migrated off `TaskSpec` (cart_pole, grasp_reorient) set `self.config` and
+read it directly — no `spec` property involved. The two not yet migrated
+(push, peg_in_hole) still override `spec` themselves and read from it; generic
+callers spanning all task types use `task.config or task.spec`.
 
 `ContactComplexity` and `TaskSpec` live here (rather than in base.py) so that
 `base.py` can import them without a circular dependency; they are re-exported

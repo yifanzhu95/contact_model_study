@@ -4,7 +4,7 @@ import numpy as np
 import mujoco
 import warp as wp
 
-from .base import BaseTask, ContactComplexity, TaskSpec, register, SCENES_DIR
+from .base import BaseTask, ContactComplexity, register, SCENES_DIR
 from .config import TaskConfig, EvalSimulatorKind
 
 # --- LEAP hand: MuJoCo(rollout) <-> URDF(Drake eval) joint correspondence -----
@@ -25,28 +25,37 @@ _MJ_CTRL_TO_URDF_JOINT = [
     "12", "13", "14", "15", # thumb : th_cmc, th_axl, th_mcp, th_ipl
 ]
 
-# MuJoCo palm world pose (scenes/leap_hand_old/leap_right_hand.xml). The Drake
-# hand's palm_lower link is welded here so the Drake world frame coincides with
-# the MuJoCo world frame (so mirrored cube poses and the ground plane line up).
-_PALM_POS  = (0.0, 0.0, 0.01)
-_PALM_QUAT = (0.0, 0.97236992, 0.0, -0.23344536)  # wxyz
-# URDF base_joint origin (base -> palm_lower), needed to weld the *base* link
-# (the URDF root) such that palm_lower lands at the MuJoCo palm pose. (Welding
-# palm_lower directly is rejected by Drake: it already has the base_joint inboard.)
-_BASE_TO_PALM_XYZ = (0.0, 0.038, 0.098)
-_BASE_TO_PALM_RPY = (0.0, -1.57079, 0.0)
+# The rollout (MuJoCo) model is a static, pre-built scene file — generated once
+# by scenes/scripts/build_grasp_reorient_scene.py from the bare hand asset
+# (scenes/leap_hand/leap_hand_right.xml, which itself carries the floor + free
+# "obj" cube, mirroring scenes/leap_hand/leap_hand_right.urdf used for Drake
+# eval) plus fingertip sites, the obj_target mocap goal, and a "home" keyframe
+# that a URDF/bare MJCF has no way to express. Re-run that script and commit
+# the output if the hand/floor/cube geometry changes.
+#
+# Both rollout and eval load from the same URDF-derived geometry, so they share
+# one world frame already (the URDF's fixed base->palm_lower transform): welding
+# the Drake "base" link to the world at identity (DrakeSimulator's
+# `weld_base=True`) lines palm_lower up with the MuJoCo placement with no extra
+# calibration, and "obj"/"floor" need no Drake-side scene-building at all.
+GRASP_SCENE_XML = "leap_hand/scene_grasp_reorient.xml"
 
-# Free cube (matches scenes/leap_hand_old/scene_leap_cube.xml obj geom).
-_CUBE_HALF = 0.035
-_CUBE_MASS = 0.14
-_CUBE_FRIC = 0.5
-_FLOOR_Z   = -0.25       # MuJoCo floor height in world
+# Drake PidController gains for the eval hand (position control, mirroring the
+# MuJoCo position servos kp=3.0 kv=0.01). Starting points to tune against Drake's
+# solver; _PID_EFFORT is the per-joint actuator force clamp DrakeSimulator adds.
+_PID_KP, _PID_KI, _PID_KD, _PID_EFFORT = 3.0, 0.0, 0.05, 10.0
 
-# MuJoCo position-servo gains (leap_right_hand.xml default: kp=3.0 kv=0.01).
-# MuJoCo's servo has no force limit here, so 0.95 (the URDF effort) is too weak
-# to hold the hand; use a higher clamp. All three are starting points to tune
-# against Drake's solver on the user's machine.
-_PD_KP, _PD_KD, _PD_EFFORT = 3.0, 0.01, 5.0
+# Camera: positioned along the palm's outward normal (+x, empirically — fingers
+# curl toward +x from the palm base) so its forward axis points straight at the
+# palm/grasp region, framing the whole hand (incl. thumb) from ~0.65 m out.
+_PALM_TARGET = np.array([0.02, 0.04, 0.07])   # approx. palm-center world point
+_CAM_DIST    = 0.65
+_CAM_POS     = tuple(_PALM_TARGET + np.array([_CAM_DIST, 0.0, 0.0]))
+_CAM_ROTMAT  = (   # columns = camera (right, down, forward) axes in world frame
+    (0.0,  0.0, -1.0),
+    (1.0,  0.0,  0.0),
+    (0.0, -1.0,  0.0),
+)
 
 @wp.func
 def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
@@ -153,33 +162,12 @@ class GraspReorientTask(BaseTask):
             kwargs["role"] = role
         super().__init__(**kwargs)
 
-        s = self.spec  # legacy TaskSpec (rollout path); mirror into the config.
         self.config = TaskConfig(
-            name               = s.name,
-            complexity         = s.complexity,
-            max_steps          = s.max_steps,
-            cost_weights       = s.cost_weights,
-            success_thresholds = s.success_thresholds,
-            xml_path_template  = s.xml_path_template,
-            rollout_model_path = str(SCENES_DIR / s.xml_path_template),
-            rollout_is_urdf    = False,
-            eval_sim           = EvalSimulatorKind.DRAKE,
-            eval_model_path    = str(SCENES_DIR / "leap_hand/leap_hand_right.urdf"),
-            cam_pos            = (0.0, -0.35, 0.12),
-            cam_fps            = 30.0,
-            timestep           = 0.005,
-            difficulty         = self.goal_difficulty,
-        )
-
-    @property
-    def spec(self) -> TaskSpec:
-        return TaskSpec(
-            name              = "grasp_reorient",
-            complexity        = ContactComplexity.MEDIUM,
-            xml_path_template = "leap_hand_old/scene_leap_cube.xml",
+            name               = "grasp_reorient",
+            complexity         = ContactComplexity.MEDIUM,
             max_steps          = 2500,
             success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
-            cost_weights      = {
+            cost_weights       = {
                 "w_quat": 5.0,
                 "w_pos": 40.0,
                 "w_velo": 0.0,
@@ -190,8 +178,23 @@ class GraspReorientTask(BaseTask):
                 "w_quat_term": 10.0,
                 "w_pos_term": 10.0,
                 "w_fallen_term": 0.0,
-            }
+            },
+            # BaseTask.load() loads this static file directly — no MJCF is
+            # built at task-load time.
+            xml_path_template  = GRASP_SCENE_XML,
+            rollout_model_path = str(SCENES_DIR / GRASP_SCENE_XML),
+            rollout_is_urdf    = False,
+            eval_sim           = EvalSimulatorKind.DRAKE,
+            eval_model_path    = str(SCENES_DIR / "leap_hand/leap_hand_right.urdf"),
+            cam_pos            = _CAM_POS,
+            cam_rotmat         = _CAM_ROTMAT,
+            cam_fps            = 30.0,
+            timestep           = 0.005,
+            difficulty         = self.goal_difficulty,
         )
+
+    # load() is inherited from BaseTask: it loads GRASP_SCENE_XML directly via
+    # mujoco.MjModel.from_xml_path, no on-the-fly construction.
 
     def initialize_task(self):
         mjm = self.mjm
@@ -236,7 +239,7 @@ class GraspReorientTask(BaseTask):
         self.index_vector_wp = wp.array(self.index_vector, dtype=wp.int32, device="cuda")
         self.goal_vector_wp = wp.array(self.goal_vector, dtype=wp.float32, device="cuda")
 
-        w = self.spec.cost_weights
+        w = self.config.cost_weights
         weights_list = [
             w["w_quat"], w["w_pos"], w["w_velo"],
             w["w_contact"], w["w_joint"], w["w_joint_velo"],
@@ -274,12 +277,12 @@ class GraspReorientTask(BaseTask):
         #print(quat, self.target_quat)
         #print(pos_err,quat_err)
 
-        thr     = self.spec.success_thresholds
+        thr     = self.config.success_thresholds
         pose_ok = pos_err < thr["pos"] and quat_err < thr["quat"]
         if not pose_ok:
             return False
 
-        return bool(np.linalg.norm(vel) < self.spec.success_thresholds["vel"])
+        return bool(np.linalg.norm(vel) < thr["vel"])
 
     def has_failed(self, mjd: mujoco.MjData) -> bool:
         mjm = self.mjm
@@ -399,53 +402,15 @@ class GraspReorientTask(BaseTask):
         if self.config.eval_sim != EvalSimulatorKind.DRAKE:
             return super().make_eval_simulator(video_path=video_path, render=render)
 
-        import numpy as _np
-        from pydrake.math import RigidTransform, RotationMatrix, RollPitchYaw
-        from pydrake.common.eigen_geometry import Quaternion
-        from pydrake.multibody.tree import SpatialInertia, UnitInertia
-        from pydrake.geometry import Box, HalfSpace
-        from pydrake.multibody.plant import CoulombFriction
-
         from contact_study.contact_models.drake_sim import (
-            DrakeSimulator, DrakeJointChannel, DrakeFreeBodyChannel, DrakePdActuation,
+            DrakeSimulator, DrakeJointChannel, DrakeFreeBodyChannel, DrakePidActuation,
         )
 
-        side = 2.0 * _CUBE_HALF
-
-        def _build_scene(plant):
-            # Weld the hand's *base* link (the URDF root) so palm_lower lands at
-            # the MuJoCo palm world pose -> the Drake and MuJoCo world frames
-            # coincide (cube poses + ground line up). Welding palm_lower directly
-            # is rejected by Drake (it already has the base_joint inboard).
-            qw, qx, qy, qz = _PALM_QUAT
-            X_world_palm = RigidTransform(
-                RotationMatrix(Quaternion(w=qw, x=qx, y=qy, z=qz)), list(_PALM_POS)
-            )
-            X_base_palm = RigidTransform(
-                RotationMatrix(RollPitchYaw(*_BASE_TO_PALM_RPY)), list(_BASE_TO_PALM_XYZ)
-            )
-            X_world_base = X_world_palm @ X_base_palm.inverse()
-            base = plant.GetBodyByName("base")
-            plant.WeldFrames(plant.world_frame(), base.body_frame(), X_world_base)
-
-            # Free cube (matches the MuJoCo obj geom).
-            inst = plant.AddModelInstance("objects")
-            G = UnitInertia.SolidBox(side, side, side)
-            M = SpatialInertia(_CUBE_MASS, _np.zeros(3), G)
-            cube = plant.AddRigidBody("obj", inst, M)
-            fric = CoulombFriction(_CUBE_FRIC, _CUBE_FRIC)
-            box = Box(side, side, side)
-            plant.RegisterCollisionGeometry(cube, RigidTransform(), box, "obj_col", fric)
-            plant.RegisterVisualGeometry(
-                cube, RigidTransform(), box, "obj_vis", _np.array([1.0, 1.0, 0.0, 1.0])
-            )
-
-            # Ground plane (matches the MuJoCo floor height).
-            plant.RegisterCollisionGeometry(
-                plant.world_body(), RigidTransform([0.0, 0.0, _FLOOR_Z]),
-                HalfSpace(), "ground", CoulombFriction(1.0, 1.0),
-            )
-
+        # No extra_models_fn needed: "floor" and "obj" are parsed straight out
+        # of the URDF (eval_model_path) along with the hand, and "base" welds
+        # to the world at identity (weld_base=True) just like the MuJoCo
+        # rollout's own base->palm_lower transform, so both world frames and
+        # both floor/cube placements coincide automatically.
         joint_channels = [
             DrakeJointChannel(_MJ_CTRL_TO_URDF_JOINT[i], "revolute", q_adr=i, v_adr=i)
             for i in range(16)
@@ -455,9 +420,9 @@ class GraspReorientTask(BaseTask):
                 "obj", q_adr=int(self.index_vector[0]), v_adr=int(self.index_vector[1])
             )
         ]
-        pd = DrakePdActuation(
-            kp=_PD_KP, kd=_PD_KD,
-            ctrl_joint_names=list(_MJ_CTRL_TO_URDF_JOINT), effort=_PD_EFFORT,
+        pid = DrakePidActuation(
+            kp=_PID_KP, ki=_PID_KI, kd=_PID_KD,
+            ctrl_joint_names=list(_MJ_CTRL_TO_URDF_JOINT), effort=_PID_EFFORT,
         )
 
         return DrakeSimulator(
@@ -468,15 +433,12 @@ class GraspReorientTask(BaseTask):
             joint_channels = joint_channels,
             float_channels = float_channels,
             n_ctrl         = 0,
-            weld_base      = False,            # the scene builder welds the palm
+            weld_base      = True,             # welds "base" to world at identity
             video_path     = video_path,
-            # Position control: prefer Drake's native PD-controlled actuators on
-            # a discrete plant at this dt (implicit -> stable, fast). DrakeSimulator
-            # auto-falls-back to manual PD on a continuous plant when the installed
-            # Drake lacks native PD actuators (e.g. 1.12). `time_step` is ignored
-            # when pd is set (the mode picks it).
-            time_step      = 0.0,
-            pd_native_dt   = 0.005,
-            extra_models_fn = _build_scene,
-            pd             = pd,
+            # Position control via Drake's PidController. pid_plant_dt is the eval
+            # plant's discrete step; it must be far smaller than the control dt
+            # because the discrete SAP solver treats PID actuation explicitly and
+            # diverges at large steps (mirrors tests/view_model_drake.py's 1e-4).
+            pid_plant_dt   = 0.0001,
+            pid            = pid,
         )
