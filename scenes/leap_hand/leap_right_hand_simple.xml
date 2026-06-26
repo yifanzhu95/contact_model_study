@@ -69,19 +69,8 @@ Naming Conventions
 
   <!-- mesh assets -->
   <asset>
-    <material name="black" rgba="0.2 0.2 0.2 1" />
-    <material name="white" rgba="1 1 1 1" />
-
-    <mesh name="palm" file="palm_right.obj"/>
-    <mesh name="base" file="base.obj"/>
-    <mesh name="proximal" file="proximal.obj"/>
-    <mesh name="medial" file="medial.obj"/>
-    <mesh name="distal" file="distal.obj"/>
-    <mesh name="tip" file="tip.obj"/>
-    <mesh name="thumb_base" file="thumb_base.obj"/>
-    <mesh name="thumb_proximal" file="thumb_proximal.obj"/>
-    <mesh name="thumb_distal" file="thumb_distal.obj"/>
-    <mesh name="thumb_tip" file="thumb_tip.obj"/>
+    <mesh name="white_tip" content_type="model/obj" file="meshes/white_tip.obj" />
+    <mesh name="white_tip_thumb" content_type="model/obj" file="meshes/white_tip_thumb.obj" />
   </asset>
 
   <!-- defaults -->
@@ -94,12 +83,6 @@ Naming Conventions
     <joint damping="0.03" frictionloss="0.001"/>
     <!-- ADDED THE ARMATURE AND FORCE RANGE AND IT STABALIZED THE SIM A LOT! frictionloss="0.001" <-Moved  armature="0.0015" -->
     <!-- geom class defaults -->
-    <default class="visual">
-      <geom group="1" type="mesh" contype="0" conaffinity="0" density="0" material="black" />
-    </default>
-    <default class="collision">
-      <geom material="black" />
-    </default>
     <default class="tip">
       <geom type="mesh" mesh="tip" friction="0.5" material="white" />
     </default>
@@ -204,33 +187,6 @@ Naming Conventions
     <position name="th_mcp_act" joint="th_mcp" class="thumb_mcp" />
     <position name="th_ipl_act" joint="th_ipl" class="thumb_ipl" />
   </actuator>
-
-  <!-- sensors -->
-  <sensor>
-    <!-- index -->
-    <jointpos name="if_mcp_sensor" joint="if_mcp" />
-    <jointpos name="if_rot_sensor" joint="if_rot" />
-    <jointpos name="if_pip_sensor" joint="if_pip" />
-    <jointpos name="if_dip_sensor" joint="if_dip" />
-
-    <!-- middle -->
-    <jointpos name="mf_mcp_sensor" joint="mf_mcp" />
-    <jointpos name="mf_rot_sensor" joint="mf_rot" />
-    <jointpos name="mf_pip_sensor" joint="mf_pip" />
-    <jointpos name="mf_dip_sensor" joint="mf_dip" />
-
-    <!-- ring -->
-    <jointpos name="rf_mcp_sensor" joint="rf_mcp" />
-    <jointpos name="rf_rot_sensor" joint="rf_rot" />
-    <jointpos name="rf_pip_sensor" joint="rf_pip" />
-    <jointpos name="rf_dip_sensor" joint="rf_dip" />
-
-    <!-- thumb -->
-    <jointpos name="th_cmc_sensor" joint="th_cmc" />
-    <jointpos name="th_axl_sensor" joint="th_axl" />
-    <jointpos name="th_mcp_sensor" joint="th_mcp" />
-    <jointpos name="th_ipl_sensor" joint="th_ipl" />
-  </sensor>
 
   <worldbody>
     <!-- <body name="palm" pos="0 0 0.01" quat="0 1 0 0"> -->
