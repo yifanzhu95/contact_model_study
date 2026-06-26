@@ -51,6 +51,8 @@ from contact_study.planners.mppi import MPPIController, MPPIConfig
 from contact_study.tasks.base import get_task
 from contact_study.tasks.config import TaskRole, EvalSimulatorKind
 
+wp.init()
+
 MODEL_FACTORIES = {
     "M1": ContactModelConfig.M1,
     "M2": ContactModelConfig.M2,
@@ -78,7 +80,8 @@ def run_eval_episode(
     """Run one closed-loop eval episode and return an EpisodeResult.
 
     The episode length is the task's TaskConfig.max_steps. mean_step_ms /
-    std_step_ms hold per-control-step latency (plan + eval advance) in ms.
+    std_step_ms hold per-control-step MPPI planning latency (controller.plan()
+    only, excluding the eval-sim advance) in ms.
     """
     # ---- ROLLOUT task + planner ------------------------------------------
     rollout_task = get_task(task_name, role=TaskRole.ROLLOUT)
@@ -156,8 +159,6 @@ def run_eval_episode(
     ep_start = time.perf_counter()
 
     for t in range(n_steps):
-        step_start = time.perf_counter()
-
         # 1. Read eval state (MuJoCo-ordered) and mirror into the planning MjData.
         st = sim.get_state()
         mjd.qpos[:] = st.qpos
@@ -176,7 +177,10 @@ def run_eval_episode(
             break
 
         # 2. Plan on the GPU and integrate the delta into the absolute command.
+        # step_times measures only this MPPI call, not the eval-sim advance below.
+        plan_start = time.perf_counter()
         action = controller.plan(mjd)
+        step_times.append((time.perf_counter() - plan_start) * 1e3)
         u = u + action
         if clip_lo is not None:
             u = np.clip(u, clip_lo, clip_hi)
@@ -186,8 +190,6 @@ def run_eval_episode(
         sim.apply_control(u)
         sim.step(eval_steps_per_control)
         sim.render()
-
-        step_times.append((time.perf_counter() - step_start) * 1e3)
 
         if debug and t % 10 == 0:
             print(f"  [step {t:04d}]  qpos_norm={np.linalg.norm(st.qpos):.4f}  "
@@ -223,8 +225,8 @@ def main():
     p.add_argument("--task",        type=str,   default="cart_pole")
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
     p.add_argument("--n_samples",   type=int,   default=1024)
-    p.add_argument("--horizon",     type=int,   default=128)
-    p.add_argument("--temperature", type=float, default=50.00)#0.750)
+    p.add_argument("--horizon",     type=int,   default=48)
+    p.add_argument("--temperature", type=float, default=2.00)#0.750)
     p.add_argument("--noise_sigma", type=float, default=0.01,)#0.001)
     p.add_argument("--delta",       type=float, default=0.1,#0.05,
                    help="Per-step MPPI delta clip magnitude (action units).")
