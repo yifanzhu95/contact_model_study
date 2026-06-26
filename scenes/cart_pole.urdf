@@ -1,19 +1,16 @@
 <?xml version="1.0"?>
-<!-- Cart-pole URDF used to build the MuJoCo *planning* model.
-
-     This MUST be kept parameter-consistent with cart_pole.sdf (the Drake
-     "real"/eval model):
+<!-- Cart-pole URDF, shared by both the MuJoCo rollout model and the Drake eval
+     model (contact_study/tasks/cart_pole.py):
        * Cart  : 10 kg box 0.24 x 0.12 x 0.12
        * Pole  : 1 kg point mass 0.5 m below the cart, 0.5 m rod
        * Slider: prismatic along world +x
        * Pin   : revolute (continuous) about world -y, angle 0 => pole hangs
                  straight down, angle +/-pi => pole upright.
 
-     MuJoCo cannot parse SDF, so this URDF is the source for the MuJoCo model.
-     The "base" link is welded to the world by MuJoCo's parser, and the cart
-     slides relative to it along x (matching the SDF's world<->Cart prismatic).
-     Inertias are tiny (point-mass / no rotational DOF participation), matching
-     the SDF comments. -->
+     The "base" link is welded to the world (by MuJoCo's parser automatically;
+     by DrakeSimulator's weld_base=True for the eval model), and the cart
+     slides relative to it along x. Inertias are tiny (point-mass / no
+     rotational DOF participation). -->
 <robot name="CartPole">
 
   <!-- Fixed rail. MuJoCo welds the root link to the world. -->

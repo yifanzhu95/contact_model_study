@@ -25,25 +25,65 @@ _MJ_CTRL_TO_URDF_JOINT = [
     "12", "13", "14", "15", # thumb : th_cmc, th_axl, th_mcp, th_ipl
 ]
 
-# The rollout (MuJoCo) model is a static, pre-built scene file — generated once
-# by scenes/scripts/build_grasp_reorient_scene.py from the bare hand asset
-# (scenes/leap_hand/leap_hand_right.xml, which itself carries the floor + free
-# "obj" cube, mirroring scenes/leap_hand/leap_hand_right.urdf used for Drake
-# eval) plus fingertip sites, the obj_target mocap goal, and a "home" keyframe
-# that a URDF/bare MJCF has no way to express. Re-run that script and commit
-# the output if the hand/floor/cube geometry changes.
+# The rollout (MuJoCo) model: the bare hand asset carrying the floor, the free
+# "obj" cube, and the fingertip sites (if_tip/mf_tip/rf_tip/th_tip) the cost
+# kernel reads. The initial hand+cube state, the joint cost target, and the goal
+# pose are all defined in this file (see _INIT_QPOS / _INIT_CTRL / _TARGET_*), so
+# the scene needs no keyframe or obj_target mocap body.
 #
 # Both rollout and eval load from the same URDF-derived geometry, so they share
 # one world frame already (the URDF's fixed base->palm_lower transform): welding
 # the Drake "base" link to the world at identity (DrakeSimulator's
 # `weld_base=True`) lines palm_lower up with the MuJoCo placement with no extra
 # calibration, and "obj"/"floor" need no Drake-side scene-building at all.
-GRASP_SCENE_XML = "leap_hand/scene_grasp_reorient.xml"
+GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites.xml"
 
 # Drake PidController gains for the eval hand (position control, mirroring the
 # MuJoCo position servos kp=3.0 kv=0.01). Starting points to tune against Drake's
 # solver; _PID_EFFORT is the per-joint actuator force clamp DrakeSimulator adds.
 _PID_KP, _PID_KI, _PID_KD, _PID_EFFORT = 3.0, 0.0, 0.05, 10.0
+
+# Fixed initial state + control for the hand and cube, used to initialize BOTH
+# the rollout and eval simulators (overrides the scene keyframe). Layout:
+#   qpos = [16 hand joints, obj pos(3), obj quat(wxyz)(4)]  (nq = 23)
+#   ctrl = [16 hand joint position targets]                  (nu = 16)
+# Initial velocity is zero (hand + cube start at rest).
+_INIT_QPOS = np.array([
+    0.74346777,  -0.56903687,  0.91440081,   0.5741493,
+    -0.010605284, -0.08351411, 0.70321997,   1.0184264,
+    0.80782262,   0.61122899,  0.92718954,   0.61047876,
+    0.69887738,   1.438706,    1.3375555,    0.19482527,
+
+    0.018495468,  0.033628956, 0.1,#0.083264539,  
+    0.93823638, 0.12995374, 0.31377877,  0.066086313,
+], dtype=np.float64)
+
+_INIT_CTRL = np.array([
+    0.765751,   -0.568012,  0.916951,  0.573897,
+    -0.0191225, -0.0837503, 0.709056,  1.01884,
+    0.830768,    0.610365,  0.929305,  0.610097,
+    0.69912,     1.44581,   1.33179,   0.192794,
+], dtype=np.float64)
+
+
+def _euler_to_quat(euler) -> np.ndarray:
+    """Intrinsic-xyz Euler angles (rad) -> wxyz quaternion (MuJoCo convention,
+    matching a <body ... euler="..."> with the default eulerseq="xyz")."""
+    q = np.array([1.0, 0.0, 0.0, 0.0])
+    for axis, angle in zip(np.eye(3), euler):
+        dq = np.zeros(4)
+        mujoco.mju_axisAngle2Quat(dq, axis, float(angle))
+        out = np.zeros(4)
+        mujoco.mju_mulQuat(out, q, dq)
+        q = out
+    return q
+
+
+# Goal/target pose for the cube reorientation, defined here rather than read
+# from a mocap body in the scene. pos + intrinsic-xyz Euler (rad).
+_TARGET_POS   = np.array([0.012, 0.04, 0.085], dtype=np.float64)
+_TARGET_EULER = np.array([0.0, 0.5235, 0.0], dtype=np.float64)
+_TARGET_QUAT  = _euler_to_quat(_TARGET_EULER)   # wxyz
 
 # Camera: positioned along the palm's outward normal (+x, empirically — fingers
 # curl toward +x from the palm base) so its forward axis points straight at the
@@ -119,7 +159,11 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
         weights[6] * fallen
     )
     if terminal:
-        cost = (weights[5] * c_quat) + (weights[6] * c_pos) + weights[7]*fallen
+        cost = (
+            weights[7] * c_quat +   # w_quat_term
+            weights[8] * c_pos +    # w_pos_term
+            weights[9] * fallen     # w_fallen_term
+        )
     return cost
 
 
@@ -165,18 +209,18 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 2500,
+            max_steps          = 1000,
             success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
             cost_weights       = {
-                "w_quat": 5.0,
-                "w_pos": 40.0,
+                "w_quat": 0.0, #5.0
+                "w_pos": 0.0, #40.0
                 "w_velo": 0.0,
-                "w_contact": 2.5,
-                "w_joint": 0.1,
+                "w_contact": 2.5,#2.5
+                "w_joint": 0.01, #0.1
                 "w_joint_velo": 0.0,
-                "w_fallen": 30.0,
-                "w_quat_term": 10.0,
-                "w_pos_term": 10.0,
+                "w_fallen": 0.0, #30.0,
+                "w_quat_term": 0.0, #10.0
+                "w_pos_term": 0.0, #10.0
                 "w_fallen_term": 0.0,
             },
             # BaseTask.load() loads this static file directly — no MJCF is
@@ -189,7 +233,10 @@ class GraspReorientTask(BaseTask):
             cam_pos            = _CAM_POS,
             cam_rotmat         = _CAM_ROTMAT,
             cam_fps            = 30.0,
-            timestep           = 0.005,
+            # Eval ("real") sim timestep; rollout_dt = 10x this = 0.001 (the
+            # MuJoCo planning step the GPU rollouts use).
+            timestep           = 0.0005,
+            eval_substeps_per_rollout = 10,
             difficulty         = self.goal_difficulty,
         )
 
@@ -198,7 +245,7 @@ class GraspReorientTask(BaseTask):
 
     def initialize_task(self):
         mjm = self.mjm
-        obj_jnt = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "obj_freejoint")
+        obj_jnt = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "obj_joint")
 
         obj_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj")
         tip_ids = [
@@ -217,20 +264,16 @@ class GraspReorientTask(BaseTask):
             *tip_ids
         ], dtype=np.int32)
 
-        target_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_BODY, "obj_target")
-        mocap_id = mjm.body_mocapid[target_id]
-        self.target_pos          = self._mjd.mocap_pos[mocap_id]
-        self.target_quat         = self._mjd.mocap_quat[mocap_id].copy()
+        # Goal pose and canonical (initial-face) orientation come from the
+        # header constants, not a mocap body in the scene.
+        self.target_pos          = _TARGET_POS.copy()
+        self.target_quat         = _TARGET_QUAT.copy()
         self._canonical_quat     = self.target_quat.copy()
         self._face_index         = 0
 
-        if mjm.nkey > 0:
-            key_idx = 1 if mjm.nkey > 1 else 0
-            robot_start = self.index_vector[2]
-            n_manip = self.index_vector[3]
-            self.home_state = mjm.key_ctrl[key_idx, robot_start : robot_start + n_manip].copy()
-        else:
-            raise ValueError("No keyframe defined in the XML model. A keyframe is required to define the manipulator's home state.")
+        # The cost's joint target is the initial grasp command (_INIT_CTRL), so
+        # the joint term penalizes drift away from the commanded grasp pose.
+        self.home_state = _INIT_CTRL.copy()
 
         self.goal_vector = np.concatenate([
             self.target_pos, self.target_quat, self.home_state
@@ -249,13 +292,18 @@ class GraspReorientTask(BaseTask):
         self.weights_wp = wp.array(weights_list, dtype=wp.float32, device="cuda")
 
     def get_inital_state(self, rng: np.random.Generator):
+        # Fixed hand+cube initial state and control, applied to BOTH simulators:
+        # the driver resets the eval sim to (q0, v0) and mirrors it into the
+        # planning MjData, and uses ctrl0 as the initial command for both.
         mjm = self.mjm
-        if mjm.nkey > 0:
-            q0 = mjm.key_qpos[0].copy()
-            v0 = mjm.key_qvel[0].copy()
-            ctrl0 = mjm.key_ctrl[0].copy()
-        else:
-            raise ValueError("No keyframe defined in the XML model. A keyframe is required for the initial state.")
+        if _INIT_QPOS.shape[0] != mjm.nq or _INIT_CTRL.shape[0] != mjm.nu:
+            raise ValueError(
+                f"_INIT_QPOS ({_INIT_QPOS.shape[0]}) / _INIT_CTRL "
+                f"({_INIT_CTRL.shape[0]}) do not match model nq={mjm.nq} / nu={mjm.nu}."
+            )
+        q0 = _INIT_QPOS.copy()
+        v0 = np.zeros(mjm.nv, dtype=np.float64)
+        ctrl0 = _INIT_CTRL.copy()
         return q0, v0, ctrl0
 
     @property
@@ -432,13 +480,14 @@ class GraspReorientTask(BaseTask):
             nv             = self.mjm.nv,
             joint_channels = joint_channels,
             float_channels = float_channels,
-            n_ctrl         = 0,
             weld_base      = True,             # welds "base" to world at identity
             video_path     = video_path,
             # Position control via Drake's PidController. pid_plant_dt is the eval
             # plant's discrete step; it must be far smaller than the control dt
             # because the discrete SAP solver treats PID actuation explicitly and
             # diverges at large steps (mirrors tests/view_model_drake.py's 1e-4).
-            pid_plant_dt   = 0.0001,
+            # Half the nominal eval timestep keeps the SAP solver well inside its
+            # stable range regardless of how config.timestep is tuned.
+            pid_plant_dt   = self.config.timestep / 2.0,
             pid            = pid,
         )

@@ -24,6 +24,10 @@ class MujocoSimulator(EvalSimulator):
         width: int = 640,
     ):
         self.mjm = mjm
+        # The eval sim runs at the (fine) eval timestep, independent of whatever
+        # the loaded XML declared. rollout_dt = config.timestep * substeps is
+        # applied to the planning model separately (see the driver).
+        self.mjm.opt.timestep = float(config.timestep)
         self.mjd = mujoco.MjData(mjm)
         self._config = config
         self._camera_name = camera_name

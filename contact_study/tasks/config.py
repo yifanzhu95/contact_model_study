@@ -80,11 +80,12 @@ class TaskConfig:
     xml_path_template:  str | None = None
 
     # --- ROLLOUT (planning) model source -----------------------------------
-    # Path to the model the GPU rollouts plan with. For cart_pole this is a
-    # URDF compiled to MJCF via MjSpec; for grasp it is the tuned MJCF scene.
+    # Path to the MJCF the GPU rollouts plan with (precompiled, loaded as-is).
     rollout_model_path: str | None = None
     rollout_is_urdf:    bool       = False
-    # Where the compiled MJCF is written when rollout_is_urdf is True.
+    # Precompiled MJCF path passed to MjModel.from_xml_path by tasks (e.g.
+    # cart_pole) that load a static rollout model instead of using
+    # xml_path_template.
     mjcf_out_path:      str | None = None
 
     # --- EVAL ("real") simulator selection ---------------------------------
@@ -104,7 +105,15 @@ class TaskConfig:
     cam_fps:    float = 30.0
 
     # --- dynamics / control ------------------------------------------------
-    timestep:       float = 0.02
+    # Eval ("real") simulator timestep (s) — the fine, high-fidelity step the
+    # EvalSimulator integrates at. The rollout/planning model runs coarser:
+    #   rollout_dt = timestep * eval_substeps_per_rollout
+    # i.e. the eval sim takes `eval_substeps_per_rollout` steps for each single
+    # rollout step. The driver infers rollout_dt from these and stamps it onto
+    # the planning model. Control frequency stays a separate knob (MPPI substeps:
+    #   control_dt = mppi_substeps * rollout_dt).
+    timestep:                  float = 0.002
+    eval_substeps_per_rollout: int   = 10
     # Absolute actuator command range (e.g. hand joint-target ctrlrange).
     control_limits: tuple[float, float] | None = None
     # Cart force clip for cart_pole (absolute, applied after delta integration).

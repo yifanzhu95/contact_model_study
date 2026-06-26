@@ -1,11 +1,12 @@
 """Cart-pole swing-up task — testing vehicle for the Drake eval pipeline.
 
-The MuJoCo *rollout* model is built from scenes/cart_pole.urdf via MjSpec (a
-position servo is added on the cart slider, a pole-tip site is added, and the
-compiled model is saved as scenes/cart_pole.xml). The *eval* environment is
-Drake, loading scenes/cart_pole.sdf (already exposes one CartSlider actuator and
-welds the cart to the world), PID-controlled to the same desired cart position.
-The URDF and SDF must stay parameter-consistent.
+The MuJoCo *rollout* model is loaded straight from the precompiled
+scenes/cart_pole.xml (cart-slider position servo + pole-tip site already
+baked in — no on-the-fly MjSpec build). The *eval* environment is Drake,
+loading scenes/cart_pole.urdf (its "base" link is welded to the world, and
+its CartSlider <transmission> gives Drake a ready-made actuator),
+PID-controlled to the same desired cart position. The XML and URDF are
+hand-maintained to stay parameter-consistent.
 
 Moved out of tests/test_drake.py and registered so it loads through the standard
 task registry. The pole hangs down at hinge angle 0 and is upright at ±π.
@@ -27,11 +28,11 @@ from .config import (
 )
 
 SCENES   = Path(__file__).parents[2] / "scenes"
-URDF     = SCENES / "cart_pole.urdf"   # source for the MuJoCo rollout model
-MJCF_OUT = SCENES / "cart_pole.xml"    # generated MJCF ("save as MJCF")
-SDF      = SCENES / "cart_pole.sdf"    # Drake "real" env model
+URDF     = SCENES / "cart_pole.urdf"   # Drake eval model
+MJCF_OUT = SCENES / "cart_pole.xml"    # precompiled MuJoCo rollout model
 
-TIMESTEP   = 0.02          # MuJoCo planning timestep (s); also the control dt
+TIMESTEP   = 0.002         # eval ("real") sim timestep (s); rollout_dt = 10x this = 0.02
+EVAL_SUBSTEPS_PER_ROLLOUT = 10  # eval steps per single rollout/planning step
 UPRIGHT    = float(np.pi)  # pole angle (rad) that points straight up
 # Desired cart x-position command range (m). The rail is +/-10 m (URDF); the
 # command is clipped to this so the cart stays in the camera's view (the strong
@@ -85,7 +86,7 @@ def cart_pole_cost_wp(qpos:      wp.array(dtype=float),
 
 
 class CartPoleTask(BaseTask):
-    """Cart-pole swing-up backed by a URDF-derived MuJoCo rollout model."""
+    """Cart-pole swing-up backed by a precompiled MuJoCo rollout model."""
 
     # Initial pole angle (rad). 0.0 = hanging straight down (swing-up). Set to
     # ~pi to start near upright (balance-only). Overridable before load().
@@ -111,47 +112,24 @@ class CartPoleTask(BaseTask):
                 "angle_term": 100.0, "pos_term": 100.0,
                 "cart_vel": 2.0, "pole_vel": 2.0,
             },
-            rollout_model_path = str(URDF),
-            rollout_is_urdf    = True,
+            rollout_model_path = str(MJCF_OUT),
+            rollout_is_urdf    = False,
             mjcf_out_path      = str(MJCF_OUT),
             eval_sim           = EvalSimulatorKind.DRAKE,
-            eval_model_path    = str(SDF),
+            eval_model_path    = str(URDF),
             cam_pos            = (0.0, -2.5, 0.25),
             cam_fps            = 30.0,
             timestep           = TIMESTEP,
+            eval_substeps_per_rollout = EVAL_SUBSTEPS_PER_ROLLOUT,
             control_limits     = (-CART_RANGE, CART_RANGE),
         )
 
-    # --- load: URDF -> add actuator -> compile -> save MJCF -----------------
+    # --- load: read the precompiled MJCF directly ---------------------------
     def load(self, full_path: str | None = None):
-        """Build the MuJoCo model from the URDF and persist it as MJCF."""
-        spec = mujoco.MjSpec.from_file(str(URDF))
-        spec.option.timestep   = self.config.timestep
-        spec.option.integrator = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
-
-        # Position servo on the cart slider matching the Drake PID eval, so the
-        # control signal means the same thing in rollout and eval: a desired cart
-        # x-position. A fixed-gain / affine-bias actuator yields
-        # force = kp*(ctrl - x) - kv*x_dot  (gainprm[0]=kp, biasprm=[0,-kp,-kv]).
-        act = spec.add_actuator()
-        act.name        = "cart_position"
-        act.target      = "CartSlider"
-        act.trntype     = mujoco.mjtTrn.mjTRN_JOINT
-        act.gaintype    = mujoco.mjtGain.mjGAIN_FIXED
-        act.gainprm     = [PID_KP, 0.0, 0.0] + list(act.gainprm[3:])
-        act.biastype    = mujoco.mjtBias.mjBIAS_AFFINE
-        act.biasprm     = [0.0, -PID_KP, -PID_KD] + list(act.biasprm[3:])
-        act.ctrllimited = mujoco.mjtLimited.mjLIMITED_TRUE
-        act.ctrlrange   = list(self.config.control_limits)
-
-        # A pole-tip site keeps the cost kernel's site arrays non-empty.
-        tip = spec.body("Pole").add_site()
-        tip.name = "pole_tip"
-        tip.pos  = [0.0, 0.0, -0.5]
-
-        self._mjm = spec.compile()
+        """Load the precompiled MuJoCo model (cart-slider position servo and
+        pole-tip site are already baked into scenes/cart_pole.xml)."""
+        self._mjm = mujoco.MjModel.from_xml_path(str(full_path or self.config.mjcf_out_path))
         self._mjd = mujoco.MjData(self._mjm)
-        Path(self.config.mjcf_out_path).write_text(spec.to_xml())
 
         self.initialize_task()
         return self._mjm, self._mjd
@@ -223,8 +201,7 @@ class CartPoleTask(BaseTask):
                 nq             = self.mjm.nq,
                 nv             = self.mjm.nv,
                 joint_channels = channels,
-                n_ctrl         = self.mjm.nu,
-                weld_base      = False,   # SDF already welds the cart to world
+                weld_base      = True,    # welds the URDF's "base" link to the world
                 video_path     = video_path,
                 # PID position control of the (only) actuated joint, the cart
                 # slider. The unactuated PolePin is left out of the projection.

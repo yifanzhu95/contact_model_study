@@ -18,7 +18,7 @@ feedback. The walk dimension is read from plant.num_actuators() at build time.
 
 Demo (cart-pole, 1 actuator):
     python tests/view_model_drake.py
-    python tests/view_model_drake.py --model scenes/cart_pole.sdf --sigma 0.05
+    python tests/view_model_drake.py --model scenes/cart_pole.urdf --sigma 0.05
 """
 
 from __future__ import annotations

@@ -46,6 +46,7 @@ def run_random_episode(
     settle_seconds: float = 0.0,
     delta:       float = 10.0,
     substeps:    int = 1,
+    eval_substeps: int | None = None,
     verbose:     bool = True,
 ) -> dict:
     # ---- ROLLOUT task (planning MjData + task success/goal logic) ---------
@@ -56,6 +57,13 @@ def run_random_episode(
         rollout_task.init_angle = init_angle
     mjm, mjd = rollout_task.load()
     cfg = rollout_task.config
+
+    # Eval ("real") sim runs at the fine cfg.timestep; the rollout model coarser.
+    # rollout_dt = eval_dt * eval_substeps_per_rollout, stamped onto the model.
+    eval_dt    = cfg.timestep
+    eval_substeps = eval_substeps if eval_substeps is not None else cfg.eval_substeps_per_rollout
+    rollout_dt = eval_dt * eval_substeps
+    mjm.opt.timestep = rollout_dt
 
     # ---- EVAL task + "real" simulator ------------------------------------
     eval_task = get_task(task_name, role=TaskRole.EVAL)
@@ -70,12 +78,13 @@ def run_random_episode(
     u = np.asarray(u0, dtype=float).copy()
 
     # Settle (objects fall to rest / hand closes onto the object). Hold the
-    # initial command each substep so a position-controlled hand doesn't go limp.
+    # initial command each rollout step so a position-controlled hand doesn't go
+    # limp; advance the eval sim a full rollout step (eval_substeps fine steps).
     if settle_seconds > 0.0:
-        n_settle = int(settle_seconds / sim.timestep)
+        n_settle = int(settle_seconds / rollout_dt)
         for _ in range(n_settle):
             sim.apply_control(u)
-            sim.step(1)
+            sim.step(eval_substeps)
 
     # Sample a fresh goal on the settled state. No-op for cart_pole.
     if hasattr(rollout_task, "sample_new_goal"):
@@ -93,12 +102,14 @@ def run_random_episode(
     else:
         clip_lo = clip_hi = None
 
-    control_dt = substeps * mjm.opt.timestep
-    n_steps    = int(sim_time / control_dt)
+    control_dt      = substeps * rollout_dt
+    eval_steps_per_control = substeps * eval_substeps
+    n_steps         = int(sim_time / control_dt)
     steps_to_success: int | None = None
 
     if verbose:
         print(f"  task={task_name}  eval_sim={cfg.eval_sim.value}  "
+              f"eval_dt={eval_dt*1e3:.2f}ms  rollout_dt={rollout_dt*1e3:.2f}ms  "
               f"control_dt={control_dt*1e3:.1f}ms  n_steps={n_steps}  "
               f"delta=±{delta}  controller=RANDOM")
 
@@ -126,9 +137,10 @@ def run_random_episode(
         if clip_lo is not None:
             u = np.clip(u, clip_lo, clip_hi)
 
-        # 3. Apply, advance the eval sim, capture a frame.
+        # 3. Apply, advance the eval sim (finer steps over the same control_dt),
+        #    capture a frame.
         sim.apply_control(u)
-        sim.step(substeps)
+        sim.step(eval_steps_per_control)
         sim.render()
 
         if verbose and t % 25 == 0:
@@ -151,7 +163,10 @@ def main():
     p.add_argument("--task",        type=str,   default="cart_pole")
     p.add_argument("--delta",       type=float, default=0.10,
                    help="Per-step random motor-delta magnitude (uniform in ±delta).")
-    p.add_argument("--substeps",    type=int,   default=1)
+    p.add_argument("--substeps",    type=int,   default=1,
+                   help="Rollout substeps per control step (control frequency knob).")
+    p.add_argument("--eval_substeps", type=int, default=None,
+                   help="Eval steps per rollout step (default: task config, usually 10).")
     p.add_argument("--sim_time",    type=float, default=10.0)
     p.add_argument("--init_angle",  type=float, default=0.0,
                    help="cart_pole initial pole angle (rad): 0=down, pi=upright.")
@@ -177,6 +192,7 @@ def main():
         settle_seconds = args.settle,
         delta          = args.delta,
         substeps       = args.substeps,
+        eval_substeps  = args.eval_substeps,
     )
 
 

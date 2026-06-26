@@ -22,7 +22,7 @@
     <geom size="1 1 0.01" pos="0 0 -0.25" type="box" rgba="0.4 0.45 0.5 1" />
     <body name="mcp_joint" pos="0.00328786 -0.023 0.0196947" quat="-0.612371 0.612376 0.353551 0.353552">
       <inertial pos="0 0 0" quat="0.388585 0.626468 -0.324549 0.592628" mass="0.044" diaginertia="1.47756e-05 1.31982e-05 6.0802e-06" />
-      <joint name="1" pos="0 0 0" axis="0 0 -1" range="-0.314 2.23" actuatorfrcrange="-0.95 0.95" />
+      <joint name="0" pos="0 0 0" axis="0 0 -1" range="-0.314 2.23" actuatorfrcrange="-0.95 0.95" />
       <geom size="0.01 0.003 0.017" pos="0 0.018 0.0147" type="box" />
       <geom size="0.014 0.02 0.01" pos="-0.027 0.042 0.015" type="box" />
       <geom size="0.017 0.003 0.01" pos="-0.0262 0.02 0.0146" type="box" />
@@ -31,7 +31,7 @@
       <geom size="0.007 0.01 0.002" pos="0 0.005 -0.001" type="box" />
       <body name="pip" pos="-0.0122 0.0381 0.0145" quat="0.500003 -0.5 -0.499997 0.5">
         <inertial pos="0 0 0" quat="0.709913 0.704273 -0.000363156 0.00475427" mass="0.032" diaginertia="4.7981e-06 4.23406e-06 2.86184e-06" />
-        <joint name="0" pos="0 0 0" axis="0 0 -1" range="-1.047 1.047" actuatorfrcrange="-0.95 0.95" />
+        <joint name="1" pos="0 0 0" axis="0 0 -1" range="-1.047 1.047" actuatorfrcrange="-0.95 0.95" />
         <geom size="0.017 0.013 0.011" pos="0.0075 -0.0002 -0.011" type="box" />
         <body name="dip" pos="0.015 0.0143 -0.013" quat="0.500003 0.5 -0.5 0.499997">
           <inertial pos="0 0 0" quat="-0.252689 0.659216 0.238844 0.666735" mass="0.037" diaginertia="6.68256e-06 6.24841e-06 5.02002e-06" />
@@ -55,7 +55,7 @@
     </body>
     <body name="mcp_joint_2" pos="0.00320119 0.0224 0.0197446" quat="-0.612371 0.612376 0.353551 0.353552">
       <inertial pos="0 0 0" quat="0.388585 0.626468 -0.324549 0.592628" mass="0.044" diaginertia="1.47756e-05 1.31982e-05 6.0802e-06" />
-      <joint name="5" pos="0 0 0" axis="0 0 -1" range="-0.314 2.23" actuatorfrcrange="-0.95 0.95" />
+      <joint name="4" pos="0 0 0" axis="0 0 -1" range="-0.314 2.23" actuatorfrcrange="-0.95 0.95" />
       <geom size="0.01 0.003 0.017" pos="0 0.018 0.0147" type="box" />
       <geom size="0.014 0.02 0.01" pos="-0.027 0.042 0.015" type="box" />
       <geom size="0.017 0.003 0.01" pos="-0.0262 0.02 0.0146" type="box" />
@@ -64,7 +64,7 @@
       <geom size="0.007 0.01 0.002" pos="0 0.005 -0.001" type="box" />
       <body name="pip_2" pos="-0.0122 0.0381 0.0145" quat="0.500003 -0.5 -0.499997 0.5">
         <inertial pos="0 0 0" quat="0.709913 0.704273 -0.000363156 0.00475427" mass="0.032" diaginertia="4.7981e-06 4.23406e-06 2.86184e-06" />
-        <joint name="4" pos="0 0 0" axis="0 0 -1" range="-1.047 1.047" actuatorfrcrange="-0.95 0.95" />
+        <joint name="5" pos="0 0 0" axis="0 0 -1" range="-1.047 1.047" actuatorfrcrange="-0.95 0.95" />
         <geom size="0.017 0.013 0.011" pos="0.0075 -0.0002 -0.011" type="box" />
         <body name="dip_2" pos="0.015 0.0143 -0.013" quat="0.500003 0.5 -0.5 0.499997">
           <inertial pos="0 0 0" quat="-0.252689 0.659216 0.238844 0.666735" mass="0.037" diaginertia="6.68256e-06 6.24841e-06 5.02002e-06" />
@@ -88,7 +88,7 @@
     </body>
     <body name="mcp_joint_3" pos="0.00320979 0.0678 0.0197395" quat="-0.612371 0.612376 0.353551 0.353552">
       <inertial pos="0 0 0" quat="0.388585 0.626468 -0.324549 0.592628" mass="0.044" diaginertia="1.47756e-05 1.31982e-05 6.0802e-06" />
-      <joint name="9" pos="0 0 0" axis="0 0 -1" range="-0.314 2.23" actuatorfrcrange="-0.95 0.95" />
+      <joint name="8" pos="0 0 0" axis="0 0 -1" range="-0.314 2.23" actuatorfrcrange="-0.95 0.95" />
       <geom size="0.01 0.003 0.017" pos="0 0.018 0.0147" type="box" />
       <geom size="0.014 0.02 0.01" pos="-0.027 0.042 0.015" type="box" />
       <geom size="0.017 0.003 0.01" pos="-0.0262 0.02 0.0146" type="box" />
@@ -97,7 +97,7 @@
       <geom size="0.007 0.01 0.002" pos="0 0.005 -0.001" type="box" />
       <body name="pip_3" pos="-0.0122 0.0381 0.0145" quat="0.500003 -0.5 -0.499997 0.5">
         <inertial pos="0 0 0" quat="0.709913 0.704273 -0.000363156 0.00475427" mass="0.032" diaginertia="4.7981e-06 4.23406e-06 2.86184e-06" />
-        <joint name="8" pos="0 0 0" axis="0 0 -1" range="-1.047 1.047" actuatorfrcrange="-0.95 0.95" />
+        <joint name="9" pos="0 0 0" axis="0 0 -1" range="-1.047 1.047" actuatorfrcrange="-0.95 0.95" />
         <geom size="0.017 0.013 0.011" pos="0.0075 -0.0002 -0.011" type="box" />
         <body name="dip_3" pos="0.015 0.0143 -0.013" quat="0.500003 0.5 -0.5 0.499997">
           <inertial pos="0 0 0" quat="-0.252689 0.659216 0.238844 0.666735" mass="0.037" diaginertia="6.68256e-06 6.24841e-06 5.02002e-06" />

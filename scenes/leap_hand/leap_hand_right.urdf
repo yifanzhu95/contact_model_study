@@ -239,7 +239,7 @@
     <child link="pip"/>
     <axis xyz="0 0 -1"/>
     <limit effort="0.95" velocity="8.48" lower="-1.047" upper="1.047"/>
-    <joint_properties friction="0.0"/>
+    <dynamics damping="0.1" />
   </joint>
 
   <transmission name="0_trans">
@@ -257,7 +257,7 @@
     <child link="mcp_joint"/>
     <axis xyz="0 0 -1"/>
     <limit effort="0.95" velocity="8.48" lower="-0.314" upper="2.23"/>
-    <joint_properties friction="0.0"/>
+    <dynamics damping="0.1" />
   </joint>
 
   <transmission name="1_trans">
@@ -275,7 +275,7 @@
     <child link="dip"/>
     <axis xyz="0 0 -1"/>
     <limit effort="0.95" velocity="8.48" lower="-0.506" upper="1.885"/>
-    <joint_properties friction="0.0"/>
+    <dynamics damping="0.1" />
   </joint>
 
   <transmission name="2_trans">
@@ -293,7 +293,7 @@
     <child link="fingertip"/>
     <axis xyz="0 0 -1"/>
     <limit effort="0.95" velocity="8.48" lower="-0.366" upper="2.042"/>
-    <joint_properties friction="0.0"/>
+    <dynamics damping="0.1" />
   </joint>
 
   <transmission name="3_trans">
@@ -459,7 +459,7 @@
     <child link="pip_2"/>
     <axis xyz="0 0 -1"/>
     <limit effort="0.95" velocity="8.48" lower="-1.047" upper="1.047"/>
-    <joint_properties friction="0.0"/>
+    <dynamics damping="0.1" />
   </joint>
 
   <transmission name="4_trans">
@@ -477,7 +477,7 @@
     <child link="mcp_joint_2"/>
     <axis xyz="0 0 -1"/>
     <limit effort="0.95" velocity="8.48" lower="-0.314" upper="2.23"/>
-    <joint_properties friction="0.0"/>
+    <dynamics damping="0.1" />
   </joint>
 
   <transmission name="5_trans">
@@ -495,7 +495,7 @@
     <child link="dip_2"/>
     <axis xyz="0 0 -1"/>
     <limit effort="0.95" velocity="8.48" lower="-0.506" upper="1.885"/>
-    <joint_properties friction="0.0"/>
+    <dynamics damping="0.1" />
   </joint>
 
   <transmission name="6_trans">
@@ -513,7 +513,7 @@
     <child link="fingertip_2"/>
     <axis xyz="0 0 -1"/>
     <limit effort="0.95" velocity="8.48" lower="-0.366" upper="2.042"/>
-    <joint_properties friction="0.0"/>
+    <dynamics damping="0.1" />
   </joint>
 
   <transmission name="7_trans">
@@ -679,7 +679,7 @@
     <child link="pip_3"/>
     <axis xyz="0 0 -1"/>
     <limit effort="0.95" velocity="8.48" lower="-1.047" upper="1.047"/>
-    <joint_properties friction="0.0"/>
+    <dynamics damping="0.1" />
   </joint>
 
   <transmission name="8_trans">
@@ -697,7 +697,7 @@
     <child link="mcp_joint_3"/>
     <axis xyz="0 0 -1"/>
     <limit effort="0.95" velocity="8.48" lower="-0.314" upper="2.23"/>
-    <joint_properties friction="0.0"/>
+    <dynamics damping="0.1" />
   </joint>
 
   <transmission name="9_trans">
@@ -715,7 +715,7 @@
     <child link="dip_3"/>
     <axis xyz="0 0 -1"/>
     <limit effort="0.95" velocity="8.48" lower="-0.506" upper="1.885"/>
-    <joint_properties friction="0.0"/>
+    <dynamics damping="0.1" />
   </joint>
 
   <transmission name="10_trans">
@@ -733,7 +733,7 @@
     <child link="fingertip_3"/>
     <axis xyz="0 0 -1"/>
     <limit effort="0.95" velocity="8.48" lower="-0.366" upper="2.042"/>
-    <joint_properties friction="0.0"/>
+    <dynamics damping="0.1" />
   </joint>
 
   <transmission name="11_trans">
@@ -881,7 +881,7 @@
     <child link="thumb_temp_base"/>
     <axis xyz="0 0 -1"/>
     <limit effort="0.95" velocity="8.48" lower="-0.349" upper="2.094"/>
-    <joint_properties friction="0.0"/>
+    <dynamics damping="0.1" />
   </joint>
 
   <transmission name="12_trans">
@@ -899,7 +899,7 @@
     <child link="thumb_pip"/>
     <axis xyz="0 0 -1"/>
     <limit effort="0.95" velocity="8.48" lower="-0.47" upper="2.443"/>
-    <joint_properties friction="0.0"/>
+    <dynamics damping="0.1" />
   </joint>
 
   <transmission name="13_trans">
@@ -917,7 +917,7 @@
     <child link="thumb_dip"/>
     <axis xyz="0 0 -1"/>
     <limit effort="0.95" velocity="8.48" lower="-1.20" upper="1.90"/>
-    <joint_properties friction="0.0"/>
+    <dynamics damping="0.1" />
   </joint>
 
   <transmission name="14_trans">
@@ -935,7 +935,7 @@
     <child link="thumb_fingertip"/>
     <axis xyz="0 0 -1"/>
     <limit effort="0.95" velocity="8.48" lower="-1.34" upper="1.88"/>
-    <joint_properties friction="0.0"/>
+    <dynamics damping="0.1" />
   </joint>
 
   <transmission name="15_trans">
