@@ -8,21 +8,24 @@ from .base import BaseTask, ContactComplexity, register, SCENES_DIR
 from .config import TaskConfig, EvalSimulatorKind
 
 # --- LEAP hand: MuJoCo(rollout) <-> URDF(Drake eval) joint correspondence -----
-# MuJoCo control/qpos order is [if_mcp,if_rot,if_pip,if_dip, mf_*, rf_*,
-# th_cmc,th_axl,th_mcp,th_ipl]. The URDF (scenes/leap_hand/leap_hand_right.urdf)
-# names joints "0".."15" in a different order; this list maps MuJoCo control
-# index -> URDF joint name by *kinematic chain position* (validated against the
-# per-joint limits — the 12 finger joints match exactly; see KNOWN GAP below).
+# The MuJoCo hand and the Drake eval URDF (scenes/leap_hand/leap_hand_right.urdf)
+# both name their joints "0".."15", but assign those names DIFFERENTLY: e.g. for
+# each finger MuJoCo "0"=mcp, "1"=rot while the URDF has "0"=rot, "1"=mcp. So the
+# map is by *kinematic role* (per-finger order [mcp, rot, pip, dip]), keyed by
+# MuJoCo qpos slot / actuator index -> URDF joint name. Validated against the
+# per-joint limit ranges (the role fingerprint); see KNOWN GAP below. This is a
+# naming map, NOT a reordering, so it is unaffected by a MuJoCo joint *rename*
+# that preserves the per-finger kinematic order.
 #
-# KNOWN GAP (eval fidelity): the two thumb middle joints (th_axl, th_mcp) have
-# DIFFERENT limit ranges between the URDF and the MuJoCo hand, i.e. the thumb
-# kinematics/zero-references differ between the two models. Finger behavior is
-# faithful; thumb eval will be approximate until the URDF thumb is recalibrated.
+# KNOWN GAP (eval fidelity): the two thumb middle joints have DIFFERENT limit
+# ranges between the URDF and the MuJoCo hand, i.e. the thumb kinematics/zero-
+# references differ between the two models. Finger behavior is faithful; thumb
+# eval will be approximate until the URDF thumb is recalibrated.
 _MJ_CTRL_TO_URDF_JOINT = [
-    "1", "0", "2", "3",     # index : if_mcp, if_rot, if_pip, if_dip
-    "5", "4", "6", "7",     # middle: mf_mcp, mf_rot, mf_pip, mf_dip
-    "9", "8", "10", "11",   # ring  : rf_mcp, rf_rot, rf_pip, rf_dip
-    "12", "13", "14", "15", # thumb : th_cmc, th_axl, th_mcp, th_ipl
+    "1", "0", "2", "3",     # index : mcp, rot, pip, dip
+    "5", "4", "6", "7",     # middle
+    "9", "8", "10", "11",   # ring
+    "12", "13", "14", "15", # thumb
 ]
 
 # The rollout (MuJoCo) model: the bare hand asset carrying the floor, the free
@@ -41,7 +44,7 @@ GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites.xml"
 # Drake PidController gains for the eval hand (position control, mirroring the
 # MuJoCo position servos kp=3.0 kv=0.01). Starting points to tune against Drake's
 # solver; _PID_EFFORT is the per-joint actuator force clamp DrakeSimulator adds.
-_PID_KP, _PID_KI, _PID_KD, _PID_EFFORT = 3.0, 0.0, 0.05, 10.0
+_PID_KP, _PID_KI, _PID_KD, _PID_EFFORT = 3.0, 0.0, 0.05, 100.0
 
 # Fixed initial state + control for the hand and cube, used to initialize BOTH
 # the rollout and eval simulators (overrides the scene keyframe). Layout:
@@ -81,7 +84,7 @@ def _euler_to_quat(euler) -> np.ndarray:
 
 # Goal/target pose for the cube reorientation, defined here rather than read
 # from a mocap body in the scene. pos + intrinsic-xyz Euler (rad).
-_TARGET_POS   = np.array([0.012, 0.04, 0.085], dtype=np.float64)
+_TARGET_POS   = np.array([0.03, 0.04, 0.09], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
 _TARGET_EULER = np.array([0.0, 0.5235, 0.0], dtype=np.float64)
 _TARGET_QUAT  = _euler_to_quat(_TARGET_EULER)   # wxyz
 
@@ -136,6 +139,23 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
         dq = qvel[robot_qpos_adr + i]
         c_joint_velo = c_joint_velo + dq * dq
 
+    # Contact: squared distance from each fingertip to the cube *surface* (a box
+    # of half-extent 0.035), evaluated in the cube's local frame. This is an
+    # exterior box SDF: it is 0 once a tip touches the cube and stays 0 as the
+    # finger presses in, so closing onto the cube monotonically lowers the cost
+    # (the old distance-to-center penalty bottomed out above the surface and then
+    # *rose* as fingers curled past, fighting a firm grasp).
+    # half = float(0.035)
+    # # MuJoCo quat is (w,x,y,z); Warp quat is (x,y,z,w).
+    # q_cube = wp.quat(q_obj_v4[1], q_obj_v4[2], q_obj_v4[3], q_obj_v4[0])
+    # c_contact = float(0.0)
+    # for i in range(5, 9):
+    #     p_tip = site_xpos[indices[i]]
+    #     local = wp.quat_rotate_inv(q_cube, p_tip - p_obj)
+    #     dx = wp.max(wp.abs(local[0]) - half, 0.0)
+    #     dy = wp.max(wp.abs(local[1]) - half, 0.0)
+    #     dz = wp.max(wp.abs(local[2]) - half, 0.0)
+    #     c_contact = c_contact + (dx * dx + dy * dy + dz * dz)
     c_contact = float(0.0)
     for i in range(5, 9):
         p_tip = site_xpos[indices[i]]
@@ -212,15 +232,15 @@ class GraspReorientTask(BaseTask):
             max_steps          = 1000,
             success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
             cost_weights       = {
-                "w_quat": 0.0, #5.0
-                "w_pos": 0.0, #40.0
+                "w_quat": 10.0, #5.0
+                "w_pos": 10.0, #40.0
                 "w_velo": 0.0,
                 "w_contact": 2.5,#2.5
-                "w_joint": 0.01, #0.1
+                "w_joint": 0.2, #0.1
                 "w_joint_velo": 0.0,
-                "w_fallen": 0.0, #30.0,
-                "w_quat_term": 0.0, #10.0
-                "w_pos_term": 0.0, #10.0
+                "w_fallen": 30.0, #30.0,
+                "w_quat_term": 10.0, #10.0
+                "w_pos_term": 10.0, #10.0
                 "w_fallen_term": 0.0,
             },
             # BaseTask.load() loads this static file directly — no MJCF is
@@ -459,6 +479,10 @@ class GraspReorientTask(BaseTask):
         # to the world at identity (weld_base=True) just like the MuJoCo
         # rollout's own base->palm_lower transform, so both world frames and
         # both floor/cube placements coincide automatically.
+        #
+        # _MJ_CTRL_TO_URDF_JOINT maps MuJoCo qpos slot / actuator index -> URDF
+        # joint name by kinematic role; both share qpos==ctrl order, so the same
+        # list keys joint_channels (q_adr=i) and the PID's ctrl_joint_names.
         joint_channels = [
             DrakeJointChannel(_MJ_CTRL_TO_URDF_JOINT[i], "revolute", q_adr=i, v_adr=i)
             for i in range(16)

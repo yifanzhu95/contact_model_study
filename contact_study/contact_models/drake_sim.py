@@ -193,6 +193,7 @@ class DrakeSimulator(EvalSimulator):
             self._video = VideoWriter.AddToBuilder(
                 filename=video_path, builder=builder,
                 sensor_pose=camera_pose, fps=config.cam_fps,
+                width=config.cam_width, height=config.cam_height,
             )
 
         self._diagram = builder.Build()

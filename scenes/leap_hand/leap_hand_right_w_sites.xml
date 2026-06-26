@@ -156,18 +156,21 @@
     </body>
   </worldbody>
   <actuator>
-    <position name="0" joint="0" ctrllimited="true" ctrlrange="-1.047 1.047" />
-    <position name="1" joint="1" ctrllimited="true" ctrlrange="-0.314 2.23" />
+    <position name="0" joint="0" ctrllimited="true" ctrlrange="-0.314 2.23" />
+    <position name="1" joint="1" ctrllimited="true" ctrlrange="-1.047 1.047" />
     <position name="2" joint="2" ctrllimited="true" ctrlrange="-0.506 1.885" />
     <position name="3" joint="3" ctrllimited="true" ctrlrange="-0.366 2.042" />
-    <position name="4" joint="4" ctrllimited="true" ctrlrange="-1.047 1.047" />
-    <position name="5" joint="5" ctrllimited="true" ctrlrange="-0.314 2.23" />
+
+    <position name="4" joint="4" ctrllimited="true" ctrlrange="-0.314 2.23" />
+    <position name="5" joint="5" ctrllimited="true" ctrlrange="-1.047 1.047" />
     <position name="6" joint="6" ctrllimited="true" ctrlrange="-0.506 1.885" />
     <position name="7" joint="7" ctrllimited="true" ctrlrange="-0.366 2.042" />
-    <position name="8" joint="8" ctrllimited="true" ctrlrange="-1.047 1.047" />
-    <position name="9" joint="9" ctrllimited="true" ctrlrange="-0.314 2.23" />
+
+    <position name="8" joint="8" ctrllimited="true" ctrlrange="-0.314 2.23" />
+    <position name="9" joint="9" ctrllimited="true" ctrlrange="-1.047 1.047" />
     <position name="10" joint="10" ctrllimited="true" ctrlrange="-0.506 1.885" />
     <position name="11" joint="11" ctrllimited="true" ctrlrange="-0.366 2.042" />
+    
     <position name="12" joint="12" ctrllimited="true" ctrlrange="-0.349 2.094" />
     <position name="13" joint="13" ctrllimited="true" ctrlrange="-0.47 2.443" />
     <position name="14" joint="14" ctrllimited="true" ctrlrange="-1.2 1.9" />

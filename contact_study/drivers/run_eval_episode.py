@@ -49,7 +49,7 @@ from contact_study.contact_models.config import ContactModelConfig
 from contact_study.evaluation.metrics import EpisodeResult
 from contact_study.planners.mppi import MPPIController, MPPIConfig
 from contact_study.tasks.base import get_task
-from contact_study.tasks.config import TaskRole
+from contact_study.tasks.config import TaskRole, EvalSimulatorKind
 
 MODEL_FACTORIES = {
     "M1": ContactModelConfig.M1,
@@ -70,6 +70,7 @@ def run_eval_episode(
     video_path:  str | None = None,
     settle_seconds: float = 0.0,
     eval_substeps: int | None = None,
+    eval_sim:    EvalSimulatorKind | None = None,
     condition:   str  = "B",
     debug:       bool = False,
     verbose:     bool = True,
@@ -101,6 +102,9 @@ def run_eval_episode(
     # ---- EVAL task + "real" simulator ------------------------------------
     eval_task = get_task(task_name, role=TaskRole.EVAL)
     eval_task.load()
+    # eval_sim=None keeps the task's TaskConfig default; otherwise override it.
+    if eval_sim is not None:
+        eval_task.config.eval_sim = eval_sim
     sim = eval_task.make_eval_simulator(video_path=video_path, render=True)
 
     # ---- initial state ----------------------------------------------------
@@ -143,7 +147,7 @@ def run_eval_episode(
     steps_to_success: int | None = None
 
     if verbose:
-        print(f"  task={task_name}  eval_sim={cfg.eval_sim.value}  "
+        print(f"  task={task_name}  eval_sim={eval_task.config.eval_sim.value}  "
               f"eval_dt={eval_dt*1e3:.2f}ms  rollout_dt={rollout_dt*1e3:.2f}ms  "
               f"control_dt={control_dt*1e3:.1f}ms  max_steps={n_steps}  "
               f"horizon={mppi_cfg.horizon}  n_samples={mppi_cfg.n_samples}")
@@ -218,16 +222,19 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--task",        type=str,   default="cart_pole")
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
-    p.add_argument("--n_samples",   type=int,   default=256)
+    p.add_argument("--n_samples",   type=int,   default=1024)
     p.add_argument("--horizon",     type=int,   default=128)
-    p.add_argument("--temperature", type=float, default=2.0)
-    p.add_argument("--noise_sigma", type=float, default=0.01)
-    p.add_argument("--delta",       type=float, default=0.1,
+    p.add_argument("--temperature", type=float, default=50.00)#0.750)
+    p.add_argument("--noise_sigma", type=float, default=0.01,)#0.001)
+    p.add_argument("--delta",       type=float, default=0.1,#0.05,
                    help="Per-step MPPI delta clip magnitude (action units).")
     p.add_argument("--substeps",    type=int,   default=1,
                    help="MPPI rollout substeps per control step (control frequency knob).")
     p.add_argument("--eval_substeps", type=int, default=None,
                    help="Eval steps per rollout step (default: task config, usually 10).")
+    p.add_argument("--eval_sim",    type=str,   default="none",
+                   choices=["none", "mujoco", "drake"],
+                   help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
     p.add_argument("--seed",        type=int,   default=0)
     p.add_argument("--video",       type=str,   default=None)
@@ -261,6 +268,8 @@ def main():
         debug          = args.debug,
     )
 
+    eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
+
     result = run_eval_episode(
         task_name   = args.task,
         contact_cfg = contact_cfg,
@@ -269,6 +278,7 @@ def main():
         video_path  = video_path,
         settle_seconds = args.settle,
         eval_substeps  = args.eval_substeps,
+        eval_sim       = eval_sim,
         debug          = args.debug,
     )
 

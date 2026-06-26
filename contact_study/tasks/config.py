@@ -103,6 +103,8 @@ class TaskConfig:
         (0.0, -1.0, 0.0),
     )
     cam_fps:    float = 30.0
+    cam_width:  int   = 640
+    cam_height: int   = 480
 
     # --- dynamics / control ------------------------------------------------
     # Eval ("real") simulator timestep (s) — the fine, high-fidelity step the

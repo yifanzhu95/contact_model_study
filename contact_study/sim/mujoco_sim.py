@@ -20,9 +20,12 @@ class MujocoSimulator(EvalSimulator):
         config,
         render: bool = True,
         camera_name: str | None = None,
-        height: int = 480,
-        width: int = 640,
+        height: int | None = None,
+        width: int | None = None,
     ):
+        height = height if height is not None else config.cam_height
+        width = width if width is not None else config.cam_width
+
         self.mjm = mjm
         # The eval sim runs at the (fine) eval timestep, independent of whatever
         # the loaded XML declared. rollout_dt = config.timestep * substeps is
@@ -37,6 +40,15 @@ class MujocoSimulator(EvalSimulator):
             mujoco.Renderer(mjm, height=height, width=width) if render else None
         )
         self._cam = self._build_camera()
+
+        # Capture frames at cam_fps, not every render() call — render() is
+        # called once per (fine) sim step, and at cam_fps=30 with a small
+        # timestep that's far more frames than the video needs, so storing all
+        # of them blows up memory on long episodes. Mirrors Drake's VideoWriter,
+        # which already captures on its own fps clock during AdvanceTo.
+        self._t = 0.0
+        self._frame_dt = 1.0 / config.cam_fps if config.cam_fps > 0 else 0.0
+        self._next_frame_t = 0.0
 
     # -- camera --------------------------------------------------------------
     def _build_camera(self):
@@ -64,6 +76,8 @@ class MujocoSimulator(EvalSimulator):
 
     # -- EvalSimulator interface --------------------------------------------
     def reset(self, qpos: np.ndarray, qvel: np.ndarray) -> None:
+        self._t = 0.0
+        self._next_frame_t = 0.0
         self.set_state(qpos, qvel)
 
     def set_state(self, qpos: np.ndarray, qvel: np.ndarray) -> None:
@@ -80,10 +94,14 @@ class MujocoSimulator(EvalSimulator):
     def step(self, n_substeps: int = 1) -> None:
         for _ in range(n_substeps):
             mujoco.mj_step(self.mjm, self.mjd)
+        self._t += n_substeps * self.mjm.opt.timestep
 
     def render(self) -> None:
         if self._renderer is None:
             return
+        if self._frame_dt > 0 and self._t + 1e-9 < self._next_frame_t:
+            return
+        self._next_frame_t += self._frame_dt
         self._renderer.update_scene(self.mjd, camera=self._cam)
         self._frames.append(self._renderer.render())
 
@@ -91,7 +109,11 @@ class MujocoSimulator(EvalSimulator):
         if not self._frames:
             return
         import mediapy as media
-        media.write_video(path, self._frames, fps=int(self._config.cam_fps))
+        # mediapy defaults to the h264 codec and does not infer "gif" from the
+        # extension, so the ffmpeg GIF muxer rejects an h264-encoded .gif. Select
+        # the codec from the extension (Drake's eval path writes gifs natively).
+        kwargs = {"codec": "gif"} if str(path).lower().endswith(".gif") else {}
+        media.write_video(path, self._frames, fps=int(self._config.cam_fps), **kwargs)
 
     @property
     def timestep(self) -> float:
