@@ -224,10 +224,10 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--task",        type=str,   default="cart_pole")
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
-    p.add_argument("--n_samples",   type=int,   default=1024)
+    p.add_argument("--n_samples",   type=int,   default=256)
     p.add_argument("--horizon",     type=int,   default=48)
-    p.add_argument("--temperature", type=float, default=2.00)#0.750)
-    p.add_argument("--noise_sigma", type=float, default=0.01,)#0.001)
+    p.add_argument("--temperature", type=float, default=0.5)#0.750)
+    p.add_argument("--noise_sigma", type=float, default=0.005,)#0.001)
     p.add_argument("--delta",       type=float, default=0.1,#0.05,
                    help="Per-step MPPI delta clip magnitude (action units).")
     p.add_argument("--substeps",    type=int,   default=1,
@@ -238,7 +238,7 @@ def main():
                    choices=["none", "mujoco", "drake"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
-    p.add_argument("--seed",        type=int,   default=0)
+    p.add_argument("--seed",        type=int,   default=None)
     p.add_argument("--video",       type=str,   default=None)
     p.add_argument("--results",     type=str,   default=None,
                    help="JSON path for the episode result (auto-named if omitted).")
@@ -262,7 +262,7 @@ def main():
         noise_sigma    = args.noise_sigma,
         substeps       = args.substeps,
         warm_start     = True,
-        use_full_graph = False,
+        use_full_graph = True,
         delta_range    = (-args.delta, args.delta),
         nconmax        = 200,
         njmax          = 500,
