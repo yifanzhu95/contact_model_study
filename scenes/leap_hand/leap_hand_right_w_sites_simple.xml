@@ -1,7 +1,10 @@
 <mujoco model="leap_right">
   <default>
-    <position kp="3.0" kv="0.0" />
+    <position kp="3.0" kv="0.01" />
+    <joint damping="0.03"/>
+    <!--
     <joint damping="0.03" frictionloss="0.001" />
+    -->
   </default>
   <compiler angle="radian" />
   <asset>

@@ -39,12 +39,12 @@ _MJ_CTRL_TO_URDF_JOINT = [
 # the Drake "base" link to the world at identity (DrakeSimulator's
 # `weld_base=True`) lines palm_lower up with the MuJoCo placement with no extra
 # calibration, and "obj"/"floor" need no Drake-side scene-building at all.
-GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites.xml"
+GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites_simple.xml"
 
 # Drake PidController gains for the eval hand (position control, mirroring the
 # MuJoCo position servos kp=3.0 kv=0.01). Starting points to tune against Drake's
 # solver; _PID_EFFORT is the per-joint actuator force clamp DrakeSimulator adds.
-_PID_KP, _PID_KI, _PID_KD, _PID_EFFORT = 3.0, 0.0, 0.05, 100.0
+_PID_KP, _PID_KI, _PID_KD, _PID_EFFORT = 3.0, 0.0, 0.01, 100.0
 
 # Fixed initial state + control for the hand and cube, used to initialize BOTH
 # the rollout and eval simulators (overrides the scene keyframe). Layout:
@@ -159,12 +159,13 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
     c_contact = float(0.0)
     for i in range(5, 9):
         p_tip = site_xpos[indices[i]]
-        dp = wp.length(p_obj - p_tip) - float(0.035)
+        dp = wp.length(p_obj - p_tip) #- float(0.035)
+        #dp = wp.length(p_tip) - float(0.035)
         if dp > 0.0:
             c_contact = c_contact + dp*dp
 
     fallen = float(0.0)
-    if qpos[obj_qpos_adr + 2] < 0.05:
+    if qpos[obj_qpos_adr + 2] < 0.06:
         fallen = 1.0
 
     c_velo = wp.dot(v_obj, v_obj) + wp.dot(w_obj, w_obj)
@@ -232,11 +233,11 @@ class GraspReorientTask(BaseTask):
             max_steps          = 1000,
             success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
             cost_weights       = {
-                "w_quat": 10.0, #5.0
-                "w_pos": 10.0, #40.0
+                "w_quat": 5.0, #5.0
+                "w_pos": 40.0, #40.0
                 "w_velo": 0.0,
                 "w_contact": 2.5,#2.5
-                "w_joint": 0.2, #0.1
+                "w_joint": 0.1, #0.1
                 "w_joint_velo": 0.0,
                 "w_fallen": 30.0, #30.0,
                 "w_quat_term": 10.0, #10.0
@@ -255,7 +256,7 @@ class GraspReorientTask(BaseTask):
             cam_fps            = 30.0,
             # Eval ("real") sim timestep; rollout_dt = 10x this = 0.001 (the
             # MuJoCo planning step the GPU rollouts use).
-            timestep           = 0.0005,
+            timestep           = 0.0001,
             eval_substeps_per_rollout = 10,
             difficulty         = self.goal_difficulty,
         )
