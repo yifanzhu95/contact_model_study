@@ -3,18 +3,18 @@
 Grid search over cost-function weights for a given task.
 
 For each (model × weight combination) cell the script runs `--n_episodes`
-episodes via `run_episode` and records success rate and step latency.
-Results are saved as two JSON files:
+episodes via `run_eval_episode` (the eval/rollout driver), passing the weight
+overrides through `cost_weight_overrides`. Results are saved as two JSON files:
   - A standard aggregated JSON (same format as run_experiment.py)
   - A rich search JSON with explicit weight dicts for easy analysis/plotting
 
 Edit WEIGHT_SEARCH_SPACE at the top to define the sweep axes.  Any key that
-appears in the task's `spec.cost_weights` dict is valid.  Keys not listed keep
-their default value from the task spec.
+appears in the task's `config.cost_weights` dict is valid.  Keys not listed keep
+their default value from the task config.
 
-NOTE: The script rebuilds `task.weights_wp` after loading by iterating the
-`spec.cost_weights` dict in insertion order — which must match the order used
-in the task's `initialize_task`.  This holds for all built-in tasks.
+NOTE: The override merges into the task's `cost_weights` dict in insertion order
+— which must match the order used in the task's `initialize_task`.  This holds
+for all built-in tasks.
 
 Usage:
     # Default search (grasp_reorient, all models, 5 episodes)
@@ -23,16 +23,13 @@ Usage:
     # Single model, more episodes
     python experiments/run_param_search.py --models M3 --n_episodes 10
 
-    # Different task
-    python experiments/run_param_search.py --task push --n_episodes 5
-
-    # Specify output prefix
-    python experiments/run_param_search.py --output results/param_search
+    # Different task, MuJoCo eval
+    python experiments/run_param_search.py --task push --eval_sim mujoco --n_episodes 5
 """
 
 from __future__ import annotations
 import os
-os.environ["MUJOCO_GL"] = "egl"
+os.environ.setdefault("MUJOCO_GL", "egl")
 
 import argparse
 import datetime
@@ -48,43 +45,32 @@ import contact_study.tasks  # noqa: F401
 from contact_study.contact_models.config import GeometryVariant
 from contact_study.evaluation.metrics import aggregate_episodes, save_results
 from contact_study.planners.mppi import MPPIConfig
-from contact_study.utils.physics_noise import PhysicsNoiseParams
+from contact_study.tasks.config import EvalSimulatorKind
 
-from run_episode import run_episode, load_task, MODEL_FACTORIES
+from contact_study.drivers.run_eval_episode import (
+    run_eval_episode, load_rollout_task, MODEL_FACTORIES,
+)
 
 RESULTS_DIR = Path(__file__).parent.parent / "results"
 
 # ---------------------------------------------------------------------------
 # Edit this dict to define the search space.
-# Keys must match entries in the task's spec.cost_weights.
+# Keys must match entries in the task's config.cost_weights.
 # Each key maps to a list of candidate values.
 # ---------------------------------------------------------------------------
 WEIGHT_SEARCH_SPACE: dict[str, list[float]] = {
     "w_quat":    [5.0, 10.0, 20.0],
     "w_pos":     [10.0, 20.0, 40.0],
     "w_contact": [2.5, 5.0, 10.0],
-    "w_joint":   [0.05, 0.1, 0.2], 
+    "w_joint":   [0.05, 0.1, 0.2],
 }
 
 wp.init()
 
 
 # ---------------------------------------------------------------------------
-# Weight helpers
+# Grid helpers
 # ---------------------------------------------------------------------------
-
-def apply_weight_overrides(task, overrides: dict[str, float]) -> None:
-    """Merge overrides into the task's default weights and rebuild weights_wp.
-
-    The dict key order of cost_weights must match the array order used in the
-    task's initialize_task — this holds for all built-in tasks.
-    """
-    task_cfg = task.config or task.spec
-    weights = dict(task_cfg.cost_weights)
-    weights.update(overrides)
-    weights_arr = np.array([weights[k] for k in task_cfg.cost_weights], dtype=np.float32)
-    task.weights_wp = wp.array(weights_arr, dtype=wp.float32, device="cuda")
-
 
 def combo_label(model_key: str, overrides: dict[str, float]) -> str:
     """Short label encoding model + overridden weight values."""
@@ -110,10 +96,8 @@ def main():
     parser.add_argument("--task",    type=str, default="grasp_reorient")
     parser.add_argument("--models",  nargs="+", default=list(MODEL_FACTORIES.keys()),
                         choices=list(MODEL_FACTORIES.keys()))
-    parser.add_argument("--condition", type=str, default="B", choices=["A", "B"])
     parser.add_argument("--n_episodes",     type=int,   default=10,
                         help="Episodes per (model × weight combo) cell.")
-    parser.add_argument("--budget_seconds", type=float, default=0.1)
     parser.add_argument("--n_samples",      type=int,   default=256)
     parser.add_argument("--horizon",        type=int,   default=128)
     parser.add_argument("--temperature",    type=float, default=0.05)
@@ -121,10 +105,9 @@ def main():
     parser.add_argument("--seed",           type=int,   default=None)
     parser.add_argument("--geometry",       type=str,   default="accurate",
                         choices=[g.value for g in GeometryVariant])
-    parser.add_argument("--mass_sigma",     type=float, default=0.0)
-    parser.add_argument("--inertia_sigma",  type=float, default=0.0)
-    parser.add_argument("--friction_sigma", type=float, default=0.0)
-    parser.add_argument("--com_sigma",      type=float, default=0.0)
+    parser.add_argument("--eval_sim",       type=str,   default="none",
+                        choices=["none", "mujoco", "drake"],
+                        help="Eval simulator: 'none' uses the task default, else override it.")
     parser.add_argument("--settle",         type=float, default=10.0)
     parser.add_argument("--use_full_graph", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--nconmax",        type=int,   default=200)
@@ -136,20 +119,15 @@ def main():
     parser.add_argument("--debug",          action="store_true")
     args = parser.parse_args()
 
-    rng   = np.random.default_rng(args.seed)
-    noise = PhysicsNoiseParams(
-        mass_sigma     = args.mass_sigma,
-        inertia_sigma  = args.inertia_sigma,
-        friction_sigma = args.friction_sigma,
-        com_sigma      = args.com_sigma,
-    )
+    rng      = np.random.default_rng(args.seed)
     geometry = GeometryVariant(args.geometry)
+    eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
 
     grid = build_grid(WEIGHT_SEARCH_SPACE)
     n_cells = len(args.models) * len(grid)
 
     print(f"\n{'='*65}")
-    print(f"  weight grid search — {args.task}  condition={args.condition}")
+    print(f"  weight grid search — {args.task}")
     print(f"  models      : {args.models}")
     print(f"  search axes : {list(WEIGHT_SEARCH_SPACE.keys())}")
     print(f"  combos      : {len(grid)}  ×  {len(args.models)} models  =  {n_cells} cells")
@@ -176,12 +154,12 @@ def main():
     for model_key in args.models:
         cfg = MODEL_FACTORIES[model_key]()
 
-        # Peek at model dimensions once.
-        _mjm, _task = load_task(args.task, geometry, noise, rng)
-        _task_cfg = _task.config or _task.spec
-        default_weights = dict(_task_cfg.cost_weights)
+        # Peek at model dimensions + default weights once.
+        _task = load_rollout_task(args.task, geometry)
+        _mjm = _task.mjm
+        default_weights = dict(_task.config.cost_weights)
         print(f"\n  [{model_key}]  nq={_mjm.nq}  nv={_mjm.nv}  nu={_mjm.nu}  "
-              f"max_steps={_task_cfg.max_steps}")
+              f"max_steps={_task.config.max_steps}")
         print(f"  default weights: {default_weights}")
 
         for overrides in grid:
@@ -195,21 +173,18 @@ def main():
 
             episodes = []
             for ep in range(args.n_episodes):
-                mjm, task = load_task(args.task, geometry, noise, rng)
-                apply_weight_overrides(task, overrides)
-
-                result = run_episode(
-                    mjm            = mjm,
-                    task           = task,
-                    cfg            = cfg,
-                    mppi_cfg       = mppi_cfg,
-                    rng            = rng,
-                    condition      = args.condition,
-                    budget_seconds = args.budget_seconds,
-                    settle_seconds = args.settle,
-                    render_mode    = "none",
-                    debug          = args.debug,
-                    ep_idx         = ep,
+                result = run_eval_episode(
+                    task_name             = args.task,
+                    contact_cfg           = cfg,
+                    mppi_cfg              = mppi_cfg,
+                    rng                   = rng,
+                    geometry              = geometry,
+                    cost_weight_overrides = overrides,
+                    settle_seconds        = args.settle,
+                    eval_sim              = eval_sim,
+                    ep_idx                = ep,
+                    debug                 = args.debug,
+                    verbose               = False,
                 )
                 episodes.append(result)
                 tick = "✓" if result.success else "✗"
@@ -217,7 +192,7 @@ def main():
                 print(f"    ep {ep:02d}  {tick}  success_step={sstr:<8}  "
                       f"step={result.mean_step_ms:.3f}±{result.std_step_ms:.3f} ms")
 
-            agg = aggregate_episodes(episodes, args.task, label, args.condition)
+            agg = aggregate_episodes(episodes, args.task, label, "B")
             aggregated.append(agg)
 
             succ_steps = [e.steps_to_success for e in episodes if e.steps_to_success is not None]
@@ -258,7 +233,7 @@ def main():
     # Ranked summary: top-N by success rate, then mean_step_ms
     # ------------------------------------------------------------------
     print(f"\n{'='*65}")
-    print(f"  Top-{args.top_n} configurations — {args.task}  condition={args.condition}")
+    print(f"  Top-{args.top_n} configurations — {args.task}")
     print(f"{'='*65}")
 
     ranked = sorted(rich_rows, key=lambda r: (-r["success_rate"], r["mean_step_ms"]))

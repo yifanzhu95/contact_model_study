@@ -37,7 +37,7 @@ class MPPIConfig:
     use_spline_noise:bool  = False   # toggle between spline and Gaussian noise
     n_spline_points: int   = 5      # control points for spline-smoothed noise
     debug:           bool  = True
-    delta_range:     tuple[float, float] = (-0.01, 0.01)
+    delta_range:     tuple[float, float] = (-0.1, 0.1)
     use_full_graph:  bool  = True   # True=single mega CUDA graph, False=step+reset graphs
     seed:            int | None = None  # seed for deterministic noise sampling
 

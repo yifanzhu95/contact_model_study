@@ -3,14 +3,14 @@
 Sweep over the number of physics substeps between MPPI planning iterations
 to evaluate how control frequency affects task success rate and step latency.
 
-Each substep value changes how many simulation steps the robot executes before
-the controller replans: substeps=1 means replan every step (highest control
-frequency), substeps=N means replan every N steps (lower frequency, but each
-plan covers more real time).
+Each substep value changes how many rollout steps the planner advances before
+replanning: substeps=1 means replan every step (highest control frequency),
+substeps=N means replan every N steps (lower frequency, but each plan covers
+more real time).
 
 For each (model × substeps) cell the script runs `--n_episodes` episodes via
-`run_episode`, aggregates the results, and saves a JSON file in the same
-format as run_experiment.py.
+`run_eval_episode` (the eval/rollout driver) and aggregates the results into a
+JSON file in the same format as run_experiment.py.
 
 Edit SUBSTEPS_SWEEP at the top of this file to change the sweep values.
 
@@ -18,14 +18,8 @@ Usage:
     # Default sweep, grasp_reorient, all models, 10 episodes each
     python experiments/run_cntrl_freq_eval.py --n_episodes 10
 
-    # Single model
-    python experiments/run_cntrl_freq_eval.py --models M3 --n_episodes 5
-
-    # Custom n_samples, specific task
-    python experiments/run_cntrl_freq_eval.py --task push --n_samples 512 --n_episodes 10
-
-    # Physics noise
-    python experiments/run_cntrl_freq_eval.py --friction_sigma 0.1 --n_episodes 10
+    # Single model, custom task, MuJoCo eval
+    python experiments/run_cntrl_freq_eval.py --models M3 --task push --eval_sim mujoco
 
     # Specify output path
     python experiments/run_cntrl_freq_eval.py --output results/cntrl_freq_sweep.json
@@ -33,7 +27,7 @@ Usage:
 
 from __future__ import annotations
 import os
-os.environ["MUJOCO_GL"] = "egl"
+os.environ.setdefault("MUJOCO_GL", "egl")
 
 import argparse
 import datetime
@@ -44,12 +38,14 @@ import warp as wp
 
 import contact_study.tasks  # noqa: F401
 
-from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
+from contact_study.contact_models.config import GeometryVariant
 from contact_study.evaluation.metrics import aggregate_episodes, save_results
 from contact_study.planners.mppi import MPPIConfig
-from contact_study.utils.physics_noise import PhysicsNoiseParams
+from contact_study.tasks.config import EvalSimulatorKind
 
-from run_episode import run_episode, load_task, MODEL_FACTORIES
+from contact_study.drivers.run_eval_episode import (
+    run_eval_episode, load_rollout_task, MODEL_FACTORIES,
+)
 
 RESULTS_DIR = Path(__file__).parent.parent / "results"
 
@@ -70,12 +66,8 @@ def main():
     parser.add_argument("--models",  nargs="+", default=list(MODEL_FACTORIES.keys()),
                         choices=list(MODEL_FACTORIES.keys()),
                         help="Contact model keys to evaluate (e.g. M1 M2 M3 M4).")
-    parser.add_argument("--condition", type=str, default="B", choices=["A", "B"],
-                        help="A=fixed_budget_rollout  B=warm-started MPPIController")
     parser.add_argument("--n_episodes",     type=int,   default=10,
                         help="Episodes to run per (model, substeps) cell.")
-    parser.add_argument("--budget_seconds", type=float, default=0.1,
-                        help="Per-step wall-time budget for Condition A.")
     parser.add_argument("--n_samples",      type=int,   default=256,
                         help="Fixed number of MPPI samples (held constant across sweep).")
     parser.add_argument("--horizon",        type=int,   default=48)
@@ -84,10 +76,9 @@ def main():
     parser.add_argument("--seed",           type=int,   default=None)
     parser.add_argument("--geometry",       type=str,   default="accurate",
                         choices=[g.value for g in GeometryVariant])
-    parser.add_argument("--mass_sigma",     type=float, default=0.0)
-    parser.add_argument("--inertia_sigma",  type=float, default=0.0)
-    parser.add_argument("--friction_sigma", type=float, default=0.0)
-    parser.add_argument("--com_sigma",      type=float, default=0.0)
+    parser.add_argument("--eval_sim",       type=str,   default="none",
+                        choices=["none", "mujoco", "drake"],
+                        help="Eval simulator: 'none' uses the task default, else override it.")
     parser.add_argument("--settle",         type=float, default=10.0)
     parser.add_argument("--use_full_graph", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--nconmax",        type=int,   default=200)
@@ -97,17 +88,12 @@ def main():
     parser.add_argument("--debug",          action="store_true")
     args = parser.parse_args()
 
-    rng   = np.random.default_rng(args.seed)
-    noise = PhysicsNoiseParams(
-        mass_sigma     = args.mass_sigma,
-        inertia_sigma  = args.inertia_sigma,
-        friction_sigma = args.friction_sigma,
-        com_sigma      = args.com_sigma,
-    )
+    rng      = np.random.default_rng(args.seed)
     geometry = GeometryVariant(args.geometry)
+    eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
 
     print(f"\n{'='*65}")
-    print(f"  substeps sweep — {args.task}  condition={args.condition}")
+    print(f"  substeps sweep — {args.task}")
     print(f"  models     : {args.models}")
     print(f"  substeps   : {SUBSTEPS_SWEEP}")
     print(f"  n_samples  : {args.n_samples}  horizon={args.horizon}")
@@ -120,10 +106,10 @@ def main():
         cfg = MODEL_FACTORIES[model_key]()
 
         # Load once just to print model dimensions before the sweep.
-        _mjm, _task = load_task(args.task, geometry, noise, rng)
-        _task_cfg = _task.config or _task.spec
+        _task = load_rollout_task(args.task, geometry)
+        _mjm = _task.mjm
         print(f"\n  [{model_key}]  nq={_mjm.nq}  nv={_mjm.nv}  nu={_mjm.nu}  "
-              f"max_steps={_task_cfg.max_steps}")
+              f"max_steps={_task.config.max_steps}")
 
         for substeps in SUBSTEPS_SWEEP:
             mppi_cfg = MPPIConfig(
@@ -146,19 +132,17 @@ def main():
 
             episodes = []
             for ep in range(args.n_episodes):
-                mjm, task = load_task(args.task, geometry, noise, rng)
-                result = run_episode(
-                    mjm            = mjm,
-                    task           = task,
-                    cfg            = cfg,
+                result = run_eval_episode(
+                    task_name      = args.task,
+                    contact_cfg    = cfg,
                     mppi_cfg       = mppi_cfg,
                     rng            = rng,
-                    condition      = args.condition,
-                    budget_seconds = args.budget_seconds,
+                    geometry       = geometry,
                     settle_seconds = args.settle,
-                    render_mode    = "none",
-                    debug          = args.debug,
+                    eval_sim       = eval_sim,
                     ep_idx         = ep,
+                    debug          = args.debug,
+                    verbose        = False,
                 )
                 episodes.append(result)
                 tick = "✓" if result.success else "✗"
@@ -166,7 +150,7 @@ def main():
                 print(f"    ep {ep:02d}  {tick}  success_step={sstr:<8}  "
                       f"step={result.mean_step_ms:.3f}±{result.std_step_ms:.3f} ms")
 
-            agg = aggregate_episodes(episodes, args.task, label, args.condition)
+            agg = aggregate_episodes(episodes, args.task, label, "B")
             aggregated.append(agg)
 
             succ_steps = [e.steps_to_success for e in episodes if e.steps_to_success is not None]
@@ -185,7 +169,7 @@ def main():
     # Summary table: rows = substeps, cols = model
     # ------------------------------------------------------------------
     print(f"\n{'='*65}")
-    print(f"  Summary — {args.task}  condition={args.condition}  n_samples={args.n_samples}")
+    print(f"  Summary — {args.task}  n_samples={args.n_samples}")
     print(f"{'='*65}")
 
     col_w  = 18

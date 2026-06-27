@@ -45,7 +45,7 @@ import warp as wp
 
 import contact_study.tasks  # noqa: F401 — registers all tasks
 
-from contact_study.contact_models.config import ContactModelConfig
+from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
 from contact_study.evaluation.metrics import EpisodeResult
 from contact_study.planners.mppi import MPPIController, MPPIConfig
 from contact_study.tasks.base import get_task
@@ -64,29 +64,67 @@ VIDEOS_DIR  = Path(__file__).parents[2] / "videos"
 RESULTS_DIR = Path(__file__).parents[2] / "results"
 
 
+def load_rollout_task(task_name: str, geometry: GeometryVariant = GeometryVariant.ACCURATE):
+    """Load a task's ROLLOUT instance — handy for peeking nq/nv/nu/cost_weights
+    before a sweep (the episode runner builds its own rollout + eval tasks)."""
+    task = get_task(task_name, geometry=geometry, role=TaskRole.ROLLOUT)
+    task.load()
+    return task
+
+
+def apply_cost_weight_overrides(task, overrides: dict) -> None:
+    """Merge cost-weight overrides into the (loaded) task and rebuild weights_wp.
+
+    The dict key order of cost_weights must match the array order used in the
+    task's initialize_task — this holds for all built-in tasks. Must be called
+    before the MPPIController is built (it captures task.cost_weights_wp)."""
+    weights = dict(task.config.cost_weights)
+    weights.update(overrides)
+    weights_arr = np.array([weights[k] for k in task.config.cost_weights], dtype=np.float32)
+    task.weights_wp = wp.array(weights_arr, dtype=wp.float32, device="cuda")
+
+
 def run_eval_episode(
     task_name:   str,
     contact_cfg: ContactModelConfig,
     mppi_cfg:    MPPIConfig,
     rng:         np.random.Generator,
-    video_path:  str | None = None,
+    geometry:    GeometryVariant = GeometryVariant.ACCURATE,
+    cost_weight_overrides: dict | None = None,
     settle_seconds: float = 0.0,
     eval_substeps: int | None = None,
     eval_sim:    EvalSimulatorKind | None = None,
     condition:   str  = "B",
+    video_path:  str | None = None,
+    ep_idx:      int  = 0,
+    fin_ep_on_success: bool = True,
     debug:       bool = False,
     verbose:     bool = True,
 ) -> EpisodeResult:
     """Run one closed-loop eval episode and return an EpisodeResult.
 
+    Drop-in replacement for the legacy experiments/run_episode.py `run_episode`,
+    but built on the eval/rollout split: a ROLLOUT task (planning MuJoCo model +
+    cost arrays for the MPPIController) and an EVAL task (the pluggable "real"
+    EvalSimulator, MuJoCo or Drake). condition is a label only — only the
+    warm-started MPPIController ("B") path exists; the legacy fixed-budget
+    rollout ("A") path is gone.
+
     The episode length is the task's TaskConfig.max_steps. mean_step_ms /
     std_step_ms hold per-control-step MPPI planning latency (controller.plan()
     only, excluding the eval-sim advance) in ms.
+
+    cost_weight_overrides: optional {weight_name: value} merged into the rollout
+        task's cost weights before planning (used by the weight grid search).
+    fin_ep_on_success: stop at first success (default); if False, resample a new
+        goal on each success and keep going (multi-goal mode).
     """
     # ---- ROLLOUT task + planner ------------------------------------------
-    rollout_task = get_task(task_name, role=TaskRole.ROLLOUT)
+    rollout_task = get_task(task_name, geometry=geometry, role=TaskRole.ROLLOUT)
     mjm, mjd = rollout_task.load()
     cfg = rollout_task.config
+    if cost_weight_overrides:
+        apply_cost_weight_overrides(rollout_task, cost_weight_overrides)
 
     # The eval ("real") simulator runs at the fine cfg.timestep; the rollout /
     # planning model runs coarser. Infer the rollout step from the eval step and
@@ -103,12 +141,16 @@ def run_eval_episode(
     )
 
     # ---- EVAL task + "real" simulator ------------------------------------
-    eval_task = get_task(task_name, role=TaskRole.EVAL)
+    eval_task = get_task(task_name, geometry=geometry, role=TaskRole.EVAL)
     eval_task.load()
     # eval_sim=None keeps the task's TaskConfig default; otherwise override it.
     if eval_sim is not None:
         eval_task.config.eval_sim = eval_sim
-    sim = eval_task.make_eval_simulator(video_path=video_path, render=True)
+    # Only stand up a renderer when a video is requested (avoids a GL context per
+    # episode during headless sweeps).
+    sim = eval_task.make_eval_simulator(
+        video_path=video_path, render=video_path is not None
+    )
 
     # ---- initial state ----------------------------------------------------
     q0, v0, u0 = rollout_task.get_inital_state(rng)
@@ -167,10 +209,18 @@ def run_eval_episode(
         mujoco.mj_forward(mjm, mjd)
 
         # Success/failure are evaluated on the current (start-of-step) state.
-        if rollout_task.is_success(mjd) and steps_to_success is None:
-            steps_to_success = t
-            if debug:
-                print(f"  first success at step {t}")
+        if rollout_task.is_success(mjd):
+            if steps_to_success is None:
+                steps_to_success = t
+                if debug:
+                    print(f"  [ep {ep_idx:02d}] first success at step {t}")
+            if fin_ep_on_success:
+                break
+            elif hasattr(rollout_task, "sample_new_goal"):
+                # Multi-goal mode: target a fresh goal and keep going.
+                rollout_task.sample_new_goal(mjd, rng)
+                controller.reset()
+                controller.lam = controller.pc.temperature
         if rollout_task.has_failed(mjd):
             if verbose:
                 print(f"  step {t:4d}: task failed")
@@ -192,7 +242,7 @@ def run_eval_episode(
         sim.render()
 
         if debug and t % 10 == 0:
-            print(f"  [step {t:04d}]  qpos_norm={np.linalg.norm(st.qpos):.4f}  "
+            print(f"  [ep {ep_idx:02d} | step {t:04d}]  qpos_norm={np.linalg.norm(st.qpos):.4f}  "
                   f"qvel_norm={np.linalg.norm(st.qvel):.4f}  u[0]={float(u[0]):+8.3f}")
         elif verbose and t % 25 == 0:
             print(f"  step {t:4d}  t={t*control_dt:5.2f}s  u[0]={float(u[0]):+8.3f}")
@@ -226,8 +276,8 @@ def main():
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
     p.add_argument("--n_samples",   type=int,   default=256)
     p.add_argument("--horizon",     type=int,   default=48)
-    p.add_argument("--temperature", type=float, default=0.5)#0.750)
-    p.add_argument("--noise_sigma", type=float, default=0.005,)#0.001)
+    p.add_argument("--temperature", type=float, default=0.25)#0.750)
+    p.add_argument("--noise_sigma", type=float, default=0.01,)#0.001)
     p.add_argument("--delta",       type=float, default=0.1,#0.05,
                    help="Per-step MPPI delta clip magnitude (action units).")
     p.add_argument("--substeps",    type=int,   default=1,
