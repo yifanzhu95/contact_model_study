@@ -173,7 +173,7 @@ def main():
                          help="Duration of the back-and-forth sweep at each joint's limits.")
     parser.add_argument("--transition_seconds", type=float, default=0.5,
                          help="Ramp duration to/from each joint's limit and home.")
-    parser.add_argument("--cycles", type=float, default=2.0,
+    parser.add_argument("--cycles", type=float, default=1.0,
                          help="Number of back-and-forth oscillations during sweep_seconds.")
     parser.add_argument("--fallback_amplitude", type=float, default=1.0,
                          help="+/- range to sweep for actuators with no ctrlrange (rare).")

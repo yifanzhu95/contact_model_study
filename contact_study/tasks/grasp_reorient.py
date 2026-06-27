@@ -57,7 +57,7 @@ _INIT_QPOS = np.array([
     0.80782262,   0.61122899,  0.92718954,   0.61047876,
     0.69887738,   1.438706,    1.3375555,    0.19482527,
 
-    0.018495468,  0.033628956, 0.1,#0.083264539,  
+    0.018495468,  0.033628956, 0.083264539,  
     0.93823638, 0.12995374, 0.31377877,  0.066086313,
 ], dtype=np.float64)
 
@@ -256,8 +256,8 @@ class GraspReorientTask(BaseTask):
             cam_fps            = 30.0,
             # Eval ("real") sim timestep; rollout_dt = 10x this = 0.001 (the
             # MuJoCo planning step the GPU rollouts use).
-            timestep           = 0.0001,
-            eval_substeps_per_rollout = 10,
+            timestep           = 0.00005,
+            eval_substeps_per_rollout = 20,
             difficulty         = self.goal_difficulty,
         )
 

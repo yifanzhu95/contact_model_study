@@ -1,10 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <robot name="leap_right">
   <link name="base"/>
-
-  <material name="obj_material">
-    <texture filename="iris_block.png"/>
-  </material>
   
   <joint name="base_joint" type="fixed">
     <parent link="base"/>
@@ -978,12 +974,65 @@
        free body; the origin below is each parser's nominal rest pose, but the
        task always overrides it via an explicit initial state on reset. -->
   <link name="obj">
+    <!-- Decorative visuals only: a Rubik's-cube-style shell built from inset
+         face plates, edge bars, and corner cubes so each face shows a
+         distinct color without the pieces overlapping at the seams. The
+         underlying collision box below is unchanged. -->
     <visual>
-      <geometry><box size="0.07 0.07 0.07"/></geometry>
-      <material name="obj_material">
-        <color rgba="1.0 1.0 0.0 1.0"/>
-      </material>
+      <origin xyz="0.03425 0 0"/>
+      <geometry><box size="0.0015 0.062 0.062"/></geometry>
+      <material name="obj_face_px"><color rgba="0.9 0.1 0.1 1.0"/></material>
     </visual>
+    <visual>
+      <origin xyz="-0.03425 0 0"/>
+      <geometry><box size="0.0015 0.062 0.062"/></geometry>
+      <material name="obj_face_nx"><color rgba="1.0 0.55 0.0 1.0"/></material>
+    </visual>
+    <visual>
+      <origin xyz="0 0.03425 0"/>
+      <geometry><box size="0.062 0.0015 0.062"/></geometry>
+      <material name="obj_face_py"><color rgba="0.1 0.7 0.2 1.0"/></material>
+    </visual>
+    <visual>
+      <origin xyz="0 -0.03425 0"/>
+      <geometry><box size="0.062 0.0015 0.062"/></geometry>
+      <material name="obj_face_ny"><color rgba="0.1 0.3 0.9 1.0"/></material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0.03425"/>
+      <geometry><box size="0.062 0.062 0.0015"/></geometry>
+      <material name="obj_face_pz"><color rgba="1.0 1.0 0.0 1.0"/></material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 -0.03425"/>
+      <geometry><box size="0.062 0.062 0.0015"/></geometry>
+      <material name="obj_face_nz"><color rgba="0.95 0.95 0.95 1.0"/></material>
+    </visual>
+
+    <!-- 12 edge bars (black piping) -->
+    <visual><origin xyz="0.033 0.033 0"/><geometry><box size="0.004 0.004 0.062"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="0.033 -0.033 0"/><geometry><box size="0.004 0.004 0.062"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="-0.033 0.033 0"/><geometry><box size="0.004 0.004 0.062"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="-0.033 -0.033 0"/><geometry><box size="0.004 0.004 0.062"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="0.033 0 0.033"/><geometry><box size="0.004 0.062 0.004"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="0.033 0 -0.033"/><geometry><box size="0.004 0.062 0.004"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="-0.033 0 0.033"/><geometry><box size="0.004 0.062 0.004"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="-0.033 0 -0.033"/><geometry><box size="0.004 0.062 0.004"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="0 0.033 0.033"/><geometry><box size="0.062 0.004 0.004"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="0 0.033 -0.033"/><geometry><box size="0.062 0.004 0.004"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="0 -0.033 0.033"/><geometry><box size="0.062 0.004 0.004"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="0 -0.033 -0.033"/><geometry><box size="0.062 0.004 0.004"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+
+    <!-- 8 corner cubes (black piping) -->
+    <visual><origin xyz="0.033 0.033 0.033"/><geometry><box size="0.004 0.004 0.004"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="0.033 0.033 -0.033"/><geometry><box size="0.004 0.004 0.004"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="0.033 -0.033 0.033"/><geometry><box size="0.004 0.004 0.004"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="0.033 -0.033 -0.033"/><geometry><box size="0.004 0.004 0.004"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="-0.033 0.033 0.033"/><geometry><box size="0.004 0.004 0.004"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="-0.033 0.033 -0.033"/><geometry><box size="0.004 0.004 0.004"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="-0.033 -0.033 0.033"/><geometry><box size="0.004 0.004 0.004"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+    <visual><origin xyz="-0.033 -0.033 -0.033"/><geometry><box size="0.004 0.004 0.004"/></geometry><material name="obj_edge_material"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+
     <collision>
       <geometry><box size="0.07 0.07 0.07"/></geometry>
     </collision>
