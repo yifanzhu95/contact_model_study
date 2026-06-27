@@ -28,7 +28,7 @@ import argparse
 from typing import Callable
 
 import numpy as np
-import warp as wp
+#import warp as wp
 
 import contact_study.tasks  # noqa: F401 — registers all tasks
 
@@ -190,7 +190,7 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
-    wp.init()
+    #wp.init()
 
     eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
 
