@@ -274,13 +274,13 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--task",        type=str,   default="cart_pole")
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
-    p.add_argument("--n_samples",   type=int,   default=256)
-    p.add_argument("--horizon",     type=int,   default=48)
-    p.add_argument("--temperature", type=float, default=0.25)#0.750)
+    p.add_argument("--n_samples",   type=int,   default=512)
+    p.add_argument("--horizon",     type=int,   default=24)
+    p.add_argument("--temperature", type=float, default=0.125)#0.750)
     p.add_argument("--noise_sigma", type=float, default=0.01,)#0.001)
     p.add_argument("--delta",       type=float, default=0.1,#0.05,
                    help="Per-step MPPI delta clip magnitude (action units).")
-    p.add_argument("--substeps",    type=int,   default=1,
+    p.add_argument("--substeps",    type=int,   default=10,#7,
                    help="MPPI rollout substeps per control step (control frequency knob).")
     p.add_argument("--eval_substeps", type=int, default=None,
                    help="Eval steps per rollout step (default: task config, usually 10).")
@@ -312,10 +312,10 @@ def main():
         noise_sigma    = args.noise_sigma,
         substeps       = args.substeps,
         warm_start     = True,
-        use_full_graph = True,
+        use_full_graph = False,
         delta_range    = (-args.delta, args.delta),
-        nconmax        = 200,
-        njmax          = 500,
+        nconmax        = 50,
+        njmax          = 200,
         seed           = args.seed,
         debug          = args.debug,
     )
@@ -332,6 +332,7 @@ def main():
         eval_substeps  = args.eval_substeps,
         eval_sim       = eval_sim,
         debug          = args.debug,
+        fin_ep_on_success = True,
     )
 
     # ---- print + save the episode result ---------------------------------

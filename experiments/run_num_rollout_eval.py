@@ -47,7 +47,7 @@ RESULTS_DIR = Path(__file__).parent.parent / "results"
 # ---------------------------------------------------------------------------
 # Edit this list to change the sweep values
 # ---------------------------------------------------------------------------
-N_SAMPLES_SWEEP = [256, 512, 1024, 2048]
+N_SAMPLES_SWEEP = [256, 512, 1024, 2048, 4096]
 
 wp.init()
 

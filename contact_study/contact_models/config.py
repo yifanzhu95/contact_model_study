@@ -59,8 +59,8 @@ class MujocoSolverParams:
     """
     cone:       str   = "pyramidal"
     solver:     str   = "Newton"       # "PGS" | "CG" | "Newton"
-    iterations: int   = 100
-    tolerance:  float = 1e-8
+    iterations: int   = 25 #100
+    tolerance:  float = 1e-6 #1e-8
 
     # --- Hard-contact preset (M1) ---------------------------------
     # When True, all geom/pair solref and solimp are overwritten with

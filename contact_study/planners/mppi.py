@@ -170,6 +170,22 @@ def _apply_dU_kernel(
     h, u = wp.tid()
     U[h, u] = U[h, u] + wp.clamp(dU[h, u], low, high)
 
+@wp.kernel
+def _shift_U_kernel(
+    src: wp.array2d(dtype=float),  # (H, nu)
+    dst: wp.array2d(dtype=float),  # (H, nu)  [out]
+    H:   int,
+):
+    """Warm-start shift: dst[h] = src[h+1], with the last row zeroed.
+
+    Written into a separate buffer (not in place) so adjacent rows can't race
+    on the read-before-write; the caller swaps src/dst afterward."""
+    h, u = wp.tid()
+    if h < H - 1:
+        dst[h, u] = src[h + 1, u]
+    else:
+        dst[h, u] = 0.0
+
 
 # ---------------------------------------------------------------------------
 # Controller
@@ -220,6 +236,8 @@ class MPPIController:
         self.ctrl_reset = wp.empty(self.nu, dtype=wp.float32, device="cuda")
 
         self.U_wp = wp.zeros((H, nu), dtype=wp.float32, device="cuda")
+        # Scratch buffer for the on-GPU warm-start shift (swapped with U_wp).
+        self.U_shift_wp = wp.zeros((H, nu), dtype=wp.float32, device="cuda")
         self.V_wp = wp.zeros((N, H, nu), dtype=wp.float32, device="cuda")
         self.costs_wp = wp.zeros(N, dtype=wp.float32, device="cuda")
 
@@ -390,12 +408,18 @@ class MPPIController:
             print(f"min cost: {beta:.4f}  eta: {eta:.4f}  lam: {self.lam:.6f}")
 
     def _extract_action(self) -> np.ndarray:
+        # Only the first action crosses device→host; the warm-start shift stays
+        # on the GPU (no full (H,nu) round-trip). U_wp is never baked into a
+        # captured graph, so swapping the buffer reference is safe.
         action_np = self.U_wp[0].numpy().copy()
         if self.pc.warm_start:
-            U_np      = self.U_wp.numpy()
-            U_np[:-1] = U_np[1:]
-            U_np[-1]  = 0.0
-            self.U_wp.assign(U_np)
+            H, nu = self.pc.horizon, self.nu
+            wp.launch(
+                _shift_U_kernel,
+                dim=(H, nu),
+                inputs=[self.U_wp, self.U_shift_wp, H],
+            )
+            self.U_wp, self.U_shift_wp = self.U_shift_wp, self.U_wp
         return action_np
 
     # Costs at or above this value mean wp.atomic_min was never written (all NaN rollouts).
