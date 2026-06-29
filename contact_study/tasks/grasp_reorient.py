@@ -84,7 +84,7 @@ def _euler_to_quat(euler) -> np.ndarray:
 
 # Goal/target pose for the cube reorientation, defined here rather than read
 # from a mocap body in the scene. pos + intrinsic-xyz Euler (rad).
-_TARGET_POS   = np.array([0.03, 0.03, 0.09], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
+_TARGET_POS   = np.array([0.03, 0.03, 0.08], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
 _TARGET_EULER = np.array([0.0, 0.5235, 0.0], dtype=np.float64)
 _TARGET_QUAT  = _euler_to_quat(_TARGET_EULER)   # wxyz
 
@@ -159,7 +159,7 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
     c_contact = float(0.0)
     for i in range(5, 9):
         p_tip = site_xpos[indices[i]]
-        dp = wp.length(p_obj - p_tip) #- float(0.035)
+        dp = wp.length(p_obj - p_tip) - float(0.035)
         #dp = wp.length(p_tip) - float(0.035)
         if dp > 0.0:
             c_contact = c_contact + dp*dp
@@ -208,6 +208,7 @@ class GraspReorientTask(BaseTask):
     # Override on an instance before the first episode to change difficulty.
     goal_difficulty: int = 1
 
+
     # Object-frame axis that is the surface normal for each face index.
     # Matches the face_twist_axes table in sample_new_goal_by_face.
     _FACE_NORMALS = [
@@ -230,13 +231,13 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 250,
-            success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
+            max_steps          = 500,
+            success_thresholds = {"pos": 0.05, "quat": 0.02, "vel": 0.1},
             cost_weights       = {
-                "w_quat": 10.0, #5.0
-                "w_pos": 20.0, #40.0
+                "w_quat": 5.0, #5.0
+                "w_pos": 40.0, #40.0
                 "w_velo": 0.0,
-                "w_contact": 1.0,#2.5
+                "w_contact": 5.0,#2.5
                 "w_joint": 0.05, #0.1
                 "w_joint_velo": 0.0,
                 "w_fallen": 30.0, #30.0,

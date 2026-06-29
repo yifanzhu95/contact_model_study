@@ -274,9 +274,9 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--task",        type=str,   default="cart_pole")
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
-    p.add_argument("--n_samples",   type=int,   default=512)
-    p.add_argument("--horizon",     type=int,   default=24)
-    p.add_argument("--temperature", type=float, default=0.125)#0.750)
+    p.add_argument("--n_samples",   type=int,   default=256)
+    p.add_argument("--horizon",     type=int,   default=48)
+    p.add_argument("--temperature", type=float, default=2.0)#0.750)
     p.add_argument("--noise_sigma", type=float, default=0.01,)#0.001)
     p.add_argument("--delta",       type=float, default=0.1,#0.05,
                    help="Per-step MPPI delta clip magnitude (action units).")
@@ -289,60 +289,91 @@ def main():
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
     p.add_argument("--seed",        type=int,   default=None)
-    p.add_argument("--video",       type=str,   default=None)
+    p.add_argument("--n_episodes",  type=int,   default=1,
+                   help="Number of episodes to run; reports the aggregate success rate.")
+    p.add_argument("--video",       type=str,   default="videos/grasp_reorient_eval.gif")
     p.add_argument("--results",     type=str,   default=None,
-                   help="JSON path for the episode result (auto-named if omitted).")
+                   help="JSON path for the episode result(s) (auto-named if omitted).")
     p.add_argument("--debug",       action="store_true",
                    help="Verbose per-step diagnostics (also enables MPPI debug).")
     args = p.parse_args()
 
     wp.init()
-    rng = np.random.default_rng(args.seed)
+    seed_seq = np.random.SeedSequence(args.seed)
+    episode_seeds = seed_seq.spawn(args.n_episodes)
 
-    video_path = args.video
-    if video_path is None:
+    # Rendering every episode in a multi-episode run is slow and usually
+    # unwanted; only render when the caller explicitly passed --video (or
+    # there's a single episode, matching the old default behavior).
+    want_video = args.video is not None or args.n_episodes == 1
+    base_video_path = args.video
+    if base_video_path is None and want_video:
         VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
-        video_path = str(VIDEOS_DIR / f"{args.task}_eval.gif")
+        base_video_path = str(VIDEOS_DIR / f"{args.task}_eval.gif")
 
     contact_cfg = MODEL_FACTORIES[args.model]()
-    mppi_cfg = MPPIConfig(
-        n_samples      = args.n_samples,
-        horizon        = args.horizon,
-        temperature    = args.temperature,
-        noise_sigma    = args.noise_sigma,
-        substeps       = args.substeps,
-        warm_start     = True,
-        use_full_graph = False,
-        delta_range    = (-args.delta, args.delta),
-        nconmax        = 50,
-        njmax          = 200,
-        seed           = args.seed,
-        debug          = args.debug,
-    )
-
     eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
 
-    result = run_eval_episode(
-        task_name   = args.task,
-        contact_cfg = contact_cfg,
-        mppi_cfg    = mppi_cfg,
-        rng         = rng,
-        video_path  = video_path,
-        settle_seconds = args.settle,
-        eval_substeps  = args.eval_substeps,
-        eval_sim       = eval_sim,
-        debug          = args.debug,
-        fin_ep_on_success = True,
-    )
+    results: list[EpisodeResult] = []
+    for ep_idx in range(args.n_episodes):
+        ep_seed = int(episode_seeds[ep_idx].generate_state(1)[0])
+        rng = np.random.default_rng(episode_seeds[ep_idx])
 
-    # ---- print + save the episode result ---------------------------------
-    label = "✓" if result.success else "✗"
-    sstr  = f"step {result.steps_to_success}" if result.steps_to_success is not None else "—"
+        if want_video:
+            if args.n_episodes == 1:
+                video_path = base_video_path
+            else:
+                stem, suffix = base_video_path.rsplit(".", 1)
+                video_path = f"{stem}_ep{ep_idx:03d}.{suffix}"
+        else:
+            video_path = None
+
+        mppi_cfg = MPPIConfig(
+            n_samples      = args.n_samples,
+            horizon        = args.horizon,
+            temperature    = args.temperature,
+            noise_sigma    = args.noise_sigma,
+            substeps       = args.substeps,
+            warm_start     = True,
+            use_full_graph = False,
+            delta_range    = (-args.delta, args.delta),
+            nconmax        = 50,
+            njmax          = 200,
+            seed           = ep_seed,
+            debug          = args.debug,
+        )
+
+        result = run_eval_episode(
+            task_name   = args.task,
+            contact_cfg = contact_cfg,
+            mppi_cfg    = mppi_cfg,
+            rng         = rng,
+            video_path  = video_path,
+            settle_seconds = args.settle,
+            eval_substeps  = args.eval_substeps,
+            eval_sim       = eval_sim,
+            ep_idx         = ep_idx,
+            debug          = args.debug,
+            verbose        = args.debug or args.n_episodes == 1,
+            fin_ep_on_success = True,
+        )
+        results.append(result)
+
+        label = "✓" if result.success else "✗"
+        sstr  = f"step {result.steps_to_success}" if result.steps_to_success is not None else "—"
+        print(f"  [ep {ep_idx:03d}] {label}  success_step={sstr}  "
+              f"final_cost={result.final_cost:.4f}  "
+              f"step={result.mean_step_ms:.3f}±{result.std_step_ms:.3f} ms")
+
+    # ---- aggregate + save -------------------------------------------------
+    n_success = sum(r.success for r in results)
+    success_rate = n_success / len(results)
+    mean_step_ms = float(np.mean([r.mean_step_ms for r in results]))
+
     print(f"\n{'='*60}")
-    print(f"  task={result.task_name}  model={result.model_label}  condition={result.condition}")
-    print(f"  {label}  success_step={sstr}  final_cost={result.final_cost:.4f}")
-    print(f"  elapsed={result.elapsed_seconds*1e3:.1f} ms  "
-          f"step={result.mean_step_ms:.3f}±{result.std_step_ms:.3f} ms")
+    print(f"  task={args.task}  model={args.model}  n_episodes={args.n_episodes}")
+    print(f"  success_rate={success_rate:.3f}  ({n_success}/{len(results)})  "
+          f"mean_step_ms={mean_step_ms:.3f}")
     print(f"{'='*60}")
 
     results_path = args.results
@@ -350,10 +381,17 @@ def main():
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         results_path = str(RESULTS_DIR / f"{args.task}_{args.model}_eval.json")
     with open(results_path, "w") as f:
-        json.dump(dataclasses.asdict(result), f, indent=2)
-    print(f"  Saved result -> {results_path}")
+        json.dump({
+            "task":          args.task,
+            "model":         args.model,
+            "n_episodes":    args.n_episodes,
+            "success_rate":  success_rate,
+            "mean_step_ms":  mean_step_ms,
+            "episodes":      [dataclasses.asdict(r) for r in results],
+        }, f, indent=2)
+    print(f"  Saved result(s) -> {results_path}")
 
-    return result
+    return results
 
 
 if __name__ == "__main__":

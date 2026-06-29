@@ -64,7 +64,7 @@ def main():
     parser.add_argument("--n_episodes",     type=int,   default=5,
                         help="Episodes to run per (model, n_samples) cell.")
     parser.add_argument("--horizon",        type=int,   default=48)
-    parser.add_argument("--temperature",    type=float, default=0.25)
+    parser.add_argument("--temperature",    type=float, default=0.125)
     parser.add_argument("--noise_sigma",    type=float, default=0.01)
     parser.add_argument("--seed",           type=int,   default=None)
     parser.add_argument("--geometry",       type=str,   default="accurate",
@@ -74,8 +74,8 @@ def main():
                         help="Eval simulator: 'none' uses the task default, else override it.")
     parser.add_argument("--settle",         type=float, default=1.0)
     parser.add_argument("--use_full_graph", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--nconmax",        type=int,   default=200)
-    parser.add_argument("--njmax",          type=int,   default=500)
+    parser.add_argument("--nconmax",        type=int,   default=50)
+    parser.add_argument("--njmax",          type=int,   default=200)
     parser.add_argument("--output",         type=str,   default=None,
                         help="Path for results JSON (auto-timestamped if omitted).")
     parser.add_argument("--debug",          action="store_true")

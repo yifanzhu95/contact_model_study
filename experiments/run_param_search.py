@@ -59,9 +59,9 @@ RESULTS_DIR = Path(__file__).parent.parent / "results"
 # Each key maps to a list of candidate values.
 # ---------------------------------------------------------------------------
 WEIGHT_SEARCH_SPACE: dict[str, list[float]] = {
-    "w_quat":    [5.0, 10.0, 20.0],
-    "w_pos":     [10.0, 20.0, 40.0],
-    "w_contact": [2.5, 5.0, 10.0],
+    "w_quat":    [3.0, 5.0, 7.0],
+    "w_pos":     [35.0, 40.0, 45.0],
+    "w_contact": [2.5, 5.0, 7.5],
     "w_joint":   [0.05, 0.1, 0.2],
 }
 
@@ -96,22 +96,22 @@ def main():
     parser.add_argument("--task",    type=str, default="grasp_reorient")
     parser.add_argument("--models",  nargs="+", default=list(MODEL_FACTORIES.keys()),
                         choices=list(MODEL_FACTORIES.keys()))
-    parser.add_argument("--n_episodes",     type=int,   default=10,
+    parser.add_argument("--n_episodes",     type=int,   default=5,
                         help="Episodes per (model × weight combo) cell.")
-    parser.add_argument("--n_samples",      type=int,   default=256)
-    parser.add_argument("--horizon",        type=int,   default=128)
-    parser.add_argument("--temperature",    type=float, default=0.05)
-    parser.add_argument("--noise_sigma",    type=float, default=0.001)
+    parser.add_argument("--n_samples",      type=int,   default=512)
+    parser.add_argument("--horizon",        type=int,   default=48)
+    parser.add_argument("--temperature",    type=float, default=2.0)
+    parser.add_argument("--noise_sigma",    type=float, default=0.05)
     parser.add_argument("--seed",           type=int,   default=None)
     parser.add_argument("--geometry",       type=str,   default="accurate",
                         choices=[g.value for g in GeometryVariant])
     parser.add_argument("--eval_sim",       type=str,   default="none",
                         choices=["none", "mujoco", "drake"],
                         help="Eval simulator: 'none' uses the task default, else override it.")
-    parser.add_argument("--settle",         type=float, default=10.0)
+    parser.add_argument("--settle",         type=float, default=1.0)
     parser.add_argument("--use_full_graph", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--nconmax",        type=int,   default=200)
-    parser.add_argument("--njmax",          type=int,   default=500)
+    parser.add_argument("--nconmax",        type=int,   default=50)
+    parser.add_argument("--njmax",          type=int,   default=200)
     parser.add_argument("--top_n",          type=int,   default=10,
                         help="How many top results to show in the final summary.")
     parser.add_argument("--output",         type=str,   default=None,
@@ -145,6 +145,7 @@ def main():
         njmax          = args.njmax,
         seed           = args.seed,
         debug          = args.debug,
+        delta_range    = (-0.5, 0.5),
     )
 
     aggregated  = []   # AggregatedResult list for save_results
