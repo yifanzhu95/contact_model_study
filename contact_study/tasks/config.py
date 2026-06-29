@@ -45,8 +45,9 @@ class TaskRole(enum.Enum):
 
 class EvalSimulatorKind(str, enum.Enum):
     """Which simulator backs the eval/"real" environment."""
-    MUJOCO = "mujoco"
-    DRAKE  = "drake"
+    MUJOCO    = "mujoco"
+    DRAKE     = "drake"
+    PINOCCHIO = "pinocchio"
 
 
 @dataclass

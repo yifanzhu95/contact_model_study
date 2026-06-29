@@ -167,7 +167,7 @@ def main():
     parser.add_argument("--task", type=str, default="cart_pole",
                          help="Registered task name (e.g. cart_pole, grasp_reorient).")
     parser.add_argument("--eval_sim", type=str, default="none",
-                         choices=["none", "mujoco", "drake"],
+                         choices=["none", "mujoco", "drake", "pinocchio"],
                          help="Eval simulator: 'none' uses the task default, else override it.")
     parser.add_argument("--sweep_seconds", type=float, default=1.5,
                          help="Duration of the back-and-forth sweep at each joint's limits.")

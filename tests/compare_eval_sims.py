@@ -1,138 +1,308 @@
 """compare_eval_sims.py
 
-Side-by-side sanity check of all available eval simulators (currently MuJoCo
-and Drake), driven through the same EvalSimulator interface used by
-contact_study/drivers/run_eval_episode.py. Builds the same per-joint
-ramp/sweep/ramp-home control sequence as test_robot_model.py, applies it to
-both simulators in lockstep (same task, same initial state, same controls,
-same timestep), and prints qpos/qvel from each at every step.
+Side-by-side check of all available eval simulators (currently MuJoCo and
+Drake), driven by an MPPI controller instead of a hand-scripted control
+sweep. Generalizes contact_study/drivers/run_eval_episode.py to two eval
+simulators stepped in lockstep:
 
-At the end, plots each qpos element over time (MuJoCo vs Drake overlaid) and
-saves the figures as PDFs. Also records a per-simulator video (gif) of the
-same control sequence into the videos/ folder, by shelling out to
-test_robot_model.py once per simulator — MuJoCo's GL renderer and Drake's VTK
-renderer can't safely share a process (see MUJOCO_GL note below), so each
-video is captured in its own subprocess.
+  * a ROLLOUT task — owns the planning MuJoCo model + MPPIController (GPU
+    rollouts), exactly as in run_eval_episode.
+  * two EVAL tasks  — one MuJoCo, one Drake EvalSimulator, both reset to the
+    same initial state.
 
-Usage:
-    python tests/compare_eval_sims.py --task grasp_reorient
-    python tests/compare_eval_sims.py --task cart_pole --out_dir figures/compare_eval_sims
-    python tests/compare_eval_sims.py --task cart_pole --no_video
+Per control step: read state from the MuJoCo eval sim (the "primary" sim that
+closes the loop) → mirror into the planning MjData → controller.plan() on the
+GPU → integrate the delta into the command → apply the *same* command to both
+eval sims → advance both → print qpos/qvel from each.
+
+MuJoCo drives the planner; Drake is stepped open-loop on the identical command
+stream so any divergence between the two is purely a contact-model/physics
+effect, not a difference in what each one was told to do.
+
+At the end, saves the qpos/qvel/control history to an .npz and plots each
+qpos element over time (MuJoCo vs Drake overlaid) as a PDF. Optionally records
+a gif per simulator by replaying the saved control history in its own
+subprocess (MuJoCo's GL renderer and Drake's VTK renderer can't safely share a
+process, so each replay happens in isolation, after the fact).
+
+Run on a CUDA machine (warp arrays live on the device):
+    python tests/compare_eval_sims.py --task cart_pole
+    python tests/compare_eval_sims.py --task grasp_reorient --model M2 --video
 """
 
 from __future__ import annotations
 
 import os
-# Drake's VTK GLX context and MuJoCo's GL backend can't coexist; the
-# comparison loop below doesn't render either simulator, so keep MuJoCo off
-# the GPU entirely. Video capture happens in separate subprocesses (one
-# simulator per process), each with its own MUJOCO_GL setting.
+# The comparison loop below never renders in-process (MuJoCo's GL renderer and
+# Drake's VTK renderer can't safely share a process); keep MuJoCo off the GPU
+# entirely here. Video capture (if requested) replays the recorded controls in
+# its own subprocess per simulator, each with its own MUJOCO_GL setting.
 os.environ.setdefault("MUJOCO_GL", "disable")
 
 import argparse
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import mujoco
 import numpy as np
+import warp as wp
 
 import contact_study.tasks  # noqa: F401 — registers all tasks
 
+from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
+from contact_study.planners.mppi import MPPIController, MPPIConfig
 from contact_study.tasks.base import get_task
-from contact_study.tasks.config import EvalSimulatorKind, TaskRole
+from contact_study.tasks.config import TaskRole, EvalSimulatorKind
+
+MODEL_FACTORIES = {
+    "M1": ContactModelConfig.M1,
+    "M2": ContactModelConfig.M2,
+    "M3": ContactModelConfig.M3,
+    "M4": ContactModelConfig.M4,
+}
 
 ALL_EVAL_SIMS = [EvalSimulatorKind.MUJOCO, EvalSimulatorKind.DRAKE]
+PRIMARY_SIM = EvalSimulatorKind.MUJOCO  # drives the MPPI feedback loop
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TEST_ROBOT_MODEL = Path(__file__).resolve().parent / "test_robot_model.py"
+THIS_SCRIPT = Path(__file__).resolve()
 
 
-def _joint_limits(mjm, home_ctrl: np.ndarray, fallback_amplitude: float) -> np.ndarray:
-    """Per-actuator (lo, hi) sweep range: ctrlrange where ctrllimited, else
-    home +/- fallback_amplitude."""
-    lim = np.empty((mjm.nu, 2), dtype=float)
-    for i in range(mjm.nu):
-        if mjm.actuator_ctrllimited[i]:
-            lim[i] = mjm.actuator_ctrlrange[i]
-        else:
-            lim[i] = (home_ctrl[i] - fallback_amplitude, home_ctrl[i] + fallback_amplitude)
-    return lim
+def run_compare(
+    task_name: str,
+    contact_cfg: ContactModelConfig,
+    mppi_cfg: MPPIConfig,
+    rng: np.random.Generator,
+    geometry: GeometryVariant = GeometryVariant.ACCURATE,
+    settle_seconds: float = 1.0,
+    eval_substeps: int | None = None,
+    max_steps: int | None = None,
+    print_every: int = 25,
+    out_dir: str = "figures/compare_eval_sims",
+) -> Path:
+    """Run one MPPI-driven episode against both eval sims in lockstep; returns
+    the path of the saved .npz (qpos/qvel/control history)."""
+    # ---- ROLLOUT task + planner (same as run_eval_episode) -----------------
+    rollout_task = get_task(task_name, geometry=geometry, role=TaskRole.ROLLOUT)
+    mjm, mjd = rollout_task.load()
+    cfg = rollout_task.config
+
+    eval_dt = cfg.timestep
+    eval_substeps = eval_substeps if eval_substeps is not None else cfg.eval_substeps_per_rollout
+    rollout_dt = eval_dt * eval_substeps
+    mjm.opt.timestep = rollout_dt
+
+    controller = MPPIController(task=rollout_task, cfg=contact_cfg, mppi_cfg=mppi_cfg, rng=rng)
+
+    # ---- two EVAL tasks, one per simulator ----------------------------------
+    eval_tasks = {}
+    sims = {}
+    for kind in ALL_EVAL_SIMS:
+        t = get_task(task_name, geometry=geometry, role=TaskRole.EVAL)
+        t.load()
+        t.config.eval_sim = kind
+        eval_tasks[kind] = t
+
+    q0, v0, u0 = rollout_task.get_inital_state(rng)
+    q0 = np.asarray(q0, dtype=float)
+    v0 = np.asarray(v0, dtype=float)
+    u = np.asarray(u0, dtype=float).copy() if u0 is not None else np.zeros(mjm.nu)
+
+    for kind in ALL_EVAL_SIMS:
+        sim = eval_tasks[kind].make_eval_simulator(video_path=None, render=False)
+        sim.reset(q0.copy(), v0.copy())
+        sims[kind] = sim
+
+    dts = {kind: sims[kind].timestep for kind in ALL_EVAL_SIMS}
+    for kind in ALL_EVAL_SIMS[1:]:
+        if not np.isclose(dts[kind], dts[PRIMARY_SIM]):
+            raise ValueError(f"Eval simulators disagree on timestep: "
+                              f"{ {k.value: v for k, v in dts.items()} }")
+
+    # Recorded event log (settle + control-loop commands) so a later video
+    # pass can replay the exact same input each simulator saw, without
+    # re-running MPPI (which would resample noise and diverge).
+    event_ctrl: list[np.ndarray] = []
+    event_substeps: list[int] = []
+
+    # ---- settle phase (hold u0, advance both sims) --------------------------
+    if settle_seconds > 0.0:
+        n_settle = int(settle_seconds / rollout_dt)
+        for _ in range(n_settle):
+            for kind in ALL_EVAL_SIMS:
+                sims[kind].apply_control(u)
+                sims[kind].step(eval_substeps)
+            event_ctrl.append(u.copy())
+            event_substeps.append(eval_substeps)
+
+    # Sample a fresh goal on the settled MuJoCo state before planning (no-op
+    # for tasks without sample_new_goal, e.g. cart_pole).
+    if hasattr(rollout_task, "sample_new_goal"):
+        st = sims[PRIMARY_SIM].get_state()
+        mjd.qpos[:] = st.qpos
+        mjd.qvel[:] = st.qvel
+        mujoco.mj_forward(mjm, mjd)
+        rollout_task.sample_new_goal(mjd, rng)
+
+    if cfg.force_limits is not None:
+        clip_lo, clip_hi = cfg.force_limits
+    elif cfg.control_limits is not None:
+        clip_lo, clip_hi = cfg.control_limits
+    else:
+        clip_lo = clip_hi = None
+
+    control_dt = mppi_cfg.substeps * rollout_dt
+    eval_steps_per_control = mppi_cfg.substeps * eval_substeps
+    n_steps = max_steps if max_steps is not None else cfg.max_steps
+
+    print(f"task={task_name}  model={contact_cfg.label}  "
+          f"eval_sims={[k.value for k in ALL_EVAL_SIMS]} (primary={PRIMARY_SIM.value})  "
+          f"eval_dt={eval_dt*1e3:.2f}ms  rollout_dt={rollout_dt*1e3:.2f}ms  "
+          f"control_dt={control_dt*1e3:.1f}ms  max_steps={n_steps}  "
+          f"horizon={mppi_cfg.horizon}  n_samples={mppi_cfg.n_samples}")
+
+    history_t: list[float] = []
+    history_qpos = {kind: [] for kind in ALL_EVAL_SIMS}
+    history_qvel = {kind: [] for kind in ALL_EVAL_SIMS}
+
+    steps_to_success: int | None = None
+    for t in range(n_steps):
+        st = sims[PRIMARY_SIM].get_state()
+        mjd.qpos[:] = st.qpos
+        mjd.qvel[:] = st.qvel
+        mjd.ctrl[:] = u
+        mujoco.mj_forward(mjm, mjd)
+
+        if rollout_task.is_success(mjd):
+            if steps_to_success is None:
+                steps_to_success = t
+                print(f"  step {t:4d}: success (primary={PRIMARY_SIM.value})")
+            break
+        if rollout_task.has_failed(mjd):
+            print(f"  step {t:4d}: task failed (primary={PRIMARY_SIM.value})")
+            break
+
+        action = controller.plan(mjd)
+        u = u + action
+        if clip_lo is not None:
+            u = np.clip(u, clip_lo, clip_hi)
+
+        states = {}
+        for kind in ALL_EVAL_SIMS:
+            sims[kind].apply_control(u)
+            sims[kind].step(eval_steps_per_control)
+            states[kind] = sims[kind].get_state()
+        event_ctrl.append(u.copy())
+        event_substeps.append(eval_steps_per_control)
+
+        history_t.append(t * control_dt)
+        for kind in ALL_EVAL_SIMS:
+            history_qpos[kind].append(states[kind].qpos.copy())
+            history_qvel[kind].append(states[kind].qvel.copy())
+
+        if t % print_every == 0:
+            print(f"  step {t:4d}  t={t*control_dt:5.2f}s  u={np.array2string(u, precision=3)}")
+            for kind in ALL_EVAL_SIMS:
+                st = states[kind]
+                print(f"    {kind.value:7s} qpos={np.array2string(st.qpos, precision=3)}  "
+                      f"qvel={np.array2string(st.qvel, precision=3)}")
+
+    # ---- save history + control replay log ----------------------------------
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    t_arr = np.asarray(history_t)
+    qpos = {kind: np.asarray(history_qpos[kind]) for kind in ALL_EVAL_SIMS}
+    qvel = {kind: np.asarray(history_qvel[kind]) for kind in ALL_EVAL_SIMS}
+
+    npz_path = out_path / f"{task_name}_qpos_qvel.npz"
+    np.savez(
+        npz_path,
+        task_name=np.array(task_name),
+        t=t_arr,
+        q0=q0, v0=v0,
+        event_ctrl=np.asarray(event_ctrl),
+        event_substeps=np.asarray(event_substeps),
+        **{f"qpos_{kind.value}": qpos[kind] for kind in ALL_EVAL_SIMS},
+        **{f"qvel_{kind.value}": qvel[kind] for kind in ALL_EVAL_SIMS},
+    )
+    print(f"  Saved qpos/qvel/control history -> {npz_path}")
+
+    for i in range(mjm.nq):
+        fig, ax = plt.subplots(figsize=(8, 4))
+        for kind in ALL_EVAL_SIMS:
+            ax.plot(t_arr, qpos[kind][:, i], label=kind.value)
+        ax.set_xlabel("time [s]")
+        ax.set_ylabel(f"qpos[{i}]")
+        ax.set_title(f"{task_name}: qpos[{i}] vs time (MPPI/{contact_cfg.label})")
+        ax.legend()
+        fig.tight_layout()
+        pdf_path = out_path / f"{task_name}_qpos_{i:02d}.pdf"
+        fig.savefig(pdf_path)
+        plt.close(fig)
+        print(f"  Saved plot -> {pdf_path}")
+
+    return npz_path
 
 
-def _build_phases(
-    nu: int,
-    limits: np.ndarray,
-    home_ctrl: np.ndarray,
-    sweep_seconds: float,
-    transition_seconds: float,
-    cycles: float,
-) -> list[tuple[str, float, Callable[[float], np.ndarray]]]:
-    """Per-joint (name, duration, ctrl_fn(elapsed_in_phase)) phase list:
-    ramp home->lo, sine sweep lo<->hi for `cycles` periods, ramp back->home."""
-    phases: list[tuple[str, float, Callable[[float], np.ndarray]]] = []
-    freq = (cycles / sweep_seconds) if sweep_seconds > 0 else 0.0
+def _replay_and_record(
+    npz_path: Path,
+    kind: EvalSimulatorKind,
+    video_path: Path,
+    video_width: int | None,
+    video_height: int | None,
+    video_fps: float | None,
+) -> None:
+    """Replay a recorded control history on a single eval simulator with
+    rendering on, and save the video. Runs in its own process (see module
+    docstring) so MuJoCo's and Drake's renderers never coexist."""
+    data = np.load(npz_path, allow_pickle=False)
+    task_name = str(data["task_name"])
+    q0, v0 = data["q0"], data["v0"]
+    event_ctrl, event_substeps = data["event_ctrl"], data["event_substeps"]
 
-    for i in range(nu):
-        lo, hi = limits[i]
-        mid, half = 0.5 * (lo + hi), 0.5 * (hi - lo)
+    task = get_task(task_name, role=TaskRole.EVAL)
+    task.load()
+    task.config.eval_sim = kind
+    if video_width is not None:
+        task.config.cam_width = video_width
+    if video_height is not None:
+        task.config.cam_height = video_height
+    if video_fps is not None:
+        task.config.cam_fps = video_fps
 
-        def ramp_to_lo(elapsed, i=i, lo=lo):
-            frac = min(elapsed / transition_seconds, 1.0) if transition_seconds > 0 else 1.0
-            c = home_ctrl.copy()
-            c[i] = home_ctrl[i] + (lo - home_ctrl[i]) * frac
-            return c
-
-        def sweep(elapsed, i=i, mid=mid, half=half):
-            c = home_ctrl.copy()
-            c[i] = mid + half * np.sin(-np.pi / 2 + 2 * np.pi * freq * elapsed)
-            return c
-
-        end_val = mid + half * np.sin(-np.pi / 2 + 2 * np.pi * freq * sweep_seconds)
-
-        def ramp_home(elapsed, i=i, end_val=end_val):
-            frac = min(elapsed / transition_seconds, 1.0) if transition_seconds > 0 else 1.0
-            c = home_ctrl.copy()
-            c[i] = end_val + (home_ctrl[i] - end_val) * frac
-            return c
-
-        phases.append((f"joint {i:2d}/{nu}: -> lo={lo:+.3f}",    transition_seconds, ramp_to_lo))
-        phases.append((f"joint {i:2d}/{nu}: sweep [{lo:+.3f}, {hi:+.3f}]", sweep_seconds, sweep))
-        phases.append((f"joint {i:2d}/{nu}: -> home={home_ctrl[i]:+.3f}", transition_seconds, ramp_home))
-
-    return phases
+    sim = task.make_eval_simulator(video_path=str(video_path), render=True)
+    sim.reset(q0.copy(), v0.copy())
+    for ctrl, substeps in zip(event_ctrl, event_substeps):
+        sim.apply_control(ctrl)
+        sim.step(int(substeps))
+        sim.render()
+    sim.save_video(str(video_path))
+    print(f"  Saved video -> {video_path}")
 
 
 def _record_videos(
+    npz_path: Path,
     task_name: str,
-    sweep_seconds: float,
-    transition_seconds: float,
-    cycles: float,
-    fallback_amplitude: float,
-    seed: int,
     video_dir: Path,
     video_width: int | None,
     video_height: int | None,
     video_fps: float | None,
 ) -> None:
-    """Capture one gif per eval simulator by running test_robot_model.py in
-    its own subprocess (one simulator per process avoids MuJoCo's GL renderer
-    and Drake's VTK renderer fighting over the same GL context)."""
+    """Spawn one subprocess per simulator to replay the recorded control
+    history with rendering on, and save a gif each."""
     video_dir.mkdir(parents=True, exist_ok=True)
     for kind in ALL_EVAL_SIMS:
         video_path = video_dir / f"compare_eval_sims_{task_name}_{kind.value}.gif"
         cmd = [
-            sys.executable, str(TEST_ROBOT_MODEL),
-            "--task", task_name,
-            "--eval_sim", kind.value,
-            "--sweep_seconds", str(sweep_seconds),
-            "--transition_seconds", str(transition_seconds),
-            "--cycles", str(cycles),
-            "--fallback_amplitude", str(fallback_amplitude),
-            "--seed", str(seed),
-            "--video", str(video_path),
+            sys.executable, str(THIS_SCRIPT),
+            "--replay_npz", str(npz_path),
+            "--replay_kind", kind.value,
+            "--replay_video", str(video_path),
         ]
         if video_width is not None:
             cmd += ["--video_width", str(video_width)]
@@ -142,191 +312,111 @@ def _record_videos(
             cmd += ["--video_fps", str(video_fps)]
 
         env = os.environ.copy()
-        # MuJoCo needs a real GL backend to render; Drake's own VTK renderer
-        # is unaffected by MUJOCO_GL, but only one simulator runs per
-        # subprocess, so there's no shadowing conflict to avoid here.
         env["MUJOCO_GL"] = "egl" if kind == EvalSimulatorKind.MUJOCO else "disable"
 
         print(f"  Recording {kind.value} video -> {video_path}")
         subprocess.run(cmd, check=True, env=env, cwd=str(REPO_ROOT))
 
 
-def run_compare(
-    task_name: str,
-    sweep_seconds: float,
-    transition_seconds: float,
-    cycles: float,
-    fallback_amplitude: float,
-    print_every: int,
-    seed: int,
-    out_dir: str,
-    record_video: bool,
-    video_dir: str,
-    video_width: int | None,
-    video_height: int | None,
-    video_fps: float | None,
-) -> None:
-    # One task object per simulator: make_eval_simulator() reads its kind off
-    # task.config.eval_sim, and each task carries its own MjModel/MjData.
-    tasks = {}
-    sims = {}
-    for kind in ALL_EVAL_SIMS:
-        task = get_task(task_name, role=TaskRole.EVAL)
-        task.load()
-        task.config.eval_sim = kind
-        tasks[kind] = task
-
-    mjm = tasks[ALL_EVAL_SIMS[0]].mjm
-    nu = mjm.nu
-    print(f"task={task_name}  nq={mjm.nq}  nv={mjm.nv}  nu={nu}  "
-          f"eval_sims={[k.value for k in ALL_EVAL_SIMS]}")
-
-    rng = np.random.default_rng(seed)
-    q0, v0, ctrl0 = tasks[ALL_EVAL_SIMS[0]].get_inital_state(rng)
-    q0 = np.asarray(q0, dtype=float)
-    v0 = np.asarray(v0, dtype=float)
-    home_ctrl = np.asarray(ctrl0 if ctrl0 is not None else np.zeros(nu), dtype=float)
-
-    limits = _joint_limits(mjm, home_ctrl, fallback_amplitude)
-    phases = _build_phases(nu, limits, home_ctrl, sweep_seconds, transition_seconds, cycles)
-
-    for kind in ALL_EVAL_SIMS:
-        sim = tasks[kind].make_eval_simulator(video_path=None, render=False)
-        sim.reset(q0.copy(), v0.copy())
-        sims[kind] = sim
-
-    dts = {kind: sims[kind].timestep for kind in ALL_EVAL_SIMS}
-    dt = dts[ALL_EVAL_SIMS[0]]
-    for kind in ALL_EVAL_SIMS[1:]:
-        if not np.isclose(dts[kind], dt):
-            raise ValueError(
-                f"Eval simulators disagree on timestep: "
-                f"{ {k.value: v for k, v in dts.items()} }"
-            )
-
-    history_t: list[float] = []
-    history_qpos = {kind: [] for kind in ALL_EVAL_SIMS}
-    history_qvel = {kind: [] for kind in ALL_EVAL_SIMS}
-
-    step = 0
-    t = 0.0
-    for name, duration, ctrl_fn in phases:
-        print(f"  {name}")
-        n_steps = max(1, int(round(duration / dt))) if duration > 0 else 0
-        for k in range(n_steps):
-            elapsed = k * dt
-            ctrl = ctrl_fn(elapsed)
-
-            states = {}
-            for kind in ALL_EVAL_SIMS:
-                sim = sims[kind]
-                sim.apply_control(ctrl)
-                sim.step(1)
-                states[kind] = sim.get_state()
-
-            history_t.append(t)
-            for kind in ALL_EVAL_SIMS:
-                history_qpos[kind].append(states[kind].qpos.copy())
-                history_qvel[kind].append(states[kind].qvel.copy())
-
-            step += 1
-            t += dt
-            if step % print_every == 0:
-                print(f"    [step {step:6d}] t={t:6.3f}s  ctrl={np.array2string(ctrl, precision=3)}")
-                for kind in ALL_EVAL_SIMS:
-                    st = states[kind]
-                    print(f"      {kind.value:7s} qpos={np.array2string(st.qpos, precision=3)}  "
-                          f"qvel={np.array2string(st.qvel, precision=3)}")
-
-    out_path = Path(out_dir)
-    out_path.mkdir(parents=True, exist_ok=True)
-
-    t_arr = np.asarray(history_t)
-    qpos = {kind: np.asarray(history_qpos[kind]) for kind in ALL_EVAL_SIMS}
-
-    npz_path = out_path / f"{task_name}_qpos_qvel.npz"
-    np.savez(
-        npz_path,
-        t=t_arr,
-        **{f"qpos_{kind.value}": qpos[kind] for kind in ALL_EVAL_SIMS},
-        **{f"qvel_{kind.value}": np.asarray(history_qvel[kind]) for kind in ALL_EVAL_SIMS},
-    )
-    print(f"  Saved raw qpos/qvel -> {npz_path}")
-
-    for i in range(mjm.nq):
-        fig, ax = plt.subplots(figsize=(8, 4))
-        for kind in ALL_EVAL_SIMS:
-            ax.plot(t_arr, qpos[kind][:, i], label=kind.value)
-        ax.set_xlabel("time [s]")
-        ax.set_ylabel(f"qpos[{i}]")
-        ax.set_title(f"{task_name}: qpos[{i}] vs time")
-        ax.legend()
-        fig.tight_layout()
-        pdf_path = out_path / f"{task_name}_qpos_{i:02d}.pdf"
-        fig.savefig(pdf_path)
-        plt.close(fig)
-        print(f"  Saved plot -> {pdf_path}")
-
-    if record_video:
-        _record_videos(
-            task_name           = task_name,
-            sweep_seconds       = sweep_seconds,
-            transition_seconds  = transition_seconds,
-            cycles              = cycles,
-            fallback_amplitude  = fallback_amplitude,
-            seed                = seed,
-            video_dir           = Path(video_dir),
-            video_width         = video_width,
-            video_height        = video_height,
-            video_fps           = video_fps,
-        )
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--task", type=str, default="cart_pole",
-                         help="Registered task name (e.g. cart_pole, grasp_reorient).")
-    parser.add_argument("--sweep_seconds", type=float, default=1.5,
-                         help="Duration of the back-and-forth sweep at each joint's limits.")
-    parser.add_argument("--transition_seconds", type=float, default=0.5,
-                         help="Ramp duration to/from each joint's limit and home.")
-    parser.add_argument("--cycles", type=float, default=1.0,
-                         help="Number of back-and-forth oscillations during sweep_seconds.")
-    parser.add_argument("--fallback_amplitude", type=float, default=1.0,
-                         help="+/- range to sweep for actuators with no ctrlrange (rare).")
-    parser.add_argument("--print_every", type=int, default=50, help="Print state every N steps.")
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--task", type=str, default="cart_pole")
+    parser.add_argument("--model", type=str, default="M2", choices=list(MODEL_FACTORIES))
+    parser.add_argument("--n_samples", type=int, default=256)
+    parser.add_argument("--horizon", type=int, default=48)
+    parser.add_argument("--temperature", type=float, default=2.0)
+    parser.add_argument("--noise_sigma", type=float, default=0.01)
+    parser.add_argument("--delta", type=float, default=0.1,
+                         help="Per-step MPPI delta clip magnitude (action units).")
+    parser.add_argument("--substeps", type=int, default=10,
+                         help="MPPI rollout substeps per control step (control frequency knob).")
+    parser.add_argument("--eval_substeps", type=int, default=None,
+                         help="Eval steps per rollout step (default: task config, usually 10).")
+    parser.add_argument("--settle", type=float, default=1.0)
+    parser.add_argument("--max_steps", type=int, default=None,
+                         help="Override the task's configured episode length.")
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--print_every", type=int, default=25)
     parser.add_argument("--out_dir", type=str, default="figures/compare_eval_sims",
                          help="Directory to save qpos PDFs and raw data into.")
-    parser.add_argument("--video", dest="record_video", action="store_true", default=True,
-                         help="Record a gif per simulator (default: on).")
-    parser.add_argument("--no_video", dest="record_video", action="store_false",
-                         help="Skip video recording.")
-    parser.add_argument("--video_dir", type=str, default="videos",
-                         help="Directory to save per-simulator gifs into.")
-    parser.add_argument("--video_width", type=int, default=None,
-                         help="Video frame width in pixels (default: task config).")
-    parser.add_argument("--video_height", type=int, default=None,
-                         help="Video frame height in pixels (default: task config).")
-    parser.add_argument("--video_fps", type=float, default=None,
-                         help="Video capture rate in fps (default: task config).")
+    parser.add_argument("--eval_sims", type=str, default="mujoco,drake",
+                         help="Comma-separated eval simulators to compare (e.g. "
+                              "'mujoco,pinocchio'). The first is the primary sim "
+                              "that drives the MPPI loop. Only sims the task "
+                              "supports are valid (pinocchio: grasp_reorient).")
+    parser.add_argument("--debug", action="store_true")
+
+    parser.add_argument("--video", dest="record_video", action="store_true", default=False,
+                         help="Record a gif per simulator by replaying the episode (default: off).")
+    parser.add_argument("--video_dir", type=str, default="videos")
+    parser.add_argument("--video_width", type=int, default=None)
+    parser.add_argument("--video_height", type=int, default=None)
+    parser.add_argument("--video_fps", type=float, default=None)
+
+    # Internal: invoked by _record_videos() in a subprocess, one simulator at
+    # a time. Not meant to be passed by hand.
+    parser.add_argument("--replay_npz", type=str, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--replay_kind", type=str, default=None,
+                         choices=[k.value for k in EvalSimulatorKind], help=argparse.SUPPRESS)
+    parser.add_argument("--replay_video", type=str, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
-    run_compare(
-        task_name           = args.task,
-        sweep_seconds       = args.sweep_seconds,
-        transition_seconds  = args.transition_seconds,
-        cycles              = args.cycles,
-        fallback_amplitude  = args.fallback_amplitude,
-        print_every         = args.print_every,
-        seed                = args.seed,
-        out_dir             = args.out_dir,
-        record_video        = args.record_video,
-        video_dir           = args.video_dir,
-        video_width         = args.video_width,
-        video_height        = args.video_height,
-        video_fps           = args.video_fps,
+    # Select which eval simulators to compare; the first is the MPPI-driving
+    # primary. run_compare/_record_videos read these module globals at runtime.
+    global ALL_EVAL_SIMS, PRIMARY_SIM
+    ALL_EVAL_SIMS = [EvalSimulatorKind(s.strip()) for s in args.eval_sims.split(",") if s.strip()]
+    PRIMARY_SIM = ALL_EVAL_SIMS[0]
+
+    if args.replay_npz is not None:
+        _replay_and_record(
+            npz_path=Path(args.replay_npz),
+            kind=EvalSimulatorKind(args.replay_kind),
+            video_path=Path(args.replay_video),
+            video_width=args.video_width,
+            video_height=args.video_height,
+            video_fps=args.video_fps,
+        )
+        return
+
+    wp.init()
+    rng = np.random.default_rng(args.seed)
+    contact_cfg = MODEL_FACTORIES[args.model]()
+    mppi_cfg = MPPIConfig(
+        n_samples=args.n_samples,
+        horizon=args.horizon,
+        temperature=args.temperature,
+        noise_sigma=args.noise_sigma,
+        substeps=args.substeps,
+        warm_start=True,
+        use_full_graph=False,
+        delta_range=(-args.delta, args.delta),
+        nconmax=50,
+        njmax=200,
+        seed=args.seed,
+        debug=args.debug,
     )
+
+    npz_path = run_compare(
+        task_name=args.task,
+        contact_cfg=contact_cfg,
+        mppi_cfg=mppi_cfg,
+        rng=rng,
+        settle_seconds=args.settle,
+        eval_substeps=args.eval_substeps,
+        max_steps=args.max_steps,
+        print_every=args.print_every,
+        out_dir=args.out_dir,
+    )
+
+    if args.record_video:
+        _record_videos(
+            npz_path=npz_path,
+            task_name=args.task,
+            video_dir=Path(args.video_dir),
+            video_width=args.video_width,
+            video_height=args.video_height,
+            video_fps=args.video_fps,
+        )
 
 
 if __name__ == "__main__":
