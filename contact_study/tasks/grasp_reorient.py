@@ -84,7 +84,7 @@ def _euler_to_quat(euler) -> np.ndarray:
 
 # Goal/target pose for the cube reorientation, defined here rather than read
 # from a mocap body in the scene. pos + intrinsic-xyz Euler (rad).
-_TARGET_POS   = np.array([0.025, 0.033, 0.08], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
+_TARGET_POS   = np.array([0.025, 0.033, 0.09], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
 _TARGET_EULER = np.array([0.0, 0.5235, 0.0], dtype=np.float64)
 _TARGET_QUAT  = _euler_to_quat(_TARGET_EULER)   # wxyz
 
@@ -165,7 +165,7 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
             c_contact = c_contact + dp*dp
 
     fallen = float(0.0)
-    if qpos[obj_qpos_adr + 2] < 0.05:
+    if qpos[obj_qpos_adr + 2] < 0.08:
         fallen = 1.0
 
     c_velo = wp.dot(v_obj, v_obj) + wp.dot(w_obj, w_obj)
@@ -234,13 +234,13 @@ class GraspReorientTask(BaseTask):
             max_steps          = 500,
             success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
             cost_weights       = {
-                "w_quat": 10.0, #5.0
-                "w_pos": 50.0, #40.0
+                "w_quat": 20.0, #5.0
+                "w_pos": 20.0, #40.0
                 "w_velo": 0.0,
-                "w_contact": 5.0,#2.5
-                "w_joint": 0.1, #0.1
+                "w_contact": 10.0,#2.5
+                "w_joint": 0.05, #0.1
                 "w_joint_velo": 0.0,
-                "w_fallen": 20.0, #30.0,
+                "w_fallen": 30.0, #30.0,
                 "w_quat_term": 10.0, #10.0
                 "w_pos_term": 10.0, #10.0
                 "w_fallen_term": 0.0,
