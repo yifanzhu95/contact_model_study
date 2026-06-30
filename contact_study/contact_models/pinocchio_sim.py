@@ -143,9 +143,21 @@ def _box_half_extents(go):
 
 
 def _is_adjacent(model, j1, j2):
-    """Same joint or a direct parent-child relationship (a contact there would be
-    a spurious, permanently-active constraint)."""
-    return j1 == j2 or model.parents[j1] == j2 or model.parents[j2] == j1
+    """Same joint or a direct parent-child relationship between two non-universe
+    joints (a contact there would be a spurious, permanently-active constraint).
+
+    Universe (j=0) is the computational root, not a physical body. Loose
+    worldbody geoms (e.g. the palm) land at parentJoint=0, and free/revolute
+    joints that are direct children of universe also have parents[jid]=0.
+    Treating universe as a body in the adjacency check would filter out every
+    palm<->object and palm<->finger contact, so we skip the parent-child test
+    whenever either joint is universe.
+    """
+    if j1 == j2:
+        return True
+    if j1 > 0 and j2 > 0:
+        return model.parents[j1] == j2 or model.parents[j2] == j1
+    return False
 
 
 def build_collision_pairs(pin, model, geom_model, cfg: PinocchioContactConfig):
