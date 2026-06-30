@@ -59,10 +59,10 @@ RESULTS_DIR = Path(__file__).parent.parent / "results"
 # Each key maps to a list of candidate values.
 # ---------------------------------------------------------------------------
 WEIGHT_SEARCH_SPACE: dict[str, list[float]] = {
-    "w_quat":    [3.0, 5.0, 7.0],
-    "w_pos":     [35.0, 40.0, 45.0],
-    "w_contact": [2.5, 5.0, 7.5],
-    "w_joint":   [0.05, 0.1, 0.2],
+    "w_quat":    [15.0, 20.0, 25.0],
+    "w_pos":     [15.0, 20.0, 25.0],
+    "w_contact": [7.5, 10.0, 12.5],
+    "w_joint":   [0.025, 0.05, 0.1],
 }
 
 wp.init()
@@ -98,10 +98,10 @@ def main():
                         choices=list(MODEL_FACTORIES.keys()))
     parser.add_argument("--n_episodes",     type=int,   default=5,
                         help="Episodes per (model × weight combo) cell.")
-    parser.add_argument("--n_samples",      type=int,   default=512)
+    parser.add_argument("--n_samples",      type=int,   default=256)
     parser.add_argument("--horizon",        type=int,   default=48)
-    parser.add_argument("--temperature",    type=float, default=2.0)
-    parser.add_argument("--noise_sigma",    type=float, default=0.05)
+    parser.add_argument("--temperature",    type=float, default=1.0)
+    parser.add_argument("--noise_sigma",    type=float, default=0.01)
     parser.add_argument("--seed",           type=int,   default=None)
     parser.add_argument("--geometry",       type=str,   default="accurate",
                         choices=[g.value for g in GeometryVariant])
@@ -145,7 +145,8 @@ def main():
         njmax          = args.njmax,
         seed           = args.seed,
         debug          = args.debug,
-        delta_range    = (-0.5, 0.5),
+        delta_range    = (-0.1, 0.1),
+        substeps       = 16
     )
 
     aggregated  = []   # AggregatedResult list for save_results
@@ -186,6 +187,7 @@ def main():
                     ep_idx                = ep,
                     debug                 = args.debug,
                     verbose               = False,
+                    #eval_substeps         = 16,
                 )
                 episodes.append(result)
                 tick = "✓" if result.success else "✗"
