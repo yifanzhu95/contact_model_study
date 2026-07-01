@@ -254,7 +254,7 @@ class GraspReorientTask(BaseTask):
             xml_path_template  = GRASP_SCENE_XML,
             rollout_model_path = str(SCENES_DIR / GRASP_SCENE_XML),
             rollout_is_urdf    = False,
-            eval_sim           = EvalSimulatorKind.DRAKE,
+            eval_sim           = EvalSimulatorKind.PINOCCHIO,
             # Drake evals the URDF-derived hand; MuJoCo and Pinocchio both eval
             # the same MJCF scene the rollouts plan with (GRASP_SCENE_XML).
             eval_model_paths   = {
