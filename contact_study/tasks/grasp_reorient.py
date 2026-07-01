@@ -57,7 +57,7 @@ _INIT_QPOS = np.array([
     0.80782262,   0.61122899,  0.92718954,   0.61047876,
     0.69887738,   1.438706,    1.3375555,    0.19482527,
 
-    0.02,  0.035, 0.08,#0.018495468,  0.033628956, 0.083264539,  
+    0.018495468,  0.033628956, 0.083264539,  
     0.93823638, 0.12995374, 0.31377877,  0.066086313,
 ], dtype=np.float64)
 
@@ -84,7 +84,7 @@ def _euler_to_quat(euler) -> np.ndarray:
 
 # Goal/target pose for the cube reorientation, defined here rather than read
 # from a mocap body in the scene. pos + intrinsic-xyz Euler (rad).
-_TARGET_POS   = np.array([0.025, 0.033, 0.09], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
+_TARGET_POS   = np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
 _TARGET_EULER = np.array([0.0, 0.5235, 0.0], dtype=np.float64)
 _TARGET_QUAT  = _euler_to_quat(_TARGET_EULER)   # wxyz
 
@@ -231,18 +231,18 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 150,
-            success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
+            max_steps          = 250,
+            success_thresholds = {"pos": 0.05, "quat": 0.02, "vel": 0.1},
             cost_weights       = {
-                "w_quat": 20.0, #5.0
-                "w_pos": 20.0, #40.0
+                "w_quat": 50.0, #5.0
+                "w_pos": 400.0, #40.0
                 "w_velo": 0.0,
-                "w_contact": 10.0,#2.5
-                "w_joint": 0.05, #0.1
+                "w_contact": 500.0,#2.5
+                "w_joint": 5.0, #0.1
                 "w_joint_velo": 0.0,
-                "w_fallen": 30.0, #30.0,
-                "w_quat_term": 10.0, #10.0
-                "w_pos_term": 10.0, #10.0
+                "w_fallen": 300.0, #30.0,
+                "w_quat_term": 100.0, #10.0
+                "w_pos_term": 100.0, #10.0
                 "w_fallen_term": 0.0,
             },
             # BaseTask.load() loads this static file directly — no MJCF is
