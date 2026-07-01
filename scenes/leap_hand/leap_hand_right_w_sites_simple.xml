@@ -5,11 +5,30 @@
     <!--
     <joint damping="0.03" frictionloss="0.001" />
     -->
+    <default class="visual">
+      <geom group="1" type="mesh" contype="0" conaffinity="0" density="0" material="black" />
+    </default>
+
+    <default class="collision">
+      <geom material="black" />
+    </default>
+
   </default>
   <compiler angle="radian" />
   <asset>
+    <material name="black" rgba="0.2 0.2 0.2 1" />
+    <material name="white" rgba="1 1 1 1" />
     <mesh name="white_tip" content_type="model/obj" file="meshes/white_tip.obj" />
     <mesh name="white_tip_thumb" content_type="model/obj" file="meshes/white_tip_thumb.obj" />
+    
+    <mesh name="palm_lower" content_type="model/obj" file="meshes/palm_lower.obj" />
+    <mesh name="mcp_joint" content_type="model/obj" file="meshes/mcp_joint.obj" />
+    <mesh name="pip" content_type="model/obj" file="meshes/pip.obj" />
+    <mesh name="dip" content_type="model/obj" file="meshes/dip.obj" />
+    <mesh name="fingertip" content_type="model/obj" file="meshes/fingertip.obj" />
+    <mesh name="thumb_pip" content_type="model/obj" file="meshes/thumb_pip.obj" />
+    <mesh name="thumb_dip" content_type="model/obj" file="meshes/thumb_dip.obj" />
+    <mesh name="thumb_fingertip" content_type="model/obj" file="meshes/thumb_fingertip.obj" />
   </asset>
   <worldbody>
     <geom size="0.011 0.013 0.017" pos="-0.00229421 -0.00849997 0.0140263" quat="1.28159e-06 0.965926 3.434e-07 -0.258819" type="box" />
@@ -26,6 +45,9 @@
     <geom size="0.002 0.018 0.017" pos="-0.0818705 0.00900002 0.0541962" quat="1.28159e-06 0.965926 3.434e-07 -0.258819" type="box" rgba="1 1 0 1" />
     <geom size="0.022 0.028 0.002" pos="-0.07255 0.00299997 0.0303398" quat="1.28159e-06 0.965926 3.434e-07 -0.258819" type="box" rgba="1 1 0 1"  />
     -->
+    <geom name="palm_vis" pos="-0.02 0.02575 -0.0447" quat="0 0.97236992  0 -0.23344536" class="visual" mesh="palm_lower"/>
+    
+
     <geom size="1 1 0.01" pos="0 0 -0.25" type="box" rgba="0.4 0.45 0.5 1" />
     <body name="mcp_joint" pos="0.00328786 -0.023 0.0196947" quat="-0.612371 0.612376 0.353551 0.353552">
       <inertial pos="0 0 0" quat="0.388585 0.626468 -0.324549 0.592628" mass="0.044" diaginertia="1.47756e-05 1.31982e-05 6.0802e-06" />
