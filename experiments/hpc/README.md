@@ -1,48 +1,52 @@
 # HPC weight grid search
 
-Runs `experiments/run_param_search.py`'s sweep as a SLURM **job array**: the grid
-(models × weight combos) is split so each array task runs **one** weight set for a
-few episodes, writes its own JSON, and a final job combines them.
+Runs the cost-weight sweep as a SLURM **job array**: the grid (models × weight
+combos) lives in `param_search.slurm`, which maps `$SLURM_ARRAY_TASK_ID` to one
+value per axis, runs a few episodes for that one weight set, and writes its own
+JSON. When the array finishes, a combine job merges every cell.
 
 ## Files
 
 | File | Role |
 |------|------|
-| `search_config.sh` | **Single source of truth** — task, models, the list of each weight, episode count, MPPI knobs. Edit this to change the sweep. |
-| `run_param_cell.py` | Worker. Rebuilds the grid from CLI args and runs the one cell given by `--combo_index` (via `run_eval_episode`), writing `cell_<i>.json`. |
+| `param_search.slurm` | The array job. Defines the parameter grids inline, decodes the task id into one value per axis, runs the cell, and (from task 0) queues the combine job. **This is the only thing you submit.** |
+| `run_param_cell.py` | Worker. Runs `--n_episodes` episodes for one `--model` + `--weights` set (via `run_eval_episode`) and writes `cell_<id>.json`. |
+| `combine.slurm` | Runs the combiner after the array (queued automatically as an `afterok` dependency). |
 | `combine_results.py` | Merges all `cell_*.json` into `<prefix>_rich.json` + `<prefix>_agg.json` and prints a ranked top-N table. |
-| `param_search.slurm` | Array job: one task per cell, `--combo_index $SLURM_ARRAY_TASK_ID`. |
-| `combine.slurm` | Runs the combiner after the array finishes. |
-| `submit_param_search.sh` | Convenience: sizes the array, submits it, and chains the combine job (`afterok`). |
 
 ## Usage
 
-1. Edit `search_config.sh` (grid + MPPI knobs) and fill in the `TODO` cluster
-   lines (`--partition`, `--account`, env activation) in the two `.slurm` files.
-2. Submit everything:
+1. In `param_search.slurm`, edit the grids (`MODELS`, `W_QUAT`, `W_POS`,
+   `W_CONTACT`, `W_JOINT`), `N_EPISODES`, and the shared MPPI knobs.
+2. **Keep `#SBATCH --array` in sync** with the grid: it must be
+   `0-(product of the array lengths − 1)`. The default `4×3×3×3×3 = 324` → `0-323`.
+3. Submit:
    ```bash
    cd experiments/hpc
-   ./submit_param_search.sh          # or: MAX_CONCURRENT=40 ./submit_param_search.sh
+   mkdir -p logs
+   sbatch param_search.slurm
    ```
-   This computes the number of cells, submits the array (one job per weight set),
-   and queues the combine job to run automatically once the array succeeds.
-3. Results land in `results/param_search_<timestamp>/`:
-   - `cell_00000.json … cell_NNNNN.json` — one per weight set (success rate + per-episode detail)
-   - `combined_<task>_rich.json` / `combined_<task>_agg.json` — merged
-   - the combine job's log prints the ranked top configs.
+   One job runs per weight set; task 0 also queues the combine job to run once
+   the whole array succeeds.
 
-### Running without the submit helper
+Results land in `results/param_search_<arrayjobid>/`:
+- `cell_00000.json … cell_00323.json` — one per weight set (success rate + per-episode detail)
+- `combined_<task>_rich.json` / `combined_<task>_agg.json` — merged
+- the combine job's log prints the ranked top configs.
 
-`sbatch param_search.slurm` works too, but set `#SBATCH --array=0-<N-1>` yourself
-(`N = source search_config.sh; num_cells`) and export `OUTDIR`, e.g.
-`OUTDIR=results/run1 sbatch --array=0-323 --export=ALL,OUTDIR param_search.slurm`.
+### Adding or removing a swept axis
 
-### Running locally (no SLURM)
+The grids are decoded lowest-axis-first (model, then quat, pos, contact, joint).
+To add an axis, add its array, a matching `IDX` line in the mixed-radix decode,
+a `SEL_*` selection, and another `name=value` token in the `--weights` call — then
+update `#SBATCH --array` to the new product. Weight names must match the task's
+`cost_weights` keys.
 
-The worker runs the whole grid serially when `--combo_index` is omitted:
+### Combining by hand
+
+If the auto-queued combine job didn't run:
 ```bash
-python run_param_cell.py --outdir results/local_run --n_episodes 3 \
-    --models M2 M3 --weights w_quat=15,20,25 w_pos=15,20,25
-python combine_results.py --indir results/local_run
+OUTDIR=results/param_search_<id> TASK=grasp_reorient sbatch combine.slurm
+# or directly:
+python combine_results.py --indir results/param_search_<id>
 ```
-Count the cells first with `--num_combos` (add `--models`/`--weights` to match).

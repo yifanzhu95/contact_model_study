@@ -2,33 +2,19 @@
 
 HPC worker for the cost-weight parameter search — one SLURM array task = one cell.
 
-A "cell" is a single (model x weight-combo) point of the grid. The grid is the
-Cartesian product of the swept `--models` and the per-weight value lists passed
-via `--weights`. Every array task independently reconstructs the *same* grid from
-identical CLI args and selects its own cell with `--combo_index` (typically
-`$SLURM_ARRAY_TASK_ID`). It runs `--n_episodes` episodes for that cell via
-`run_eval_episode`, aggregates the success rate, and writes ONE JSON file to
-`--outdir` (`cell_<index>.json`). `combine_results.py` merges those per-cell files.
+A "cell" is a single (model, weight set) point of the grid. The SLURM script owns
+the grid: it defines the value lists, maps `$SLURM_ARRAY_TASK_ID` to one value per
+axis, and calls this script with the *selected* model and weight values. This
+worker just runs `--n_episodes` episodes for that one cell via `run_eval_episode`,
+aggregates the success rate, and writes ONE JSON file to `--outdir`
+(`cell_<cell_id>.json`). `combine_results.py` merges those per-cell files.
 
-This is the HPC counterpart of experiments/run_param_search.py: same search, but
-the outer grid loop is parallelized across the job array instead of run serially.
+Every parameter is a command-line input:
 
-Every parameter is a command-line input, and the swept axes accept lists:
-
-    # Count the cells (use this to size the SLURM --array range)
-    python run_param_cell.py --num_combos \
-        --models M2 M3 \
-        --weights w_quat=15,20,25 w_pos=15,20,25 w_contact=7.5,10,12.5
-
-    # Run one cell (what SLURM calls per array task)
-    python run_param_cell.py --combo_index 4 --outdir results/param_search_run \
-        --task grasp_reorient --n_episodes 5 \
-        --models M2 M3 \
-        --weights w_quat=15,20,25 w_pos=15,20,25 w_contact=7.5,10,12.5
-
-    # Run ALL cells serially in one process (local, no job array)
-    python run_param_cell.py --outdir results/param_search_run \
-        --n_episodes 5 --weights w_quat=15,20,25 w_pos=15,20,25
+    python run_param_cell.py \
+        --cell_id 4 --outdir results/param_search_run \
+        --task grasp_reorient --model M2 --n_episodes 5 \
+        --weights w_quat=20 w_pos=15 w_contact=10 w_joint=0.05
 """
 
 from __future__ import annotations
@@ -37,7 +23,6 @@ os.environ.setdefault("MUJOCO_GL", "egl")
 
 import argparse
 import dataclasses
-import itertools
 import json
 from pathlib import Path
 
@@ -56,22 +41,22 @@ from contact_study.drivers.run_eval_episode import (
 
 
 # ---------------------------------------------------------------------------
-# Grid helpers (shared shape with experiments/run_param_search.py)
+# Helpers
 # ---------------------------------------------------------------------------
 
-def parse_weights(tokens: list[str]) -> dict[str, list[float]]:
-    """Parse `name=v1,v2,...` tokens into an ordered {name: [values]} dict.
+def parse_overrides(tokens: list[str]) -> dict[str, float]:
+    """Parse `name=value` tokens into an ordered {name: value} override dict.
 
     Order is preserved from the command line, which must match the insertion
     order of the task's `config.cost_weights` for the override merge — this
     holds for all built-in tasks (see apply_cost_weight_overrides)."""
-    space: dict[str, list[float]] = {}
+    overrides: dict[str, float] = {}
     for tok in tokens:
         if "=" not in tok:
-            raise ValueError(f"bad --weights token {tok!r}; expected name=v1,v2,...")
-        name, vals = tok.split("=", 1)
-        space[name.strip()] = [float(v) for v in vals.split(",") if v != ""]
-    return space
+            raise ValueError(f"bad --weights token {tok!r}; expected name=value")
+        name, val = tok.split("=", 1)
+        overrides[name.strip()] = float(val)
+    return overrides
 
 
 def combo_label(model_key: str, overrides: dict[str, float]) -> str:
@@ -80,48 +65,30 @@ def combo_label(model_key: str, overrides: dict[str, float]) -> str:
     return f"{model_key}__" + "_".join(parts)
 
 
-def build_cells(models: list[str],
-                search_space: dict[str, list[float]]) -> list[tuple[str, dict]]:
-    """Enumerate every (model, weight-override) cell of the grid, deterministically.
-
-    Outer axis is the model, inner axes are the weight lists in CLI order. Every
-    array task calls this with identical args, so cell `i` is stable everywhere."""
-    keys   = list(search_space.keys())
-    combos = list(itertools.product(*[search_space[k] for k in keys])) or [()]
-    cells: list[tuple[str, dict]] = []
-    for model_key in models:
-        for vals in combos:
-            cells.append((model_key, dict(zip(keys, vals))))
-    return cells
-
-
 # ---------------------------------------------------------------------------
 # Single-cell runner
 # ---------------------------------------------------------------------------
 
-def run_cell(cell_index: int,
-             model_key:  str,
-             overrides:  dict,
-             args) -> dict:
+def run_cell(cell_id: int, overrides: dict, args) -> dict:
     """Run one grid cell (n_episodes episodes) and return the result dict."""
     geometry = GeometryVariant(args.geometry)
     eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
-    cfg      = MODEL_FACTORIES[model_key]()
+    cfg      = MODEL_FACTORIES[args.model]()
 
-    label = combo_label(model_key, overrides)
+    label = combo_label(args.model, overrides)
 
     # Peek at the rollout task once for default weights + dimensions.
     peek_task       = load_rollout_task(args.task, geometry)
     default_weights = dict(peek_task.config.cost_weights)
     full_weights    = {**default_weights, **overrides}
 
-    print(f"[cell {cell_index}]  {label}")
-    print(f"  task={args.task}  model={model_key}  n_episodes={args.n_episodes}")
+    print(f"[cell {cell_id}]  {label}")
+    print(f"  task={args.task}  model={args.model}  n_episodes={args.n_episodes}")
     print(f"  overrides={overrides}")
 
-    # Reproducible per-episode seeds derived from the base seed AND the cell
-    # index, so different cells never share a seed but a run is repeatable.
-    seed_seq      = np.random.SeedSequence([s for s in (args.seed, cell_index)
+    # Reproducible per-episode seeds derived from the base seed AND the cell id,
+    # so different cells never share a seed but a run is repeatable.
+    seed_seq      = np.random.SeedSequence([s for s in (args.seed, cell_id)
                                             if s is not None] or None)
     episode_seeds = seed_seq.spawn(args.n_episodes)
 
@@ -178,9 +145,9 @@ def run_cell(cell_index: int,
           f"step_ms={float(np.mean(step_ms)):.3f}±{float(np.mean(step_sd)):.3f}")
 
     return {
-        "combo_index":           cell_index,
+        "combo_index":           cell_id,
         "task":                  args.task,
-        "model":                 model_key,
+        "model":                 args.model,
         "label":                 label,
         "overrides":             overrides,
         "full_weights":          full_weights,
@@ -212,31 +179,19 @@ def run_cell(cell_index: int,
 # ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        description="HPC worker: run one (or all) parameter-search cells.")
-    # --- what to sweep -----------------------------------------------------
+    p = argparse.ArgumentParser(description="HPC worker: run one parameter-search cell.")
+    # --- which cell (selected by the SLURM script) -------------------------
     p.add_argument("--task",    type=str, default="grasp_reorient")
-    p.add_argument("--models",  nargs="+", default=list(MODEL_FACTORIES.keys()),
-                   choices=list(MODEL_FACTORIES.keys()),
-                   help="Contact models to sweep (outer grid axis).")
-    p.add_argument("--weights", nargs="+", default=[
-                       "w_quat=15,20,25",
-                       "w_pos=15,20,25",
-                       "w_contact=7.5,10,12.5",
-                       "w_joint=0.025,0.05,0.1",
-                   ],
-                   help="Swept weight axes as name=v1,v2,... tokens (inner grid axes).")
+    p.add_argument("--model",   type=str, default="M2", choices=list(MODEL_FACTORIES),
+                   help="Contact model for this cell.")
+    p.add_argument("--weights", nargs="+", default=[],
+                   help="Weight overrides for this cell as name=value tokens.")
+    p.add_argument("--cell_id", type=int, default=0,
+                   help="Cell index (e.g. $SLURM_ARRAY_TASK_ID); names the output file.")
     p.add_argument("--n_episodes", type=int, default=5,
-                   help="Episodes per cell (used to estimate the success rate).")
-    # --- which cell(s) -----------------------------------------------------
-    p.add_argument("--combo_index", type=int, default=None,
-                   help="Run only this cell (e.g. $SLURM_ARRAY_TASK_ID). "
-                        "Omit to run all cells serially in one process.")
-    p.add_argument("--num_combos", action="store_true",
-                   help="Print the number of cells in the grid and exit "
-                        "(use to size the SLURM --array range).")
+                   help="Episodes for this cell (used to estimate the success rate).")
     p.add_argument("--outdir", type=str, default="results/param_search_run",
-                   help="Directory for per-cell JSON output.")
+                   help="Directory for the per-cell JSON output.")
     # --- MPPI / eval knobs (all command-line inputs) -----------------------
     p.add_argument("--n_samples",     type=int,   default=256)
     p.add_argument("--horizon",       type=int,   default=48)
@@ -263,34 +218,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main():
-    args  = build_parser().parse_args()
-    space = parse_weights(args.weights)
-    cells = build_cells(args.models, space)
-
-    if args.num_combos:
-        print(len(cells))
-        return
+    args      = build_parser().parse_args()
+    overrides = parse_overrides(args.weights)
 
     wp.init()
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    if args.combo_index is not None:
-        if not (0 <= args.combo_index < len(cells)):
-            raise SystemExit(
-                f"--combo_index {args.combo_index} out of range [0, {len(cells)})")
-        indices = [args.combo_index]
-    else:
-        indices = list(range(len(cells)))
-        print(f"No --combo_index: running all {len(cells)} cells serially.")
-
-    for idx in indices:
-        model_key, overrides = cells[idx]
-        record   = run_cell(idx, model_key, overrides, args)
-        out_path = outdir / f"cell_{idx:05d}.json"
-        with open(out_path, "w") as f:
-            json.dump(record, f, indent=2)
-        print(f"  saved -> {out_path}\n")
+    record   = run_cell(args.cell_id, overrides, args)
+    out_path = outdir / f"cell_{args.cell_id:05d}.json"
+    with open(out_path, "w") as f:
+        json.dump(record, f, indent=2)
+    print(f"  saved -> {out_path}")
 
 
 if __name__ == "__main__":

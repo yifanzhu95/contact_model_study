@@ -1,44 +1,96 @@
 #!/bin/bash
-#SBATCH --job-name=param_search
-#SBATCH --output=logs/param_search_%A_%a.out
-#SBATCH --error=logs/param_search_%A_%a.err
-#SBATCH --array=0-323          # 4 models x 81 weight combos (default grid). The
-                               # submit script overrides this with the real count;
-                               # if you run `sbatch param_search.slurm` directly,
-                               # set this to `num_cells` (see submit_param_search.sh).
-#SBATCH --gres=gpu:1           # one GPU per cell — warp rollouts live on CUDA
+#SBATCH --job-name=cont_modeling_param_search
+#SBATCH --output=logs/cont_modeling_param_search%A_%a.out
+#SBATCH --error=logs/cont_modeling_param_search%A_%a.err
+#SBATCH --array=0-80          # must equal (#MODELS * #W_QUAT * #W_POS * #W_CONTACT * #W_JOINT) - 1
+                               # default grid: 4 * 3 * 3 * 3 * 3 = 324  ->  0-323
+#SBATCH --partition=gpu
+#SBATCH --gpus=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=02:00:00
-# --- TODO: set these for your cluster ---------------------------------------
-##SBATCH --partition=gpu
-##SBATCH --account=YOUR_ACCOUNT
-# ----------------------------------------------------------------------------
 
 set -euo pipefail
 
 HPC_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 cd "$HPC_DIR"
-source "$HPC_DIR/search_config.sh"
 
-# Where per-cell JSON goes. Exported by the submit script so the array and the
-# combine job agree; otherwise default to a per-array-job directory.
+# ---------------------------------------------------------------------------
+# 1. Fixed settings + the parameter grids to sweep.
+#    Edit the arrays below and keep #SBATCH --array in sync (see the product
+#    of their lengths above).
+# ---------------------------------------------------------------------------
+TASK="grasp_reorient"
+N_EPISODES=5          # episodes per weight set -> success rate
+
+MODELS= ("M2") #("M1" "M2" "M3" "M4")
+W_QUAT=("75" "50" "25")
+W_POS=("600" "400" "200")
+W_CONTACT=("750" "500" "250")
+W_JOINT=("100" "50" "5")
+
+# Shared MPPI / eval knobs (single values, not swept).
+N_SAMPLES=256
+HORIZON=48
+TEMPERATURE=1.0
+NOISE_SIGMA=0.01
+DELTA=0.1
+SUBSTEPS=16
+EVAL_SIM="none"
+SETTLE=1.0
+GEOMETRY="accurate"
+SEED=0
+
+# ---------------------------------------------------------------------------
+# 2. Map this task's ID to one index per axis (mixed-radix decode).
+#    Peel off the lowest axis first, then divide it out for the next.
+# ---------------------------------------------------------------------------
+NM=${#MODELS[@]}; NQ=${#W_QUAT[@]}; NP=${#W_POS[@]}; NC=${#W_CONTACT[@]}; NJ=${#W_JOINT[@]}
+
+T=$SLURM_ARRAY_TASK_ID
+MODEL_IDX=$((   T % NM )); T=$(( T / NM ))
+QUAT_IDX=$((    T % NQ )); T=$(( T / NQ ))
+POS_IDX=$((     T % NP )); T=$(( T / NP ))
+CONTACT_IDX=$(( T % NC )); T=$(( T / NC ))
+JOINT_IDX=$((   T % NJ ))
+
+# ---------------------------------------------------------------------------
+# 3. Select the actual values for this cell.
+# ---------------------------------------------------------------------------
+SEL_MODEL=${MODELS[$MODEL_IDX]}
+SEL_W_QUAT=${W_QUAT[$QUAT_IDX]}
+SEL_W_POS=${W_POS[$POS_IDX]}
+SEL_W_CONTACT=${W_CONTACT[$CONTACT_IDX]}
+SEL_W_JOINT=${W_JOINT[$JOINT_IDX]}
+
+# All array tasks share one output dir (keyed by the array job id) so the
+# combine job can gather every cell_*.json.
 OUTDIR="${OUTDIR:-$HPC_DIR/../../results/param_search_${SLURM_ARRAY_JOB_ID:-manual}}"
 
-# --- TODO: activate your environment ----------------------------------------
-# module load cuda
-# source ~/miniconda3/etc/profile.d/conda.sh && conda activate contact_study
-# ----------------------------------------------------------------------------
+module load miniconda
+conda activate contact_modeling
 
-echo "cell ${SLURM_ARRAY_TASK_ID} / $(num_cells)  ->  $OUTDIR"
+echo "cell ${SLURM_ARRAY_TASK_ID}: model=$SEL_MODEL "\
+     "w_quat=$SEL_W_QUAT w_pos=$SEL_W_POS w_contact=$SEL_W_CONTACT w_joint=$SEL_W_JOINT"\
+     "-> $OUTDIR"
+
+# The first task queues the combine job to run once the whole array finishes
+# ok, so a single `sbatch param_search.slurm` produces the merged results too.
+if [ "${SLURM_ARRAY_TASK_ID}" -eq 0 ]; then
+    sbatch --dependency=afterok:"${SLURM_ARRAY_JOB_ID}" \
+           --export=ALL,OUTDIR="${OUTDIR}",TASK="${TASK}" \
+           combine.slurm \
+        || echo "warning: could not queue combine job (run combine_results.py manually)"
+fi
 
 python run_param_cell.py \
-    --combo_index "$SLURM_ARRAY_TASK_ID" \
+    --cell_id     "$SLURM_ARRAY_TASK_ID" \
     --outdir      "$OUTDIR" \
     --task        "$TASK" \
+    --model       "$SEL_MODEL" \
     --n_episodes  "$N_EPISODES" \
-    --models      "${MODELS[@]}" \
-    --weights     "${WEIGHTS[@]}" \
+    --weights     "w_quat=$SEL_W_QUAT" "w_pos=$SEL_W_POS" \
+                  "w_contact=$SEL_W_CONTACT" "w_joint=$SEL_W_JOINT" \
     --n_samples   "$N_SAMPLES" \
     --horizon     "$HORIZON" \
     --temperature "$TEMPERATURE" \

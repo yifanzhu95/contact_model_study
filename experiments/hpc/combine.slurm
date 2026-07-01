@@ -1,26 +1,24 @@
 #!/bin/bash
-#SBATCH --job-name=param_combine
-#SBATCH --output=logs/param_combine_%j.out
-#SBATCH --error=logs/param_combine_%j.err
+#SBATCH --job-name=cont_modeling_param_combine
+#SBATCH --output=logs/cont_modeling_param_combine%j.out
+#SBATCH --error=logs/cont_modeling_param_combine%j.err
+#SBATCH --partition=gpu
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=4G
 #SBATCH --time=00:10:00
-# --- TODO: set these for your cluster ---------------------------------------
-##SBATCH --partition=cpu
-##SBATCH --account=YOUR_ACCOUNT
-# ----------------------------------------------------------------------------
 
 set -euo pipefail
 
 HPC_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 cd "$HPC_DIR"
-source "$HPC_DIR/search_config.sh"
 
-OUTDIR="${OUTDIR:?OUTDIR must be set (exported by submit_param_search.sh)}"
+# OUTDIR + TASK are exported by param_search.slurm's auto-submit. If you run this
+# by hand, pass them: `OUTDIR=results/... TASK=grasp_reorient sbatch combine.slurm`
+OUTDIR="${OUTDIR:?set OUTDIR to the directory holding cell_*.json}"
+TASK="${TASK:-run}"
 
-# --- TODO: activate your environment ----------------------------------------
-# source ~/miniconda3/etc/profile.d/conda.sh && conda activate contact_study
-# ----------------------------------------------------------------------------
+module load miniconda
+conda activate contact_modeling
 
 python combine_results.py \
     --indir  "$OUTDIR" \
