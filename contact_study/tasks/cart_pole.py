@@ -116,7 +116,7 @@ class CartPoleTask(BaseTask):
             rollout_is_urdf    = False,
             mjcf_out_path      = str(MJCF_OUT),
             eval_sim           = EvalSimulatorKind.DRAKE,
-            eval_model_path    = str(URDF),
+            eval_model_paths   = {EvalSimulatorKind.DRAKE: str(URDF)},
             cam_pos            = (0.0, -2.5, 0.25),
             cam_fps            = 30.0,
             timestep           = TIMESTEP,
@@ -196,7 +196,7 @@ class CartPoleTask(BaseTask):
                 DrakeJointChannel("PolePin",    "revolute",  q_adr=int(iv[1]), v_adr=int(iv[3])),
             ]
             return DrakeSimulator(
-                model_path     = self.config.eval_model_path,
+                model_path     = self.config.eval_model_paths[self.config.eval_sim],
                 config         = self.config,
                 nq             = self.mjm.nq,
                 nv             = self.mjm.nv,

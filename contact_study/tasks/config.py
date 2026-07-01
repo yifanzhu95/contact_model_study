@@ -91,9 +91,11 @@ class TaskConfig:
 
     # --- EVAL ("real") simulator selection ---------------------------------
     eval_sim:        EvalSimulatorKind = EvalSimulatorKind.MUJOCO
-    # Model for the eval simulator (SDF/URDF for Drake). Falls back to the
-    # rollout model when None and eval_sim is MUJOCO.
-    eval_model_path: str | None = None
+    # Per-simulator eval model paths: maps an EvalSimulatorKind to the model
+    # file that simulator loads (e.g. Drake -> URDF, MuJoCo/Pinocchio -> MJCF).
+    # Look up with the active eval_sim; falls back to the rollout model when the
+    # active eval_sim has no entry and eval_sim is MUJOCO.
+    eval_model_paths: dict[EvalSimulatorKind, str] = field(default_factory=dict)
 
     # --- camera (shared by Drake's VideoWriter and MuJoCo's Renderer) ------
     # world_from_camera rotation (3x3) and camera position, world frame.

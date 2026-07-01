@@ -88,16 +88,20 @@ _TARGET_POS   = np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.012, 
 _TARGET_EULER = np.array([0.0, 0.5235, 0.0], dtype=np.float64)
 _TARGET_QUAT  = _euler_to_quat(_TARGET_EULER)   # wxyz
 
-# Camera: positioned along the palm's outward normal (+x, empirically — fingers
-# curl toward +x from the palm base) so its forward axis points straight at the
-# palm/grasp region, framing the whole hand (incl. thumb) from ~0.65 m out.
-_PALM_TARGET = np.array([0.02, 0.04, 0.07])   # approx. palm-center world point
-_CAM_DIST    = 0.65
-_CAM_POS     = tuple(_PALM_TARGET + np.array([_CAM_DIST, 0.0, 0.0]))
-_CAM_ROTMAT  = (   # columns = camera (right, down, forward) axes in world frame
-    (0.0,  0.0, -1.0),
-    (1.0,  0.0,  0.0),
-    (0.0, -1.0,  0.0),
+# Camera: matches the "top" camera in scenes/leap_hand_old/scene_leap_cube.xml:
+#   <camera name="top" pos="0.2 0.02 0.4" xyaxes="0 1 0  -1 0 0.5"/>
+# MuJoCo xyaxes gives the camera's right (+x) and up (+y) axes in the world
+# frame, and the camera looks down its own -z. We convert that to the
+# (right, down, forward) world_from_camera columns this config uses (the Drake
+# optical-axis convention: +X right, +Y down, +Z forward/viewing direction).
+_CAM_POS     = (0.2, 0.02, 0.4)
+_cam_right   = np.array([0.0, 1.0, 0.0]);  _cam_right /= np.linalg.norm(_cam_right)
+_cam_up      = np.array([-1.0, 0.0, 0.5]); _cam_up    /= np.linalg.norm(_cam_up)
+_cam_fwd     = -np.cross(_cam_right, _cam_up)   # camera -z = viewing direction
+_cam_down    = -_cam_up
+_CAM_ROTMAT  = tuple(   # columns = camera (right, down, forward) axes in world frame
+    tuple(float(v) for v in row)
+    for row in np.column_stack([_cam_right, _cam_down, _cam_fwd])
 )
 
 @wp.func
@@ -251,7 +255,13 @@ class GraspReorientTask(BaseTask):
             rollout_model_path = str(SCENES_DIR / GRASP_SCENE_XML),
             rollout_is_urdf    = False,
             eval_sim           = EvalSimulatorKind.DRAKE,
-            eval_model_path    = str(SCENES_DIR / "leap_hand/leap_hand_right.urdf"),
+            # Drake evals the URDF-derived hand; MuJoCo and Pinocchio both eval
+            # the same MJCF scene the rollouts plan with (GRASP_SCENE_XML).
+            eval_model_paths   = {
+                EvalSimulatorKind.DRAKE:     str(SCENES_DIR / "leap_hand/leap_hand_right.urdf"),
+                EvalSimulatorKind.MUJOCO:    str(SCENES_DIR / GRASP_SCENE_XML),
+                EvalSimulatorKind.PINOCCHIO: str(SCENES_DIR / GRASP_SCENE_XML),
+            },
             cam_pos            = _CAM_POS,
             cam_rotmat         = _CAM_ROTMAT,
             cam_fps            = 30.0,
@@ -479,7 +489,7 @@ class GraspReorientTask(BaseTask):
         )
 
         # No extra_models_fn needed: "floor" and "obj" are parsed straight out
-        # of the URDF (eval_model_path) along with the hand, and "base" welds
+        # of the URDF (eval_model_paths[DRAKE]) along with the hand, and "base" welds
         # to the world at identity (weld_base=True) just like the MuJoCo
         # rollout's own base->palm_lower transform, so both world frames and
         # both floor/cube placements coincide automatically.
@@ -502,7 +512,7 @@ class GraspReorientTask(BaseTask):
         )
 
         return DrakeSimulator(
-            model_path     = self.config.eval_model_path,
+            model_path     = self.config.eval_model_paths[self.config.eval_sim],
             config         = self.config,
             nq             = self.mjm.nq,
             nv             = self.mjm.nv,
@@ -522,8 +532,9 @@ class GraspReorientTask(BaseTask):
 
     def _make_pinocchio_simulator(self, video_path: str | None = None, render: bool = True):
         """Pinocchio + ADMM eval simulator. Unlike the Drake path it parses the
-        same MJCF the rollout model uses (rollout_model_path), so the 16 hand
-        joints, the obj freejoint, and the control order all align 1:1 with the
+        MJCF at eval_model_paths[PINOCCHIO] (the same scene the rollout model
+        uses), so the 16 hand joints, the obj freejoint, and the control order
+        all align 1:1 with the
         MuJoCo qpos/qvel/ctrl indices — the channels are an identity map (no
         URDF name translation needed). The hand joints are named "0".."15" and
         the cube is the "obj_joint" freejoint, matching index_vector."""
@@ -541,10 +552,16 @@ class GraspReorientTask(BaseTask):
                 q_adr=int(self.index_vector[0]), v_adr=int(self.index_vector[1]),
             )
         ]
-        pid = PinocchioPdActuation(ctrl_joint_names=[str(i) for i in range(16)])
+        # Reuse the position-servo gains defined at the top of this file
+        # (_PID_KP/_PID_KD); Pinocchio's PD has no integral term, so _PID_KI is
+        # ignored. use_direct_gains=True applies kp/kd as given (not inertia-scaled).
+        pid = PinocchioPdActuation(
+            ctrl_joint_names=[str(i) for i in range(16)],
+            use_direct_gains=True, kp=_PID_KP, kd=_PID_KD,
+        )
 
         return PinocchioSimulator(
-            model_path     = self.config.rollout_model_path,  # the MJCF (not URDF)
+            model_path     = self.config.eval_model_paths[self.config.eval_sim],  # the MJCF (not URDF)
             config         = self.config,
             nq             = self.mjm.nq,
             nv             = self.mjm.nv,
