@@ -217,6 +217,13 @@ def _rotation_from_normal(n):
     return np.column_stack([x, y, z])
 
 
+# Panda3D's ShowBase is a per-process singleton — constructing a second one
+# (e.g. one PinocchioSimulator per episode during a sweep) raises "Attempt to
+# spawn multiple ShowBase instances!". We build the offscreen viewer once and
+# reattach every simulator's visualizer to it (see _setup_viewer).
+_PANDA_VIEWER = None
+
+
 class PinocchioSimulator(EvalSimulator):
     def __init__(
         self,
@@ -318,6 +325,7 @@ class PinocchioSimulator(EvalSimulator):
 
     # -- viewer --------------------------------------------------------------
     def _setup_viewer(self):
+        global _PANDA_VIEWER
         # Panda3D's headless EGL pipe must be selected before the panda3d import.
         from panda3d.core import loadPrcFileData
         loadPrcFileData("", "load-display p3headlessgl")
@@ -328,7 +336,15 @@ class PinocchioSimulator(EvalSimulator):
             go.overrideMaterial = True
 
         viz = Panda3dVisualizer(self._model, self._collision_model, self._visual_model)
-        viz.initViewer(open=False)
+        # Reuse the one process-wide ShowBase (created on the first episode);
+        # later episodes reattach to it. append_group(remove_if_exists=True)
+        # inside loadViewerModel swaps in this episode's model, so reusing the
+        # fixed "pin_eval" group name drops the previous episode's geometry.
+        if _PANDA_VIEWER is None:
+            viz.initViewer(open=False)
+            _PANDA_VIEWER = viz.viewer
+        else:
+            viz.initViewer(viewer=_PANDA_VIEWER, open=False)
         viz.loadViewerModel(group_name="pin_eval")
         viz.displayVisuals(True)
 
