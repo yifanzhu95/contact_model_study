@@ -234,6 +234,7 @@ logs/
 videos/*
 results/*
 figures/
+logs/
 
 # uv
 uv.lock

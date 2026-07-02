@@ -87,7 +87,7 @@ conda activate contact_modeling
 echo "cell ${SLURM_ARRAY_TASK_ID:-0}: model=$SEL_MODEL n_samples=$SEL_N_SAMPLES "\
      "n_episodes=$N_EPISODES delta=$DELTA -> $OUTDIR"
 
-python run_num_rollout_cell.py \
+python experiments/hpc/run_num_rollout_cell.py \
     --outdir      "$OUTDIR" \
     --task        "$TASK" \
     --model       "$SEL_MODEL" \
