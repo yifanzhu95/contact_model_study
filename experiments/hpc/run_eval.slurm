@@ -2,7 +2,7 @@
 #SBATCH --job-name=cont_modeling_eval
 #SBATCH --output=logs/cont_modeling_eval_%j.out
 #SBATCH --error=logs/cont_modeling_eval_%j.err
-#SBATCH --partition=gpu_h200
+#SBATCH --partition=gpu
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
@@ -22,7 +22,7 @@ ROOT_DIR="$(cd "$HPC_DIR/../.." && pwd)"
 # ---------------------------------------------------------------------------
 TASK="grasp_reorient"
 MODEL="M2"
-N_EPISODES=5          # episodes to run for this one weight set
+N_EPISODES=10          # episodes to run for this one weight set
 
 # Shared MPPI / eval knobs.
 N_SAMPLES=256
@@ -42,7 +42,7 @@ mkdir -p "$VIDEO_DIR"
 VIDEO_PATH="$VIDEO_DIR/${TASK}_${MODEL}_eval.gif"
 
 # EGL for headless (offscreen) rendering on the GPU node.
-export MUJOCO_GL="egl"
+#export MUJOCO_GL="egl"
 
 module load miniconda
 conda activate contact_modeling
@@ -63,4 +63,5 @@ python -m contact_study.drivers.run_eval_episode \
     --eval_sim    "$EVAL_SIM" \
     --settle      "$SETTLE" \
     --seed        "$SEED" \
-    --video       "$VIDEO_PATH"
+    --video       "$VIDEO_PATH" \
+    --debug
