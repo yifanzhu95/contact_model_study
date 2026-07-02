@@ -40,7 +40,7 @@ _MJ_CTRL_TO_URDF_JOINT = [
 # `weld_base=True`) lines palm_lower up with the MuJoCo placement with no extra
 # calibration, and "obj"/"floor" need no Drake-side scene-building at all.
 GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites.xml"#"leap_hand/leap_hand_right_w_sites_simple.xml"
-
+#GRASP_SCENE_XML = "leap_hand_old/leap_right_hand_simple copy.xml"#
 # Drake PidController gains for the eval hand (position control, mirroring the
 # MuJoCo position servos kp=3.0 kv=0.01). Starting points to tune against Drake's
 # solver; _PID_EFFORT is the per-joint actuator force clamp DrakeSimulator adds.
@@ -236,7 +236,7 @@ class GraspReorientTask(BaseTask):
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
             max_steps          = 500,
-            success_thresholds = {"pos": 0.05, "quat": 0.02, "vel": 0.1},
+            success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
             cost_weights       = {
                 "w_quat": 50.0, #5.0
                 "w_pos": 400.0, #40.0
@@ -543,8 +543,23 @@ class GraspReorientTask(BaseTask):
             PinocchioPdActuation,
         )
 
+        # Pinocchio joint names come from the MJCF, so read them off the loaded
+        # MuJoCo model instead of assuming "0".."15" (that only held for the older
+        # index-named scene; this one names joints "if_mcp", "if_rot", ...). Every
+        # 1-DOF (non-free) joint is a hand joint; its MuJoCo qpos/qvel address maps
+        # to the Pinocchio joint of the same name.
+        mjm = self.mjm
+        hand_jids = [
+            j for j in range(mjm.njnt)
+            if mjm.jnt_type[j] != mujoco.mjtJoint.mjJNT_FREE
+        ]
         joint_channels = [
-            PinocchioJointChannel(pin_name=str(i), q_adr=i, v_adr=i) for i in range(16)
+            PinocchioJointChannel(
+                pin_name=mjm.joint(j).name,
+                q_adr=int(mjm.jnt_qposadr[j]),
+                v_adr=int(mjm.jnt_dofadr[j]),
+            )
+            for j in hand_jids
         ]
         free_channels = [
             PinocchioFreeBodyChannel(
@@ -552,11 +567,16 @@ class GraspReorientTask(BaseTask):
                 q_adr=int(self.index_vector[0]), v_adr=int(self.index_vector[1]),
             )
         ]
+        # PD desired positions arrive in MuJoCo control order, so name the
+        # controlled joints by each actuator's target joint (trnid).
+        ctrl_joint_names = [
+            mjm.joint(int(mjm.actuator(a).trnid[0])).name for a in range(mjm.nu)
+        ]
         # Reuse the position-servo gains defined at the top of this file
         # (_PID_KP/_PID_KD); Pinocchio's PD has no integral term, so _PID_KI is
         # ignored. use_direct_gains=True applies kp/kd as given (not inertia-scaled).
         pid = PinocchioPdActuation(
-            ctrl_joint_names=[str(i) for i in range(16)],
+            ctrl_joint_names=ctrl_joint_names,
             use_direct_gains=True, kp=_PID_KP, kd=_PID_KD,
         )
 

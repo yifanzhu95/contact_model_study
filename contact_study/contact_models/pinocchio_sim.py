@@ -113,6 +113,7 @@ def split_into_single_root_mjcfs(mjcf_path, scene_dir):
     root = tree.getroot()
     compiler = root.find("compiler")
     asset = root.find("asset")
+    default = root.find("default")
     worldbody = root.find("worldbody")
 
     loose_geoms = [el for el in worldbody if el.tag == "geom"]
@@ -123,13 +124,26 @@ def split_into_single_root_mjcfs(mjcf_path, scene_dir):
         new_root = ET.Element("mujoco", root.attrib)
         if compiler is not None:
             new_root.append(compiler)
+        # The <default> block must travel with the body: geoms/joints reference
+        # its classes (e.g. `class="tip"` supplies type+mesh), and Pinocchio's
+        # MJCF parser raises IndexError('unordered_map::at') on an unresolved
+        # class if it isn't carried into each single-root split.
+        if default is not None:
+            new_root.append(default)
         if asset is not None:
             new_root.append(asset)
         new_worldbody = ET.SubElement(new_root, "worldbody")
+        # Pinocchio's MJCF parser welds the single root <body> to the universe at
+        # identity and discards that body's own pos/quat. Nest the real body inside
+        # a dummy identity wrapper so its transform survives as an honored *child*
+        # placement — without this, a rotated/translated base (e.g. the hand palm's
+        # pos/quat) lands at the origin and every descendant geom is mis-placed,
+        # opening a gap so the fingers never contact the object.
+        wrapper = ET.SubElement(new_worldbody, "body", {"name": f"_root_wrap_{i}"})
         if i == 0:
             for geom in loose_geoms:
-                new_worldbody.append(geom)
-        new_worldbody.append(body)
+                wrapper.append(geom)
+        wrapper.append(body)
         tmp_path = os.path.join(scene_dir, f"_tmp_pin_sim_split_{i}.xml")
         ET.ElementTree(new_root).write(tmp_path)
         tmp_paths.append(tmp_path)

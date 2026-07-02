@@ -291,6 +291,10 @@ def main():
     p.add_argument("--seed",        type=int,   default=None)
     p.add_argument("--n_episodes",  type=int,   default=1,
                    help="Number of episodes to run; reports the aggregate success rate.")
+    p.add_argument("--weights",     nargs="+", default=[],
+                   help="Cost-weight overrides as name=value tokens "
+                        "(e.g. --weights w_quat=50 w_pos=400). Order must match "
+                        "the task's config.cost_weights insertion order.")
     p.add_argument("--video",       type=str,   default="videos/grasp_reorient_eval.gif")
     p.add_argument("--results",     type=str,   default=None,
                    help="JSON path for the episode result(s) (auto-named if omitted).")
@@ -313,6 +317,14 @@ def main():
 
     contact_cfg = MODEL_FACTORIES[args.model]()
     eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
+
+    # Parse `name=value` weight overrides (order must match config.cost_weights).
+    overrides: dict = {}
+    for tok in args.weights:
+        if "=" not in tok:
+            raise ValueError(f"bad --weights token {tok!r}; expected name=value")
+        name, val = tok.split("=", 1)
+        overrides[name.strip()] = float(val)
 
     results: list[EpisodeResult] = []
     for ep_idx in range(args.n_episodes):
@@ -349,6 +361,7 @@ def main():
             mppi_cfg    = mppi_cfg,
             rng         = rng,
             video_path  = video_path,
+            cost_weight_overrides = overrides or None,
             settle_seconds = args.settle,
             eval_substeps  = args.eval_substeps,
             eval_sim       = eval_sim,
