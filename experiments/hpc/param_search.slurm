@@ -23,7 +23,7 @@ cd "$HPC_DIR"
 TASK="grasp_reorient"
 N_EPISODES=5          # episodes per weight set -> success rate
 
-MODELS= ("M2") #("M1" "M2" "M3" "M4")
+MODELS=("M2")
 W_QUAT=("75" "50" "25")
 W_POS=("600" "400" "200")
 W_CONTACT=("750" "500" "250")
@@ -68,6 +68,9 @@ SEL_W_JOINT=${W_JOINT[$JOINT_IDX]}
 OUTDIR="${OUTDIR:-$HPC_DIR/../../results/param_search_${SLURM_ARRAY_JOB_ID:-manual}}"
 
 module load miniconda
+
+eval "$(conda shell.bash hook)"
+
 conda activate contact_modeling
 
 echo "cell ${SLURM_ARRAY_TASK_ID}: model=$SEL_MODEL "\
@@ -76,12 +79,6 @@ echo "cell ${SLURM_ARRAY_TASK_ID}: model=$SEL_MODEL "\
 
 # The first task queues the combine job to run once the whole array finishes
 # ok, so a single `sbatch param_search.slurm` produces the merged results too.
-if [ "${SLURM_ARRAY_TASK_ID}" -eq 0 ]; then
-    sbatch --dependency=afterok:"${SLURM_ARRAY_JOB_ID}" \
-           --export=ALL,OUTDIR="${OUTDIR}",TASK="${TASK}" \
-           combine.slurm \
-        || echo "warning: could not queue combine job (run combine_results.py manually)"
-fi
 
 python run_param_cell.py \
     --cell_id     "$SLURM_ARRAY_TASK_ID" \
