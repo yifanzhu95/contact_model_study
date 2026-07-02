@@ -32,7 +32,9 @@ module does not require them on the GPU-rollout machines.
 
 from __future__ import annotations
 
+import datetime
 import os
+import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
@@ -119,6 +121,13 @@ def split_into_single_root_mjcfs(mjcf_path, scene_dir):
     loose_geoms = [el for el in worldbody if el.tag == "geom"]
     bodies = [el for el in worldbody if el.tag == "body"]
 
+    # Instance-specific suffix so concurrent runs (e.g. one Pinocchio eval per
+    # HPC node/process) don't write, read, and delete the same shared temp files
+    # in scene_dir and clobber each other. Timestamp for readability + PID and a
+    # short uuid to stay unique across nodes and repeated calls in one process.
+    token = (f"{datetime.datetime.now():%Y%m%d_%H%M%S}_"
+             f"{os.getpid()}_{uuid.uuid4().hex[:8]}")
+
     tmp_paths = []
     for i, body in enumerate(bodies):
         new_root = ET.Element("mujoco", root.attrib)
@@ -144,7 +153,7 @@ def split_into_single_root_mjcfs(mjcf_path, scene_dir):
             for geom in loose_geoms:
                 wrapper.append(geom)
         wrapper.append(body)
-        tmp_path = os.path.join(scene_dir, f"_tmp_pin_sim_split_{i}.xml")
+        tmp_path = os.path.join(scene_dir, f"_tmp_pin_sim_split_{i}_{token}.xml")
         ET.ElementTree(new_root).write(tmp_path)
         tmp_paths.append(tmp_path)
     return tmp_paths
