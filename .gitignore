@@ -228,13 +228,10 @@ node_modules
 # VS Code
 .vscode/
 
-# test folder
-test/
-logs/
 videos/*
 results/*
 figures/
-logs/
+logs/*
 
 # uv
 uv.lock
