@@ -95,7 +95,7 @@ def run_cell(args):
             ep_idx            = ep,
             fin_ep_on_success = True,
             debug             = args.debug,
-            verbose           = False,
+            verbose           = True,
         )
         episodes.append(result)
         tick = "✓" if result.success else "✗"

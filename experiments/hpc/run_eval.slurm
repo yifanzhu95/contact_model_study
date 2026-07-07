@@ -3,18 +3,18 @@
 #SBATCH --output=logs/cont_modeling_eval_%j.out
 #SBATCH --error=logs/cont_modeling_eval_%j.err
 #SBATCH --partition=gpu
-#SBATCH --gpus=1
+#SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=02:00:00
+#SBATCH --time=03:00:00
 
 set -euo pipefail
 
-HPC_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-cd "$HPC_DIR"
-
-# Project root (experiments/hpc -> ../.. ) so videos land in <root>/videos.
-ROOT_DIR="$(cd "$HPC_DIR/../.." && pwd)"
+# Hardcoded project root so videos always land in <root>/videos regardless of
+# where `sbatch` was invoked from.
+PROJ_DIR="/home/kg878/project_pi_amd78/kg878/Projects/contact_model_study"
+ROOT_DIR="$PROJ_DIR"
+cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 
 # ---------------------------------------------------------------------------
 # 1. Single run: one model + one weight set, N_EPISODES episodes, rendered.
@@ -22,7 +22,7 @@ ROOT_DIR="$(cd "$HPC_DIR/../.." && pwd)"
 # ---------------------------------------------------------------------------
 TASK="grasp_reorient"
 MODEL="M2"
-N_EPISODES=10          # episodes to run for this one weight set
+N_EPISODES=2          # episodes to run for this one weight set
 
 # Shared MPPI / eval knobs.
 N_SAMPLES=256
@@ -50,7 +50,7 @@ conda activate contact_modeling
 echo "eval: task=$TASK model=$MODEL n_episodes=$N_EPISODES "\
      "-> videos in $VIDEO_DIR"
 
-python -m contact_study.drivers.run_eval_episode \
+python -u -m contact_study.drivers.run_eval_episode \
     --task        "$TASK" \
     --model       "$MODEL" \
     --n_episodes  "$N_EPISODES" \

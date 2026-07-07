@@ -51,7 +51,7 @@ from contact_study.planners.mppi import MPPIController, MPPIConfig
 from contact_study.tasks.base import get_task
 from contact_study.tasks.config import TaskRole, EvalSimulatorKind
 
-wp.init()
+#wp.init()
 
 MODEL_FACTORIES = {
     "M1": ContactModelConfig.M1,
@@ -280,7 +280,7 @@ def main():
     p.add_argument("--noise_sigma", type=float, default=0.01,)#0.01)
     p.add_argument("--delta",       type=float, default=0.1,#0.1,
                    help="Per-step MPPI delta clip magnitude (action units).")
-    p.add_argument("--substeps",    type=int,   default=16,#7,
+    p.add_argument("--substeps",    type=int,   default=4,#7,
                    help="MPPI rollout substeps per control step (control frequency knob).")
     p.add_argument("--eval_substeps", type=int, default=None,
                    help="Eval steps per rollout step (default: task config, usually 10).")
@@ -288,7 +288,7 @@ def main():
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
-    p.add_argument("--seed",        type=int,   default=None)
+    p.add_argument("--seed",        type=int,   default=0)
     p.add_argument("--n_episodes",  type=int,   default=1,
                    help="Number of episodes to run; reports the aggregate success rate.")
     p.add_argument("--weights",     nargs="+", default=[],

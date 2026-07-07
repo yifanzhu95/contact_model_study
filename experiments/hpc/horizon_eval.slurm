@@ -33,11 +33,11 @@ set -euo pipefail
 #     python analysis/plot_horizon_sweep_dir.py results/horizon_eval_<id>
 # ---------------------------------------------------------------------------
 
-HPC_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-cd "$HPC_DIR"
-
-# Project root (experiments/hpc -> ../..) so results land in <root>/results.
-ROOT_DIR="$(cd "$HPC_DIR/../.." && pwd)"
+# Hardcoded project root so results always land in <root>/results regardless
+# of where `sbatch` was invoked from.
+PROJ_DIR="/home/kg878/project_pi_amd78/kg878/Projects/contact_model_study"
+ROOT_DIR="$PROJ_DIR"
+cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 
 # ---------------------------------------------------------------------------
 # 1. Fixed settings + the grids to sweep.

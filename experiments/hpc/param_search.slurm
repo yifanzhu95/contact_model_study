@@ -12,8 +12,11 @@
 
 set -euo pipefail
 
-HPC_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-cd "$HPC_DIR"
+# Hardcoded project root so results always land in <root>/results regardless
+# of where `sbatch` was invoked from.
+PROJ_DIR="/home/kg878/project_pi_amd78/kg878/Projects/contact_model_study"
+ROOT_DIR="$PROJ_DIR"
+cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 
 # ---------------------------------------------------------------------------
 # 1. Fixed settings + the parameter grids to sweep.
@@ -65,7 +68,7 @@ SEL_W_JOINT=${W_JOINT[$JOINT_IDX]}
 
 # All array tasks share one output dir (keyed by the array job id) so the
 # combine job can gather every cell_*.json.
-OUTDIR="${OUTDIR:-$HPC_DIR/../../results/param_search_${SLURM_ARRAY_JOB_ID:-manual}}"
+OUTDIR="${OUTDIR:-$ROOT_DIR/results/param_search_${SLURM_ARRAY_JOB_ID:-manual}}"
 
 module load miniconda
 
@@ -80,7 +83,7 @@ echo "cell ${SLURM_ARRAY_TASK_ID}: model=$SEL_MODEL "\
 # The first task queues the combine job to run once the whole array finishes
 # ok, so a single `sbatch param_search.slurm` produces the merged results too.
 
-python run_param_cell.py \
+python experiments/hpc/run_param_cell.py \
     --cell_id     "$SLURM_ARRAY_TASK_ID" \
     --outdir      "$OUTDIR" \
     --task        "$TASK" \
