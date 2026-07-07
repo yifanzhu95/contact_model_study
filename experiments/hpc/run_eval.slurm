@@ -3,10 +3,10 @@
 #SBATCH --output=logs/cont_modeling_eval_%j.out
 #SBATCH --error=logs/cont_modeling_eval_%j.err
 #SBATCH --partition=gpu
-#SBATCH --gpus=1
+#SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=02:00:00
+#SBATCH --time=03:00:00
 
 set -euo pipefail
 
@@ -22,7 +22,7 @@ ROOT_DIR="$(cd "$HPC_DIR/../.." && pwd)"
 # ---------------------------------------------------------------------------
 TASK="grasp_reorient"
 MODEL="M2"
-N_EPISODES=10          # episodes to run for this one weight set
+N_EPISODES=2          # episodes to run for this one weight set
 
 # Shared MPPI / eval knobs.
 N_SAMPLES=256
@@ -50,7 +50,7 @@ conda activate contact_modeling
 echo "eval: task=$TASK model=$MODEL n_episodes=$N_EPISODES "\
      "-> videos in $VIDEO_DIR"
 
-python -m contact_study.drivers.run_eval_episode \
+python -u -m contact_study.drivers.run_eval_episode \
     --task        "$TASK" \
     --model       "$MODEL" \
     --n_episodes  "$N_EPISODES" \

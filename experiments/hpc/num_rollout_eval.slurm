@@ -4,11 +4,11 @@
 #SBATCH --error=logs/cont_modeling_num_rollout_eval%A_%a.err
 #SBATCH --array=0-19          # must equal (#MODELS * #N_SAMPLES) - 1
                               # default grid: 4 * 5 = 20  ->  0-19
-#SBATCH --partition=gpu_h200
-#SBATCH --gpus=1
+#SBATCH --partition=gpu
+#SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=02:00:00
+#SBATCH --time=03:00:00
 
 set -euo pipefail
 
@@ -88,7 +88,7 @@ conda activate contact_modeling
 echo "cell ${SLURM_ARRAY_TASK_ID:-0}: model=$SEL_MODEL n_samples=$SEL_N_SAMPLES "\
      "n_episodes=$N_EPISODES delta=$DELTA -> $OUTDIR"
 
-python run_num_rollout_cell.py \
+python experiments/hpc/run_num_rollout_cell.py \
     --outdir      "$OUTDIR" \
     --task        "$TASK" \
     --model       "$SEL_MODEL" \
@@ -102,4 +102,5 @@ python run_num_rollout_cell.py \
     --eval_sim    "$EVAL_SIM" \
     --settle      "$SETTLE" \
     --geometry    "$GEOMETRY" \
-    --seed        "$SEED"
+    --seed        "$SEED" \
+    --debug
