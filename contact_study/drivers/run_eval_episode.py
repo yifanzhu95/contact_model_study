@@ -288,7 +288,7 @@ def main():
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
-    p.add_argument("--seed",        type=int,   default=None)
+    p.add_argument("--seed",        type=int,   default=0)
     p.add_argument("--n_episodes",  type=int,   default=1,
                    help="Number of episodes to run; reports the aggregate success rate.")
     p.add_argument("--weights",     nargs="+", default=[],
