@@ -39,6 +39,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
 import numpy as np
+from scipy.linalg import cho_factor, cho_solve
 
 from contact_study.sim.base import EvalSimulator, EvalState, camera_pose_from_config
 
@@ -101,7 +102,7 @@ class PinocchioContactConfig:
     # removes existing penetration instead of only preventing further approach
     # (the bare velocity-level solve leaves any overlap uncorrected). 0 disables it;
     # ~0.2 removes ~20% of the penetration per substep. Values >1 over-correct.
-    baumgarte_gain: float = 0.2
+    baumgarte_gain: float = 0.2#0.2
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +261,7 @@ class PinocchioSimulator(EvalSimulator):
         contact_cfg: PinocchioContactConfig | None = None,
         video_path: str | None = None,
         render: bool = True,
+        explicit_pd: bool = False,
     ):
         import pinocchio as pin
 
@@ -270,6 +272,11 @@ class PinocchioSimulator(EvalSimulator):
         self._joint_channels = joint_channels or []
         self._free_channels = free_channels or []
         self._pid = pid
+        # When True, apply the PD velocity term (-kv*v) as an explicit joint torque
+        # evaluated at the current (q, v) and integrate with a plain forward-Euler
+        # aba step, instead of the linearly-implicit backward-Euler solve. Simpler
+        # but only conditionally stable (see _substep). Defaults to the implicit path.
+        self._explicit_pd = explicit_pd
         self._contact_cfg = contact_cfg or PinocchioContactConfig()
         self._timestep = float(config.timestep)
         self._video_path = video_path
@@ -521,32 +528,49 @@ class PinocchioSimulator(EvalSimulator):
             kp = m_diag * self._pid.omega ** 2
             kv = 2.0 * self._pid.zeta * m_diag * self._pid.omega + self._pid.joint_damping
 
-        # Only the position (stiffness) + gravity torque goes through the explicit
-        # aba step; the velocity term -kv*v is handled implicitly. Linearly-implicit
-        # (backward-Euler) PD is unconditionally stable: explicit -kv*v blows up when
-        # kv/M_ii*dt > 2, which the tiny finger inertias (M_ii ~ 3e-6) hit for any
-        # nontrivial damping. Because PD is linear in (q, v) the implicit step is a
-        # single SPD solve, no Newton iteration:
-        #   (M + dt*diag(kv + dt*kp)) v_{n+1} = M v_explicit
-        # where v_explicit is the usual explicit free velocity from the stiffness
-        # torque. diag entries are nonzero only on the controlled joints.
+        # Stiffness (+ optional gravity comp) torque, common to both paths.
         tau = np.zeros(model.nv)
         tau[self._ctrl_vadr] = kp * (self._q_des[self._ctrl_qadr] - q[self._ctrl_qadr])
         if self._pid.gravity_comp:
             tau[self._ctrl_vadr] += pin.computeGeneralizedGravity(model, data, q)[self._ctrl_vadr]
 
-        # Symmetrize M (crba fills the upper triangle) and build the implicit
-        # operator A = M + dt*diag(kv + dt*kp), reused for the free and post-contact
-        # velocities. M v is the rhs (see derivation above). diag entries are nonzero
-        # only on the controlled joints, so the cube's free dynamics are unchanged.
-        M = np.triu(data.M)
-        M = M + np.triu(M, 1).T
-        d_diag = np.zeros(model.nv)
-        d_diag[self._ctrl_vadr] = kv + dt * kp
-        A = M + np.diag(dt * d_diag)
+        if self._explicit_pd:
+            # Simple path: add the velocity term -kv*v as an explicit torque at the
+            # current v and integrate with a plain forward-Euler aba step (no implicit
+            # solve). Only conditionally stable: -kv*v blows up when kv/M_ii*dt > 2,
+            # which the tiny finger inertias (M_ii ~ 3e-6) hit for any nontrivial
+            # damping, so use this only with small kv/large M_ii.
+            tau[self._ctrl_vadr] -= kv * v[self._ctrl_vadr]
 
-        def _implicit(v_explicit):
-            return np.linalg.solve(A, M @ v_explicit)
+            def _implicit(v_explicit):
+                return v_explicit
+        else:
+            # Only the position (stiffness) + gravity torque goes through the explicit
+            # aba step; the velocity term -kv*v is handled implicitly. Linearly-implicit
+            # (backward-Euler) PD is unconditionally stable: explicit -kv*v blows up when
+            # kv/M_ii*dt > 2, which the tiny finger inertias (M_ii ~ 3e-6) hit for any
+            # nontrivial damping. Because PD is linear in (q, v) the implicit step is a
+            # single SPD solve, no Newton iteration:
+            #   (M + dt*diag(kv + dt*kp)) v_{n+1} = M v_explicit
+            # where v_explicit is the usual explicit free velocity from the stiffness
+            # torque. diag entries are nonzero only on the controlled joints.
+            #
+            # Symmetrize M (crba fills the upper triangle) and build the implicit
+            # operator A = M + dt*diag(kv + dt*kp), reused for the free and post-contact
+            # velocities. M v is the rhs (see derivation above). diag entries are nonzero
+            # only on the controlled joints, so the cube's free dynamics are unchanged.
+            M = np.triu(data.M)
+            M = M + np.triu(M, 1).T
+            d_diag = np.zeros(model.nv)
+            d_diag[self._ctrl_vadr] = kv + dt * kp
+            A = M + np.diag(dt * d_diag)
+            # A is SPD (M is SPD, dt*d_diag >= 0) and constant for this substep, so
+            # factor it once and reuse the factorization for both the free and
+            # post-contact solves below instead of re-factoring on each call.
+            A_factor = cho_factor(A)
+
+            def _implicit(v_explicit):
+                return cho_solve(A_factor, M @ v_explicit)
 
         v_free = _implicit(v + dt * pin.aba(model, data, q, v, tau, self._fext))
         if len(cms) == 0:
