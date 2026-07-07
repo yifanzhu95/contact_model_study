@@ -12,8 +12,12 @@
 
 set -euo pipefail
 
-HPC_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-cd "$HPC_DIR"
+# Resolve paths from the script's own location, not the submission directory
+# (SLURM_SUBMIT_DIR is wherever `sbatch` was invoked from, which may not be
+# experiments/hpc), so results always land in <root>/results regardless of cwd.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$SCRIPT_DIR"
 
 # ---------------------------------------------------------------------------
 # 1. Fixed settings + the parameter grids to sweep.
@@ -65,7 +69,7 @@ SEL_W_JOINT=${W_JOINT[$JOINT_IDX]}
 
 # All array tasks share one output dir (keyed by the array job id) so the
 # combine job can gather every cell_*.json.
-OUTDIR="${OUTDIR:-$HPC_DIR/../../results/param_search_${SLURM_ARRAY_JOB_ID:-manual}}"
+OUTDIR="${OUTDIR:-$ROOT_DIR/results/param_search_${SLURM_ARRAY_JOB_ID:-manual}}"
 
 module load miniconda
 

@@ -32,11 +32,12 @@ set -euo pipefail
 #     python analysis/plot_n_samples_sweep_dir.py results/num_rollout_eval_<id>
 # ---------------------------------------------------------------------------
 
-HPC_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-cd "$HPC_DIR"
-
-# Project root (experiments/hpc -> ../..) so results land in <root>/results.
-ROOT_DIR="$(cd "$HPC_DIR/../.." && pwd)"
+# Resolve paths from the script's own location, not the submission directory
+# (SLURM_SUBMIT_DIR is wherever `sbatch` was invoked from, which may not be
+# experiments/hpc), so results always land in <root>/results regardless of cwd.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$SCRIPT_DIR"
 
 # ---------------------------------------------------------------------------
 # 1. Fixed settings + the grids to sweep.

@@ -9,8 +9,11 @@
 
 set -euo pipefail
 
-HPC_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-cd "$HPC_DIR"
+# Resolve from the script's own location, not the submission directory
+# (SLURM_SUBMIT_DIR is wherever `sbatch` was invoked from, which may not be
+# experiments/hpc).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 # OUTDIR + TASK are exported by param_search.slurm's auto-submit. If you run this
 # by hand, pass them: `OUTDIR=results/... TASK=grasp_reorient sbatch combine.slurm`
