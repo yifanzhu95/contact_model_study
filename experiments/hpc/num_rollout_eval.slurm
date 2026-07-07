@@ -22,9 +22,10 @@ set -euo pipefail
 # Keep #SBATCH --array in sync with the grid: it must be
 # 0-((#MODELS * #N_SAMPLES) - 1). The default 4×5 = 20 → 0-19.
 #
-# Submit (from experiments/hpc):
-#     mkdir -p logs
-#     sbatch num_rollout_eval.slurm
+# Submit (from the repo root, so logs/results land at the project root -
+# #SBATCH output paths are resolved relative to the sbatch submission dir):
+#     mkdir -p logs results
+#     sbatch experiments/hpc/num_rollout_eval.slurm
 #
 # Results land in results/num_rollout_eval_<arrayjobid>/<model>_n<n>.json.
 # Plot them all together with:
@@ -87,7 +88,7 @@ conda activate contact_modeling
 echo "cell ${SLURM_ARRAY_TASK_ID:-0}: model=$SEL_MODEL n_samples=$SEL_N_SAMPLES "\
      "n_episodes=$N_EPISODES delta=$DELTA -> $OUTDIR"
 
-python experiments/hpc/run_num_rollout_cell.py \
+python run_num_rollout_cell.py \
     --outdir      "$OUTDIR" \
     --task        "$TASK" \
     --model       "$SEL_MODEL" \
