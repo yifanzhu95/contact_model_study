@@ -9,11 +9,10 @@
 
 set -euo pipefail
 
-# Resolve from the script's own location, not the submission directory
-# (SLURM_SUBMIT_DIR is wherever `sbatch` was invoked from, which may not be
-# experiments/hpc).
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+# Hardcoded project root, so this always runs from experiments/hpc regardless
+# of where `sbatch` was invoked from.
+PROJ_DIR="/home/kg878/project_pi_amd78/kg878/Projects/contact_model_study"
+cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 
 # OUTDIR + TASK are exported by param_search.slurm's auto-submit. If you run this
 # by hand, pass them: `OUTDIR=results/... TASK=grasp_reorient sbatch combine.slurm`
@@ -23,6 +22,6 @@ TASK="${TASK:-run}"
 module load miniconda
 conda activate contact_modeling
 
-python combine_results.py \
+python experiments/hpc/combine_results.py \
     --indir  "$OUTDIR" \
     --output "$OUTDIR/combined_${TASK}"

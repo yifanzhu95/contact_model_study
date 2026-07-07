@@ -12,12 +12,11 @@
 
 set -euo pipefail
 
-# Resolve paths from the script's own location, not the submission directory
-# (SLURM_SUBMIT_DIR is wherever `sbatch` was invoked from, which may not be
-# experiments/hpc), so results always land in <root>/results regardless of cwd.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-cd "$SCRIPT_DIR"
+# Hardcoded project root so results always land in <root>/results regardless
+# of where `sbatch` was invoked from.
+PROJ_DIR="/home/kg878/project_pi_amd78/kg878/Projects/contact_model_study"
+ROOT_DIR="$PROJ_DIR"
+cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 
 # ---------------------------------------------------------------------------
 # 1. Fixed settings + the parameter grids to sweep.
@@ -84,7 +83,7 @@ echo "cell ${SLURM_ARRAY_TASK_ID}: model=$SEL_MODEL "\
 # The first task queues the combine job to run once the whole array finishes
 # ok, so a single `sbatch param_search.slurm` produces the merged results too.
 
-python run_param_cell.py \
+python experiments/hpc/run_param_cell.py \
     --cell_id     "$SLURM_ARRAY_TASK_ID" \
     --outdir      "$OUTDIR" \
     --task        "$TASK" \

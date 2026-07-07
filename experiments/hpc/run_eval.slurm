@@ -10,12 +10,11 @@
 
 set -euo pipefail
 
-# Resolve paths from the script's own location, not the submission directory
-# (SLURM_SUBMIT_DIR is wherever `sbatch` was invoked from, which may not be
-# experiments/hpc), so videos always land in <root>/videos regardless of cwd.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-cd "$SCRIPT_DIR"
+# Hardcoded project root so videos always land in <root>/videos regardless of
+# where `sbatch` was invoked from.
+PROJ_DIR="/home/kg878/project_pi_amd78/kg878/Projects/contact_model_study"
+ROOT_DIR="$PROJ_DIR"
+cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 
 # ---------------------------------------------------------------------------
 # 1. Single run: one model + one weight set, N_EPISODES episodes, rendered.
