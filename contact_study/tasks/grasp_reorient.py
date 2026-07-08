@@ -40,6 +40,7 @@ _MJ_CTRL_TO_URDF_JOINT = [
 # `weld_base=True`) lines palm_lower up with the MuJoCo placement with no extra
 # calibration, and "obj"/"floor" need no Drake-side scene-building at all.
 GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites.xml"#"leap_hand/leap_hand_right_w_sites_simple.xml"
+#"leap_hand/leap_hand_right_w_sites_spheres.xml"
 #GRASP_SCENE_XML = "leap_hand_old/leap_right_hand_simple copy.xml"#
 
 # Drake PidController gains for the eval hand (position control, mirroring the
@@ -541,7 +542,7 @@ class GraspReorientTask(BaseTask):
         the cube is the "obj_joint" freejoint, matching index_vector."""
         from contact_study.contact_models.pinocchio_sim import (
             PinocchioSimulator, PinocchioJointChannel, PinocchioFreeBodyChannel,
-            PinocchioPdActuation,
+            PinocchioPdActuation, PinocchioContactConfig,
         )
 
         # Pinocchio joint names come from the MJCF, so read them off the loaded
@@ -576,9 +577,18 @@ class GraspReorientTask(BaseTask):
         # Reuse the position-servo gains defined at the top of this file
         # (_PID_KP/_PID_KD); Pinocchio's PD has no integral term, so _PID_KI is
         # ignored. use_direct_gains=True applies kp/kd as given (not inertia-scaled).
+        # armature_pd folds the joint PD into the ADMM solve's effective inertia so
+        # the contact solve sees the PD-held fingers (consistent + well-conditioned).
         pid = PinocchioPdActuation(
             ctrl_joint_names=ctrl_joint_names,
             use_direct_gains=True, kp=_PID_KP, kd=_PID_KD,
+            armature_pd=True,
+        )
+        # Cap the Baumgarte penetration corrector so a deep mesh contact can't fling
+        # the cube to infinity (baumgarte_max_vel); this is the actual fling fix.
+        # The 2x2 study in tests/test_pinocchio_baumgarte_ab.py validated both knobs.
+        contact_cfg = PinocchioContactConfig(
+            baumgarte_max_vel=0.05, baumgarte_slop=0.0005,
         )
 
         return PinocchioSimulator(
@@ -589,6 +599,7 @@ class GraspReorientTask(BaseTask):
             pid            = pid,
             joint_channels = joint_channels,
             free_channels  = free_channels,
+            contact_cfg    = contact_cfg,
             video_path     = video_path,
             render         = render,
         )
