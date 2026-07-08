@@ -5,7 +5,7 @@
 #SBATCH --array=0-80          # must equal (#MODELS * #W_QUAT * #W_POS * #W_CONTACT * #W_JOINT) - 1
                                # default grid: 4 * 3 * 3 * 3 * 3 = 324  ->  0-323
 #SBATCH --partition=gpu
-#SBATCH --gpus=1
+#SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=02:00:00
