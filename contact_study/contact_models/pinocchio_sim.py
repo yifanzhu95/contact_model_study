@@ -86,6 +86,17 @@ class PinocchioPdActuation:
     kp: float = 3.0
     kd: float = 0.01
     joint_damping: float = 0.1
+    # Fold the implicit-PD impedance dt*(kv + dt*kp) into model.armature so the
+    # ADMM contact solve's effective-inertia operator (the Delassus) is built from
+    # A = M + that diagonal — the physically-correct one-step compliance of a
+    # PD-damped joint — instead of the bare mass matrix M. This makes the contact
+    # solve consistent with the integrator and far better conditioned (the fingers
+    # stop looking near-massless next to the cube), and it is what lets stiff gains
+    # stay stable. It does NOT by itself remove the Baumgarte fling (see
+    # PinocchioContactConfig.baumgarte_max_vel for that). Implemented via the
+    # explicit-damping path, which the armature term keeps stable; requires
+    # use_direct_gains=True (the armature is derived from the fixed kp/kv gains).
+    armature_pd: bool = False
 
 
 @dataclass
@@ -102,7 +113,18 @@ class PinocchioContactConfig:
     # removes existing penetration instead of only preventing further approach
     # (the bare velocity-level solve leaves any overlap uncorrected). 0 disables it;
     # ~0.2 removes ~20% of the penetration per substep. Values >1 over-correct.
-    baumgarte_gain: float = 0.2#0.2
+    baumgarte_gain: float = 0.2
+    # Cap (m/s) on that separating velocity. A deep or erratic mesh-contact
+    # penetration otherwise asks for baumgarte_gain*pen/dt = many m/s (dt=1e-4),
+    # and because the normal contact impulse is one-sided the object can never
+    # reabsorb it -> it is flung to infinity. Capping the correction speed removes
+    # overlap gently over several steps instead of in one impulsive kick; this is
+    # the actual fix for the fling (validated in tests/test_pinocchio_baumgarte_ab.py).
+    # <= 0 disables the cap (the old, fling-prone behavior).
+    baumgarte_max_vel: float = 0.05
+    # Penetration deadband (m): ignore the first baumgarte_slop metres of overlap
+    # so sub-mm contact jitter isn't fought (reduces buzzing at rest).
+    baumgarte_slop: float = 0.0005
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +344,23 @@ class PinocchioSimulator(EvalSimulator):
             [model.joints[model.getJointId(n)].idx_v for n in pid.ctrl_joint_names],
             dtype=int,
         )
+
+        # armature-PD: fold the implicit-PD impedance dt*(kv + dt*kp) into the
+        # joint inertia so crba AND the constraint Cholesky (=> the Delassus the
+        # ADMM solve uses) both see A = M + that diagonal. aba honors armature too,
+        # so it also stabilizes the explicit -kv*v damping; hence armature-PD routes
+        # through the explicit-PD path. Constant gains only (derived once here).
+        if pid.armature_pd:
+            if not pid.use_direct_gains:
+                raise ValueError(
+                    "PinocchioPdActuation.armature_pd requires use_direct_gains=True "
+                    "(the armature term is derived from the fixed kp/kv gains)."
+                )
+            kv = pid.kd + pid.joint_damping
+            armature = np.zeros(model.nv)
+            armature[self._ctrl_vadr] = self._timestep * (kv + self._timestep * pid.kp)
+            model.armature = armature
+            self._explicit_pd = True
 
         # ADMM solver setup (mirrors results/admm-constraint-solver.py).
         self._solver = pin.ADMMConstraintSolver()
@@ -587,11 +626,16 @@ class PinocchioSimulator(EvalSimulator):
         g = Jc @ v_free
         # Baumgarte position stabilization: bias the normal component of each 3D
         # point-contact (contact-frame z, i.e. every 3rd entry) so the solver aims
-        # for a small separating velocity proportional to the current penetration,
-        # actively pushing the bodies apart instead of merely halting approach.
+        # for a separating velocity proportional to the current penetration, but
+        # past a slop deadband and CAPPED at baumgarte_max_vel so a deep/erratic
+        # mesh contact can't inject a huge one-shot velocity (the fling).
         beta = self._contact_cfg.baumgarte_gain
         if beta != 0.0 and pens.size:
-            g[2::3] -= beta * pens / dt
+            corr = beta * np.maximum(pens - self._contact_cfg.baumgarte_slop, 0.0) / dt
+            vmax = self._contact_cfg.baumgarte_max_vel
+            if vmax and vmax > 0.0:
+                corr = np.minimum(corr, vmax)
+            g[2::3] -= corr
         self._solver.solve(delassus, g, cms, cds, self._settings, self._result)
         forces = (1.0 / dt) * self._result.retrieveConstraintImpulses()
         v_new = _implicit(v + dt * pin.aba(model, data, q, v, tau + Jc.T @ forces, self._fext))
