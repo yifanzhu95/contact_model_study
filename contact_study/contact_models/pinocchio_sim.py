@@ -699,7 +699,7 @@ class PinocchioSimulator(EvalSimulator):
         g = Jc @ v_free
         self._apply_baumgarte_drift(g, cms, cds, dt)
         has_converged = self._solver.solve(delassus, g, cms, cds, self._settings, self._result)
-        print("Conv.",has_converged)
+        #print("Conv.",has_converged)
         forces = (1.0 / dt) * self._result.retrieveConstraintImpulses()
         v_new = _implicit(v + dt * pin.aba(model, data, q, v, tau + Jc.T @ forces, self._fext))
         self._q = pin.integrate(model, q, v_new * dt)
