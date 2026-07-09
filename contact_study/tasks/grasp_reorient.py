@@ -49,14 +49,15 @@ GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites.xml"#"leap_hand/leap_hand_r
 _PID_KP, _PID_KI, _PID_KD, _PID_EFFORT = 3.0, 0.0, 0.01, 100.0
 
 # Pinocchio eval: mirror tests/test_pinochio.py's simulation scheme as closely as
-# possible — mass-scaled critically-damped PD (kp=M_ii*omega^2, kd=2*zeta*M_ii*omega),
-# gravity compensation, plain explicit forward-Euler integration (no implicit
-# backward-Euler damping, no armature-PD), and only the cube<->hand / hand<->hand
-# contact constraints (no joint-limit or joint-friction constraints, no Baumgarte
-# drift) — instead of the direct-gain/implicit/armature-PD scheme used elsewhere in
-# this module. cfg.timestep is left alone: it also sets rollout_dt for the MPPI
-# planner, so it isn't part of the eval-only "simulation scheme".
-_PIN_OMEGA          = 30.0   # hand PD natural frequency [rad/s] (test_pinochio.py OMEGA)
+# possible — critically-damped PD with stiffness pinned to _PID_KP (kd is derived
+# per-joint from the mass matrix: kd=2*zeta*sqrt(kp*M_ii), see
+# PinocchioSimulator._substep's explicit_pd branch), gravity compensation, plain
+# explicit forward-Euler integration (no implicit backward-Euler damping, no
+# armature-PD), and only the cube<->hand / hand<->hand contact constraints (no
+# joint-limit or joint-friction constraints, no Baumgarte drift) — instead of the
+# direct-gain/implicit/armature-PD scheme used elsewhere in this module. cfg.timestep
+# is left alone: it also sets rollout_dt for the MPPI planner, so it isn't part of
+# the eval-only "simulation scheme".
 _PIN_ZETA           = 1.0    # hand PD damping ratio (critically damped)
 _PIN_MU             = 0.5    # Coulomb friction coefficient (test_pinochio.py MU)
 _PIN_ADMM_MAX_ITER  = 5000
@@ -588,13 +589,14 @@ class GraspReorientTask(BaseTask):
         ctrl_joint_names = [
             mjm.joint(int(mjm.actuator(a).trnid[0])).name for a in range(mjm.nu)
         ]
-        # Mass-scaled, critically-damped PD (use_direct_gains=False -> omega/zeta),
-        # gravity comp, zero passive joint damping, and no armature-PD folding —
-        # mirrors tests/test_pinochio.py's OMEGA/ZETA/GRAVITY_COMP exactly (see the
-        # module-level _PIN_* constants above).
+        # explicit_pd (below) ignores use_direct_gains/omega and instead sets kp
+        # directly from the PID flag (_PID_KP -> the closed-loop time constant),
+        # deriving kd per-joint from the mass matrix so the loop stays critically
+        # damped at that stiffness (see PinocchioSimulator._substep). gravity comp
+        # and zero passive joint damping otherwise mirror tests/test_pinochio.py.
         pid = PinocchioPdActuation(
             ctrl_joint_names=ctrl_joint_names,
-            use_direct_gains=False, omega=_PIN_OMEGA, zeta=_PIN_ZETA,
+            kp=_PID_KP, zeta=_PIN_ZETA,
             gravity_comp=True, joint_damping=0.0,
             armature_pd=False,
         )

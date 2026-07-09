@@ -77,6 +77,12 @@ class PinocchioPdActuation:
     If `use_direct_gains` is True, `kp` and `kd` are used directly instead of
     computing them from `omega` and `zeta`. Both scalars are broadcast across all
     controlled joints (not inertia-scaled).
+
+    Under PinocchioSimulator's explicit_pd integration path, `use_direct_gains`
+    and `omega` are ignored: `kp` is used directly as the stiffness (it sets the
+    closed-loop time constant), and `kd` is instead derived per-joint from the
+    mass matrix so the loop stays exactly critically damped at that stiffness:
+    kd = 2*zeta*sqrt(kp*M_ii). `zeta` still selects the damping ratio.
     """
     ctrl_joint_names: list[str]
     omega: float = 50.0
@@ -607,9 +613,20 @@ class PinocchioSimulator(EvalSimulator):
 
         # PD gains on the controlled joints. kp (position/stiffness) is applied
         # forward-Euler as an explicit torque below; kd (PD derivative) and the passive
-        # joint_damping are velocity-proportional and go through the implicit operator.
-        # kv = kd + joint_damping is their sum (the implicit velocity coefficient).
-        if self._pid.use_direct_gains:
+        # joint_damping are velocity-proportional and go through the implicit operator
+        # (or, under explicit_pd, an explicit torque — see below). kv = kd +
+        # joint_damping is their sum (the implicit velocity coefficient).
+        if self._explicit_pd:
+            # Explicit forward-Euler PD: stiffness is the fixed PID kp (it sets the
+            # closed-loop time constant directly, overriding use_direct_gains/omega),
+            # while damping is still derived per-joint from the mass matrix so the
+            # loop stays critically damped at that stiffness: kd = 2*zeta*sqrt(kp*M_ii).
+            # An explicit -kv*v term is only conditionally stable, so landing exactly
+            # on critical damping (not over/under) matters more here than in the
+            # implicit path below.
+            kp = self._pid.kp
+            kd = 2.0 * self._pid.zeta * np.sqrt(kp * m_diag)
+        elif self._pid.use_direct_gains:
             kp = self._pid.kp
             kd = self._pid.kd
         else:
