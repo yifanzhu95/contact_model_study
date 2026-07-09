@@ -96,7 +96,7 @@ class PinocchioPdActuation:
     # PinocchioContactConfig.baumgarte_max_vel for that). Implemented via the
     # explicit-damping path, which the armature term keeps stable; requires
     # use_direct_gains=True (the armature is derived from the fixed kp/kv gains).
-    armature_pd: bool = False
+    armature_pd: bool = True
 
 
 @dataclass
@@ -121,10 +121,10 @@ class PinocchioContactConfig:
     # overlap gently over several steps instead of in one impulsive kick; this is
     # the actual fix for the fling (validated in tests/test_pinocchio_baumgarte_ab.py).
     # <= 0 disables the cap (the old, fling-prone behavior).
-    baumgarte_max_vel: float = 0.05
+    baumgarte_max_vel: float = 0.1
     # Penetration deadband (m): ignore the first baumgarte_slop metres of overlap
     # so sub-mm contact jitter isn't fought (reduces buzzing at rest).
-    baumgarte_slop: float = 0.0005
+    baumgarte_slop: float = 0.005
 
 
 # ---------------------------------------------------------------------------
