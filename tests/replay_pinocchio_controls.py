@@ -57,6 +57,18 @@ KP = 3.0              # hand position-servo stiffness (fixed, not mass-scaled)
 ZETA = 1.0            # hand PD damping ratio (1.0 = critically damped)
 GRAVITY_COMP = False   # add gravity-compensation torque so the hand holds its target
 
+# --- Baumgarte contact stabilization (native pinocchio, mirroring
+# results/g1-constraint-simulation.py) -------------------------------------------
+# Each point contact is a position-level constraint, so its drift term gets an
+# extra Baumgarte push-back proportional to the current penetration/position
+# error: g += Kp * constraint_position_error / dt (velocity level; Kd would add a
+# constraint_velocity_error term). Set via pin.BaumgarteCorrectorParameters on
+# each PointContactConstraintModel and read back off it in the solve loop, exactly
+# like g1-constraint-simulation.py does for its anchor/joint-limit constraints.
+# Kp=0 (default) disables it, recovering the plain velocity-level contact solve.
+BAUMGARTE_KP = 50.0   # contact position-error correction gain
+BAUMGARTE_KD = 5.0    # contact velocity-error correction gain
+
 # --- grasp_reorient's fixed initial state (contact_study/tasks/grasp_reorient.py) --
 # qpos = [16 hand joint angles, obj pos(3), obj quat(wxyz)(4)]  (nq = 23)
 # ctrl = [16 hand joint position targets]                        (nu = 16)
@@ -302,6 +314,10 @@ def detect_contacts_to_constraints(model, data, geom_model, geom_data, q, obj_ji
             plc2 = data.oMi[j2].inverse() * M_world
             cm = pin.PointContactConstraintModel(model, j1, plc1, j2, plc2)
             cm.setFriction(MU)
+            # Native Baumgarte corrector: the drift correction it configures is
+            # read back off the constraint and applied in step_dynamics (g1-style).
+            cm.setBaumgarteCorrectorParameters(
+                pin.BaumgarteCorrectorParameters(BAUMGARTE_KP, BAUMGARTE_KD))
             constraint_models.append(pin.ConstraintModel(cm))
 
     constraint_datas = [cm.createData() for cm in constraint_models]
@@ -341,6 +357,19 @@ def step_dynamics(model, data, q, v, q_tgt, hand_q_idx, hand_v_idx,
 
     Jc = pin.getConstraintsJacobian(model, data, constraint_models, constraint_datas)
     g = Jc @ v_free
+
+    # Baumgarte stabilization: for each position-level contact, bias the drift by
+    # the current position error scaled by its Baumgarte Kp (read straight off the
+    # constraint, as set in detect_contacts_to_constraints), mirroring the
+    # PointAnchorConstraintModel branch of results/g1-constraint-simulation.py:
+    #   g_pos += Kp * constraint_position_error / dt
+    idx = 0
+    for cm, cd in zip(constraint_models, constraint_datas):
+        size = cm.residualSize()
+        kp = cm.baumgarte_corrector_parameters.Kp
+        if kp != 0.0:
+            g[idx:idx + size] += kp * cd.extract().constraint_position_error / dt
+        idx += size
 
     converged = solver.solve(
         delassus, g, constraint_models, constraint_datas, settings, result)
@@ -405,7 +434,8 @@ def make_solver():
     settings.relative_complementarity_tol = 1e-12
     settings.admm_update_rule = pin.ADMMUpdateRule.SPECTRAL
     settings.anderson_capacity = 10
-    settings.mu_prox = 1e-4
+    #settings.mu_prox = 1e-4
+    settings.admm_proximal_rule = pin.ADMMProximalRule.AUTOMATIC
     settings.stat_record = False
     settings.solve_ncp = True
     result = pin.ADMMSolverResult()
