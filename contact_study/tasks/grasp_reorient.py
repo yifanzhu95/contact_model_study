@@ -48,6 +48,20 @@ GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites.xml"#"leap_hand/leap_hand_r
 # solver; _PID_EFFORT is the per-joint actuator force clamp DrakeSimulator adds.
 _PID_KP, _PID_KI, _PID_KD, _PID_EFFORT = 3.0, 0.0, 0.01, 100.0
 
+# Pinocchio eval: mirror tests/test_pinochio.py's simulation scheme as closely as
+# possible — mass-scaled critically-damped PD (kp=M_ii*omega^2, kd=2*zeta*M_ii*omega),
+# gravity compensation, plain explicit forward-Euler integration (no implicit
+# backward-Euler damping, no armature-PD), and only the cube<->hand / hand<->hand
+# contact constraints (no joint-limit or joint-friction constraints, no Baumgarte
+# drift) — instead of the direct-gain/implicit/armature-PD scheme used elsewhere in
+# this module. cfg.timestep is left alone: it also sets rollout_dt for the MPPI
+# planner, so it isn't part of the eval-only "simulation scheme".
+_PIN_OMEGA          = 30.0   # hand PD natural frequency [rad/s] (test_pinochio.py OMEGA)
+_PIN_ZETA           = 1.0    # hand PD damping ratio (critically damped)
+_PIN_MU             = 0.5    # Coulomb friction coefficient (test_pinochio.py MU)
+_PIN_ADMM_MAX_ITER  = 5000
+_PIN_ADMM_MU_PROX   = 1e-4
+
 # Fixed initial state + control for the hand and cube, used to initialize BOTH
 # the rollout and eval simulators (overrides the scene keyframe). Layout:
 #   qpos = [16 hand joints, obj pos(3), obj quat(wxyz)(4)]  (nq = 23)
@@ -237,18 +251,18 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 500,
+            max_steps          = 750,
             success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
             cost_weights       = {
-                "w_quat": 25,#50.0, #5.0
-                "w_pos": 200,#400.0, #40.0
+                "w_quat": 0,#25,#50.0, #5.0
+                "w_pos": 0,#200,#400.0, #40.0
                 "w_velo": 0.0,
                 "w_contact": 750.0,#500.0,#2.5
-                "w_joint": 5.0, #0.1
+                "w_joint": 0,#5.0, #0.1
                 "w_joint_velo": 0.0,
-                "w_fallen": 300.0, #30.0,
-                "w_quat_term": 100.0, #10.0
-                "w_pos_term": 100.0, #10.0
+                "w_fallen": 0,#300.0, #30.0,
+                "w_quat_term": 0,#100.0, #10.0
+                "w_pos_term": 0,#100.0, #10.0
                 "w_fallen_term": 0.0,
             },
             # BaseTask.load() loads this static file directly — no MJCF is
@@ -574,21 +588,28 @@ class GraspReorientTask(BaseTask):
         ctrl_joint_names = [
             mjm.joint(int(mjm.actuator(a).trnid[0])).name for a in range(mjm.nu)
         ]
-        # Reuse the position-servo gains defined at the top of this file
-        # (_PID_KP/_PID_KD); Pinocchio's PD has no integral term, so _PID_KI is
-        # ignored. use_direct_gains=True applies kp/kd as given (not inertia-scaled).
-        # armature_pd folds the joint PD into the ADMM solve's effective inertia so
-        # the contact solve sees the PD-held fingers (consistent + well-conditioned).
+        # Mass-scaled, critically-damped PD (use_direct_gains=False -> omega/zeta),
+        # gravity comp, zero passive joint damping, and no armature-PD folding —
+        # mirrors tests/test_pinochio.py's OMEGA/ZETA/GRAVITY_COMP exactly (see the
+        # module-level _PIN_* constants above).
         pid = PinocchioPdActuation(
             ctrl_joint_names=ctrl_joint_names,
-            use_direct_gains=True, kp=_PID_KP, kd=_PID_KD,
-            armature_pd=True,
+            use_direct_gains=False, omega=_PIN_OMEGA, zeta=_PIN_ZETA,
+            gravity_comp=True, joint_damping=0.0,
+            armature_pd=False,
         )
-        # Cap the Baumgarte penetration corrector so a deep mesh contact can't fling
-        # the cube to infinity (baumgarte_max_vel); this is the actual fling fix.
-        # The 2x2 study in tests/test_pinocchio_baumgarte_ab.py validated both knobs.
+        # Only cube<->hand / hand<->hand contact constraints (no joint-limit or
+        # joint-friction constraints, no Baumgarte drift), and the same ADMM
+        # tolerances/mu_prox test_pinochio.py uses.
         contact_cfg = PinocchioContactConfig(
-            baumgarte_max_vel=0.05, baumgarte_slop=0.0005,
+            friction=_PIN_MU,
+            use_mesh_geoms=True,
+            admm_max_iterations=_PIN_ADMM_MAX_ITER,
+            mu_prox=_PIN_ADMM_MU_PROX,
+            add_joint_limits=False,
+            add_joint_friction=False,
+            contact_baumgarte_kp=0.0,
+            joint_limit_baumgarte_kp=0.0,
         )
 
         return PinocchioSimulator(
@@ -602,4 +623,5 @@ class GraspReorientTask(BaseTask):
             contact_cfg    = contact_cfg,
             video_path     = video_path,
             render         = render,
+            explicit_pd    = True,
         )
