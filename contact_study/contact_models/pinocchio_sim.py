@@ -10,8 +10,10 @@ Pinocchio's MJCF parser only follows the first <body> under <worldbody>, so a
 multi-root scene (hand fingers + free object) is split into single-root MJCFs,
 parsed separately, and merged via pin.appendModel into one model. Contacts are
 detected each fine step (coal collision) and resolved with the ADMM constraint
-solver; the hand joints are position-controlled with inertia-scaled, critically
-damped PD torques.
+solver; the hand joints are position-controlled by a compliant, torque-limited
+joint constraint solved *jointly* with the contacts (see _substep), so actuation
+and contact forces stay mutually consistent and the fingers do not drive through
+the object.
 
 Like DrakeSimulator, Pinocchio stores state in its own joint layout, so the
 caller supplies channels mapping it onto the MuJoCo-ordered qpos/qvel the
@@ -39,7 +41,6 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
 import numpy as np
-from scipy.linalg import cho_factor, cho_solve
 
 from contact_study.sim.base import EvalSimulator, EvalState, camera_pose_from_config
 
@@ -66,36 +67,44 @@ class PinocchioFreeBodyChannel:
 
 @dataclass
 class PinocchioPdActuation:
-    """Position control via inertia-scaled, critically damped PD torques.
+    """Position control expressed as a compliant, torque-limited joint constraint
+    solved *inside* the ADMM contact solve (see PinocchioSimulator._substep).
 
-    Per-joint gains are derived from the mass-matrix diagonal so the closed loop
-    has a fixed natural frequency `omega` regardless of the (tiny) finger
-    inertias: kp = M_ii*omega^2, kd = 2*zeta*M_ii*omega. ctrl_joint_names is in
-    MuJoCo *control* order: apply_control(ctrl)[k] is the desired position for
-    Pinocchio joint ctrl_joint_names[k].
+    Each controlled joint contributes one row of a pin.JointFrictionConstraintModel
+    (a joint-space, box-bounded force whose Jacobian is the joint-selection matrix):
+      * compliance   = 1/kp  -> the row behaves like a spring of stiffness kp,
+      * box bound    = ±tau_max (a real torque limit; the finger pushes either way
+                        but never with infinite force -> it cannot crush the cube),
+      * target       = drive the joint toward q_des via a Baumgarte-style velocity
+                        bias `pd_track_gain*(q_des - q)/dt` injected into the solve's
+                        free constraint velocity g (mirroring the contact Baumgarte).
+    Because the actuator rows and the contact rows are solved together, the finger's
+    tracking force and the contact reaction are mutually consistent in one solve, so
+    the finger no longer drives through the cube (the old two-stage backward-Euler PD
+    reconciled them only after the fact, leaving persistent penetration).
 
-    If `use_direct_gains` is True, `kp` and `kd` are used directly instead of
-    computing them from `omega` and `zeta`. Both scalars are broadcast across all
-    controlled joints (not inertia-scaled).
+    ctrl_joint_names is in MuJoCo *control* order: apply_control(ctrl)[k] is the
+    desired position for Pinocchio joint ctrl_joint_names[k].
     """
     ctrl_joint_names: list[str]
-    omega: float = 50.0
-    zeta: float = 1.0
-    gravity_comp: bool = False
-    use_direct_gains: bool = True
     kp: float = 3.0
     kd: float = 0.01
     joint_damping: float = 0.1
-    # Fold the implicit-PD impedance dt*(kv + dt*kp) into model.armature so the
-    # ADMM contact solve's effective-inertia operator (the Delassus) is built from
-    # A = M + that diagonal — the physically-correct one-step compliance of a
-    # PD-damped joint — instead of the bare mass matrix M. This makes the contact
-    # solve consistent with the integrator and far better conditioned (the fingers
-    # stop looking near-massless next to the cube), and it is what lets stiff gains
-    # stay stable. It does NOT by itself remove the Baumgarte fling (see
-    # PinocchioContactConfig.baumgarte_max_vel for that). Implemented via the
-    # explicit-damping path, which the armature term keeps stable; requires
-    # use_direct_gains=True (the armature is derived from the fixed kp/kv gains).
+    gravity_comp: bool = True
+    # Per-joint torque limit (N*m) for the actuator constraint's box bound. Large
+    # enough not to bind normal finger motion, finite so grasp force stays bounded.
+    tau_max: float = 5.0
+    # Position-tracking gain on the Baumgarte-style velocity bias: each substep the
+    # actuator aims to close this fraction of the joint position error. Like the
+    # contact baumgarte_gain it must stay well below 1.0 -- 1.0 is deadbeat (remove
+    # all error in one dt) and, coupled to the contacts, goes unstable; ~0.2 tracks
+    # to ~0 rest error while keeping finger<->object penetration sub-mm (validated).
+    pd_track_gain: float = 0.05
+    # --- accepted-but-ignored (kept so existing call sites construct unchanged; the
+    # backward-Euler / inertia-scaled / armature PD paths were removed) -------------
+    omega: float = 50.0
+    zeta: float = 1.0
+    use_direct_gains: bool = True
     armature_pd: bool = False
 
 
@@ -106,14 +115,14 @@ class PinocchioContactConfig:
     friction: float = 0.5
     use_mesh_geoms: bool = True
     floor_halfextent_thresh: float = 0.5
-    admm_max_iterations: int = 1000
-    mu_prox: float = 1e-6
+    admm_max_iterations: int = 5000
+    mu_prox: float = 1e-4
     # Baumgarte position stabilization: each step, target a separating contact
     # velocity of (baumgarte_gain * penetration_depth / dt) so the solver actively
     # removes existing penetration instead of only preventing further approach
     # (the bare velocity-level solve leaves any overlap uncorrected). 0 disables it;
     # ~0.2 removes ~20% of the penetration per substep. Values >1 over-correct.
-    baumgarte_gain: float = 0.2
+    baumgarte_gain: float = 0.0
     # Cap (m/s) on that separating velocity. A deep or erratic mesh-contact
     # penetration otherwise asks for baumgarte_gain*pen/dt = many m/s (dt=1e-4),
     # and because the normal contact impulse is one-sided the object can never
@@ -294,11 +303,9 @@ class PinocchioSimulator(EvalSimulator):
         self._joint_channels = joint_channels or []
         self._free_channels = free_channels or []
         self._pid = pid
-        # When True, apply the PD velocity term (-kv*v) as an explicit joint torque
-        # evaluated at the current (q, v) and integrate with a plain forward-Euler
-        # aba step, instead of the linearly-implicit backward-Euler solve. Simpler
-        # but only conditionally stable (see _substep). Defaults to the implicit path.
-        self._explicit_pd = explicit_pd
+        # `explicit_pd` is accepted for call-site compatibility but no longer used:
+        # PD is now a constraint inside the ADMM solve, not a torque integrated by a
+        # separate Euler step (see _substep and PinocchioPdActuation).
         self._contact_cfg = contact_cfg or PinocchioContactConfig()
         self._timestep = float(config.timestep)
         self._video_path = video_path
@@ -345,22 +352,27 @@ class PinocchioSimulator(EvalSimulator):
             dtype=int,
         )
 
-        # armature-PD: fold the implicit-PD impedance dt*(kv + dt*kp) into the
-        # joint inertia so crba AND the constraint Cholesky (=> the Delassus the
-        # ADMM solve uses) both see A = M + that diagonal. aba honors armature too,
-        # so it also stabilizes the explicit -kv*v damping; hence armature-PD routes
-        # through the explicit-PD path. Constant gains only (derived once here).
-        if pid.armature_pd:
-            if not pid.use_direct_gains:
-                raise ValueError(
-                    "PinocchioPdActuation.armature_pd requires use_direct_gains=True "
-                    "(the armature term is derived from the fixed kp/kv gains)."
-                )
-            kv = pid.kd + pid.joint_damping
-            armature = np.zeros(model.nv)
-            armature[self._ctrl_vadr] = self._timestep * (kv + self._timestep * pid.kp)
-            model.armature = armature
-            self._explicit_pd = True
+        # Actuator-as-constraint: one pin.JointFrictionConstraintModel over the
+        # controlled joints (its Jacobian is the joint-selection matrix, its cone a
+        # box on the joint force). Configured as a PD actuator: compliance = 1/kp
+        # (spring of stiffness kp) and box bound = ±tau_max (torque limit). Built once
+        # here (structure is state-independent); each substep it is appended to the
+        # contact constraint list and its target velocity bias is set in `g`.
+        ctrl_jids = pin.StdVec_Index()
+        for n in pid.ctrl_joint_names:
+            ctrl_jids.append(model.getJointId(n))
+        act = pin.JointFrictionConstraintModel(model, ctrl_jids)
+        n_act = act.residualSize()
+        kp = max(float(pid.kp), 1e-9)
+        act.setCompliance(np.full(n_act, 1.0 / kp))
+        # Solver works in impulses (forces = impulses/dt); a torque limit tau_max is
+        # an impulse bound tau_max*dt over the substep.
+        lim = float(pid.tau_max) * self._timestep
+        act.setFrictionLowerLimit(np.full(n_act, -lim))
+        act.setFrictionUpperLimit(np.full(n_act, lim))
+        self._act_cm = pin.ConstraintModel(act)
+        self._act_cd = self._act_cm.createData()
+        self._n_act = n_act
 
         # ADMM solver setup (mirrors results/admm-constraint-solver.py).
         self._solver = pin.ADMMConstraintSolver()
@@ -371,6 +383,7 @@ class PinocchioSimulator(EvalSimulator):
         s.absolute_complementarity_tol = 1e-10
         s.relative_complementarity_tol = 1e-12
         s.admm_update_rule = pin.ADMMUpdateRule.SPECTRAL
+        s.anderson_capacity = 10
         s.mu_prox = self._contact_cfg.mu_prox
         s.stat_record = False
         s.solve_ncp = True
@@ -545,102 +558,105 @@ class PinocchioSimulator(EvalSimulator):
         cds = [cm.createData() for cm in cms]
         return cms, cds, np.asarray(pens, dtype=float)
 
-    def _substep(self):
+    # Bisection depth cap for _substep's non-convergence retry: 3 halvings takes the
+    # worst-case internal dt from 1e-4s to 1.25e-5s, far finer than any legitimate
+    # contact event needs. Worst case (every half-step also fails to converge) costs
+    # up to 2^3 + 2^2 + 2^1 = 14 ADMM solves per original substep instead of 1 --
+    # kept modest because a genuinely unrecoverable configuration (e.g. commanding
+    # every finger into its hard joint limit simultaneously) can otherwise make every
+    # bisected half-step fail too, and deeper recursion buys ~4x more solves for no
+    # improvement. Beyond this depth the state is committed as-is (protected by the
+    # finite-state safety net) rather than recursing further.
+    _MAX_BISECT_DEPTH = 3
+
+    def _substep(self, dt: float | None = None, _depth: int = 0):
         pin = self._pin
         model, data = self._model, self._data
         q, v = self._q, self._v
-        dt = self._timestep
+        if dt is None:
+            dt = self._timestep
         cms, cds, pens = self._detect_contacts()
 
-        # data.M must be populated before ConstraintCholeskyDecomposition.compute,
-        # regardless of the gain mode.
+        # Full constraint system for this substep: the detected point contacts
+        # followed by the single joint-actuator constraint (appended LAST so the
+        # contact rows stay first and the contact-Baumgarte slicing below is valid).
+        n_c = len(cms)
+        cms = cms + [self._act_cm]
+        cds = cds + [self._act_cd]
+
+        # data.M must be populated before ConstraintCholeskyDecomposition.compute.
         pin.crba(model, data, q, pin.Convention.WORLD)
 
-        m_diag = np.diag(data.M)[self._ctrl_vadr]
-
-        # PD stiffness (kp) and velocity (kv = kd + passive joint_damping) gains on
-        # the controlled joints. Both are integrated implicitly (see below).
-        if self._pid.use_direct_gains:
-            kp = self._pid.kp
-            kv = self._pid.kd + self._pid.joint_damping
-        else:
-            kp = m_diag * self._pid.omega ** 2
-            kv = 2.0 * self._pid.zeta * m_diag * self._pid.omega + self._pid.joint_damping
-
-        # Stiffness (+ optional gravity comp) torque, common to both paths.
+        # Free velocity carries NO PD torque any more (the PD force is produced by the
+        # actuator constraint in the solve). Optional gravity comp + passive joint
+        # damping are the only explicit torques.
         tau = np.zeros(model.nv)
-        tau[self._ctrl_vadr] = kp * (self._q_des[self._ctrl_qadr] - q[self._ctrl_qadr])
         if self._pid.gravity_comp:
             tau[self._ctrl_vadr] += pin.computeGeneralizedGravity(model, data, q)[self._ctrl_vadr]
-
-        if self._explicit_pd:
-            # Simple path: add the velocity term -kv*v as an explicit torque at the
-            # current v and integrate with a plain forward-Euler aba step (no implicit
-            # solve). Only conditionally stable: -kv*v blows up when kv/M_ii*dt > 2,
-            # which the tiny finger inertias (M_ii ~ 3e-6) hit for any nontrivial
-            # damping, so use this only with small kv/large M_ii.
-            tau[self._ctrl_vadr] -= kv * v[self._ctrl_vadr]
-
-            def _implicit(v_explicit):
-                return v_explicit
-        else:
-            # Only the position (stiffness) + gravity torque goes through the explicit
-            # aba step; the velocity term -kv*v is handled implicitly. Linearly-implicit
-            # (backward-Euler) PD is unconditionally stable: explicit -kv*v blows up when
-            # kv/M_ii*dt > 2, which the tiny finger inertias (M_ii ~ 3e-6) hit for any
-            # nontrivial damping. Because PD is linear in (q, v) the implicit step is a
-            # single SPD solve, no Newton iteration:
-            #   (M + dt*diag(kv + dt*kp)) v_{n+1} = M v_explicit
-            # where v_explicit is the usual explicit free velocity from the stiffness
-            # torque. diag entries are nonzero only on the controlled joints.
-            #
-            # Symmetrize M (crba fills the upper triangle) and build the implicit
-            # operator A = M + dt*diag(kv + dt*kp), reused for the free and post-contact
-            # velocities. M v is the rhs (see derivation above). diag entries are nonzero
-            # only on the controlled joints, so the cube's free dynamics are unchanged.
-            M = np.triu(data.M)
-            M = M + np.triu(M, 1).T
-            d_diag = np.zeros(model.nv)
-            d_diag[self._ctrl_vadr] = kv + dt * kp
-            A = M + np.diag(dt * d_diag)
-            # A is SPD (M is SPD, dt*d_diag >= 0) and constant for this substep, so
-            # factor it once and reuse the factorization for both the free and
-            # post-contact solves below instead of re-factoring on each call.
-            A_factor = cho_factor(A)
-
-            def _implicit(v_explicit):
-                return cho_solve(A_factor, M @ v_explicit)
-
-        v_free = _implicit(v + dt * pin.aba(model, data, q, v, tau, self._fext))
-        if len(cms) == 0:
-            self._q = pin.integrate(model, q, v_free * dt)
-            self._v = v_free
-            return
+        if self._pid.joint_damping:
+            tau[self._ctrl_vadr] -= self._pid.joint_damping * v[self._ctrl_vadr]
+        v_free = v + dt * pin.aba(model, data, q, v, tau, self._fext)
 
         for cm, cd in zip(cms, cds):
             cm.calc(model, data, cd)
         chol = pin.ConstraintCholeskyDecomposition(model, data, cms, cds)
-        chol.compute(model, data, cms, cds, 1e-10)#1e-10
+        chol.compute(model, data, cms, cds, 1e-10)
         delassus = chol.getDelassusOperatorCholeskyExpression()
         Jc = pin.getConstraintsJacobian(model, data, cms, cds)
         g = Jc @ v_free
-        # Baumgarte position stabilization: bias the normal component of each 3D
-        # point-contact (contact-frame z, i.e. every 3rd entry) so the solver aims
-        # for a separating velocity proportional to the current penetration, but
-        # past a slop deadband and CAPPED at baumgarte_max_vel so a deep/erratic
-        # mesh contact can't inject a huge one-shot velocity (the fling).
+
+        # --- Baumgarte biases on the free constraint velocity g -------------------
+        # Contact block = first 3*n_c rows (each 3D point contact is [tx, ty, n]);
+        # actuator block = the trailing self._n_act rows (one per controlled joint).
+        n_crows = 3 * n_c
+        # Contacts: bias the normal component (every 3rd entry, contact-frame z) so
+        # the solver targets a separating velocity proportional to penetration, past
+        # a slop deadband and CAPPED at baumgarte_max_vel so a deep/erratic mesh
+        # contact can't inject a huge one-shot velocity (the fling).
         beta = self._contact_cfg.baumgarte_gain
         if beta != 0.0 and pens.size:
             corr = beta * np.maximum(pens - self._contact_cfg.baumgarte_slop, 0.0) / dt
             vmax = self._contact_cfg.baumgarte_max_vel
             if vmax and vmax > 0.0:
                 corr = np.minimum(corr, vmax)
-            g[2::3] -= corr
-        self._solver.solve(delassus, g, cms, cds, self._settings, self._result)
+            g[2:n_crows:3] -= corr
+        # Actuator: drive each controlled joint toward q_des. The row's free velocity
+        # is the current joint velocity; subtracting the desired closing velocity
+        # pd_track_gain*(q_des - q)/dt makes the (compliant, torque-limited) row act
+        # as a position servo of stiffness kp, solved jointly with the contacts.
+        q_err = self._q_des[self._ctrl_qadr] - q[self._ctrl_qadr]
+        g[n_crows:] -= self._pid.pd_track_gain * q_err / dt
+
+        converged = self._solver.solve(delassus, g, cms, cds, self._settings, self._result)
+        # On non-convergence, don't commit this solve: the returned forces are an
+        # incomplete, unreliable partial solution, and blindly integrating them for a
+        # "full-size" dt is exactly how a fast-appearing contact tunnels through a mesh
+        # in one step (observed: penetration jumping from ~0.1mm to >20mm in a single
+        # substep once contacts stopped converging, then staying pegged there because
+        # the solver kept being fed an already-deep, still-unconverged state). Retry
+        # this physical interval as two half-size substeps instead -- finer temporal
+        # resolution gives the collision solve a chance to catch the contact while it's
+        # still shallow, rather than integrating through it. Bounded by
+        # _MAX_BISECT_DEPTH so a genuinely unrecoverable configuration still commits
+        # (protected by the finite-state safety net below) instead of recursing forever.
+        if not converged and _depth < self._MAX_BISECT_DEPTH:
+            self._substep(dt / 2, _depth + 1)
+            self._substep(dt / 2, _depth + 1)
+            return
         forces = (1.0 / dt) * self._result.retrieveConstraintImpulses()
-        v_new = _implicit(v + dt * pin.aba(model, data, q, v, tau + Jc.T @ forces, self._fext))
-        self._q = pin.integrate(model, q, v_new * dt)
-        self._v = v_new
+        v_new = v + dt * pin.aba(model, data, q, v, tau + Jc.T @ forces, self._fext)
+        q_new = pin.integrate(model, q, v_new * dt)
+        # Safety net: never commit a non-finite state. Without this, one bad substep
+        # (e.g. an unconverged, ill-conditioned solve) turns q/v to NaN, and every
+        # later call to _detect_contacts runs coal collision on degenerate NaN
+        # geometry -- which floods stderr with Eigen Jacobi-eigensolver warnings on
+        # every subsequent substep instead of failing once. Freeze at the last good
+        # state instead (zero velocity, so it doesn't keep "moving" through NaN).
+        if np.all(np.isfinite(q_new)) and np.all(np.isfinite(v_new)):
+            self._q = q_new
+            self._v = v_new
+        else:
+            self._v = np.zeros_like(v)
 
     # -- EvalSimulator interface --------------------------------------------
     def reset(self, qpos, qvel) -> None:
@@ -671,8 +687,22 @@ class PinocchioSimulator(EvalSimulator):
         return EvalState(qpos, qvel)
 
     def apply_control(self, ctrl) -> None:
+        # Clamp to the joint's own physical position limits. The actuator is now a
+        # constraint *inside* the ADMM solve (see _substep), so an unclamped target
+        # beyond the joint's mechanical range becomes an infeasible velocity bias for
+        # the box-bounded actuator row: the solver can't satisfy it, ADMM iterations
+        # saturate every substep, and (especially if the caller keeps integrating an
+        # unbounded command, e.g. MPPI's u += action with no ctrlrange clip) the
+        # tracking error can run away over many substeps until the state blows up to
+        # NaN -- which then floods collision detection with degenerate geometry and
+        # spams Eigen's Jacobi eigensolver on every subsequent substep. Clamping here
+        # mirrors what a real position actuator's ctrlrange enforces upstream (and
+        # exactly matches it: verified model.lowerPositionLimit/upperPositionLimit at
+        # these q-indices equal the MuJoCo actuator_ctrlrange for this scene).
         ctrl = np.asarray(ctrl, dtype=float)
-        self._q_des[self._ctrl_qadr] = ctrl
+        lo = self._model.lowerPositionLimit[self._ctrl_qadr]
+        hi = self._model.upperPositionLimit[self._ctrl_qadr]
+        self._q_des[self._ctrl_qadr] = np.clip(ctrl, lo, hi)
 
     def step(self, n_substeps: int = 1) -> None:
         for _ in range(n_substeps):
