@@ -39,7 +39,7 @@ _MJ_CTRL_TO_URDF_JOINT = [
 # the Drake "base" link to the world at identity (DrakeSimulator's
 # `weld_base=True`) lines palm_lower up with the MuJoCo placement with no extra
 # calibration, and "obj"/"floor" need no Drake-side scene-building at all.
-GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites_blocks.xml"#"leap_hand/leap_hand_right_w_sites_simple.xml"
+GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites.xml"#"leap_hand/leap_hand_right_w_sites_simple.xml"
 #"leap_hand/leap_hand_right_w_sites_spheres.xml"
 #GRASP_SCENE_XML = "leap_hand_old/leap_right_hand_simple copy.xml"#
 
@@ -57,9 +57,10 @@ _PID_KP, _PID_KI, _PID_KD, _PID_EFFORT = 3.0, 0.0, 0.01, 100.0
 _PIN_ZETA           = 1.0    # hand PD damping ratio (critically damped)
 _PIN_MU             = 0.5    # Coulomb friction coefficient
 _PIN_GRAVITY_COMP   = False  # gravity-compensation torque on the hand PD
+_PIN_ARMATURE       = 0.5    # per-DOF rotor inertia on the hand joints (large; tune)
 _PIN_ADMM_MAX_ITER  = 5000
 _PIN_BAUMGARTE_KP   = 100.0   # contact position-error correction gain
-_PIN_BAUMGARTE_KD   = 0.0    # contact velocity-error correction gain
+_PIN_BAUMGARTE_KD   = 0.05    # contact velocity-error correction gain
 
 # Fixed initial state + control for the hand and cube, used to initialize BOTH
 # the rollout and eval simulators (overrides the scene keyframe). Layout:
@@ -253,10 +254,10 @@ class GraspReorientTask(BaseTask):
             max_steps          = 750,
             success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
             cost_weights       = {
-                "w_quat": 50.0, #5.0
-                "w_pos": 400.0, #40.0
+                "w_quat": 25.0, #5.0
+                "w_pos": 200.0, #40.0
                 "w_velo": 0.0,
-                "w_contact": 500,#250.0,#500.0,#2.5
+                "w_contact": 750,#250.0,#500.0,#2.5
                 "w_joint": 5.0, #0.1
                 "w_joint_velo": 0.0,
                 "w_fallen": 300.0, #30.0,
@@ -594,6 +595,7 @@ class GraspReorientTask(BaseTask):
             ctrl_joint_names=ctrl_joint_names,
             kp=_PID_KP, zeta=_PIN_ZETA,
             gravity_comp=_PIN_GRAVITY_COMP,
+            armature=_PIN_ARMATURE,
         )
         # cube<->hand / hand<->hand frictional point contacts, each with a native
         # Baumgarte corrector on the contact position error.

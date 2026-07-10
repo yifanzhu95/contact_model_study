@@ -75,11 +75,18 @@ class PinocchioPdActuation:
     desired position for Pinocchio joint ctrl_joint_names[k]. The stiffness `kp`
     is used directly (it sets the closed-loop time constant); the damping is
     derived per-joint from the mass-matrix diagonal so the loop stays critically
-    damped at that stiffness: kd = 2*zeta*sqrt(kp*M_ii)."""
+    damped at that stiffness: kd = 2*zeta*sqrt(kp*M_ii).
+
+    `armature` is a per-DOF rotor inertia added to each controlled joint's mass
+    (model.armature). The LEAP finger inertias are tiny (M_ii ~ 3e-6), so the
+    contact solve treats the PD-held fingers as near-massless next to the cube; a
+    large armature raises their effective inertia (better-conditioned Delassus,
+    steadier grasp). It also enters the critically-damped kd via M_ii above."""
     ctrl_joint_names: list[str]
     kp: float = 3.0
     zeta: float = 1.0
     gravity_comp: bool = False
+    armature: float = 0.0
 
 
 @dataclass
@@ -287,6 +294,12 @@ class PinocchioSimulator(EvalSimulator):
             [model.joints[model.getJointId(n)].idx_v for n in pid.ctrl_joint_names],
             dtype=int,
         )
+
+        # Rotor inertia on the controlled joints: crba (=> the Delassus the ADMM
+        # solve builds) and the mass-scaled kd both see A = M + armature, so the
+        # contact solve doesn't treat the PD-held fingers as near-massless.
+        if pid.armature:
+            model.armature[self._ctrl_vadr] += pid.armature
 
         # ADMM solver setup (mirrors replay_pinocchio_controls.py's make_solver).
         self._solver = pin.ADMMConstraintSolver()
