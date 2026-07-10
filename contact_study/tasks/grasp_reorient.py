@@ -597,7 +597,7 @@ class GraspReorientTask(BaseTask):
         pid = PinocchioPdActuation(
             ctrl_joint_names=ctrl_joint_names,
             kp=_PID_KP, zeta=_PIN_ZETA,
-            gravity_comp=True, joint_damping=0.0,
+            gravity_comp=False, joint_damping=0.0,
             armature_pd=False,
         )
         # Only cube<->hand / hand<->hand contact constraints (no joint-limit or
@@ -610,8 +610,8 @@ class GraspReorientTask(BaseTask):
             mu_prox=_PIN_ADMM_MU_PROX,
             add_joint_limits=False,
             add_joint_friction=False,
-            contact_baumgarte_kp=0.0,
-            joint_limit_baumgarte_kp=0.0,
+            contact_baumgarte_kp=0.2,
+            joint_limit_baumgarte_kp=0.2,
         )
 
         return PinocchioSimulator(
