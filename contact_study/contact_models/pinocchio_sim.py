@@ -2,16 +2,16 @@
 
 Wraps a Pinocchio model + ADMM contact solver as the high-fidelity "real"
 environment, exposing the EvalSimulator interface so it is interchangeable with
-MujocoSimulator and DrakeSimulator. This generalizes tests/test_pinochio.py
-(LEAP-hand grasp with finger<->cube and finger<->finger contacts) into a
-task-agnostic simulator configured through channels, mirroring drake_sim.py.
+MujocoSimulator and DrakeSimulator. The simulation scheme mirrors
+tests/replay_pinocchio_controls.py exactly:
 
-Pinocchio's MJCF parser only follows the first <body> under <worldbody>, so a
-multi-root scene (hand fingers + free object) is split into single-root MJCFs,
-parsed separately, and merged via pin.appendModel into one model. Contacts are
-detected each fine step (coal collision) and resolved with the ADMM constraint
-solver; the hand joints are position-controlled with inertia-scaled, critically
-damped PD torques.
+  * multi-root MJCF (hand fingers + free object) split into single-root MJCFs,
+    parsed separately, and merged via pin.appendModel into one model;
+  * each fine step: detect coal contacts, build a PointContactConstraintModel per
+    contact with a native Baumgarte corrector, and resolve them with the ADMM
+    solver;
+  * the hand joints are position-controlled with an explicit forward-Euler PD:
+    fixed stiffness kp, per-joint critically-damped kd = 2*zeta*sqrt(kp*M_ii).
 
 Like DrakeSimulator, Pinocchio stores state in its own joint layout, so the
 caller supplies channels mapping it onto the MuJoCo-ordered qpos/qvel the
@@ -36,12 +36,15 @@ import datetime
 import os
 import uuid
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
-from scipy.linalg import cho_factor, cho_solve
 
 from contact_study.sim.base import EvalSimulator, EvalState, camera_pose_from_config
+
+# A geom whose in-plane box half-extents both exceed this is treated as the floor
+# and excluded from all collision pairs.
+_FLOOR_HALFEXTENT_THRESH = 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -66,47 +69,49 @@ class PinocchioFreeBodyChannel:
 
 @dataclass
 class PinocchioPdActuation:
-    """Position control via inertia-scaled, critically damped PD torques.
+    """Position control via an explicit forward-Euler PD on the hand joints.
 
-    Per-joint gains are derived from the mass-matrix diagonal so the closed loop
-    has a fixed natural frequency `omega` regardless of the (tiny) finger
-    inertias: kp = M_ii*omega^2, kd = 2*zeta*M_ii*omega. ctrl_joint_names is in
-    MuJoCo *control* order: apply_control(ctrl)[k] is the desired position for
-    Pinocchio joint ctrl_joint_names[k].
+    ctrl_joint_names is in MuJoCo *control* order: apply_control(ctrl)[k] is the
+    desired position for Pinocchio joint ctrl_joint_names[k]. The stiffness `kp`
+    is used directly (it sets the closed-loop time constant).
 
-    If `use_direct_gains` is True, `kp` and `kd` are used directly instead of
-    computing them from `omega` and `zeta`. Both scalars are broadcast across all
-    controlled joints (not inertia-scaled).
-    """
+    By default (use_direct_kd=False) the damping is derived per-joint from the
+    mass-matrix diagonal so the loop stays critically damped at that stiffness:
+    kd = 2*zeta*sqrt(kp*M_ii). Set use_direct_kd=True to instead apply a fixed
+    `kd` directly to every controlled joint, bypassing the mass-matrix/zeta
+    derivation entirely (zeta is then unused).
+
+    `armature` is a per-DOF rotor inertia added to each controlled joint's mass
+    (model.armature). The LEAP finger inertias are tiny (M_ii ~ 3e-6), so the
+    contact solve treats the PD-held fingers as near-massless next to the cube; a
+    large armature raises their effective inertia (better-conditioned Delassus,
+    steadier grasp). It also enters the critically-damped kd via M_ii above
+    (when use_direct_kd=False)."""
     ctrl_joint_names: list[str]
-    omega: float = 50.0
+    kp: float = 3.0
     zeta: float = 1.0
     gravity_comp: bool = False
-    use_direct_gains: bool = True
-    kp: float = 3.0
-    kd: float = 0.01
-    joint_damping: float = 0.1
+    armature: float = 0.0
+    use_direct_kd: bool = False
+    kd: float = 0.0
 
 
 @dataclass
 class PinocchioContactConfig:
-    """Contact-detection knobs. Pairs are all non-adjacent, non-floor geom pairs
-    (cube<->hand and hand<->hand); floor geoms are dropped by size."""
+    """Frictional point-contact knobs. Collision pairs are all non-adjacent,
+    non-floor geom pairs (cube<->hand and hand<->hand). Each contact carries a
+    native Baumgarte corrector: its drift gets a push-back Kp*position_error/dt
+    (+ Kd*velocity_error/dt), read straight off the constraint in the solve loop
+    (mirroring results/g1-constraint-simulation.py). Kp=0 disables it."""
     friction: float = 0.5
     use_mesh_geoms: bool = True
-    floor_halfextent_thresh: float = 0.5
-    admm_max_iterations: int = 1000
-    mu_prox: float = 1e-6
-    # Baumgarte position stabilization: each step, target a separating contact
-    # velocity of (baumgarte_gain * penetration_depth / dt) so the solver actively
-    # removes existing penetration instead of only preventing further approach
-    # (the bare velocity-level solve leaves any overlap uncorrected). 0 disables it;
-    # ~0.2 removes ~20% of the penetration per substep. Values >1 over-correct.
-    baumgarte_gain: float = 0.2#0.2
+    baumgarte_kp: float = 0.0
+    baumgarte_kd: float = 0.0
+    admm_max_iterations: int = 5000
 
 
 # ---------------------------------------------------------------------------
-# Model build / contact helpers (self-contained; mirrors tests/test_pinochio.py)
+# Model build / contact helpers (self-contained; mirrors replay_pinocchio_controls.py)
 # ---------------------------------------------------------------------------
 def split_into_single_root_mjcfs(mjcf_path, scene_dir):
     """Write one temp MJCF per <worldbody> root <body> (with the loose worldbody
@@ -116,7 +121,6 @@ def split_into_single_root_mjcfs(mjcf_path, scene_dir):
     root = tree.getroot()
     compiler = root.find("compiler")
     asset = root.find("asset")
-    default = root.find("default")
     worldbody = root.find("worldbody")
 
     loose_geoms = [el for el in worldbody if el.tag == "geom"]
@@ -124,8 +128,7 @@ def split_into_single_root_mjcfs(mjcf_path, scene_dir):
 
     # Instance-specific suffix so concurrent runs (e.g. one Pinocchio eval per
     # HPC node/process) don't write, read, and delete the same shared temp files
-    # in scene_dir and clobber each other. Timestamp for readability + PID and a
-    # short uuid to stay unique across nodes and repeated calls in one process.
+    # in scene_dir and clobber each other.
     token = (f"{datetime.datetime.now():%Y%m%d_%H%M%S}_"
              f"{os.getpid()}_{uuid.uuid4().hex[:8]}")
 
@@ -134,27 +137,15 @@ def split_into_single_root_mjcfs(mjcf_path, scene_dir):
         new_root = ET.Element("mujoco", root.attrib)
         if compiler is not None:
             new_root.append(compiler)
-        # The <default> block must travel with the body: geoms/joints reference
-        # its classes (e.g. `class="tip"` supplies type+mesh), and Pinocchio's
-        # MJCF parser raises IndexError('unordered_map::at') on an unresolved
-        # class if it isn't carried into each single-root split.
-        if default is not None:
-            new_root.append(default)
         if asset is not None:
             new_root.append(asset)
         new_worldbody = ET.SubElement(new_root, "worldbody")
-        # Pinocchio's MJCF parser welds the single root <body> to the universe at
-        # identity and discards that body's own pos/quat. Nest the real body inside
-        # a dummy identity wrapper so its transform survives as an honored *child*
-        # placement — without this, a rotated/translated base (e.g. the hand palm's
-        # pos/quat) lands at the origin and every descendant geom is mis-placed,
-        # opening a gap so the fingers never contact the object.
-        wrapper = ET.SubElement(new_worldbody, "body", {"name": f"_root_wrap_{i}"})
         if i == 0:
             for geom in loose_geoms:
-                wrapper.append(geom)
-        wrapper.append(body)
-        tmp_path = os.path.join(scene_dir, f"_tmp_pin_sim_split_{i}_{token}.xml")
+                new_worldbody.append(geom)
+        new_worldbody.append(body)
+
+        tmp_path = os.path.join(scene_dir, f"_tmp_pin_sim_split_{token}_{i}.xml")
         ET.ElementTree(new_root).write(tmp_path)
         tmp_paths.append(tmp_path)
     return tmp_paths
@@ -175,6 +166,7 @@ def merge_models(pin, parts):
 
 
 def _box_half_extents(go):
+    """Return the box half-side as a length-3 array, or None for non-box geoms."""
     try:
         return np.asarray(go.geometry.halfSide, dtype=float)
     except Exception:
@@ -184,14 +176,9 @@ def _box_half_extents(go):
 def _is_adjacent(model, j1, j2):
     """Same joint or a direct parent-child relationship between two non-universe
     joints (a contact there would be a spurious, permanently-active constraint).
-
-    Universe (j=0) is the computational root, not a physical body. Loose
-    worldbody geoms (e.g. the palm) land at parentJoint=0, and free/revolute
-    joints that are direct children of universe also have parents[jid]=0.
-    Treating universe as a body in the adjacency check would filter out every
-    palm<->object and palm<->finger contact, so we skip the parent-child test
-    whenever either joint is universe.
-    """
+    Universe (j=0) is the computational root, not a physical body, so the
+    parent-child test is skipped whenever either joint is universe (otherwise
+    every palm<->finger / palm<->object contact would be filtered out)."""
     if j1 == j2:
         return True
     if j1 > 0 and j2 > 0:
@@ -199,7 +186,7 @@ def _is_adjacent(model, j1, j2):
     return False
 
 
-def build_collision_pairs(pin, model, geom_model, cfg: PinocchioContactConfig):
+def build_collision_pairs(pin, model, geom_model, use_mesh_geoms):
     """Wipe the parser's default pairs and add every non-adjacent, non-floor geom
     pair (cube<->hand and hand<->hand). Returns the list of collidable geom ids."""
     geom_model.removeAllCollisionPairs()
@@ -207,11 +194,11 @@ def build_collision_pairs(pin, model, geom_model, cfg: PinocchioContactConfig):
     for gid, go in enumerate(geom_model.geometryObjects):
         half = _box_half_extents(go)
         is_floor = half is not None and (
-            half[0] > cfg.floor_halfextent_thresh and half[1] > cfg.floor_halfextent_thresh
+            half[0] > _FLOOR_HALFEXTENT_THRESH and half[1] > _FLOOR_HALFEXTENT_THRESH
         )
         if is_floor:
             continue
-        if half is None and not cfg.use_mesh_geoms:  # mesh geom
+        if half is None and not use_mesh_geoms:  # mesh geom
             continue
         ids.append(gid)
 
@@ -261,7 +248,6 @@ class PinocchioSimulator(EvalSimulator):
         contact_cfg: PinocchioContactConfig | None = None,
         video_path: str | None = None,
         render: bool = True,
-        explicit_pd: bool = False,
     ):
         import pinocchio as pin
 
@@ -272,11 +258,6 @@ class PinocchioSimulator(EvalSimulator):
         self._joint_channels = joint_channels or []
         self._free_channels = free_channels or []
         self._pid = pid
-        # When True, apply the PD velocity term (-kv*v) as an explicit joint torque
-        # evaluated at the current (q, v) and integrate with a plain forward-Euler
-        # aba step, instead of the linearly-implicit backward-Euler solve. Simpler
-        # but only conditionally stable (see _substep). Defaults to the implicit path.
-        self._explicit_pd = explicit_pd
         self._contact_cfg = contact_cfg or PinocchioContactConfig()
         self._timestep = float(config.timestep)
         self._video_path = video_path
@@ -297,17 +278,15 @@ class PinocchioSimulator(EvalSimulator):
         self._collision_model = coll
         self._visual_model = vis
         self._data = model.createData()
-        build_collision_pairs(pin, model, coll, self._contact_cfg)
+        build_collision_pairs(pin, model, coll, self._contact_cfg.use_mesh_geoms)
         self._geom_data = pin.GeometryData(coll)
-        # Ask coal to compute the contact manifold (normal + penetration depth) per
-        # pair. Without this the collision results carry NaN normals (the code then
-        # falls back to a crude center-to-center normal) and no penetration depth,
-        # so Baumgarte stabilization has nothing to act on.
+        # Ask coal to populate the contact manifold (normal + witness points) per
+        # pair; without this the collision results carry NaN normals.
         for req in self._geom_data.collisionRequests:
             req.enable_contact = True
             req.num_max_contacts = 4
 
-        # Resolve channel joint names -> ids / state addresses.
+        # Resolve channel joint names -> ids.
         self._joint_jid = {ch.pin_name: model.getJointId(ch.pin_name)
                            for ch in self._joint_channels}
         self._free_jid = {ch.pin_name: model.getJointId(ch.pin_name)
@@ -323,7 +302,13 @@ class PinocchioSimulator(EvalSimulator):
             dtype=int,
         )
 
-        # ADMM solver setup (mirrors results/admm-constraint-solver.py).
+        # Rotor inertia on the controlled joints: crba (=> the Delassus the ADMM
+        # solve builds) and the mass-scaled kd both see A = M + armature, so the
+        # contact solve doesn't treat the PD-held fingers as near-massless.
+        if pid.armature:
+            model.armature[self._ctrl_vadr] += pid.armature
+
+        # ADMM solver setup (mirrors replay_pinocchio_controls.py's make_solver).
         self._solver = pin.ADMMConstraintSolver()
         s = pin.ADMMSolverSettings()
         s.max_iterations = self._contact_cfg.admm_max_iterations
@@ -332,7 +317,8 @@ class PinocchioSimulator(EvalSimulator):
         s.absolute_complementarity_tol = 1e-10
         s.relative_complementarity_tol = 1e-12
         s.admm_update_rule = pin.ADMMUpdateRule.SPECTRAL
-        s.mu_prox = self._contact_cfg.mu_prox
+        s.anderson_capacity = 10
+        s.admm_proximal_rule = pin.ADMMProximalRule.AUTOMATIC
         s.stat_record = False
         s.solve_ncp = True
         self._settings = s
@@ -367,9 +353,8 @@ class PinocchioSimulator(EvalSimulator):
 
         viz = Panda3dVisualizer(self._model, self._collision_model, self._visual_model)
         # Reuse the one process-wide ShowBase (created on the first episode);
-        # later episodes reattach to it. append_group(remove_if_exists=True)
-        # inside loadViewerModel swaps in this episode's model, so reusing the
-        # fixed "pin_eval" group name drops the previous episode's geometry.
+        # later episodes reattach to it and swap in this episode's geometry via
+        # the fixed "pin_eval" group name.
         if _PANDA_VIEWER is None:
             viz.initViewer(open=False)
             _PANDA_VIEWER = viz.viewer
@@ -440,16 +425,21 @@ class PinocchioSimulator(EvalSimulator):
 
     # -- contact detection + dynamics ---------------------------------------
     def _detect_contacts(self):
+        """Detect coal contacts at the current q and turn each into a frictional
+        PointContactConstraintModel with a native Baumgarte corrector. The contact
+        frame's z-axis is the contact normal, so lateral (pushing) forces resolve
+        correctly. Returns (constraint_models, constraint_datas)."""
         pin = self._pin
         model, data = self._model, self._data
         gm, gd = self._collision_model, self._geom_data
+        cfg = self._contact_cfg
         q = self._q
         pin.forwardKinematics(model, data, q)
         pin.updateGeometryPlacements(model, data, gm, gd, q)
         pin.computeCollisions(model, data, gm, gd, q, False)
 
+        baumgarte = pin.BaumgarteCorrectorParameters(cfg.baumgarte_kp, cfg.baumgarte_kd)
         cms = []
-        pens = []   # penetration depth (m, >0 == overlap) per constraint, in cms order
         for k in range(len(gm.collisionPairs)):
             cr = gd.collisionResults[k]
             if not cr.isCollision():
@@ -471,108 +461,59 @@ class PinocchioSimulator(EvalSimulator):
                 normal = c2 - c1
             R_n = _rotation_from_normal(normal)
 
-            # (world contact point, penetration depth) per manifold point. coal
-            # reports penetration_depth < 0 when the geoms overlap; flip the sign so
-            # `pen > 0` means "penetrating by pen metres".
+            # World contact points: finite coal witness points, else geom midpoint.
             world_points = []
             try:
                 n_contacts = cr.numContacts()
             except Exception:
-                try:
-                    n_contacts = len(cr.getContacts())
-                except Exception:
-                    n_contacts = 0
+                n_contacts = 0
             for i in range(n_contacts):
                 try:
-                    ct = cr.getContact(i)
-                    p = np.asarray(ct.pos, dtype=float)
+                    p = np.asarray(cr.getContact(i).pos, dtype=float)
                     if np.all(np.isfinite(p)):  # box-box manifolds can return NaN
-                        depth = float(getattr(ct, "penetration_depth", 0.0))
-                        pen = -depth if np.isfinite(depth) else 0.0
-                        world_points.append((p, pen))
+                        world_points.append(p)
                 except Exception:
                     pass
             if not world_points:
-                world_points.append((0.5 * (c1 + c2), 0.0))
+                world_points.append(0.5 * (c1 + c2))
 
-            for p_world, pen in world_points:
+            for p_world in world_points:
                 M_world = pin.SE3(R_n, p_world)
                 plc1 = data.oMi[j1].inverse() * M_world
                 plc2 = data.oMi[j2].inverse() * M_world
                 cm = pin.PointContactConstraintModel(model, j1, plc1, j2, plc2)
-                cm.setFriction(self._contact_cfg.friction)
+                cm.setFriction(cfg.friction)
+                cm.setBaumgarteCorrectorParameters(baumgarte)
                 cms.append(pin.ConstraintModel(cm))
-                pens.append(pen)
         cds = [cm.createData() for cm in cms]
-        return cms, cds, np.asarray(pens, dtype=float)
+        return cms, cds
 
     def _substep(self):
         pin = self._pin
         model, data = self._model, self._data
         q, v = self._q, self._v
         dt = self._timestep
-        cms, cds, pens = self._detect_contacts()
+        cms, cds = self._detect_contacts()
 
-        # data.M must be populated before ConstraintCholeskyDecomposition.compute,
-        # regardless of the gain mode.
+        # Explicit forward-Euler PD on the hand: fixed stiffness kp. Damping is
+        # either a fixed kd applied directly (use_direct_kd=True) or derived
+        # per-joint from the mass-matrix diagonal so the loop stays critically
+        # damped at that stiffness: kd = 2*zeta*sqrt(kp*M_ii) (default).
         pin.crba(model, data, q, pin.Convention.WORLD)
-
         m_diag = np.diag(data.M)[self._ctrl_vadr]
-
-        # PD stiffness (kp) and velocity (kv = kd + passive joint_damping) gains on
-        # the controlled joints. Both are integrated implicitly (see below).
-        if self._pid.use_direct_gains:
-            kp = self._pid.kp
-            kv = self._pid.kd + self._pid.joint_damping
+        kp = self._pid.kp
+        if self._pid.use_direct_kd:
+            kd = np.full_like(m_diag, self._pid.kd)
         else:
-            kp = m_diag * self._pid.omega ** 2
-            kv = 2.0 * self._pid.zeta * m_diag * self._pid.omega + self._pid.joint_damping
-
-        # Stiffness (+ optional gravity comp) torque, common to both paths.
+            kd = 2.0 * self._pid.zeta * np.sqrt(kp * m_diag)
         tau = np.zeros(model.nv)
-        tau[self._ctrl_vadr] = kp * (self._q_des[self._ctrl_qadr] - q[self._ctrl_qadr])
+        tau[self._ctrl_vadr] = (kp * (self._q_des[self._ctrl_qadr] - q[self._ctrl_qadr])
+                                - kd * v[self._ctrl_vadr])
         if self._pid.gravity_comp:
             tau[self._ctrl_vadr] += pin.computeGeneralizedGravity(model, data, q)[self._ctrl_vadr]
 
-        if self._explicit_pd:
-            # Simple path: add the velocity term -kv*v as an explicit torque at the
-            # current v and integrate with a plain forward-Euler aba step (no implicit
-            # solve). Only conditionally stable: -kv*v blows up when kv/M_ii*dt > 2,
-            # which the tiny finger inertias (M_ii ~ 3e-6) hit for any nontrivial
-            # damping, so use this only with small kv/large M_ii.
-            tau[self._ctrl_vadr] -= kv * v[self._ctrl_vadr]
+        v_free = v + dt * pin.aba(model, data, q, v, tau, self._fext)
 
-            def _implicit(v_explicit):
-                return v_explicit
-        else:
-            # Only the position (stiffness) + gravity torque goes through the explicit
-            # aba step; the velocity term -kv*v is handled implicitly. Linearly-implicit
-            # (backward-Euler) PD is unconditionally stable: explicit -kv*v blows up when
-            # kv/M_ii*dt > 2, which the tiny finger inertias (M_ii ~ 3e-6) hit for any
-            # nontrivial damping. Because PD is linear in (q, v) the implicit step is a
-            # single SPD solve, no Newton iteration:
-            #   (M + dt*diag(kv + dt*kp)) v_{n+1} = M v_explicit
-            # where v_explicit is the usual explicit free velocity from the stiffness
-            # torque. diag entries are nonzero only on the controlled joints.
-            #
-            # Symmetrize M (crba fills the upper triangle) and build the implicit
-            # operator A = M + dt*diag(kv + dt*kp), reused for the free and post-contact
-            # velocities. M v is the rhs (see derivation above). diag entries are nonzero
-            # only on the controlled joints, so the cube's free dynamics are unchanged.
-            M = np.triu(data.M)
-            M = M + np.triu(M, 1).T
-            d_diag = np.zeros(model.nv)
-            d_diag[self._ctrl_vadr] = kv + dt * kp
-            A = M + np.diag(dt * d_diag)
-            # A is SPD (M is SPD, dt*d_diag >= 0) and constant for this substep, so
-            # factor it once and reuse the factorization for both the free and
-            # post-contact solves below instead of re-factoring on each call.
-            A_factor = cho_factor(A)
-
-            def _implicit(v_explicit):
-                return cho_solve(A_factor, M @ v_explicit)
-
-        v_free = _implicit(v + dt * pin.aba(model, data, q, v, tau, self._fext))
         if len(cms) == 0:
             self._q = pin.integrate(model, q, v_free * dt)
             self._v = v_free
@@ -581,20 +522,24 @@ class PinocchioSimulator(EvalSimulator):
         for cm, cd in zip(cms, cds):
             cm.calc(model, data, cd)
         chol = pin.ConstraintCholeskyDecomposition(model, data, cms, cds)
-        chol.compute(model, data, cms, cds, 1e-10)#1e-10
+        chol.compute(model, data, cms, cds, 1e-10)
         delassus = chol.getDelassusOperatorCholeskyExpression()
         Jc = pin.getConstraintsJacobian(model, data, cms, cds)
         g = Jc @ v_free
-        # Baumgarte position stabilization: bias the normal component of each 3D
-        # point-contact (contact-frame z, i.e. every 3rd entry) so the solver aims
-        # for a small separating velocity proportional to the current penetration,
-        # actively pushing the bodies apart instead of merely halting approach.
-        beta = self._contact_cfg.baumgarte_gain
-        if beta != 0.0 and pens.size:
-            g[2::3] -= beta * pens / dt
+
+        # Baumgarte stabilization: bias each contact's drift by its position error
+        # scaled by the Kp set on the constraint (g1-style), g += Kp * perr / dt.
+        idx = 0
+        for cm, cd in zip(cms, cds):
+            size = cm.residualSize()
+            kp_b = cm.baumgarte_corrector_parameters.Kp
+            if kp_b != 0.0:
+                g[idx:idx + size] += kp_b * cd.extract().constraint_position_error / dt
+            idx += size
+
         self._solver.solve(delassus, g, cms, cds, self._settings, self._result)
         forces = (1.0 / dt) * self._result.retrieveConstraintImpulses()
-        v_new = _implicit(v + dt * pin.aba(model, data, q, v, tau + Jc.T @ forces, self._fext))
+        v_new = v + dt * pin.aba(model, data, q, v, tau + Jc.T @ forces, self._fext)
         self._q = pin.integrate(model, q, v_new * dt)
         self._v = v_new
 

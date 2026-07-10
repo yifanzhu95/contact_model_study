@@ -22,6 +22,7 @@ class MujocoSimulator(EvalSimulator):
         camera_name: str | None = None,
         height: int | None = None,
         width: int | None = None,
+        hard_contact: bool = True,
     ):
         height = height if height is not None else config.cam_height
         width = width if width is not None else config.cam_width
@@ -31,6 +32,18 @@ class MujocoSimulator(EvalSimulator):
         # the loaded XML declared. rollout_dt = config.timestep * substeps is
         # applied to the planning model separately (see the driver).
         self.mjm.opt.timestep = float(config.timestep)
+
+        # Default the ground-truth eval sim to the M1 "hard_contact" preset:
+        # stiffen every contact row's solref/solimp toward the hard-constraint
+        # limit so the reference environment behaves rigidly. Only the contact
+        # rows are hardened here — cone/solver/iterations stay at reference
+        # (CPU) MuJoCo defaults, which (unlike MJWarp) support the elliptic
+        # cone. Must run after opt.timestep is set: the preset derives its
+        # solref timeconst from mjm.opt.timestep.
+        if hard_contact:
+            from contact_study.contact_models.api import _apply_hard_contact_preset
+            from contact_study.contact_models.config import ContactModelConfig
+            _apply_hard_contact_preset(self.mjm, ContactModelConfig.M1().mujoco)
         self.mjd = mujoco.MjData(mjm)
         self._config = config
         self._camera_name = camera_name

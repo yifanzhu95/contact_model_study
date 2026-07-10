@@ -1,29 +1,15 @@
-"""Closed-loop eval episode: pluggable "real" simulator + GPU-MPPI planner.
+"""Closed-loop eval episode that also records the applied control command from
+every MPPI step to a .npy file.
 
-Generalizes tests/test_drake.py. Two task instances share the same TaskConfig:
-
-  * a ROLLOUT task — owns the planning MuJoCo model + cost arrays; handed to the
-    MPPIController (which still owns the batched GPU rollout env).
-  * an EVAL task   — owns the high-fidelity "real" environment (an EvalSimulator,
-    MuJoCo or Drake) that this loop actually steps.
-
-Per control step: read eval state → mirror into the planning MjData →
-controller.plan() on the GPU → integrate the delta into the command → apply to
-the eval simulator → advance it → render.
-
-The eval ("real") simulator runs at a finer timestep than the rollout/planning
-model: rollout_dt = eval_dt * eval_substeps_per_rollout (the eval sim takes that
-many steps per rollout step). The rollout step is inferred from the eval step and
-stamped onto the planning model. Control frequency stays a separate knob — one
-control step spans mppi_cfg.substeps rollout steps (control_dt = substeps *
-rollout_dt), so the eval sim advances substeps * eval_substeps_per_rollout steps.
-
-The contact model (M1..M4) used for rollouts is orthogonal to the eval simulator
-(set by the task's TaskConfig.eval_sim).
+Same eval/rollout split as run_eval_episode.py (see that module's docstring for
+the full picture): a ROLLOUT task drives the MPPIController on the GPU, an EVAL
+task owns the "real" simulator that this loop actually steps. This variant just
+appends the absolute command `u` applied to the eval sim after each control
+step and dumps it to disk at the end, alongside the usual video.
 
 Run on a CUDA machine (warp arrays live on the device). For Drake eval, its VTK
 renderer needs a display, so run headless under xvfb:
-    xvfb-run -a python -m contact_study.drivers.run_eval_episode --task cart_pole
+    xvfb-run -a python -m contact_study.drivers.run_eval_episode_record_controls --task cart_pole
 """
 
 from __future__ import annotations
@@ -31,11 +17,9 @@ from __future__ import annotations
 import os
 # For Drake eval, MuJoCo must not grab a GL backend (it shadows Drake's VTK GLX
 # context). Default to "disable"; override to "egl" for MuJoCo-eval rendering.
-os.environ.setdefault("MUJOCO_GL", "disable")
+os.environ.setdefault("MUJOCO_GL", "egl")
 
 import argparse
-import dataclasses
-import json
 import time
 from pathlib import Path
 
@@ -51,7 +35,7 @@ from contact_study.planners.mppi import MPPIController, MPPIConfig
 from contact_study.tasks.base import get_task
 from contact_study.tasks.config import TaskRole, EvalSimulatorKind
 
-#wp.init()
+from contact_study.drivers.run_eval_episode import apply_cost_weight_overrides
 
 MODEL_FACTORIES = {
     "M1": ContactModelConfig.M1,
@@ -60,31 +44,12 @@ MODEL_FACTORIES = {
     "M4": ContactModelConfig.M4,
 }
 
-VIDEOS_DIR  = Path(__file__).parents[2] / "videos"
-RESULTS_DIR = Path(__file__).parents[2] / "results"
+VIDEOS_DIR   = Path(__file__).parents[2] / "videos"
+RESULTS_DIR  = Path(__file__).parents[2] / "results"
+CONTROLS_DIR = Path(__file__).parents[2] / "results" / "controls"
 
 
-def load_rollout_task(task_name: str, geometry: GeometryVariant = GeometryVariant.ACCURATE):
-    """Load a task's ROLLOUT instance — handy for peeking nq/nv/nu/cost_weights
-    before a sweep (the episode runner builds its own rollout + eval tasks)."""
-    task = get_task(task_name, geometry=geometry, role=TaskRole.ROLLOUT)
-    task.load()
-    return task
-
-
-def apply_cost_weight_overrides(task, overrides: dict) -> None:
-    """Merge cost-weight overrides into the (loaded) task and rebuild weights_wp.
-
-    The dict key order of cost_weights must match the array order used in the
-    task's initialize_task — this holds for all built-in tasks. Must be called
-    before the MPPIController is built (it captures task.cost_weights_wp)."""
-    weights = dict(task.config.cost_weights)
-    weights.update(overrides)
-    weights_arr = np.array([weights[k] for k in task.config.cost_weights], dtype=np.float32)
-    task.weights_wp = wp.array(weights_arr, dtype=wp.float32, device="cuda")
-
-
-def run_eval_episode(
+def run_eval_episode_record_controls(
     task_name:   str,
     contact_cfg: ContactModelConfig,
     mppi_cfg:    MPPIConfig,
@@ -96,28 +61,18 @@ def run_eval_episode(
     eval_sim:    EvalSimulatorKind | None = None,
     condition:   str  = "B",
     video_path:  str | None = None,
+    controls_path: str | None = None,
     ep_idx:      int  = 0,
     fin_ep_on_success: bool = True,
     debug:       bool = False,
     verbose:     bool = True,
-) -> EpisodeResult:
-    """Run one closed-loop eval episode and return an EpisodeResult.
+) -> tuple[EpisodeResult, np.ndarray]:
+    """Run one closed-loop eval episode, save a video (if requested), record
+    every applied control command `u` to `controls_path`, and return the
+    (EpisodeResult, controls) pair. `controls` has shape (n_steps_taken, nu).
 
-    Drop-in replacement for the legacy experiments/run_episode.py `run_episode`,
-    but built on the eval/rollout split: a ROLLOUT task (planning MuJoCo model +
-    cost arrays for the MPPIController) and an EVAL task (the pluggable "real"
-    EvalSimulator, MuJoCo or Drake). condition is a label only — only the
-    warm-started MPPIController ("B") path exists; the legacy fixed-budget
-    rollout ("A") path is gone.
-
-    The episode length is the task's TaskConfig.max_steps. mean_step_ms /
-    std_step_ms hold per-control-step MPPI planning latency (controller.plan()
-    only, excluding the eval-sim advance) in ms.
-
-    cost_weight_overrides: optional {weight_name: value} merged into the rollout
-        task's cost weights before planning (used by the weight grid search).
-    fin_ep_on_success: stop at first success (default); if False, resample a new
-        goal on each success and keep going (multi-goal mode).
+    Identical to run_eval_episode.run_eval_episode otherwise — see that
+    function's docstring for the argument semantics.
     """
     # ---- ROLLOUT task + planner ------------------------------------------
     rollout_task = get_task(task_name, geometry=geometry, role=TaskRole.ROLLOUT)
@@ -198,6 +153,7 @@ def run_eval_episode(
               f"horizon={mppi_cfg.horizon}  n_samples={mppi_cfg.n_samples}")
 
     step_times: list[float] = []
+    controls_log: list[np.ndarray] = []
     ep_start = time.perf_counter()
 
     for t in range(n_steps):
@@ -235,6 +191,9 @@ def run_eval_episode(
         if clip_lo is not None:
             u = np.clip(u, clip_lo, clip_hi)
 
+        # Record the control command actually applied to the eval sim this step.
+        controls_log.append(u.copy())
+
         # 3. Apply, advance the eval sim (finer steps over the same control_dt),
         #    capture a frame.
         sim.apply_control(u)
@@ -254,9 +213,16 @@ def run_eval_episode(
         if verbose:
             print(f"  Saved video -> {video_path}")
 
+    controls_arr = np.stack(controls_log) if controls_log else np.empty((0,) + u.shape)
+    if controls_path is not None:
+        Path(controls_path).parent.mkdir(parents=True, exist_ok=True)
+        np.save(controls_path, controls_arr)
+        if verbose:
+            print(f"  Saved controls {controls_arr.shape} -> {controls_path}")
+
     final_qpos = sim.get_state().qpos
     step_arr = np.asarray(step_times)
-    return EpisodeResult(
+    result = EpisodeResult(
         task_name        = cfg.name,
         model_label      = contact_cfg.label,
         condition        = condition,
@@ -268,143 +234,88 @@ def run_eval_episode(
         mean_step_ms     = float(step_arr.mean()) if len(step_arr) else 0.0,
         std_step_ms      = float(step_arr.std())  if len(step_arr) else 0.0,
     )
+    return result, controls_arr
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--task",        type=str,   default="cart_pole")
+    p.add_argument("--task",        type=str,   default="grasp_reorient")
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
     p.add_argument("--n_samples",   type=int,   default=256)
     p.add_argument("--horizon",     type=int,   default=48)
-    p.add_argument("--temperature", type=float, default=10.0)#0.750)
-    p.add_argument("--noise_sigma", type=float, default=0.01,)#0.01)
-    p.add_argument("--delta",       type=float, default=0.1,#0.1,
+    p.add_argument("--temperature", type=float, default=12.50)
+    p.add_argument("--noise_sigma", type=float, default=0.01)
+    p.add_argument("--delta",       type=float, default=0.1,
                    help="Per-step MPPI delta clip magnitude (action units).")
-    p.add_argument("--substeps",    type=int,   default=4,#16,
+    p.add_argument("--substeps",    type=int,   default=16,
                    help="MPPI rollout substeps per control step (control frequency knob).")
     p.add_argument("--eval_substeps", type=int, default=None,
                    help="Eval steps per rollout step (default: task config, usually 10).")
-    p.add_argument("--eval_sim",    type=str,   default="none",
+    p.add_argument("--eval_sim",    type=str,   default="mujoco",
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
     p.add_argument("--seed",        type=int,   default=None)
-    p.add_argument("--n_episodes",  type=int,   default=1,
-                   help="Number of episodes to run; reports the aggregate success rate.")
-    p.add_argument("--weights",     nargs="+", default=[],
-                   help="Cost-weight overrides as name=value tokens "
-                        "(e.g. --weights w_quat=50 w_pos=400). Order must match "
-                        "the task's config.cost_weights insertion order.")
     p.add_argument("--video",       type=str,   default="videos/grasp_reorient_eval.gif")
-    p.add_argument("--results",     type=str,   default=None,
-                   help="JSON path for the episode result(s) (auto-named if omitted).")
+    p.add_argument("--controls",    type=str,   default=None,
+                   help="Output .npy path for the per-step control log (auto-named if omitted).")
     p.add_argument("--debug",       action="store_true",
                    help="Verbose per-step diagnostics (also enables MPPI debug).")
     args = p.parse_args()
 
     wp.init()
-    seed_seq = np.random.SeedSequence(args.seed)
-    episode_seeds = seed_seq.spawn(args.n_episodes)
+    rng = np.random.default_rng(args.seed)
 
-    # Rendering every episode in a multi-episode run is slow and usually
-    # unwanted; only render when the caller explicitly passed --video (or
-    # there's a single episode, matching the old default behavior).
-    want_video = args.video is not None or args.n_episodes == 1
-    base_video_path = args.video
-    if base_video_path is None and want_video:
-        VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
-        base_video_path = str(VIDEOS_DIR / f"{args.task}_eval.gif")
+    VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
+    video_path = args.video if args.video is not None else str(VIDEOS_DIR / f"{args.task}_eval.gif")
+
+    controls_path = args.controls
+    if controls_path is None:
+        CONTROLS_DIR.mkdir(parents=True, exist_ok=True)
+        controls_path = str(CONTROLS_DIR / f"{args.task}_{args.model}_controls.npy")
 
     contact_cfg = MODEL_FACTORIES[args.model]()
     eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
 
-    # Parse `name=value` weight overrides (order must match config.cost_weights).
-    overrides: dict = {}
-    for tok in args.weights:
-        if "=" not in tok:
-            raise ValueError(f"bad --weights token {tok!r}; expected name=value")
-        name, val = tok.split("=", 1)
-        overrides[name.strip()] = float(val)
+    mppi_cfg = MPPIConfig(
+        n_samples      = args.n_samples,
+        horizon        = args.horizon,
+        temperature    = args.temperature,
+        noise_sigma    = args.noise_sigma,
+        substeps       = args.substeps,
+        warm_start     = True,
+        use_full_graph = False,
+        delta_range    = (-args.delta, args.delta),
+        nconmax        = 50,
+        njmax          = 200,
+        seed           = args.seed,
+        debug          = args.debug,
+    )
 
-    results: list[EpisodeResult] = []
-    for ep_idx in range(args.n_episodes):
-        ep_seed = int(episode_seeds[ep_idx].generate_state(1)[0])
-        rng = np.random.default_rng(episode_seeds[ep_idx])
+    result, controls = run_eval_episode_record_controls(
+        task_name     = args.task,
+        contact_cfg   = contact_cfg,
+        mppi_cfg      = mppi_cfg,
+        rng           = rng,
+        video_path    = video_path,
+        controls_path = controls_path,
+        eval_substeps = args.eval_substeps,
+        eval_sim      = eval_sim,
+        settle_seconds= args.settle,
+        debug         = args.debug,
+        verbose       = True,
+    )
 
-        if want_video:
-            if args.n_episodes == 1:
-                video_path = base_video_path
-            else:
-                stem, suffix = base_video_path.rsplit(".", 1)
-                video_path = f"{stem}_ep{ep_idx:03d}.{suffix}"
-        else:
-            video_path = None
-
-        mppi_cfg = MPPIConfig(
-            n_samples      = args.n_samples,
-            horizon        = args.horizon,
-            temperature    = args.temperature,
-            noise_sigma    = args.noise_sigma,
-            substeps       = args.substeps,
-            warm_start     = True,
-            use_full_graph = False,
-            delta_range    = (-args.delta, args.delta),
-            nconmax        = 50,
-            njmax          = 200,
-            seed           = ep_seed,
-            debug          = args.debug,
-        )
-
-        result = run_eval_episode(
-            task_name   = args.task,
-            contact_cfg = contact_cfg,
-            mppi_cfg    = mppi_cfg,
-            rng         = rng,
-            video_path  = video_path,
-            cost_weight_overrides = overrides or None,
-            settle_seconds = args.settle,
-            eval_substeps  = args.eval_substeps,
-            eval_sim       = eval_sim,
-            ep_idx         = ep_idx,
-            debug          = args.debug,
-            verbose        = args.debug or args.n_episodes == 1,
-            fin_ep_on_success = True,
-        )
-        results.append(result)
-
-        label = "✓" if result.success else "✗"
-        sstr  = f"step {result.steps_to_success}" if result.steps_to_success is not None else "—"
-        print(f"  [ep {ep_idx:03d}] {label}  success_step={sstr}  "
-              f"final_cost={result.final_cost:.4f}  "
-              f"step={result.mean_step_ms:.3f}±{result.std_step_ms:.3f} ms")
-
-    # ---- aggregate + save -------------------------------------------------
-    n_success = sum(r.success for r in results)
-    success_rate = n_success / len(results)
-    mean_step_ms = float(np.mean([r.mean_step_ms for r in results]))
-
+    label = "✓" if result.success else "✗"
+    sstr  = f"step {result.steps_to_success}" if result.steps_to_success is not None else "—"
     print(f"\n{'='*60}")
-    print(f"  task={args.task}  model={args.model}  n_episodes={args.n_episodes}")
-    print(f"  success_rate={success_rate:.3f}  ({n_success}/{len(results)})  "
-          f"mean_step_ms={mean_step_ms:.3f}")
+    print(f"  task={args.task}  model={args.model}  {label}  success_step={sstr}  "
+          f"final_cost={result.final_cost:.4f}  "
+          f"step={result.mean_step_ms:.3f}±{result.std_step_ms:.3f} ms")
+    print(f"  controls shape={controls.shape} -> {controls_path}")
     print(f"{'='*60}")
 
-    results_path = args.results
-    if results_path is None:
-        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-        results_path = str(RESULTS_DIR / f"{args.task}_{args.model}_eval.json")
-    with open(results_path, "w") as f:
-        json.dump({
-            "task":          args.task,
-            "model":         args.model,
-            "n_episodes":    args.n_episodes,
-            "success_rate":  success_rate,
-            "mean_step_ms":  mean_step_ms,
-            "episodes":      [dataclasses.asdict(r) for r in results],
-        }, f, indent=2)
-    print(f"  Saved result(s) -> {results_path}")
-
-    return results
+    return result, controls
 
 
 if __name__ == "__main__":

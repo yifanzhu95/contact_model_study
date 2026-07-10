@@ -4,8 +4,8 @@
 #SBATCH --error=logs/cont_modeling_horizon_eval%A_%a.err
 #SBATCH --array=0-15          # must equal (#MODELS * #HORIZONS) - 1
                               # default grid: 4 * 4 = 16  ->  0-15
-#SBATCH --partition=gpu_h200
-#SBATCH --gpus=1
+#SBATCH --partition=gpu
+#SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=02:00:00

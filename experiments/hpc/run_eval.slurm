@@ -31,7 +31,7 @@ TEMPERATURE=10.0
 NOISE_SIGMA=0.01
 DELTA=0.1
 SUBSTEPS=16
-EVAL_SIM="none"
+EVAL_SIM="mujoco"
 SETTLE=1.0
 SEED=0
 
@@ -42,7 +42,7 @@ mkdir -p "$VIDEO_DIR"
 VIDEO_PATH="$VIDEO_DIR/${TASK}_${MODEL}_eval.gif"
 
 # EGL for headless (offscreen) rendering on the GPU node.
-#export MUJOCO_GL="egl"
+export MUJOCO_GL="egl"
 
 module load miniconda
 conda activate contact_modeling
