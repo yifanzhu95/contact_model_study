@@ -57,7 +57,7 @@ _PID_KP, _PID_KI, _PID_KD, _PID_EFFORT = 3.0, 0.0, 0.01, 100.0
 _PIN_ZETA           = 1.0    # hand PD damping ratio (critically damped)
 _PIN_MU             = 0.5    # Coulomb friction coefficient
 _PIN_GRAVITY_COMP   = False  # gravity-compensation torque on the hand PD
-_PIN_ARMATURE       = 0.5    # per-DOF rotor inertia on the hand joints (large; tune)
+_PIN_ARMATURE       = 0.1    # per-DOF rotor inertia on the hand joints (large; tune)
 _PIN_ADMM_MAX_ITER  = 5000
 _PIN_BAUMGARTE_KP   = 100.0   # contact position-error correction gain
 _PIN_BAUMGARTE_KD   = 0.05    # contact velocity-error correction gain
@@ -254,10 +254,10 @@ class GraspReorientTask(BaseTask):
             max_steps          = 750,
             success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
             cost_weights       = {
-                "w_quat": 25.0, #5.0
-                "w_pos": 200.0, #40.0
+                "w_quat": 50.0, #5.0
+                "w_pos": 400.0, #40.0
                 "w_velo": 0.0,
-                "w_contact": 750,#250.0,#500.0,#2.5
+                "w_contact": 650,#250.0,#500.0,#2.5
                 "w_joint": 5.0, #0.1
                 "w_joint_velo": 0.0,
                 "w_fallen": 300.0, #30.0,
