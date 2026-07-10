@@ -1,18 +1,31 @@
-"""Load the LEAP hand MJCF into Pinocchio as ONE unified dynamic model, drive the
-hand toward a joint sweep with PD torques, let a free cube fall under gravity, and
-resolve finger<->cube contacts each step with Pinocchio's ADMM constraint solver.
+"""Standalone Pinocchio replay of a pre-recorded grasp_reorient control log.
 
-The MJCF parser only follows the first <body> under <worldbody>, so the scene is
-split into 5 single-root MJCFs (3 fingers, thumb, free cube), parsed separately,
-then merged into one model via pin.appendModel. Contacts are computed only between
-the cube and the hand geoms; the full system is integrated dynamically and rendered
-to a video via EGL.
+Builds the same LEAP-hand + free-cube Pinocchio/ADMM simulation as
+tests/test_pinochio.py (same MJCF, same model-splitting/merging, same ADMM
+contact solve) — no dependency on contact_study.contact_models or the task
+abstraction (get_task/TaskConfig/rollout task/MPPI) at all.
 
-See results/admm-constraint-solver.py (ADMM solve) and results/collisions.py
-(collision detection) for the patterns this builds on.
+Instead of test_pinochio.py's sinusoidal joint sweep, this script starts the
+hand+cube at the grasp_reorient task's fixed initial state, settles it for a
+few seconds while holding the initial grasp command (mirroring the settle
+phase in contact_study/drivers/run_eval_episode*.py), then plays back a
+control log — one absolute joint-target command per control step, as saved by
+contact_study/drivers/run_eval_episode_record_controls.py — and renders a
+video of the replay.
+
+The hand joints in this MJCF are named "0".."15" in body/document order, which
+is also MuJoCo's qpos/ctrl order and Pinocchio's post-merge joint order (each
+single-root sub-model is appended in the same worldbody order), so recorded
+control rows map onto Pinocchio joints with no name translation.
+
+Run headless under xvfb (Panda3D's EGL pipe still needs a display context):
+    python tests/replay_pinocchio_controls.py --controls results/controls/grasp_reorient_M2_controls.npy
 """
 
+import argparse
+import datetime
 import os
+import uuid
 import xml.etree.ElementTree as ET
 
 from panda3d.core import loadPrcFileData
@@ -27,31 +40,71 @@ import pinocchio as pin
 from pinocchio.visualize import Panda3dVisualizer
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MJCF_PATH = os.path.join(
-    REPO_ROOT, "scenes/leap_hand/leap_hand_right_w_sites.xml"
-)
+MJCF_PATH = os.path.join(REPO_ROOT, "scenes/leap_hand/leap_hand_right_w_sites.xml")
 SCENE_DIR = os.path.dirname(MJCF_PATH)
-OUT_PATH = os.path.join(REPO_ROOT, "videos/leap_hand_pinocchio.mp4")
+OUT_PATH = os.path.join(REPO_ROOT, "videos/grasp_reorient_pinocchio_replay.mp4")
 
-N_FRAMES = 150
 FPS = 30
 
-# --- contact / dynamics tuning -------------------------------------------------
-MU = 0.5             # Coulomb friction coefficient for point contacts
-USE_MESH_TIPS = True  # False -> box-vs-box collision only (cube is a box: no mesh BVH)
-SUBSTEPS = 20        # physics substeps per rendered frame (stability of PD + contact)
-# Hand PD gains are derived per-joint from the mass-matrix diagonal so the closed
-# loop is critically damped at a fixed natural frequency OMEGA regardless of the
-# (tiny, ~1e-5) finger inertias — fixed scalar gains otherwise explode under
-# explicit integration. kp = M_ii*OMEGA^2, kd = 2*ZETA*M_ii*OMEGA.
-OMEGA = 30.0         # hand PD natural frequency [rad/s]
-ZETA = 1.0           # hand PD damping ratio (1.0 = critically damped)
-GRAVITY_COMP = False  # add gravity-compensation torque so the hand tracks the sweep
+# --- scene composition ----------------------------------------------------------
+INCLUDE_CUBE = True   # False -> build the hand alone, with no free "obj" cube at all
 
-# Cube spawn pose from the MJCF (in WORLD frame): pos="0.01 0.0258 0.08"
-# quat="0.965926 0 0.258819 0" (MJCF quat order is w,x,y,z).
-OBJ_W0_POS = np.array([0.01, 0.0258, 0.08])
-OBJ_W0_QUAT_WXYZ = np.array([0.965926, 0.0, 0.258819, 0.0])  # (w, x, y, z)
+# --- contact / dynamics tuning (mirrors grasp_reorient.py's Pinocchio eval tuning,
+# itself derived from this file's own scheme) ----------------------------------
+MU = 0.5              # Coulomb friction coefficient for point contacts
+USE_MESH_TIPS = True  # False -> box-vs-box collision only (cube is a box: no mesh BVH)
+KP = 3.0              # hand position-servo stiffness (fixed, not mass-scaled)
+ZETA = 1.0            # hand PD damping ratio (1.0 = critically damped)
+GRAVITY_COMP = False   # add gravity-compensation torque so the hand holds its target
+
+# --- Baumgarte contact stabilization (native pinocchio, mirroring
+# results/g1-constraint-simulation.py) -------------------------------------------
+# Each point contact is a position-level constraint, so its drift term gets an
+# extra Baumgarte push-back proportional to the current penetration/position
+# error: g += Kp * constraint_position_error / dt (velocity level; Kd would add a
+# constraint_velocity_error term). Set via pin.BaumgarteCorrectorParameters on
+# each PointContactConstraintModel and read back off it in the solve loop, exactly
+# like g1-constraint-simulation.py does for its anchor/joint-limit constraints.
+# Kp=0 (default) disables it, recovering the plain velocity-level contact solve.
+BAUMGARTE_KP = 50.0   # contact position-error correction gain
+BAUMGARTE_KD = 5.0    # contact velocity-error correction gain
+
+# --- grasp_reorient's fixed initial state (contact_study/tasks/grasp_reorient.py) --
+# qpos = [16 hand joint angles, obj pos(3), obj quat(wxyz)(4)]  (nq = 23)
+# ctrl = [16 hand joint position targets]                        (nu = 16)
+_INIT_QPOS = np.array([
+    0.74346777,  -0.56903687,  0.91440081,   0.5741493,
+    -0.010605284, -0.08351411, 0.70321997,   1.0184264,
+    0.80782262,   0.61122899,  0.92718954,   0.61047876,
+    0.69887738,   1.438706,    1.3375555,    0.19482527,
+
+    0.018495468,  0.033628956, 0.083264539,
+    0.93823638, 0.12995374, 0.31377877,  0.066086313,
+], dtype=np.float64)
+
+_INIT_CTRL = np.array([
+    0.765751,   -0.568012,  0.916951,  0.573897,
+    -0.0191225, -0.0837503, 0.709056,  1.01884,
+    0.830768,    0.610365,  0.929305,  0.610097,
+    0.69912,     1.44581,   1.33179,   0.192794,
+], dtype=np.float64)
+
+_OBJ_POS0  = _INIT_QPOS[16:19]
+_OBJ_QUAT0 = _INIT_QPOS[19:23]  # wxyz
+
+# Camera pose, copied from contact_study/tasks/grasp_reorient.py's TaskConfig
+# (cam_pos/cam_rotmat), which is what run_eval_episode.py's eval sim renders
+# with: the "top" camera, pos="0.2 0.02 0.4" xyaxes="0 1 0  -1 0 0.5".
+_CAM_POS     = np.array([0.2, 0.02, 0.4])
+_cam_right   = np.array([0.0, 1.0, 0.0]);  _cam_right /= np.linalg.norm(_cam_right)
+_cam_up      = np.array([-1.0, 0.0, 0.5]); _cam_up    /= np.linalg.norm(_cam_up)
+_cam_fwd     = -np.cross(_cam_right, _cam_up)   # camera -z = viewing direction
+_cam_down    = -_cam_up
+_CAM_ROTMAT  = np.column_stack([_cam_right, _cam_down, _cam_fwd])
+
+# --- fine-step timing (grasp_reorient.py's TaskConfig.timestep / eval_substeps) --
+TIMESTEP                  = 0.0001  # fine Pinocchio substep dt
+EVAL_SUBSTEPS_PER_ROLLOUT = 10      # eval steps per rollout step
 
 
 def set_object_world_pose(model, q, obj_jid, oq, pos, quat_wxyz):
@@ -65,10 +118,12 @@ def set_object_world_pose(model, q, obj_jid, oq, pos, quat_wxyz):
     q[oq + 3:oq + 7] = np.array([quat.x, quat.y, quat.z, quat.w])
 
 
-def split_into_single_root_mjcfs(mjcf_path, scene_dir):
+def split_into_single_root_mjcfs(mjcf_path, scene_dir, include_cube=True):
     """Pinocchio's MJCF parser only follows the first <body> under <worldbody>,
     but this model has 5 independent root bodies (3 fingers, thumb, free object).
-    Write one temp MJCF per root body so each can be parsed into its own model."""
+    Write one temp MJCF per root body so each can be parsed into its own model.
+    If include_cube is False, the free "obj" body is dropped entirely, so the
+    merged model ends up hand-only (no free joint, no cube geometry)."""
     tree = ET.parse(mjcf_path)
     root = tree.getroot()
     compiler = root.find("compiler")
@@ -77,6 +132,11 @@ def split_into_single_root_mjcfs(mjcf_path, scene_dir):
 
     loose_geoms = [el for el in worldbody if el.tag == "geom"]
     bodies = [el for el in worldbody if el.tag == "body"]
+    if not include_cube:
+        bodies = [b for b in bodies if b.attrib.get("name") != "obj"]
+
+    token = (f"{datetime.datetime.now():%Y%m%d_%H%M%S}_"
+             f"{os.getpid()}_{uuid.uuid4().hex[:8]}")
 
     tmp_paths = []
     for i, body in enumerate(bodies):
@@ -91,29 +151,11 @@ def split_into_single_root_mjcfs(mjcf_path, scene_dir):
                 new_worldbody.append(geom)
         new_worldbody.append(body)
 
-        tmp_path = os.path.join(scene_dir, f"_tmp_pin_split_{i}.xml")
+        tmp_path = os.path.join(scene_dir, f"_tmp_pin_split_{token}_{i}.xml")
         ET.ElementTree(new_root).write(tmp_path)
         tmp_paths.append(tmp_path)
 
     return tmp_paths
-
-
-def build_joint_sweep(model, n_frames=N_FRAMES):
-    q0 = pin.neutral(model)
-    q_traj = []
-    for t in range(n_frames):
-        q = q0.copy()
-        phase = 2 * np.pi * t / n_frames
-        for jid in range(1, model.njoints):
-            joint = model.joints[jid]
-            if joint.nq != 1:
-                continue
-            idx_q = joint.idx_q
-            lo = model.lowerPositionLimit[idx_q]
-            hi = model.upperPositionLimit[idx_q]
-            q[idx_q] = lo + (hi - lo) * (0.5 + 0.5 * np.sin(phase))
-        q_traj.append(q)
-    return q_traj
 
 
 def merge_models(parts):
@@ -149,11 +191,13 @@ def build_collision_pairs(model, geom_model, obj_jid):
     """Wipe the parser's default pairs and add (a) cube<->hand and (b) hand<->hand
     self-collision pairs, both excluding the floor and adjacent (parent-child) body
     pairs. Geoms are classified by parentJoint (robust; MJCF auto-names geoms).
+    obj_jid may be None (no cube in the scene), in which case every non-floor geom
+    is just a hand geom and only hand<->hand pairs are added.
     Returns (obj_ids, hand_ids)."""
     geom_model.removeAllCollisionPairs()
     obj_ids, hand_ids = [], []
     for gid, go in enumerate(geom_model.geometryObjects):
-        if go.parentJoint == obj_jid:
+        if obj_jid is not None and go.parentJoint == obj_jid:
             obj_ids.append(gid)
             continue
         half = _box_half_extents(go)
@@ -270,6 +314,10 @@ def detect_contacts_to_constraints(model, data, geom_model, geom_data, q, obj_ji
             plc2 = data.oMi[j2].inverse() * M_world
             cm = pin.PointContactConstraintModel(model, j1, plc1, j2, plc2)
             cm.setFriction(MU)
+            # Native Baumgarte corrector: the drift correction it configures is
+            # read back off the constraint and applied in step_dynamics (g1-style).
+            cm.setBaumgarteCorrectorParameters(
+                pin.BaumgarteCorrectorParameters(BAUMGARTE_KP, BAUMGARTE_KD))
             constraint_models.append(pin.ConstraintModel(cm))
 
     constraint_datas = [cm.createData() for cm in constraint_models]
@@ -279,16 +327,15 @@ def detect_contacts_to_constraints(model, data, geom_model, geom_data, q, obj_ji
 def step_dynamics(model, data, q, v, q_tgt, hand_q_idx, hand_v_idx,
                   constraint_models, constraint_datas,
                   solver, settings, result, dt, fext):
-    """One physics substep: PD torque on the hand toward q_tgt, ADMM-resolved
-    contacts on the cube, full-system integration. Returns (q_new, v_new, ok)."""
-    # crba populates data.M; use its diagonal to set inertia-scaled, critically
-    # damped per-joint gains (kp = M_ii*OMEGA^2, kd = 2*ZETA*M_ii*OMEGA).
+    """One physics substep: fixed-stiffness PD torque on the hand toward q_tgt
+    (kp=KP, kd derived per-joint from the mass matrix so the loop is critically
+    damped at that stiffness: kd = 2*zeta*sqrt(kp*M_ii)), ADMM-resolved contacts
+    on the cube, full-system explicit integration. Returns (q_new, v_new, ok)."""
     pin.crba(model, data, q, pin.Convention.WORLD)
     m_diag = np.diag(data.M)[hand_v_idx]
-    kp = m_diag * OMEGA ** 2
-    kd = 2.0 * ZETA * m_diag * OMEGA
+    kd = 2.0 * ZETA * np.sqrt(KP * m_diag)
     tau = np.zeros(model.nv)
-    tau[hand_v_idx] = (kp * (q_tgt[hand_q_idx] - q[hand_q_idx])
+    tau[hand_v_idx] = (KP * (q_tgt[hand_q_idx] - q[hand_q_idx])
                        - kd * v[hand_v_idx])
     if GRAVITY_COMP:
         g_tau = pin.computeGeneralizedGravity(model, data, q)
@@ -311,6 +358,19 @@ def step_dynamics(model, data, q, v, q_tgt, hand_q_idx, hand_v_idx,
     Jc = pin.getConstraintsJacobian(model, data, constraint_models, constraint_datas)
     g = Jc @ v_free
 
+    # Baumgarte stabilization: for each position-level contact, bias the drift by
+    # the current position error scaled by its Baumgarte Kp (read straight off the
+    # constraint, as set in detect_contacts_to_constraints), mirroring the
+    # PointAnchorConstraintModel branch of results/g1-constraint-simulation.py:
+    #   g_pos += Kp * constraint_position_error / dt
+    idx = 0
+    for cm, cd in zip(constraint_models, constraint_datas):
+        size = cm.residualSize()
+        kp = cm.baumgarte_corrector_parameters.Kp
+        if kp != 0.0:
+            g[idx:idx + size] += kp * cd.extract().constraint_position_error / dt
+        idx += size
+
     converged = solver.solve(
         delassus, g, constraint_models, constraint_datas, settings, result)
 
@@ -322,34 +382,38 @@ def step_dynamics(model, data, q, v, q_tgt, hand_q_idx, hand_v_idx,
     return q_new, v_new, converged
 
 
-def main():
-    tmp_paths = split_into_single_root_mjcfs(MJCF_PATH, SCENE_DIR)
+def build_model():
+    """Load + merge the LEAP-hand MJCF into one Pinocchio model, wire up the
+    cube<->hand / hand<->hand ADMM collision pairs, and return everything the
+    replay loop needs."""
+    tmp_paths = split_into_single_root_mjcfs(MJCF_PATH, SCENE_DIR, include_cube=INCLUDE_CUBE)
     try:
         parts = [pin.buildModelsFromMJCF(p, contacts=False) for p in tmp_paths]
     finally:
         for p in tmp_paths:
             os.remove(p)
 
-    n_q = sum(m.nq for m, _, _ in parts)
-    n_j = sum(m.njoints - 1 for m, _, _ in parts) + 1  # shared universe joint
     model, collision_model, visual_model = merge_models(parts)
     model.gravity = pin.Motion(np.array([0.0, 0.0, -9.81, 0.0, 0.0, 0.0]))
     data = model.createData()
-    print(f"merged model: nq={model.nq} nv={model.nv} njoints={model.njoints} "
-          f"(expected nq={n_q}, njoints={n_j})")
+    print(f"merged model: nq={model.nq} nv={model.nv} njoints={model.njoints}")
 
-    obj_jid = model.getJointId("obj_joint")
-    if obj_jid >= model.njoints:
-        # Fallback: the only free joint (nq == 7).
-        obj_jid = next(j for j in range(1, model.njoints) if model.joints[j].nq == 7)
-    oq = model.joints[obj_jid].idx_q
-    ov = model.joints[obj_jid].idx_v
-    print(f"object joint id={obj_jid}  idx_q={oq}  idx_v={ov}")
+    obj_jid = None
+    if INCLUDE_CUBE:
+        obj_jid = model.getJointId("obj_joint")
+        if obj_jid >= model.njoints:
+            # Fallback: the only free joint (nq == 7).
+            obj_jid = next(j for j in range(1, model.njoints) if model.joints[j].nq == 7)
 
     hand_q_idx = np.array([model.joints[j].idx_q for j in range(1, model.njoints)
                            if model.joints[j].nq == 1])
     hand_v_idx = np.array([model.joints[j].idx_v for j in range(1, model.njoints)
                            if model.joints[j].nv == 1])
+    if len(hand_q_idx) != len(_INIT_CTRL):
+        raise ValueError(
+            f"found {len(hand_q_idx)} hinge joints, expected {len(_INIT_CTRL)} "
+            f"to match _INIT_CTRL/the recorded control log's column count."
+        )
 
     obj_ids, hand_ids = build_collision_pairs(model, collision_model, obj_jid)
     print(f"collision pairs: {len(collision_model.collisionPairs)}  "
@@ -357,7 +421,10 @@ def main():
     geom_data = pin.GeometryData(collision_model)
     _enable_contact_manifolds(geom_data)
 
-    # ADMM solver setup (mirrors results/admm-constraint-solver.py).
+    return model, data, collision_model, visual_model, geom_data, obj_jid, hand_q_idx, hand_v_idx
+
+
+def make_solver():
     solver = pin.ADMMConstraintSolver()
     settings = pin.ADMMSolverSettings()
     settings.max_iterations = 5000
@@ -367,27 +434,32 @@ def main():
     settings.relative_complementarity_tol = 1e-12
     settings.admm_update_rule = pin.ADMMUpdateRule.SPECTRAL
     settings.anderson_capacity = 10
-    settings.mu_prox = 1e-4
+    #settings.mu_prox = 1e-4
+    settings.admm_proximal_rule = pin.ADMMProximalRule.AUTOMATIC
     settings.stat_record = False
     settings.solve_ncp = True
     result = pin.ADMMSolverResult()
+    return solver, settings, result
 
+
+def replay(controls: np.ndarray, out_path: str = OUT_PATH, settle_seconds: float = 1.0,
+           eval_substeps: int = EVAL_SUBSTEPS_PER_ROLLOUT, substeps_per_control: int = 16):
+    (model, data, collision_model, visual_model, geom_data,
+     obj_jid, hand_q_idx, hand_v_idx) = build_model()
+    solver, settings, result = make_solver()
     fext = [pin.Force.Zero() for _ in range(model.njoints)]
 
-    # Initial state: cube at its MJCF spawn pose in WORLD frame (compensating for
-    # the free joint's non-identity jointPlacement).
+    # --- initial state: grasp_reorient's fixed hand (+ cube, if included) pose --
     q = pin.neutral(model)
-    set_object_world_pose(model, q, obj_jid, oq, OBJ_W0_POS, OBJ_W0_QUAT_WXYZ)
-    pin.forwardKinematics(model, data, q)
-    print(f"cube spawn world pos: {data.oMi[obj_jid].translation}")
+    q[hand_q_idx] = _INIT_QPOS[:len(hand_q_idx)]
+    if obj_jid is not None:
+        oq = model.joints[obj_jid].idx_q
+        set_object_world_pose(model, q, obj_jid, oq, _OBJ_POS0, _OBJ_QUAT0)
     v = np.zeros(model.nv)
+    pin.forwardKinematics(model, data, q)
+    if obj_jid is not None:
+        print(f"cube spawn world pos: {data.oMi[obj_jid].translation}")
 
-    q_sweep = build_joint_sweep(model)
-
-    # Each geom's MJCF rgba is stored in meshColor, but the Panda3d visualizer only
-    # applies it when overrideMaterial is set (otherwise it uses a flat default
-    # material). Enable it so the render reflects the MJCF visuals: yellow cube,
-    # slate floor, white hand.
     for go in visual_model.geometryObjects:
         go.overrideMaterial = True
 
@@ -395,33 +467,74 @@ def main():
     viz.initViewer(open=False)
     viz.loadViewerModel(group_name="leap")
     viz.displayVisuals(True)
-    # Default near clip plane (1.0m) clips this hand-scale (~0.2m) scene; pull it in.
     viz.viewer._app.camLens.set_near(0.01)
-    viz.viewer.reset_camera(pos=(0.45, -0.4, 0.2), look_at=(0.0, 0.02, 0.02))
+    # Same camera pose PinocchioSimulator._setup_viewer derives from a TaskConfig:
+    # forward = R[:, 2], look_at = pos + forward * |pos|.
+    _forward = _CAM_ROTMAT[:, 2]
+    _lookat = _CAM_POS + _forward * (np.linalg.norm(_CAM_POS) or 1.0)
+    viz.viewer.reset_camera(pos=tuple(_CAM_POS), look_at=tuple(_lookat))
 
-    dt = 1.0 / (FPS * SUBSTEPS)
-    frames = []
-    for t in range(N_FRAMES):
-        q_cur = q_sweep[t]
-        q_next = q_sweep[t + 1] if t + 1 < N_FRAMES else q_sweep[t]
-        for s in range(SUBSTEPS):
-            alpha = (s + 1) / SUBSTEPS
-            q_tgt = (1.0 - alpha) * q_cur + alpha * q_next
+    q_tgt_full = np.zeros(model.nq)
+
+    # --- settle: hold the initial grasp command so the hand doesn't go limp --
+    n_settle = int(settle_seconds / (TIMESTEP * eval_substeps))
+    print(f"settling {settle_seconds}s ({n_settle} steps of {eval_substeps} substeps)...")
+    q_tgt_full[hand_q_idx] = _INIT_CTRL
+    for _ in range(n_settle):
+        for _ in range(eval_substeps):
             cmodels, cdatas = detect_contacts_to_constraints(
                 model, data, collision_model, geom_data, q, obj_jid)
             q, v, ok = step_dynamics(
-                model, data, q, v, q_tgt, hand_q_idx, hand_v_idx,
-                cmodels, cdatas, solver, settings, result, dt, fext)
+                model, data, q, v, q_tgt_full, hand_q_idx, hand_v_idx,
+                cmodels, cdatas, solver, settings, result, TIMESTEP, fext)
+
+    # --- replay the recorded control log ------------------------------------
+    substeps_per_row = substeps_per_control * eval_substeps
+    frames = []
+    print(f"replaying {len(controls)} control steps ({substeps_per_row} fine steps each)...")
+    for t, u in enumerate(controls):
+        q_tgt_full[hand_q_idx] = u
+        for s in range(substeps_per_row):
+            cmodels, cdatas = detect_contacts_to_constraints(
+                model, data, collision_model, geom_data, q, obj_jid)
+            q, v, ok = step_dynamics(
+                model, data, q, v, q_tgt_full, hand_q_idx, hand_v_idx,
+                cmodels, cdatas, solver, settings, result, TIMESTEP, fext)
             if cmodels and not ok:
-                print(f"[warn] frame {t} substep {s}: ADMM did not converge "
+                print(f"[warn] control step {t} substep {s}: ADMM did not converge "
                       f"({len(cmodels)} contacts); continuing.")
 
         viz.display(q)
         frames.append(viz.captureImage())
+        if t % 25 == 0:
+            print(f"  step {t:4d}/{len(controls)}  u[0]={float(u[0]):+8.3f}")
 
-    os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
-    mediapy.write_video(OUT_PATH, frames, fps=FPS)
-    print(f"Saved video to {OUT_PATH}")
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    mediapy.write_video(out_path, frames, fps=FPS)
+    print(f"Saved video to {out_path}")
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--controls", type=str, required=True,
+                   help="Path to a .npy control log (shape (n_steps, 16)), e.g. as "
+                        "saved by contact_study/drivers/run_eval_episode_record_controls.py.")
+    p.add_argument("--out", type=str, default=OUT_PATH)
+    p.add_argument("--settle", type=float, default=1.0)
+    p.add_argument("--eval_substeps", type=int, default=EVAL_SUBSTEPS_PER_ROLLOUT,
+                   help="Fine Pinocchio steps per rollout step (task default: 10).")
+    p.add_argument("--substeps", type=int, default=16,
+                   help="MPPI rollout substeps per control step used when the control "
+                        "log was recorded (must match, to know how many fine steps "
+                        "correspond to each recorded row).")
+    args = p.parse_args()
+
+    controls = np.load(args.controls)
+    if controls.ndim != 2:
+        raise ValueError(f"expected a 2D (n_steps, nu) control array, got shape {controls.shape}")
+
+    replay(controls, out_path=args.out, settle_seconds=args.settle,
+           eval_substeps=args.eval_substeps, substeps_per_control=args.substeps)
 
 
 if __name__ == "__main__":
