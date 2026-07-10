@@ -1,7 +1,7 @@
 <mujoco model="leap_right">
   <default>
     <position kp="3.0" kv="0.01" />
-    <joint damping="0.1"/>
+    <joint damping="0.1" armature="0.001"/>
   </default>
   <compiler angle="radian" />
   <asset>
@@ -23,7 +23,7 @@
     <geom size="0.002 0.018 0.017" pos="-0.0818705 0.00900002 0.0541962" quat="1.28159e-06 0.965926 3.434e-07 -0.258819" type="box" />
     <geom size="0.022 0.028 0.002" pos="-0.07255 0.00299997 0.0303398" quat="1.28159e-06 0.965926 3.434e-07 -0.258819" type="box" />
     <geom size="1 1 0.01" pos="0 0 -0.25" type="box" rgba="0.4 0.45 0.5 1" />
-    <body name="mcp_joint" pos="0.00328786 -0.023 0.0196947" quat="-0.612371 0.612376 0.353551 0.353552">
+    <body name="mcp_joint" pos="0.00328786 -0.023 0.0196947" quat="-0.612371 0.612376 0.353551 0.353552" >
       <inertial pos="0 0 0" quat="0.388585 0.626468 -0.324549 0.592628" mass="0.044" diaginertia="1.47756e-05 1.31982e-05 6.0802e-06" />
       <joint name="0" pos="0 0 0" axis="0 0 -1" range="-0.314 2.23" actuatorfrcrange="-0.95 0.95" />
       <geom size="0.01 0.003 0.017" pos="0 0.018 0.0147" type="box" />
