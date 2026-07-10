@@ -5,7 +5,7 @@ import numpy as np
 
 
 # Load a built-in sample model (Humanoid) that contains pre-saved keyframes
-model = mujoco.MjModel.from_xml_path("scenes/peg_in_hole/peg_in_hole_scene.xml")#"scenes/leap_hand/scene_leap_cube.xml")
+model = mujoco.MjModel.from_xml_path("scenes/balance_stick/ur5e_balance_stick.xml")#"scenes/leap_hand/scene_leap_cube.xml")
 data = mujoco.MjData(model)
 
 # Verify the model actually has a 2nd keyframe (index 1)
@@ -16,6 +16,10 @@ target_ctrl = model.key_ctrl[0]
 
 print(f"Successfully loaded control from 2nd keyframe: {target_ctrl}")
 
+# Initialize data to the first keyframe (qpos, qvel, ctrl, etc.)
+mujoco.mj_resetDataKeyframe(model, data, 0)
+mujoco.mj_forward(model, data)
+
 # Launch the interactive viewer
 with mujoco.viewer.launch_passive(model, data) as viewer:
     print("MuJoCo Viewer is running. Press Ctrl+C in the terminal to exit.")
@@ -23,11 +27,14 @@ with mujoco.viewer.launch_passive(model, data) as viewer:
     while viewer.is_running():
         step_start = time.time()
 
-        # 1. Assign the control from the 2nd keyframe
-        # Using [:] ensures we copy the values into the existing array memory
-        data.ctrl[:] = target_ctrl
+        # Note: data.ctrl is intentionally left alone here so it can be
+        # driven live from the viewer's "Control" panel sliders. Mouse-drag
+        # perturbations (Ctrl + right-click/left-click a body) are applied
+        # below so objects can be pushed/moved around in the viewer too.
+        mujoco.mjv_applyPerturbPose(model, data, viewer.perturb, 0)
+        mujoco.mjv_applyPerturbForce(model, data, viewer.perturb)
 
-        # 2. Step the simulation forward
+        # Step the simulation forward
         mujoco.mj_step(model, data)
 
         # 3. Print the current states
@@ -39,7 +46,10 @@ with mujoco.viewer.launch_passive(model, data) as viewer:
         )
         print(
             "Qvel:",data.qvel
-        ) 
+        )
+        for site_id in range(model.nsite):
+            site_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_SITE, site_id)
+            print(f"Site '{site_name}' world pos:", data.site_xpos[site_id])
 
         cam = viewer.cam
         
