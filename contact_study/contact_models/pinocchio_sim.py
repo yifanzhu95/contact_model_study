@@ -73,20 +73,27 @@ class PinocchioPdActuation:
 
     ctrl_joint_names is in MuJoCo *control* order: apply_control(ctrl)[k] is the
     desired position for Pinocchio joint ctrl_joint_names[k]. The stiffness `kp`
-    is used directly (it sets the closed-loop time constant); the damping is
-    derived per-joint from the mass-matrix diagonal so the loop stays critically
-    damped at that stiffness: kd = 2*zeta*sqrt(kp*M_ii).
+    is used directly (it sets the closed-loop time constant).
+
+    By default (use_direct_kd=False) the damping is derived per-joint from the
+    mass-matrix diagonal so the loop stays critically damped at that stiffness:
+    kd = 2*zeta*sqrt(kp*M_ii). Set use_direct_kd=True to instead apply a fixed
+    `kd` directly to every controlled joint, bypassing the mass-matrix/zeta
+    derivation entirely (zeta is then unused).
 
     `armature` is a per-DOF rotor inertia added to each controlled joint's mass
     (model.armature). The LEAP finger inertias are tiny (M_ii ~ 3e-6), so the
     contact solve treats the PD-held fingers as near-massless next to the cube; a
     large armature raises their effective inertia (better-conditioned Delassus,
-    steadier grasp). It also enters the critically-damped kd via M_ii above."""
+    steadier grasp). It also enters the critically-damped kd via M_ii above
+    (when use_direct_kd=False)."""
     ctrl_joint_names: list[str]
     kp: float = 3.0
     zeta: float = 1.0
     gravity_comp: bool = False
     armature: float = 0.0
+    use_direct_kd: bool = False
+    kd: float = 0.0
 
 
 @dataclass
@@ -488,12 +495,17 @@ class PinocchioSimulator(EvalSimulator):
         dt = self._timestep
         cms, cds = self._detect_contacts()
 
-        # Explicit forward-Euler PD on the hand: fixed stiffness kp, per-joint
-        # critically-damped kd = 2*zeta*sqrt(kp*M_ii) from the mass-matrix diagonal.
+        # Explicit forward-Euler PD on the hand: fixed stiffness kp. Damping is
+        # either a fixed kd applied directly (use_direct_kd=True) or derived
+        # per-joint from the mass-matrix diagonal so the loop stays critically
+        # damped at that stiffness: kd = 2*zeta*sqrt(kp*M_ii) (default).
         pin.crba(model, data, q, pin.Convention.WORLD)
         m_diag = np.diag(data.M)[self._ctrl_vadr]
         kp = self._pid.kp
-        kd = 2.0 * self._pid.zeta * np.sqrt(kp * m_diag)
+        if self._pid.use_direct_kd:
+            kd = np.full_like(m_diag, self._pid.kd)
+        else:
+            kd = 2.0 * self._pid.zeta * np.sqrt(kp * m_diag)
         tau = np.zeros(model.nv)
         tau[self._ctrl_vadr] = (kp * (self._q_des[self._ctrl_qadr] - q[self._ctrl_qadr])
                                 - kd * v[self._ctrl_vadr])
