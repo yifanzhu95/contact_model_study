@@ -65,6 +65,7 @@ def run(seconds_per_extreme: float, video_path: str | None):
     for label, target in [("default->lower limits", lo), ("lower->upper limits", hi)]:
         pen_hist, speed_hist = [], []
         for i in range(n_substeps):
+            print(i)
             sim.apply_control(target)
             sim.step(1)
             st = sim.get_state()
@@ -99,7 +100,7 @@ def run(seconds_per_extreme: float, video_path: str | None):
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--seconds_per_extreme", type=float, default=0.3,
+    p.add_argument("--seconds_per_extreme", type=float, default=0.1,
                    help="Sim seconds spent driving toward (and holding at) each "
                         "joint-limit extreme.")
     p.add_argument("--video", type=str, default=None,

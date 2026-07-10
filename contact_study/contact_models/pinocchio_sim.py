@@ -90,7 +90,7 @@ class PinocchioPdActuation:
     kp: float = 3.0
     kd: float = 0.01
     joint_damping: float = 0.1
-    gravity_comp: bool = True
+    gravity_comp: bool = False
     # Per-joint torque limit (N*m) for the actuator constraint's box bound. Large
     # enough not to bind normal finger motion, finite so grasp force stays bounded.
     tau_max: float = 5.0
@@ -115,14 +115,14 @@ class PinocchioContactConfig:
     friction: float = 0.5
     use_mesh_geoms: bool = True
     floor_halfextent_thresh: float = 0.5
-    admm_max_iterations: int = 5000
+    admm_max_iterations: int = 1000
     mu_prox: float = 1e-4
     # Baumgarte position stabilization: each step, target a separating contact
     # velocity of (baumgarte_gain * penetration_depth / dt) so the solver actively
     # removes existing penetration instead of only preventing further approach
     # (the bare velocity-level solve leaves any overlap uncorrected). 0 disables it;
     # ~0.2 removes ~20% of the penetration per substep. Values >1 over-correct.
-    baumgarte_gain: float = 0.0
+    baumgarte_gain: float = 0.2
     # Cap (m/s) on that separating velocity. A deep or erratic mesh-contact
     # penetration otherwise asks for baumgarte_gain*pen/dt = many m/s (dt=1e-4),
     # and because the normal contact impulse is one-sided the object can never
