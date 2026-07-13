@@ -2,13 +2,13 @@
 #SBATCH --job-name=cont_modeling_horizon_eval
 #SBATCH --output=logs/cont_modeling_horizon_eval%A_%a.out
 #SBATCH --error=logs/cont_modeling_horizon_eval%A_%a.err
-#SBATCH --array=0-15          # must equal (#MODELS * #HORIZONS) - 1
+#SBATCH --array=0-14          # must equal (#MODELS * #HORIZONS) - 1
                               # default grid: 4 * 4 = 16  ->  0-15
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=02:00:00
+#SBATCH --time=05:00:00
 
 set -euo pipefail
 
@@ -45,18 +45,18 @@ cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 #    their lengths above).
 # ---------------------------------------------------------------------------
 TASK="grasp_reorient"
-N_EPISODES=10                                # episodes per (model, horizon) cell
+N_EPISODES=5                                # episodes per (model, horizon) cell
 
-MODELS=("M1" "M2" "M3" "M4")
-HORIZONS=("6" "12" "24" "48")            # the swept planning horizons
+MODELS=("M2" "M3" "M4")
+HORIZONS=("6" "12" "24" "48" "96")            # the swept planning horizons
 
 # Shared MPPI / eval knobs (single values, not swept).
 N_SAMPLES=256
-TEMPERATURE=10.0
+TEMPERATURE=25.0
 NOISE_SIGMA=0.01
 DELTA=0.1
 SUBSTEPS=16
-EVAL_SIM="none"                 # "none" uses the task default; "mujoco" is faster
+EVAL_SIM="mujoco"                 # "none" uses the task default; "mujoco" is faster
 SETTLE=1.0
 GEOMETRY="accurate"
 SEED=0
@@ -103,4 +103,5 @@ python experiments/hpc/run_horizon_cell.py \
     --eval_sim    "$EVAL_SIM" \
     --settle      "$SETTLE" \
     --geometry    "$GEOMETRY" \
-    --seed        "$SEED"
+    --seed        "$SEED" \
+    --debug

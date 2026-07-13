@@ -22,7 +22,7 @@ cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 # ---------------------------------------------------------------------------
 TASK="grasp_reorient"
 MODEL="M2"
-N_EPISODES=2          # episodes to run for this one weight set
+N_EPISODES=5          # episodes to run for this one weight set
 
 # Shared MPPI / eval knobs.
 N_SAMPLES=256
@@ -31,7 +31,7 @@ TEMPERATURE=10.0
 NOISE_SIGMA=0.01
 DELTA=0.1
 SUBSTEPS=16
-EVAL_SIM="mujoco"
+EVAL_SIM="none"
 SETTLE=1.0
 SEED=0
 
