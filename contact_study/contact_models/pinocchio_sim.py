@@ -105,8 +105,16 @@ class PinocchioContactConfig:
     (mirroring results/g1-constraint-simulation.py). Kp=0 disables it."""
     friction: float = 0.5
     use_mesh_geoms: bool = True
-    baumgarte_kp: float = 0.0
-    baumgarte_kd: float = 0.0
+    # Replace each triangle-mesh (BVH) collision geom with its convex hull so coal
+    # uses the analytic convex-convex (GJK/EPA) contact path — one stable normal +
+    # accurate penetration depth per step — instead of per-triangle BVH queries
+    # whose faceted, frame-to-frame-jittery normals drove the cube penetrating /
+    # "sticking" to the mesh fingertips. The LEAP tips are already convex to within
+    # triangulation noise, so the hull reproduces their shape almost exactly. Only
+    # affects collision geoms; the visual meshes are untouched.
+    use_convex_tips: bool = True
+    baumgarte_kp: float = 100.0
+    baumgarte_kd: float = 0.05
     admm_max_iterations: int = 5000
 
 
@@ -171,6 +179,54 @@ def _box_half_extents(go):
         return np.asarray(go.geometry.halfSide, dtype=float)
     except Exception:
         return None
+
+
+def _coal_module():
+    """Return the coal (a.k.a. hppfcl) module Pinocchio builds its geometry with,
+    or None if neither import is available."""
+    try:
+        import coal
+        return coal
+    except Exception:
+        pass
+    try:
+        import hppfcl
+        return hppfcl
+    except Exception:
+        return None
+
+
+def convexify_mesh_geoms(geom_model):
+    """Replace every triangle-mesh (BVH) collision geom with its convex hull, in
+    place. coal loads MJCF `<geom type="mesh">` as a BVHModelOBBRSS triangle soup,
+    whose contact query returns a single per-triangle face normal that flips
+    between adjacent facets as bodies slide — the source of the noisy normals /
+    erratic penetration depth that made the cube penetrate and stick to the mesh
+    fingertips. A coal.Convex uses the analytic GJK/EPA support-mapping path
+    (like Box/Sphere): one stable normal + accurate signed penetration per step,
+    while keeping the true tip shape (the LEAP tips are convex to triangulation
+    noise). Returns the number of geoms converted."""
+    coal = _coal_module()
+    if coal is None:
+        return 0
+    n_converted = 0
+    for go in geom_model.geometryObjects:
+        g = go.geometry
+        if not type(g).__name__.startswith("BVHModel"):
+            continue  # already a primitive / convex; nothing to do
+        try:
+            verts = np.asarray(g.vertices(), dtype=float)
+        except Exception:
+            continue
+        if verts.ndim != 2 or verts.shape[0] < 4:
+            continue
+        pts = coal.StdVec_Vec3s()
+        for row in verts:
+            pts.append(row)
+        # keepTriangles=True needs qhull's "Qt" (triangulated output).
+        go.geometry = coal.Convex.convexHull(pts, True, "Qt")
+        n_converted += 1
+    return n_converted
 
 
 def _is_adjacent(model, j1, j2):
@@ -278,6 +334,11 @@ class PinocchioSimulator(EvalSimulator):
         self._collision_model = coll
         self._visual_model = vis
         self._data = model.createData()
+        # Swap triangle-mesh (BVH) fingertips for their convex hulls so contacts
+        # use coal's analytic GJK/EPA path (stable normal + accurate depth); must
+        # happen before GeometryData is built off the collision model.
+        if self._contact_cfg.use_convex_tips:
+            convexify_mesh_geoms(coll)
         build_collision_pairs(pin, model, coll, self._contact_cfg.use_mesh_geoms)
         self._geom_data = pin.GeometryData(coll)
         # Ask coal to populate the contact manifold (normal + witness points) per
