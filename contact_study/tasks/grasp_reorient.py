@@ -615,13 +615,7 @@ class GraspReorientTask(BaseTask):
         )
         # cube<->hand / hand<->hand frictional point contacts, each with a native
         # Baumgarte corrector on the contact position error.
-        contact_cfg = PinocchioContactConfig(
-            friction=_PIN_MU,
-            use_mesh_geoms=True,
-            baumgarte_kp=_PIN_BAUMGARTE_KP,
-            baumgarte_kd=_PIN_BAUMGARTE_KD,
-            admm_max_iterations=_PIN_ADMM_MAX_ITER,
-        )
+        contact_cfg = PinocchioContactConfig()
 
         return PinocchioSimulator(
             model_path     = self.config.eval_model_paths[self.config.eval_sim],  # the MJCF (not URDF)
