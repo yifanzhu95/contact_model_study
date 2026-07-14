@@ -1,0 +1,29 @@
+<mujoco model="Actuator_test">
+  <compiler angle="radian" />
+
+  <option timestep="0.02"/>
+
+  <default>
+    <position kp="3.0" kv="0.01" />
+    <joint damping="0.1" armature="0.001"/>
+  </default>
+
+  <worldbody>
+    <body name="Base">
+      <geom size="0.005 0.005 0.01" pos="0.0 0.0 0.01" euler="0 0 0" type="box" rgba="1 0 0 1" />
+      <body name="End" pos="0 0 0.02">
+        <joint name="Joint" pos="0 0 0.0" axis="0 1 0"/>
+        <geom size="0.005 0.005 0.01" pos="0.0 0.0 0.01" euler="0 0 0" type="box" rgba="0 1 0 1" />
+        <site name="tip" pos="0 0 0.02"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <contact>
+    <exclude name="custom_exclusion" body1="Base" body2="End"/>
+  </contact>
+
+  <actuator>
+    <position name="0" joint="Joint" ctrllimited="true" ctrlrange="-1.5708 1.5708" />
+  </actuator>
+</mujoco>
