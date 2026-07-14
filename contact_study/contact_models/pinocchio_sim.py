@@ -242,9 +242,33 @@ def _is_adjacent(model, j1, j2):
     return False
 
 
-def build_collision_pairs(pin, model, geom_model, use_mesh_geoms):
-    """Wipe the parser's default pairs and add every non-adjacent, non-floor geom
-    pair (cube<->hand and hand<->hand). Returns the list of collidable geom ids."""
+def parse_mjcf_excludes(mjcf_path) -> set[frozenset[str]]:
+    """Read <contact><exclude body1=".." body2=".."/></contact> pairs from the
+    original (pre-split) MJCF. These are body-name pairs the model author has
+    explicitly marked as never-colliding (mirroring MuJoCo's own semantics),
+    used to patch cases _is_adjacent's joint-topology heuristic can't see —
+    e.g. a body welded straight to the world (no <joint>) followed by a child
+    joint: the child's parent joint id is universe (0), which _is_adjacent
+    deliberately treats as "not adjacent" (see its docstring) since that same
+    joint-parent-is-universe shape also covers legitimate independent contacts
+    (separate fingers, hand<->object) that must NOT be excluded."""
+    tree = ET.parse(mjcf_path)
+    contact = tree.getroot().find("contact")
+    if contact is None:
+        return set()
+    return {
+        frozenset((exc.get("body1"), exc.get("body2")))
+        for exc in contact.findall("exclude")
+    }
+
+
+def build_collision_pairs(pin, model, geom_model, use_mesh_geoms, excluded_body_pairs=None):
+    """Wipe the parser's default pairs and add every non-adjacent, non-floor,
+    non-excluded geom pair (cube<->hand and hand<->hand). `excluded_body_pairs`
+    (from parse_mjcf_excludes) additionally drops any pair whose owning bodies
+    match one of the model's own <contact><exclude> tags. Returns the list of
+    collidable geom ids."""
+    excluded_body_pairs = excluded_body_pairs or set()
     geom_model.removeAllCollisionPairs()
     ids = []
     for gid, go in enumerate(geom_model.geometryObjects):
@@ -265,6 +289,12 @@ def build_collision_pairs(pin, model, geom_model, use_mesh_geoms):
             jb = geom_model.geometryObjects[gb].parentJoint
             if _is_adjacent(model, ja, jb):
                 continue
+            if excluded_body_pairs:
+                fa = geom_model.geometryObjects[ga].parentFrame
+                fb = geom_model.geometryObjects[gb].parentFrame
+                body_pair = frozenset((model.frames[fa].name, model.frames[fb].name))
+                if body_pair in excluded_body_pairs:
+                    continue
             geom_model.addCollisionPair(pin.CollisionPair(ga, gb))
     return ids
 
@@ -339,7 +369,8 @@ class PinocchioSimulator(EvalSimulator):
         # happen before GeometryData is built off the collision model.
         if self._contact_cfg.use_convex_tips:
             convexify_mesh_geoms(coll)
-        build_collision_pairs(pin, model, coll, self._contact_cfg.use_mesh_geoms)
+        excludes = parse_mjcf_excludes(model_path)
+        build_collision_pairs(pin, model, coll, self._contact_cfg.use_mesh_geoms, excludes)
         self._geom_data = pin.GeometryData(coll)
         # Ask coal to populate the contact manifold (normal + witness points) per
         # pair; without this the collision results carry NaN normals.
