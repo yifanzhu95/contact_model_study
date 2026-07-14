@@ -61,6 +61,7 @@
 
   <worldbody>
     <light name="spotlight" mode="targetbodycom" target="wrist_2_link" pos="0 -1 2"/>
+
     <body name="base" quat="0 0 0 -1" childclass="ur5e">
       <inertial mass="4.0" pos="0 0 0" diaginertia="0.00443333156 0.00443333156 0.0072"/>
       <geom mesh="base_0" material="black" class="visual"/>
@@ -113,7 +114,9 @@
                   <geom class="eef_collision" pos="0 0.08 0" quat="1 1 0 0" size="0.04 0.02"/>
                   <site name="attachment_site" type="sphere" size="0.01" pos="0 0.1 0" quat="-1 1 0 0" rgba="0.5 0.5 0.5 1"/>
                   <body name="grasped_body" pos="0 0.1 0" quat="-1 1 0 0">
-                    <site name="peg_tip" size="0.01" pos="0 0 0.05" euler="3.14159 0 0" rgba="1 0.0 0.0 1" />
+                    <site name="center_of_plate" size="0.01" pos="0 0.005 0.105" euler="0 0 0" rgba="1 0.0 0.0 1" />
+                    <geom type="cylinder" pos="0 0.0 0.105" euler="1.5707 0 0" size="0.1 0.005" group="2" rgba="0.5 0.5 0.5 1"/>
+                    <geom type="cylinder" pos="0 0 0.01" euler="0 0 0" size="0.04 0.01" group="2" rgba="0.5 0.5 0.5 1"/>
                     <!-- x= towards the base y = up from groundplane z = out of ee-->
                   </body>
                 </body>
@@ -122,6 +125,13 @@
           </body>
         </body>
       </body>
+    </body>
+
+    <body name="stick" pos="0.0 0.0 0.0" euler="0 0 0">
+      <joint name="obj_joint" type="free" />
+      <geom type="capsule" size="0.01 0.1" rgba="1 1 0 1" />
+      <site name="end1" pos="0.0 0.0 -0.1" size="0.02" rgba="1 0.0 0.0 1" group="4" />
+      <site name="end2" pos="0.0 0.0 0.1" size="0.02" rgba="1 0.0 0.0 1" group="4"/>
     </body>
   </worldbody>
 
@@ -136,8 +146,14 @@
 
   <keyframe>
     <key name="home" 
-    qpos="-1.5708 -1.5708 1.5708 -1.5708 -1.5708 0"
-    qvel="0 0 0 0 0 0" 
-    ctrl="-1.5708 -1.5708 1.5708 -1.5708 -1.5708 0"/>
+    qpos="
+    -1.5708 -1.5708 1.5708 0 1.5708 0
+    -0.13399598  0.59876665  0.5825799
+    0 0 0 0"
+    qvel="
+    0 0 0 
+    0 0 0
+    0 0 0" 
+    ctrl="-1.5708 -1.5708 1.5708 0 1.5708 0"/>
   </keyframe>
 </mujoco>
