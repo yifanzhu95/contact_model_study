@@ -157,6 +157,16 @@ class ActuatorTestTask(BaseTask):
         ctrl_joint_names = [
             mjm.joint(int(mjm.actuator(a).trnid[0])).name for a in range(mjm.nu)
         ]
+        # Per-actuator torque limit from each joint's actuatorfrcrange, so the
+        # Pinocchio PD saturates like MuJoCo. This scene declares no limit, so
+        # every entry is (-inf, inf) and no clamp is applied — but wiring it here
+        # keeps the pattern identical to grasp_reorient.
+        force_limit = np.array([
+            mjm.jnt_actfrcrange[int(mjm.actuator(a).trnid[0])]
+            if mjm.jnt_actfrclimited[int(mjm.actuator(a).trnid[0])]
+            else (-np.inf, np.inf)
+            for a in range(mjm.nu)
+        ], dtype=np.float64)
         pid = PinocchioPdActuation(
             ctrl_joint_names=ctrl_joint_names,
             kp=_PID_KP, zeta=_PIN_ZETA,
@@ -164,6 +174,7 @@ class ActuatorTestTask(BaseTask):
             armature=_PIN_ARMATURE,
             use_direct_kd=_PIN_USE_DIRECT_KD,
             kd=_PIN_KD,
+            force_limit=force_limit,
         )
 
         return PinocchioSimulator(

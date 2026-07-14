@@ -86,14 +86,24 @@ class PinocchioPdActuation:
     contact solve treats the PD-held fingers as near-massless next to the cube; a
     large armature raises their effective inertia (better-conditioned Delassus,
     steadier grasp). It also enters the critically-damped kd via M_ii above
-    (when use_direct_kd=False)."""
+    (when use_direct_kd=False).
+
+    `force_limit` mirrors MuJoCo's per-joint actuator-force saturation
+    (jnt_actfrcrange): a (n_ctrl, 2) array of [lo, hi] torque bounds in ctrl
+    order (same order as ctrl_joint_names). Each substep the commanded PD torque
+    is clamped to this range before it drives the dynamics, exactly as MuJoCo
+    clamps qfrc_actuator to jnt_actfrcrange. Without it the PD applies the full
+    (unbounded) kp*error torque, which diverges from MuJoCo whenever the raw PD
+    torque exceeds the joint's limit (e.g. the LEAP hand's +/-0.95 N*m cap).
+    None => unlimited (no clamp), matching a model with no actuatorfrcrange."""
     ctrl_joint_names: list[str]
     kp: float = 3.0
     zeta: float = 1.0
     gravity_comp: bool = False
-    armature: float = 0.0
-    use_direct_kd: bool = False
-    kd: float = 0.0
+    armature: float = 0.001
+    use_direct_kd: bool = True
+    kd: float = 0.11
+    force_limit: "np.ndarray | None" = None
 
 
 @dataclass
@@ -262,12 +272,22 @@ def parse_mjcf_excludes(mjcf_path) -> set[frozenset[str]]:
     }
 
 
+def _canonical_body_name(name: str) -> str:
+    """Map a body/frame name onto a simulator-neutral name so MJCF <exclude>
+    tags match Pinocchio frames. MuJoCo calls the root body "world"; Pinocchio's
+    MJCF parser calls the same frame "universe". Geoms declared loose on the
+    <worldbody> (e.g. this LEAP scene's palm plates) hang off that frame in both,
+    so an <exclude body1="world" .../> must match Pinocchio's "universe"."""
+    return "world" if name == "universe" else name
+
+
 def build_collision_pairs(pin, model, geom_model, use_mesh_geoms, excluded_body_pairs=None):
     """Wipe the parser's default pairs and add every non-adjacent, non-floor,
     non-excluded geom pair (cube<->hand and hand<->hand). `excluded_body_pairs`
     (from parse_mjcf_excludes) additionally drops any pair whose owning bodies
-    match one of the model's own <contact><exclude> tags. Returns the list of
-    collidable geom ids."""
+    match one of the model's own <contact><exclude> tags (compared under
+    _canonical_body_name, so "world" tags match Pinocchio's "universe" frame).
+    Returns the list of collidable geom ids."""
     excluded_body_pairs = excluded_body_pairs or set()
     geom_model.removeAllCollisionPairs()
     ids = []
@@ -292,7 +312,10 @@ def build_collision_pairs(pin, model, geom_model, use_mesh_geoms, excluded_body_
             if excluded_body_pairs:
                 fa = geom_model.geometryObjects[ga].parentFrame
                 fb = geom_model.geometryObjects[gb].parentFrame
-                body_pair = frozenset((model.frames[fa].name, model.frames[fb].name))
+                body_pair = frozenset((
+                    _canonical_body_name(model.frames[fa].name),
+                    _canonical_body_name(model.frames[fb].name),
+                ))
                 if body_pair in excluded_body_pairs:
                     continue
             geom_model.addCollisionPair(pin.CollisionPair(ga, gb))
@@ -393,6 +416,21 @@ class PinocchioSimulator(EvalSimulator):
             [model.joints[model.getJointId(n)].idx_v for n in pid.ctrl_joint_names],
             dtype=int,
         )
+
+        # Per-controlled-joint actuator torque limits (MuJoCo jnt_actfrcrange),
+        # in ctrl order. None => unlimited (_substep skips the clamp).
+        if pid.force_limit is not None:
+            fl = np.asarray(pid.force_limit, dtype=float).reshape(-1, 2)
+            if fl.shape[0] != self._ctrl_vadr.shape[0]:
+                raise ValueError(
+                    f"force_limit has {fl.shape[0]} rows but there are "
+                    f"{self._ctrl_vadr.shape[0]} controlled joints."
+                )
+            self._ctrl_frc_lo = fl[:, 0].copy()
+            self._ctrl_frc_hi = fl[:, 1].copy()
+        else:
+            self._ctrl_frc_lo = None
+            self._ctrl_frc_hi = None
 
         # Rotor inertia on the controlled joints: crba (=> the Delassus the ADMM
         # solve builds) and the mass-scaled kd both see A = M + armature, so the
@@ -598,11 +636,25 @@ class PinocchioSimulator(EvalSimulator):
             kd = np.full_like(m_diag, self._pid.kd)
         else:
             kd = 2.0 * self._pid.zeta * np.sqrt(kp * m_diag)
-        tau = np.zeros(model.nv)
-        tau[self._ctrl_vadr] = (kp * (self._q_des[self._ctrl_qadr] - q[self._ctrl_qadr])
-                                - kd * v[self._ctrl_vadr])
+        # Actuator stiffness (+ optional gravity compensation) — the part MuJoCo
+        # produces as qfrc_actuator and saturates to jnt_actfrcrange.
+        act = kp * (self._q_des[self._ctrl_qadr] - q[self._ctrl_qadr])
         if self._pid.gravity_comp:
-            tau[self._ctrl_vadr] += pin.computeGeneralizedGravity(model, data, q)[self._ctrl_vadr]
+            act = act + pin.computeGeneralizedGravity(model, data, q)[self._ctrl_vadr]
+        if self._ctrl_frc_lo is not None:
+            act = np.clip(act, self._ctrl_frc_lo, self._ctrl_frc_hi)
+
+        # Velocity damping is applied OUTSIDE the saturation. In MuJoCo the
+        # dominant hand damping is passive joint damping (qfrc_passive), which is
+        # not part of the clamped actuator force — so when the actuator saturates,
+        # MuJoCo still brakes with -damping*v. Clamping the damping together with
+        # the stiffness (the naive approach) drops that braking during saturation
+        # and lets the Pinocchio joint run ahead of MuJoCo. (A tiny 0.01*v of this
+        # kd is really the position actuator's kv, which MuJoCo does clamp; leaving
+        # it outside is a <=0.01*v approximation, negligible next to the 0.1
+        # passive term.)
+        tau = np.zeros(model.nv)
+        tau[self._ctrl_vadr] = act - kd * v[self._ctrl_vadr]
 
         v_free = v + dt * pin.aba(model, data, q, v, tau, self._fext)
 

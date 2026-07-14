@@ -1,8 +1,6 @@
 <mujoco model="Actuator_test">
   <compiler angle="radian" />
-
-  <option timestep="0.02"/>
-
+  
   <default>
     <position kp="3.0" kv="0.01" />
     <joint damping="0.1" armature="0.001"/>
