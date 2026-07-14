@@ -39,6 +39,10 @@ _MJ_CTRL_TO_URDF_JOINT = [
 # the Drake "base" link to the world at identity (DrakeSimulator's
 # `weld_base=True`) lines palm_lower up with the MuJoCo placement with no extra
 # calibration, and "obj"/"floor" need no Drake-side scene-building at all.
+# DIAGNOSTIC: the _nocontact variant disables all collisions (contype=0
+# conaffinity=0 on every geom) to isolate the actuator/PD model from the contact
+# model in the MuJoCo-vs-Pinocchio eval comparison. Swap back to the plain
+# scene for normal grasping runs (the no-contact scene can't grasp the cube).
 GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites.xml"#"leap_hand/leap_hand_right_w_sites_simple.xml"
 #"leap_hand/leap_hand_right_w_sites_spheres.xml"
 #GRASP_SCENE_XML = "leap_hand_old/leap_right_hand_simple copy.xml"#
@@ -46,27 +50,18 @@ GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites.xml"#"leap_hand/leap_hand_r
 # Drake PidController gains for the eval hand (position control, mirroring the
 # MuJoCo position servos kp=3.0 kv=0.01). Starting points to tune against Drake's
 # solver; _PID_EFFORT is the per-joint actuator force clamp DrakeSimulator adds.
-_PID_KP, _PID_KI, _PID_KD, _PID_EFFORT = 3.0, 0.0, 0.01, 100.0
+_PID_KP = 3.0
+_PID_KI = 0.0
+_PID_KD = 0.01
+_JOINT_DAMPING = 0.1
+_ARMATURE = 0.001
 
 # Pinocchio eval: mirror tests/replay_pinocchio_controls.py's simulation scheme —
-# explicit forward-Euler PD with stiffness pinned to _PID_KP, and only the
-# cube<->hand / hand<->hand frictional point contacts, each carrying a native
-# Baumgarte corrector. cfg.timestep is left alone: it also sets rollout_dt for
-# the MPPI planner, so it isn't part of the eval-only "simulation scheme".
-#
-# Damping: by default (_PIN_USE_DIRECT_KD=False) kd is derived per-joint from
-# the mass matrix so the loop stays critically damped: kd=2*zeta*sqrt(kp*M_ii).
-# Set _PIN_USE_DIRECT_KD=True to instead apply _PIN_KD directly to every
-# controlled joint (bypasses the mass-matrix/zeta derivation; _PIN_ZETA unused).
-_PIN_ZETA           = 1.0    # hand PD damping ratio (critically damped), used when _PIN_USE_DIRECT_KD is False
 _PIN_USE_DIRECT_KD  = True  # False (default): derive kd from zeta + mass matrix. True: use _PIN_KD directly.
-_PIN_KD             = 0.1 + 0.01   # direct damping gain, used when _PIN_USE_DIRECT_KD is True
-_PIN_MU             = 0.5    # Coulomb friction coefficient
+_PIN_KD             = _PID_KD + _PID_KD   # direct damping gain, used when _PIN_USE_DIRECT_KD is True
 _PIN_GRAVITY_COMP   = False  # gravity-compensation torque on the hand PD
-_PIN_ARMATURE       = 0.001    # per-DOF rotor inertia on the hand joints (large; tune)
-_PIN_ADMM_MAX_ITER  = 5000
-_PIN_BAUMGARTE_KP   = 100.0   # contact position-error correction gain
-_PIN_BAUMGARTE_KD   = 0.05    # contact velocity-error correction gain
+
+_DRAKE_PID_EFFORT = 100.0
 
 # Fixed initial state + control for the hand and cube, used to initialize BOTH
 # the rollout and eval simulators (overrides the scene keyframe). Layout:
@@ -530,7 +525,7 @@ class GraspReorientTask(BaseTask):
         ]
         pid = DrakePidActuation(
             kp=_PID_KP, ki=_PID_KI, kd=_PID_KD,
-            ctrl_joint_names=list(_MJ_CTRL_TO_URDF_JOINT), effort=_PID_EFFORT,
+            ctrl_joint_names=list(_MJ_CTRL_TO_URDF_JOINT), effort=DRAKE_PID_EFFORT,
         )
 
         return DrakeSimulator(
@@ -594,17 +589,29 @@ class GraspReorientTask(BaseTask):
         ctrl_joint_names = [
             mjm.joint(int(mjm.actuator(a).trnid[0])).name for a in range(mjm.nu)
         ]
+        # Per-actuator torque limit from each target joint's actuatorfrcrange
+        # (MuJoCo jnt_actfrcrange), in control order — so the Pinocchio PD
+        # saturates its torque exactly like MuJoCo's actuator does. Joints with
+        # no limit get (-inf, inf) (no clamp). The LEAP joints all cap at
+        # +/-0.95 N*m, which the +/-45deg step commands hit hard; without this
+        # the unclamped PD tracked far faster than MuJoCo (see _substep).
+        force_limit = np.array([
+            mjm.jnt_actfrcrange[int(mjm.actuator(a).trnid[0])]
+            if mjm.jnt_actfrclimited[int(mjm.actuator(a).trnid[0])]
+            else (-np.inf, np.inf)
+            for a in range(mjm.nu)
+        ], dtype=np.float64)
         # kp is _PID_KP directly (the closed-loop time constant); kd is either
         # derived per-joint from the mass matrix (critically damped at that
         # stiffness) or applied directly, depending on _PIN_USE_DIRECT_KD (see
         # PinocchioSimulator._substep).
         pid = PinocchioPdActuation(
             ctrl_joint_names=ctrl_joint_names,
-            kp=_PID_KP, zeta=_PIN_ZETA,
+            kp=_PID_KP,
             gravity_comp=_PIN_GRAVITY_COMP,
-            armature=_PIN_ARMATURE,
-            use_direct_kd=_PIN_USE_DIRECT_KD,
+            armature=_ARMATURE,
             kd=_PIN_KD,
+            force_limit=force_limit,
         )
         # cube<->hand / hand<->hand frictional point contacts, each with a native
         # Baumgarte corrector on the contact position error.

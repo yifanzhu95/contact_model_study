@@ -1,0 +1,40 @@
+<mujoco model="Actuator_test">
+  <compiler angle="radian" />
+  
+  <default>
+    <position kp="3.0" kv="0.01" />
+    <joint damping="0.1" armature="0.001"/>
+  </default>
+
+  <asset>
+    <mesh name="white_tip" content_type="model/obj" file="leap_hand/meshes/white_tip.obj" />
+  </asset>
+
+  <worldbody>
+    <body name="Base">
+      <geom size="0.005 0.005 0.01" pos="0.0 0.0 0.01" euler="0 0 0" type="box" rgba="1 0 0 1" />
+      <body name="Mid" pos="0 0 0.02">
+        <joint name="Joint" pos="0 0 0.0" axis="0 1 0"/>
+        <inertial pos="0 0 0" euler="0 0 0" mass="0.044" diaginertia="1.47756e-05 1.31982e-05 6.0802e-06" />
+        <geom size="0.005 0.005 0.01" pos="0.0 0.0 0.01" euler="0 0 0" type="box" rgba="0 1 0 1" />
+        <body name="End" pos="0 0 0.02">
+          <joint name="Joint2" pos="0 0 0.0" axis="0 1 0"/>
+          <inertial pos="0 0 0" euler="0 0 0" mass="0.044" diaginertia="1.47756e-05 1.31982e-05 6.0802e-06" />
+          <geom size="0.005 0.005 0.01" pos="0.0 0.0 0.01" euler="0 0 0" type="box" rgba="0 0 1 1" />
+          <geom type="mesh" mesh="white_tip" />
+          <site name="tip" pos="0 0 0.02"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <contact>
+    <exclude name="exclusion_base_mid" body1="Base" body2="Mid"/>
+    <exclude name="exclusion_mid_end" body1="Mid" body2="End"/>
+  </contact>
+
+  <actuator>
+    <position name="0" joint="Joint" ctrllimited="true" ctrlrange="-1.5708 1.5708" />
+    <position name="1" joint="Joint2" ctrllimited="true" ctrlrange="-1.5708 1.5708" />
+  </actuator>
+</mujoco>

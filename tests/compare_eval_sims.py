@@ -41,11 +41,29 @@ subprocess (MuJoCo's GL renderer can't safely share a process with Drake's
 VTK renderer or Pinocchio's panda3d renderer, so each replay happens in
 isolation, after the fact).
 
+--remove_cube (grasp_reorient only, ignored elsewhere): shifts the 'obj' cube
+sideways out of the hand's workspace before reset, so finger motion can be
+compared without any cube-contact interference — isolates the actuator/joint
+model from the contact model. The offset is lateral (x), not vertical: with
+zero initial velocity and uniform gravity the cube free-falls straight down
+with no lateral drift, so it stays clear for the whole episode without having
+to be re-teleported every step. Combining this with --control_mode mppi still
+runs, but the cost function's cube pos/quat/contact terms become meaningless
+once the cube is gone — pair --remove_cube with --control_mode step to isolate
+pure actuator step-response instead.
+
 Run on a CUDA machine (warp arrays live on the device) for --control_mode mppi;
 --control_mode step needs no GPU:
     python tests/compare_eval_sims.py --task cart_pole
     python tests/compare_eval_sims.py --task grasp_reorient --model M2 --video
     python tests/compare_eval_sims.py --task grasp_reorient --control_mode step
+    python tests/compare_eval_sims.py --task grasp_reorient --control_mode step --remove_cube
+    # Step just the first finger's tip (fingertip) joint, actuator 3 — the
+    # distal-most link in that finger's chain, so this exercises the PID/
+    # actuator model with minimal inter-joint mass-matrix coupling, unlike
+    # actuator 0 (mcp) which drags pip/dip/fingertip along with it:
+    python tests/compare_eval_sims.py --task grasp_reorient --control_mode step \\
+        --step_joint_start 3 --step_n_joints 1 --remove_cube
 """
 
 from __future__ import annotations
@@ -90,6 +108,23 @@ PRIMARY_SIM = EvalSimulatorKind.MUJOCO  # drives the MPPI feedback loop
 REPO_ROOT = Path(__file__).resolve().parent.parent
 THIS_SCRIPT = Path(__file__).resolve()
 
+# --remove_cube lateral offset (meters); see module docstring for why lateral
+# (not vertical) keeps the cube clear of the hand for the whole episode.
+_CUBE_REMOVE_OFFSET_M = 2.0
+
+
+def _relocate_cube_away(mjm: mujoco.MjModel, q0: np.ndarray) -> np.ndarray:
+    """grasp_reorient only: shift the 'obj' free body's initial x-position by
+    _CUBE_REMOVE_OFFSET_M, well outside the hand's workspace. Returns a
+    modified copy of q0; a no-op if the model has no 'obj_joint' (i.e. any
+    task other than grasp_reorient)."""
+    obj_jnt = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "obj_joint")
+    if obj_jnt < 0:
+        return q0
+    q0 = q0.copy()
+    q0[mjm.jnt_qposadr[obj_jnt]] += _CUBE_REMOVE_OFFSET_M
+    return q0
+
 def _actuator_qpos_map(mjm: mujoco.MjModel) -> dict[int, int]:
     """qpos index -> actuator index, for actuators that drive a single hinge/
     slide joint 1:1 (the usual position-actuated robot joint). Used to overlay
@@ -111,14 +146,23 @@ def _step_command_sequence(
     ctrlrange: np.ndarray,
     step_amplitude: float,
     n_joints: int | None = None,
+    joint_start: int = 0,
 ) -> list[tuple[str, np.ndarray]]:
     """Per-joint step sequence: home -> home+amplitude -> home-amplitude ->
     home, one joint at a time (all others held at home), clipped to the
-    actuator's ctrlrange where limited. n_joints limits the sequence to the
-    first n_joints actuators (default: all nu)."""
+    actuator's ctrlrange where limited. Steps actuators
+    [joint_start, joint_start + n_joints) (default: joint_start=0, all nu).
+
+    joint_start lets you target a specific actuator instead of always starting
+    from 0 — e.g. for grasp_reorient, actuator 3 is the first finger's tip
+    (fingertip) joint, the distal-most link in that finger's chain. Stepping it
+    (vs. actuator 0, the mcp/base joint) minimizes inter-joint mass-matrix
+    coupling, since the fingertip has no child links to drag along — useful for
+    isolating PID/actuator-model divergence from chain-coupling effects."""
     seq: list[tuple[str, np.ndarray]] = []
-    n = nu if n_joints is None else min(n_joints, nu)
-    for i in range(n):
+    start = max(0, min(joint_start, nu - 1))
+    n = (nu - start) if n_joints is None else min(n_joints, nu - start)
+    for i in range(start, start + n):
         for sign, label in ((+1, "+"), (-1, "-"), (0, "home")):
             c = home_ctrl.copy()
             if sign != 0:
@@ -145,6 +189,8 @@ def run_compare(
     step_amplitude: float = np.deg2rad(45.0),
     step_hold_seconds: float = 1.0,
     step_n_joints: int | None = None,
+    step_joint_start: int = 0,
+    remove_cube: bool = False,
 ) -> Path:
     """Run one episode against both eval sims in lockstep; returns the path of
     the saved .npz (qpos/qvel/control history).
@@ -154,6 +200,10 @@ def run_compare(
     control_mode="step": no planner — each actuator is stepped in turn
     home -> +step_amplitude -> -step_amplitude -> home, driving both eval sims
     with the identical command stream. No GPU/rollout model needed.
+
+    remove_cube: grasp_reorient only (silently ignored otherwise) — shifts the
+    'obj' cube out of the hand's workspace before reset, isolating actuator/
+    joint dynamics from cube-contact effects. See module docstring.
     """
     if control_mode not in ("mppi", "step"):
         raise ValueError(f"Unknown control_mode: {control_mode!r}")
@@ -188,6 +238,14 @@ def run_compare(
     q0 = np.asarray(q0, dtype=float)
     v0 = np.asarray(v0, dtype=float)
     u = np.asarray(u0, dtype=float).copy() if u0 is not None else np.zeros(mjm.nu)
+
+    if remove_cube:
+        if task_name == "grasp_reorient":
+            q0 = _relocate_cube_away(mjm, q0)
+            print(f"  --remove_cube: shifted 'obj' +{_CUBE_REMOVE_OFFSET_M:.1f}m in x "
+                  f"(clear of the hand for the whole episode)")
+        else:
+            print(f"  --remove_cube ignored: task={task_name!r} is not grasp_reorient")
 
     for kind in ALL_EVAL_SIMS:
         sim = eval_tasks[kind].make_eval_simulator(video_path=None, render=False)
@@ -293,16 +351,18 @@ def run_compare(
     else:  # control_mode == "step"
         seq = _step_command_sequence(
             mjm.nu, u, mjm.actuator_ctrllimited.astype(bool), mjm.actuator_ctrlrange, step_amplitude,
-            n_joints=step_n_joints,
+            n_joints=step_n_joints, joint_start=step_joint_start,
         )
         n_hold = max(1, int(round(step_hold_seconds / eval_dt)))
         max_total = max_steps if max_steps is not None else len(seq) * n_hold
-        n_stepped = mjm.nu if step_n_joints is None else min(step_n_joints, mjm.nu)
+        start = max(0, min(step_joint_start, mjm.nu - 1))
+        n_stepped = (mjm.nu - start) if step_n_joints is None else min(step_n_joints, mjm.nu - start)
 
         print(f"task={task_name}  control_mode=step  "
               f"eval_sims={[k.value for k in ALL_EVAL_SIMS]} (primary={PRIMARY_SIM.value})  "
               f"eval_dt={eval_dt*1e3:.2f}ms  step_amplitude={np.rad2deg(step_amplitude):.1f}deg  "
-              f"step_hold={step_hold_seconds:.2f}s  n_joints={n_stepped}/{mjm.nu}  max_steps={max_total}")
+              f"step_hold={step_hold_seconds:.2f}s  joints=[{start},{start+n_stepped})/{mjm.nu}  "
+              f"max_steps={max_total}")
 
         t_elapsed = 0.0
         step_idx = 0
@@ -463,7 +523,20 @@ def main():
     parser.add_argument("--step_hold_seconds", type=float, default=0.5,
                          help="[step mode] How long to hold each step target before moving on.")
     parser.add_argument("--step_n_joints", type=int, default=1,
-                         help="[step mode] Only step the first N actuators (default: all).")
+                         help="[step mode] Only step N actuators starting at --step_joint_start "
+                              "(default: all).")
+    parser.add_argument("--step_joint_start", type=int, default=0,
+                         help="[step mode] First actuator index to step (default: 0). "
+                              "For grasp_reorient, actuator 3 is the first finger's tip "
+                              "(fingertip) joint — the distal-most link, with no children to "
+                              "drag along — so '--step_joint_start 3 --step_n_joints 1' isolates "
+                              "PID/actuator-model divergence from the inter-joint mass-matrix "
+                              "coupling that stepping actuator 0 (mcp) exercises.")
+    parser.add_argument("--remove_cube", action="store_true", default=False,
+                         help="grasp_reorient only (ignored for other tasks): shift the "
+                              "cube out of the hand's workspace before reset so actuator/"
+                              "joint dynamics can be compared without cube-contact "
+                              "interference.")
     parser.add_argument("--model", type=str, default="M2", choices=list(MODEL_FACTORIES))
     parser.add_argument("--n_samples", type=int, default=256)
     parser.add_argument("--horizon", type=int, default=48)
@@ -557,6 +630,8 @@ def main():
         step_amplitude=np.deg2rad(args.step_amplitude_deg),
         step_hold_seconds=args.step_hold_seconds,
         step_n_joints=args.step_n_joints,
+        step_joint_start=args.step_joint_start,
+        remove_cube=args.remove_cube,
     )
 
     if args.record_video:
