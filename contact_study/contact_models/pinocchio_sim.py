@@ -86,14 +86,24 @@ class PinocchioPdActuation:
     contact solve treats the PD-held fingers as near-massless next to the cube; a
     large armature raises their effective inertia (better-conditioned Delassus,
     steadier grasp). It also enters the critically-damped kd via M_ii above
-    (when use_direct_kd=False)."""
+    (when use_direct_kd=False).
+
+    `force_limit` mirrors MuJoCo's per-joint actuator-force saturation
+    (jnt_actfrcrange): a (n_ctrl, 2) array of [lo, hi] torque bounds in ctrl
+    order (same order as ctrl_joint_names). Each substep the commanded PD torque
+    is clamped to this range before it drives the dynamics, exactly as MuJoCo
+    clamps qfrc_actuator to jnt_actfrcrange. Without it the PD applies the full
+    (unbounded) kp*error torque, which diverges from MuJoCo whenever the raw PD
+    torque exceeds the joint's limit (e.g. the LEAP hand's +/-0.95 N*m cap).
+    None => unlimited (no clamp), matching a model with no actuatorfrcrange."""
     ctrl_joint_names: list[str]
     kp: float = 3.0
     zeta: float = 1.0
     gravity_comp: bool = False
-    armature: float = 0.0
-    use_direct_kd: bool = False
-    kd: float = 0.0
+    armature: float = 0.001
+    use_direct_kd: bool = True
+    kd: float = 0.11
+    force_limit: "np.ndarray | None" = None
 
 
 @dataclass
@@ -105,8 +115,16 @@ class PinocchioContactConfig:
     (mirroring results/g1-constraint-simulation.py). Kp=0 disables it."""
     friction: float = 0.5
     use_mesh_geoms: bool = True
-    baumgarte_kp: float = 0.0
-    baumgarte_kd: float = 0.0
+    # Replace each triangle-mesh (BVH) collision geom with its convex hull so coal
+    # uses the analytic convex-convex (GJK/EPA) contact path — one stable normal +
+    # accurate penetration depth per step — instead of per-triangle BVH queries
+    # whose faceted, frame-to-frame-jittery normals drove the cube penetrating /
+    # "sticking" to the mesh fingertips. The LEAP tips are already convex to within
+    # triangulation noise, so the hull reproduces their shape almost exactly. Only
+    # affects collision geoms; the visual meshes are untouched.
+    use_convex_tips: bool = True
+    baumgarte_kp: float = 100.0
+    baumgarte_kd: float = 0.05
     admm_max_iterations: int = 5000
 
 
@@ -173,6 +191,54 @@ def _box_half_extents(go):
         return None
 
 
+def _coal_module():
+    """Return the coal (a.k.a. hppfcl) module Pinocchio builds its geometry with,
+    or None if neither import is available."""
+    try:
+        import coal
+        return coal
+    except Exception:
+        pass
+    try:
+        import hppfcl
+        return hppfcl
+    except Exception:
+        return None
+
+
+def convexify_mesh_geoms(geom_model):
+    """Replace every triangle-mesh (BVH) collision geom with its convex hull, in
+    place. coal loads MJCF `<geom type="mesh">` as a BVHModelOBBRSS triangle soup,
+    whose contact query returns a single per-triangle face normal that flips
+    between adjacent facets as bodies slide — the source of the noisy normals /
+    erratic penetration depth that made the cube penetrate and stick to the mesh
+    fingertips. A coal.Convex uses the analytic GJK/EPA support-mapping path
+    (like Box/Sphere): one stable normal + accurate signed penetration per step,
+    while keeping the true tip shape (the LEAP tips are convex to triangulation
+    noise). Returns the number of geoms converted."""
+    coal = _coal_module()
+    if coal is None:
+        return 0
+    n_converted = 0
+    for go in geom_model.geometryObjects:
+        g = go.geometry
+        if not type(g).__name__.startswith("BVHModel"):
+            continue  # already a primitive / convex; nothing to do
+        try:
+            verts = np.asarray(g.vertices(), dtype=float)
+        except Exception:
+            continue
+        if verts.ndim != 2 or verts.shape[0] < 4:
+            continue
+        pts = coal.StdVec_Vec3s()
+        for row in verts:
+            pts.append(row)
+        # keepTriangles=True needs qhull's "Qt" (triangulated output).
+        go.geometry = coal.Convex.convexHull(pts, True, "Qt")
+        n_converted += 1
+    return n_converted
+
+
 def _is_adjacent(model, j1, j2):
     """Same joint or a direct parent-child relationship between two non-universe
     joints (a contact there would be a spurious, permanently-active constraint).
@@ -186,9 +252,43 @@ def _is_adjacent(model, j1, j2):
     return False
 
 
-def build_collision_pairs(pin, model, geom_model, use_mesh_geoms):
-    """Wipe the parser's default pairs and add every non-adjacent, non-floor geom
-    pair (cube<->hand and hand<->hand). Returns the list of collidable geom ids."""
+def parse_mjcf_excludes(mjcf_path) -> set[frozenset[str]]:
+    """Read <contact><exclude body1=".." body2=".."/></contact> pairs from the
+    original (pre-split) MJCF. These are body-name pairs the model author has
+    explicitly marked as never-colliding (mirroring MuJoCo's own semantics),
+    used to patch cases _is_adjacent's joint-topology heuristic can't see —
+    e.g. a body welded straight to the world (no <joint>) followed by a child
+    joint: the child's parent joint id is universe (0), which _is_adjacent
+    deliberately treats as "not adjacent" (see its docstring) since that same
+    joint-parent-is-universe shape also covers legitimate independent contacts
+    (separate fingers, hand<->object) that must NOT be excluded."""
+    tree = ET.parse(mjcf_path)
+    contact = tree.getroot().find("contact")
+    if contact is None:
+        return set()
+    return {
+        frozenset((exc.get("body1"), exc.get("body2")))
+        for exc in contact.findall("exclude")
+    }
+
+
+def _canonical_body_name(name: str) -> str:
+    """Map a body/frame name onto a simulator-neutral name so MJCF <exclude>
+    tags match Pinocchio frames. MuJoCo calls the root body "world"; Pinocchio's
+    MJCF parser calls the same frame "universe". Geoms declared loose on the
+    <worldbody> (e.g. this LEAP scene's palm plates) hang off that frame in both,
+    so an <exclude body1="world" .../> must match Pinocchio's "universe"."""
+    return "world" if name == "universe" else name
+
+
+def build_collision_pairs(pin, model, geom_model, use_mesh_geoms, excluded_body_pairs=None):
+    """Wipe the parser's default pairs and add every non-adjacent, non-floor,
+    non-excluded geom pair (cube<->hand and hand<->hand). `excluded_body_pairs`
+    (from parse_mjcf_excludes) additionally drops any pair whose owning bodies
+    match one of the model's own <contact><exclude> tags (compared under
+    _canonical_body_name, so "world" tags match Pinocchio's "universe" frame).
+    Returns the list of collidable geom ids."""
+    excluded_body_pairs = excluded_body_pairs or set()
     geom_model.removeAllCollisionPairs()
     ids = []
     for gid, go in enumerate(geom_model.geometryObjects):
@@ -209,6 +309,15 @@ def build_collision_pairs(pin, model, geom_model, use_mesh_geoms):
             jb = geom_model.geometryObjects[gb].parentJoint
             if _is_adjacent(model, ja, jb):
                 continue
+            if excluded_body_pairs:
+                fa = geom_model.geometryObjects[ga].parentFrame
+                fb = geom_model.geometryObjects[gb].parentFrame
+                body_pair = frozenset((
+                    _canonical_body_name(model.frames[fa].name),
+                    _canonical_body_name(model.frames[fb].name),
+                ))
+                if body_pair in excluded_body_pairs:
+                    continue
             geom_model.addCollisionPair(pin.CollisionPair(ga, gb))
     return ids
 
@@ -278,7 +387,13 @@ class PinocchioSimulator(EvalSimulator):
         self._collision_model = coll
         self._visual_model = vis
         self._data = model.createData()
-        build_collision_pairs(pin, model, coll, self._contact_cfg.use_mesh_geoms)
+        # Swap triangle-mesh (BVH) fingertips for their convex hulls so contacts
+        # use coal's analytic GJK/EPA path (stable normal + accurate depth); must
+        # happen before GeometryData is built off the collision model.
+        if self._contact_cfg.use_convex_tips:
+            convexify_mesh_geoms(coll)
+        excludes = parse_mjcf_excludes(model_path)
+        build_collision_pairs(pin, model, coll, self._contact_cfg.use_mesh_geoms, excludes)
         self._geom_data = pin.GeometryData(coll)
         # Ask coal to populate the contact manifold (normal + witness points) per
         # pair; without this the collision results carry NaN normals.
@@ -301,6 +416,21 @@ class PinocchioSimulator(EvalSimulator):
             [model.joints[model.getJointId(n)].idx_v for n in pid.ctrl_joint_names],
             dtype=int,
         )
+
+        # Per-controlled-joint actuator torque limits (MuJoCo jnt_actfrcrange),
+        # in ctrl order. None => unlimited (_substep skips the clamp).
+        if pid.force_limit is not None:
+            fl = np.asarray(pid.force_limit, dtype=float).reshape(-1, 2)
+            if fl.shape[0] != self._ctrl_vadr.shape[0]:
+                raise ValueError(
+                    f"force_limit has {fl.shape[0]} rows but there are "
+                    f"{self._ctrl_vadr.shape[0]} controlled joints."
+                )
+            self._ctrl_frc_lo = fl[:, 0].copy()
+            self._ctrl_frc_hi = fl[:, 1].copy()
+        else:
+            self._ctrl_frc_lo = None
+            self._ctrl_frc_hi = None
 
         # Rotor inertia on the controlled joints: crba (=> the Delassus the ADMM
         # solve builds) and the mass-scaled kd both see A = M + armature, so the
@@ -506,11 +636,25 @@ class PinocchioSimulator(EvalSimulator):
             kd = np.full_like(m_diag, self._pid.kd)
         else:
             kd = 2.0 * self._pid.zeta * np.sqrt(kp * m_diag)
-        tau = np.zeros(model.nv)
-        tau[self._ctrl_vadr] = (kp * (self._q_des[self._ctrl_qadr] - q[self._ctrl_qadr])
-                                - kd * v[self._ctrl_vadr])
+        # Actuator stiffness (+ optional gravity compensation) — the part MuJoCo
+        # produces as qfrc_actuator and saturates to jnt_actfrcrange.
+        act = kp * (self._q_des[self._ctrl_qadr] - q[self._ctrl_qadr])
         if self._pid.gravity_comp:
-            tau[self._ctrl_vadr] += pin.computeGeneralizedGravity(model, data, q)[self._ctrl_vadr]
+            act = act + pin.computeGeneralizedGravity(model, data, q)[self._ctrl_vadr]
+        if self._ctrl_frc_lo is not None:
+            act = np.clip(act, self._ctrl_frc_lo, self._ctrl_frc_hi)
+
+        # Velocity damping is applied OUTSIDE the saturation. In MuJoCo the
+        # dominant hand damping is passive joint damping (qfrc_passive), which is
+        # not part of the clamped actuator force — so when the actuator saturates,
+        # MuJoCo still brakes with -damping*v. Clamping the damping together with
+        # the stiffness (the naive approach) drops that braking during saturation
+        # and lets the Pinocchio joint run ahead of MuJoCo. (A tiny 0.01*v of this
+        # kd is really the position actuator's kv, which MuJoCo does clamp; leaving
+        # it outside is a <=0.01*v approximation, negligible next to the 0.1
+        # passive term.)
+        tau = np.zeros(model.nv)
+        tau[self._ctrl_vadr] = act - kd * v[self._ctrl_vadr]
 
         v_free = v + dt * pin.aba(model, data, q, v, tau, self._fext)
 

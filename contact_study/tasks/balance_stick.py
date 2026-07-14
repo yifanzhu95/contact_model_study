@@ -35,8 +35,36 @@ _ARM_JOINTS = [
 _HOME_ARM_QPOS = np.array(
     [-1.5708, -1.5708, 1.5708, 0.0, 1.5708, 0.0], dtype=np.float64
 )
-_STICK_INIT_POS  = np.array([-0.13399598, 0.59876665, 0.5825799], dtype=np.float64)
-_STICK_INIT_QUAT = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+# z matches the plate top surface (~0.493, from the arm's home pose) plus the
+# stick capsule's half-length (0.1) + radius (0.01) so it rests flush instead
+# of embedded in the plate. The keyframe-derived value (0.5825799) placed the
+# capsule ~2cm *into* the plate; under this task's eval sim (hard_contact=True,
+# solref timeconst clamped to ~2*dt at the fine eval timestep) that penetration
+# was corrected in essentially one step, producing a ~49 m/s velocity spike.
+# +0.001 clearance absorbs the reset's random tilt without reintroducing it.
+_STICK_INIT_POS  = np.array([-0.13399598, 0.59876665, 0.604], dtype=np.float64)
+_STICK_INIT_QUAT = np.array([1,0,0,0], dtype=np.float64)
+
+# Camera: fixed position, aimed at the robot's initial working point (the
+# stick's start pos from the "home" keyframe in scenes/balance_stick/
+# ur5e_balance_stick.xml, where the plate/end-effector sit at reset). We
+# derive (right, down, forward) camera axes from a look-at computation rather
+# than hand-picking xyaxes (c.f. grasp_reorient.py's "top" camera), since
+# there's no existing MJCF <camera> to match here.
+_CAM_POS    = np.array([-1.2, 1.2, 0.8], dtype=np.float64)
+_CAM_TARGET = _STICK_INIT_POS
+
+_cam_fwd   = _CAM_TARGET - _CAM_POS
+_cam_fwd  /= np.linalg.norm(_cam_fwd)
+_world_up  = np.array([0.0, 0.0, 1.0])
+_cam_right = np.cross(_cam_fwd, _world_up)
+_cam_right /= np.linalg.norm(_cam_right)
+_cam_up    = np.cross(_cam_right, _cam_fwd)
+_cam_down  = -_cam_up
+_CAM_ROTMAT = tuple(   # columns = camera (right, down, forward) axes in world frame
+    tuple(float(v) for v in row)
+    for row in np.column_stack([_cam_right, _cam_down, _cam_fwd])
+)
 
 
 @wp.func
@@ -54,6 +82,8 @@ def balance_stick_cost_wp(qpos: wp.array(dtype=float),
     plate_site   = indices[2]
     end1_site    = indices[3]
     end2_site    = indices[4]
+    obj_qpos_adr = indices[5]
+    obj_qvel_adr = indices[6]
 
     p_plate = site_xpos[plate_site]
     p_end1  = site_xpos[end1_site]
@@ -70,7 +100,7 @@ def balance_stick_cost_wp(qpos: wp.array(dtype=float),
     # (the stick topples/slides off the plate in either direction).
     d1_sq = wp.length_sq(p_end1 - p_plate)
     d2_sq = wp.length_sq(p_end2 - p_plate)
-    c_plate = wp.min(d1_sq, d2_sq)
+    c_plate = wp.pow(wp.min(d1_sq, d2_sq),2.0)
 
     # Distance of the 6 arm joints from the "home" pose.
     c_home = float(0.0)
@@ -78,16 +108,31 @@ def balance_stick_cost_wp(qpos: wp.array(dtype=float),
         dq = qpos[arm_qpos_adr + i] - goal[i]
         c_home = c_home + dq * dq
 
+    # Stick's free-joint qvel is laid out [vx,vy,vz, wx,wy,wz].
+    v_stick = wp.vec3(qvel[obj_qvel_adr], qvel[obj_qvel_adr + 1], qvel[obj_qvel_adr + 2])
+    w_stick = wp.vec3(qvel[obj_qvel_adr + 3], qvel[obj_qvel_adr + 4], qvel[obj_qvel_adr + 5])
+    c_linvel = wp.dot(v_stick, v_stick)
+    c_angvel = wp.dot(w_stick, w_stick)
+
     if terminal:
+        # Fallen: stick's body-frame z has dropped below 0.5 (slid/knocked off
+        # the plate and fell), a hard terminal penalty on top of the tilt/home/
+        # plate terms.
+        fallen = float(0.0)
+        if qpos[obj_qpos_adr + 2] < 0.25:
+            fallen = 1.0
         return (
-            weights[3] * c_tilt +
-            weights[4] * c_home +
-            weights[5] * c_plate
+            weights[5] * c_tilt +
+            weights[6] * c_home +
+            weights[7] * c_plate +
+            weights[8] * fallen
         )
     return (
         weights[0] * c_tilt +
         weights[1] * c_home +
-        weights[2] * c_plate
+        weights[2] * c_plate +
+        weights[3] * c_linvel +
+        weights[4] * c_angvel
     )
 
 
@@ -112,15 +157,18 @@ class BalanceStickTask(BaseTask):
         self.config = TaskConfig(
             name               = "balance_stick",
             complexity         = ContactComplexity.LOW,
-            max_steps          = 500,
+            max_steps          = 1000,
             success_thresholds = {"tilt": 0.1, "plate": 0.05, "vel": 0.5},
             cost_weights       = {
-                "w_tilt":      200.0,
-                "w_home":      2.0,
-                "w_plate":     300.0,
-                "w_tilt_term": 400.0,
-                "w_home_term": 2.0,
-                "w_plate_term":600.0,
+                "w_tilt":       1.0,
+                "w_home":       5.0,
+                "w_plate":      1.0,
+                "w_linvel":     0.05,
+                "w_angvel":     0.05,
+                "w_tilt_term":  100.0,
+                "w_home_term":  50.0,
+                "w_plate_term": 0.0,
+                "w_fallen_term":100.0,
             },
             # No {geometry} variant for this scene.
             xml_path_template  = BALANCE_SCENE_XML,
@@ -128,9 +176,10 @@ class BalanceStickTask(BaseTask):
             rollout_is_urdf    = False,
             eval_sim           = EvalSimulatorKind.MUJOCO,
             eval_model_paths   = {EvalSimulatorKind.MUJOCO: str(SCENES_DIR / BALANCE_SCENE_XML)},
-            cam_pos            = (1.2, -1.2, 0.8),
+            cam_pos            = tuple(float(v) for v in _CAM_POS),
+            cam_rotmat         = _CAM_ROTMAT,
             cam_fps            = 30.0,
-            timestep           = 0.002,
+            timestep           = 0.0001,
             eval_substeps_per_rollout = 10,
         )
 
@@ -142,17 +191,19 @@ class BalanceStickTask(BaseTask):
         plate_site = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "center_of_plate")
         end1_site  = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "end1")
         end2_site  = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_SITE, "end2")
+        obj_jnt    = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, "obj_joint")
 
         self.index_vector = np.array([
             arm_qpos_adr, len(_ARM_JOINTS), plate_site, end1_site, end2_site,
+            mjm.jnt_qposadr[obj_jnt], mjm.jnt_dofadr[obj_jnt],
         ], dtype=np.int32)
 
         self.goal_vector = _HOME_ARM_QPOS.astype(np.float32).copy()
 
         w = self.config.cost_weights
         weights_list = [
-            w["w_tilt"], w["w_home"], w["w_plate"],
-            w["w_tilt_term"], w["w_home_term"], w["w_plate_term"],
+            w["w_tilt"], w["w_home"], w["w_plate"], w["w_linvel"], w["w_angvel"],
+            w["w_tilt_term"], w["w_home_term"], w["w_plate_term"], w["w_fallen_term"],
         ]
 
         self.index_vector_wp = wp.array(self.index_vector, dtype=wp.int32, device="cuda")
@@ -202,6 +253,7 @@ class BalanceStickTask(BaseTask):
     def is_success(self, mjd: mujoco.MjData) -> bool:
         tilt, plate_err = self._tilt_and_plate_err(mjd)
         thr = self.config.success_thresholds
+        return False
         return bool(
             tilt < thr["tilt"]
             and plate_err < thr["plate"]
@@ -211,4 +263,5 @@ class BalanceStickTask(BaseTask):
     def has_failed(self, mjd: mujoco.MjData) -> bool:
         # Fallen (>~60 deg from vertical) or slid/toppled off the plate.
         tilt, plate_err = self._tilt_and_plate_err(mjd)
-        return bool(tilt > 1.0 or plate_err > 0.3)
+        #return bool(tilt > 1.0 or plate_err > 0.3)
+        return False

@@ -53,6 +53,13 @@ INCLUDE_CUBE = True   # False -> build the hand alone, with no free "obj" cube a
 # itself derived from this file's own scheme) ----------------------------------
 MU = 0.5              # Coulomb friction coefficient for point contacts
 USE_MESH_TIPS = True  # False -> box-vs-box collision only (cube is a box: no mesh BVH)
+USE_CONVEX_TIPS = True  # replace each triangle-mesh (BVH) fingertip collision geom with
+                        # its coal.Convex hull -> analytic GJK/EPA contact (one stable
+                        # normal + accurate depth) instead of faceted per-triangle BVH
+                        # normals (the source of the cube penetrating/sticking to the mesh
+                        # tips). LEAP tips are convex to triangulation noise, so shape is
+                        # kept. Collision geoms only; visuals untouched. No effect if
+                        # USE_MESH_TIPS is False.
 KP = 3.0              # hand position-servo stiffness (fixed, not mass-scaled)
 ZETA = 1.0            # hand PD damping ratio (1.0 = critically damped)
 GRAVITY_COMP = False   # add gravity-compensation torque so the hand holds its target
@@ -66,8 +73,8 @@ GRAVITY_COMP = False   # add gravity-compensation torque so the hand holds its t
 # each PointContactConstraintModel and read back off it in the solve loop, exactly
 # like g1-constraint-simulation.py does for its anchor/joint-limit constraints.
 # Kp=0 (default) disables it, recovering the plain velocity-level contact solve.
-BAUMGARTE_KP = 50.0   # contact position-error correction gain
-BAUMGARTE_KD = 5.0    # contact velocity-error correction gain
+BAUMGARTE_KP = 100.0   # contact position-error correction gain
+BAUMGARTE_KD = 0.05    # contact velocity-error correction gain
 
 # --- grasp_reorient's fixed initial state (contact_study/tasks/grasp_reorient.py) --
 # qpos = [16 hand joint angles, obj pos(3), obj quat(wxyz)(4)]  (nq = 23)
@@ -178,6 +185,42 @@ def _box_half_extents(go):
         return np.asarray(go.geometry.halfSide, dtype=float)
     except Exception:
         return None
+
+
+def convexify_mesh_geoms(geom_model):
+    """Replace every triangle-mesh (BVH) collision geom with its convex hull, in
+    place. coal loads MJCF `<geom type="mesh">` as a BVHModelOBBRSS triangle soup
+    whose contact query returns a per-triangle face normal that flips between
+    adjacent facets as bodies slide -- the noisy normals / erratic penetration
+    depth that made the cube penetrate and stick to the mesh fingertips. A
+    coal.Convex uses the analytic GJK/EPA support-mapping path (like Box/Sphere):
+    one stable normal + accurate signed depth per step, at no shape-fidelity cost
+    since the LEAP tips are convex to triangulation noise. Returns the count."""
+    try:
+        import coal
+    except Exception:
+        try:
+            import hppfcl as coal
+        except Exception:
+            return 0
+    n_converted = 0
+    for go in geom_model.geometryObjects:
+        g = go.geometry
+        if not type(g).__name__.startswith("BVHModel"):
+            continue  # already a primitive / convex; nothing to do
+        try:
+            verts = np.asarray(g.vertices(), dtype=float)
+        except Exception:
+            continue
+        if verts.ndim != 2 or verts.shape[0] < 4:
+            continue
+        pts = coal.StdVec_Vec3s()
+        for row in verts:
+            pts.append(row)
+        # keepTriangles=True needs qhull's "Qt" (triangulated output).
+        go.geometry = coal.Convex.convexHull(pts, True, "Qt")
+        n_converted += 1
+    return n_converted
 
 
 def _is_adjacent(model, j1, j2):
@@ -415,6 +458,12 @@ def build_model():
             f"to match _INIT_CTRL/the recorded control log's column count."
         )
 
+    # Swap triangle-mesh (BVH) fingertips for their convex hulls so contacts use
+    # coal's analytic GJK/EPA path; must happen before GeometryData is built.
+    if USE_MESH_TIPS and USE_CONVEX_TIPS:
+        n_convex = convexify_mesh_geoms(collision_model)
+        print(f"convexified {n_convex} mesh fingertip collision geom(s)")
+
     obj_ids, hand_ids = build_collision_pairs(model, collision_model, obj_jid)
     print(f"collision pairs: {len(collision_model.collisionPairs)}  "
           f"(obj geoms={len(obj_ids)}, hand geoms={len(hand_ids)})")
@@ -433,7 +482,7 @@ def make_solver():
     settings.absolute_complementarity_tol = 1e-10
     settings.relative_complementarity_tol = 1e-12
     settings.admm_update_rule = pin.ADMMUpdateRule.SPECTRAL
-    settings.anderson_capacity = 10
+    settings.anderson_capacity = 2
     #settings.mu_prox = 1e-4
     settings.admm_proximal_rule = pin.ADMMProximalRule.AUTOMATIC
     settings.stat_record = False
