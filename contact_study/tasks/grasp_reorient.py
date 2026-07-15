@@ -43,7 +43,7 @@ _MJ_CTRL_TO_URDF_JOINT = [
 # conaffinity=0 on every geom) to isolate the actuator/PD model from the contact
 # model in the MuJoCo-vs-Pinocchio eval comparison. Swap back to the plain
 # scene for normal grasping runs (the no-contact scene can't grasp the cube).
-GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites.xml"#"leap_hand/leap_hand_right_w_sites_simple.xml"
+GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites_simple.xml"#"leap_hand/leap_hand_right_w_sites_simple.xml"
 #"leap_hand/leap_hand_right_w_sites_spheres.xml"
 #GRASP_SCENE_XML = "leap_hand_old/leap_right_hand_simple copy.xml"#
 
@@ -265,8 +265,8 @@ class GraspReorientTask(BaseTask):
                 "w_quat": 75.0, #5.0
                 "w_pos": 400.0, #40.0
                 "w_velo": 0.0,
-                "w_contact": 550.0,#250.0,#500.0,#2.5
-                "w_joint": 10.0, #0.1
+                "w_contact": 750.0,#250.0,#500.0,#2.5
+                "w_joint": 6.0, #0.1
                 "w_joint_velo": 0.0,
                 "w_fallen": 300.0, #30.0,
                 "w_quat_term": 100.0, #10.0
