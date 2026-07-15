@@ -1,15 +1,12 @@
 <mujoco model="leap_right">
   <default>
     <position kp="3.0" kv="0.01" />
-    <joint damping="0.1" armature="0.001"/>
+    <joint damping="0.1" armature="0.001" frictionloss="0.0"/>
   </default>
   <compiler angle="radian" />
   <asset>
     <mesh name="white_tip" content_type="model/obj" file="meshes/white_tip.obj" />
     <mesh name="white_tip_thumb" content_type="model/obj" file="meshes/white_tip_thumb.obj" />
-
-    <texture name='cube_surface' file="iris_block.png" gridsize="3 4" gridlayout=".U..LFRB.D.."/>
-    <material name="obj_material" texture="cube_surface" specular="5" shininess=".0"/>
   </asset>
   <worldbody>
     <geom size="0.011 0.013 0.017" pos="-0.00229421 -0.00849997 0.0140263" quat="1.28159e-06 0.965926 3.434e-07 -0.258819" type="box" />
@@ -152,6 +149,7 @@
         </body>
       </body>
     </body>
+    
     <body name="obj" pos="0.01 0.0258 0.08" quat="0.965926 0 0.258819 0">
       <inertial pos="0 0 0" mass="0.14" diaginertia="0.00011433 0.00011433 0.00011433" />
       <joint name="obj_joint" type="free" />
