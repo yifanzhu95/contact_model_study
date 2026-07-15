@@ -8,7 +8,7 @@
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=02:00:00
+#SBATCH --time=03:00:00
 
 set -euo pipefail
 
@@ -27,15 +27,15 @@ TASK="grasp_reorient"
 N_EPISODES=5          # episodes per weight set -> success rate
 
 MODELS=("M2" "M3" "M4")
-W_QUAT=("75" "50" "25")
-W_POS=("600" "400" "200")
-W_CONTACT=("750" "500" "250")
-W_JOINT=("100" "50" "5")
+W_QUAT=("100" "75" "50")
+W_POS=("500" "400" "300")
+W_CONTACT=("1000" "750" "500")
+W_JOINT=("8" "6" "4")
 
 # Shared MPPI / eval knobs (single values, not swept).
 N_SAMPLES=256
 HORIZON=48
-TEMPERATURE=25.0
+TEMPERATURE=10.0
 NOISE_SIGMA=0.01
 DELTA=0.1
 SUBSTEPS=16
@@ -100,4 +100,5 @@ python experiments/hpc/run_param_cell.py \
     --eval_sim    "$EVAL_SIM" \
     --settle      "$SETTLE" \
     --geometry    "$GEOMETRY" \
-    --seed        "$SEED"
+    --seed        "$SEED" \
+    --debug

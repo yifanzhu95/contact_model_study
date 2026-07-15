@@ -51,7 +51,7 @@ N_SAMPLES=("16" "64" "256" "1024" "4096")    # the swept rollout counts
 
 # Shared MPPI / eval knobs (single values, not swept).
 HORIZON=48
-TEMPERATURE=25.0
+TEMPERATURE=10.0
 NOISE_SIGMA=0.01
 DELTA=0.1
 SUBSTEPS=16

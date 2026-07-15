@@ -52,7 +52,7 @@ HORIZONS=("6" "12" "24" "48" "96")            # the swept planning horizons
 
 # Shared MPPI / eval knobs (single values, not swept).
 N_SAMPLES=256
-TEMPERATURE=25.0
+TEMPERATURE=10.0
 NOISE_SIGMA=0.01
 DELTA=0.1
 SUBSTEPS=16

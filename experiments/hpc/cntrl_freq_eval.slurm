@@ -58,7 +58,7 @@ SUBSTEPS_SWEEP=("2" "4" "8" "16" "32" "64")   # the swept substep counts
 # Shared MPPI / eval knobs (single values, not swept).
 N_SAMPLES=256
 HORIZON=48
-TEMPERATURE=25.0
+TEMPERATURE=10.0
 NOISE_SIGMA=0.01
 DELTA=0.1
 EVAL_SIM="none"                 # "none" uses the task default; "mujoco" is faster
