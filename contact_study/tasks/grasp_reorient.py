@@ -58,7 +58,7 @@ _ARMATURE = 0.001
 
 # Pinocchio eval: mirror tests/replay_pinocchio_controls.py's simulation scheme —
 _PIN_USE_DIRECT_KD  = True  # False (default): derive kd from zeta + mass matrix. True: use _PIN_KD directly.
-_PIN_KD             = _PID_KD + _PID_KD   # direct damping gain, used when _PIN_USE_DIRECT_KD is True
+_PIN_KD             = _JOINT_DAMPING + _PID_KD   # direct damping gain, used when _PIN_USE_DIRECT_KD is True
 _PIN_GRAVITY_COMP   = False  # gravity-compensation torque on the hand PD
 
 _DRAKE_PID_EFFORT = 100.0
@@ -252,7 +252,7 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 500,
+            max_steps          = 250,
             success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
             cost_weights       = {
                 "w_quat": 75.0, #5.0
