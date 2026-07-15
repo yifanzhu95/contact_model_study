@@ -107,6 +107,40 @@ class PinocchioPdActuation:
 
 
 @dataclass
+class PinocchioJointConstraintConfig:
+    """Joint-level constraints (position limits + dry friction), resolved in the
+    same ADMM solve as the contacts.
+
+    Pinocchio's forward dynamics (aba) applies NEITHER of these on its own —
+    model.lower/upperPositionLimit and model.friction are inert metadata, exactly
+    like model.damping. They only take effect as explicit constraint models, which
+    is what this config switches on.
+
+    enforce_limits: build a JointLimitConstraintModel over the 1-DOF joints named
+        in joint_channels. Bounds come from the model's own lower/upperPositionLimit,
+        which Pinocchio's MJCF parser DOES import correctly from <joint range>. The
+        constraint is unilateral: each substep only the joints within `limit_margin`
+        of (or past) a bound are activated, so free joints are unaffected.
+    limit_margin: activate a bound this far (rad) before it is reached. 0.0 means
+        the joint must cross the limit before the constraint pushes back (a small
+        overshoot, resolved within a step or two). A small positive margin engages
+        earlier and reduces that overshoot.
+    frictionloss: pin joint name -> dry-friction torque (N*m), i.e. MuJoCo's
+        <joint frictionloss>. Pass the MuJoCo values explicitly: Pinocchio's MJCF
+        parser does NOT inherit frictionloss from a <default> block (same gap as
+        contype/conaffinity), so model.friction reads 0 for a defaults-driven scene.
+        Omitted/zero-valued joints get no friction constraint.
+
+        NOTE the solver works in IMPULSE space, so these torques are scaled by the
+        timestep (bound = frictionloss * dt) when the constraint is built; passing
+        the raw torque as the bound would lock the joint permanently.
+    """
+    enforce_limits: bool = False
+    limit_margin: float = 0.0
+    frictionloss: "dict[str, float] | None" = None
+
+
+@dataclass
 class PinocchioContactConfig:
     """Frictional point-contact knobs. Collision pairs are all non-adjacent,
     non-floor geom pairs (cube<->hand and hand<->hand). Each contact carries a
@@ -355,6 +389,7 @@ class PinocchioSimulator(EvalSimulator):
         joint_channels: list[PinocchioJointChannel] | None = None,
         free_channels: list[PinocchioFreeBodyChannel] | None = None,
         contact_cfg: PinocchioContactConfig | None = None,
+        joint_cfg: PinocchioJointConstraintConfig | None = None,
         video_path: str | None = None,
         render: bool = True,
     ):
@@ -368,6 +403,7 @@ class PinocchioSimulator(EvalSimulator):
         self._free_channels = free_channels or []
         self._pid = pid
         self._contact_cfg = contact_cfg or PinocchioContactConfig()
+        self._joint_cfg = joint_cfg or PinocchioJointConstraintConfig()
         self._timestep = float(config.timestep)
         self._video_path = video_path
         self._want_render = render or (video_path is not None)
@@ -437,6 +473,49 @@ class PinocchioSimulator(EvalSimulator):
         # contact solve doesn't treat the PD-held fingers as near-massless.
         if pid.armature:
             model.armature[self._ctrl_vadr] += pid.armature
+
+        # --- joint-level constraints (position limits + dry friction) ----------
+        # Both are inert in aba (see PinocchioJointConstraintConfig) and only bite
+        # as constraint models appended to the same ADMM solve as the contacts.
+        jcfg = self._joint_cfg
+        chan_jids = [model.getJointId(ch.pin_name) for ch in self._joint_channels]
+
+        # Position limits: one JointLimitConstraintModel over all channel joints.
+        # It is unilateral and re-selected per substep against the live q (see
+        # _joint_constraints), so it costs nothing while the joints are interior.
+        self._limit_raw = None
+        if jcfg.enforce_limits and chan_jids:
+            jv = pin.StdVec_Index()
+            for j in chan_jids:
+                jv.append(j)
+            self._limit_raw = pin.JointLimitConstraintModel(model, jv)
+            if jcfg.limit_margin:
+                # setPositionLimitAndMargin takes model.nq-sized vectors.
+                margin = np.full(model.nq, float(jcfg.limit_margin))
+                self._limit_raw.setPositionLimitAndMargin(
+                    np.asarray(model.lowerPositionLimit, dtype=float),
+                    np.asarray(model.upperPositionLimit, dtype=float),
+                    margin,
+                )
+
+        # Dry friction. Two API details: the bounds are IMPULSES (the solver works
+        # in impulse space, so scale the frictionloss torque by dt — passing the
+        # raw torque locks the joint permanently), and lb/ub must be full model.nv
+        # vectors indexed by each joint's idx_v, not one entry per selected joint.
+        # The model is built per (excluded-joint) set and cached, because a joint
+        # sitting at an active limit must be left out — see _friction_model.
+        self._friction_spec = []   # (name, jid, idx_q, idx_v, impulse_bound)
+        if jcfg.frictionloss:
+            for ch in self._joint_channels:
+                val = float(jcfg.frictionloss.get(ch.pin_name, 0.0))
+                if val > 0.0:
+                    jid = model.getJointId(ch.pin_name)
+                    self._friction_spec.append((
+                        ch.pin_name, jid,
+                        model.joints[jid].idx_q, model.joints[jid].idx_v,
+                        val * self._timestep,
+                    ))
+        self._friction_cache = {}
 
         # ADMM solver setup (mirrors replay_pinocchio_controls.py's make_solver).
         self._solver = pin.ADMMConstraintSolver()
@@ -618,12 +697,92 @@ class PinocchioSimulator(EvalSimulator):
         cds = [cm.createData() for cm in cms]
         return cms, cds
 
+    def _joints_at_limit(self, q):
+        """Names of friction joints currently sitting at (or past) a position
+        limit, using the same rule JointLimitConstraintModel's proximity filter
+        applies. Those joints must be dropped from the friction constraint — see
+        _friction_model."""
+        model = self._model
+        margin = float(self._joint_cfg.limit_margin)
+        at = set()
+        for name, _jid, idx_q, _idx_v, _b in self._friction_spec:
+            lo = float(model.lowerPositionLimit[idx_q])
+            hi = float(model.upperPositionLimit[idx_q])
+            if q[idx_q] >= hi - margin or q[idx_q] <= lo + margin:
+                at.add(name)
+        return at
+
+    def _friction_model(self, exclude):
+        """Wrapped JointFrictionConstraintModel over every friction joint except
+        `exclude`, cached per exclusion set (normally empty, so this is a dict hit).
+
+        Joints at an active limit MUST be excluded: the limit constraint's row for
+        that DOF is +/-e_i and the friction row is e_i — exactly linearly dependent,
+        which makes the Delassus J*M^-1*J^T singular and the solve return NaN. No
+        amount of Cholesky regularization fixes it (verified up to mu=1e-4), and
+        dropping friction there is physically right anyway: a joint pinned against
+        its stop is already held, and dry friction changes nothing."""
+        key = frozenset(exclude)
+        if key in self._friction_cache:
+            return self._friction_cache[key]
+        pin, model = self._pin, self._model
+        jids = []
+        lb = np.zeros(model.nv)
+        ub = np.zeros(model.nv)
+        for name, jid, _idx_q, idx_v, bound in self._friction_spec:
+            if name in key:
+                continue
+            jids.append(jid)
+            ub[idx_v] = bound
+            lb[idx_v] = -bound
+        cm = None
+        if jids:
+            jv = pin.StdVec_Index()
+            for j in jids:
+                jv.append(j)
+            cm = pin.ConstraintModel(pin.JointFrictionConstraintModel(model, jv, lb, ub))
+        self._friction_cache[key] = cm
+        return cm
+
+    def _joint_constraints(self, q):
+        """Constraint models for joint position limits and dry friction at the
+        current q, to be appended AFTER the contacts (the Baumgarte pass in
+        _substep only spans the leading contact rows).
+
+        The limit constraint is re-selected and re-wrapped every substep because
+        (a) its active set depends on q — only joints near/past a bound engage,
+        and makeSelectionFilteredByLimitProximity is what feeds q in — and (b)
+        pin.ConstraintModel(...) *copies* the model, so a wrapper built earlier
+        would freeze a stale active set. When no joint is near a limit the
+        residual size is 0 and nothing is added."""
+        pin = self._pin
+        cms, cds = [], []
+        at_limit = set()
+        if self._limit_raw is not None:
+            self._limit_raw.makeSelectionFilteredByLimitProximity(q)
+            if self._limit_raw.residualSize() > 0:
+                cm = pin.ConstraintModel(self._limit_raw)
+                cms.append(cm)
+                cds.append(cm.createData())
+                at_limit = self._joints_at_limit(q)
+        if self._friction_spec:
+            fcm = self._friction_model(at_limit)
+            if fcm is not None:
+                cms.append(fcm)
+                cds.append(fcm.createData())
+        return cms, cds
+
     def _substep(self):
         pin = self._pin
         model, data = self._model, self._data
         q, v = self._q, self._v
         dt = self._timestep
         cms, cds = self._detect_contacts()
+        # Contacts occupy the leading rows; the Baumgarte pass below relies on it.
+        n_contact = len(cms)
+        jcms, jcds = self._joint_constraints(q)
+        cms = cms + jcms
+        cds = cds + jcds
 
         # Explicit forward-Euler PD on the hand: fixed stiffness kp. Damping is
         # either a fixed kd applied directly (use_direct_kd=True) or derived
@@ -668,13 +827,23 @@ class PinocchioSimulator(EvalSimulator):
         chol = pin.ConstraintCholeskyDecomposition(model, data, cms, cds)
         chol.compute(model, data, cms, cds, 1e-10)
         delassus = chol.getDelassusOperatorCholeskyExpression()
-        Jc = pin.getConstraintsJacobian(model, data, cms, cds)
+        # Force 2-D: with a single constraint row (e.g. one joint-limit bound
+        # active and nothing else) getConstraintsJacobian returns a flat (nv,)
+        # array, so Jc @ v_free would collapse to a scalar and the solver would
+        # reject g. Contacts alone never hit this (a point contact is 3 rows).
+        Jc = np.asarray(pin.getConstraintsJacobian(model, data, cms, cds)).reshape(-1, model.nv)
         g = Jc @ v_free
 
         # Baumgarte stabilization: bias each contact's drift by its position error
         # scaled by the Kp set on the constraint (g1-style), g += Kp * perr / dt.
+        # Restricted to the leading contact rows: the joint-limit/friction models
+        # appended after them do not carry this state and raise on access
+        # (JointFrictionConstraintModel has no baumgarte_corrector_parameters, and
+        # JointLimitConstraintData has no constraint_position_error). They need no
+        # Baumgarte anyway — the limit is unilateral and resolves its own
+        # overshoot, and friction acts purely at the velocity level.
         idx = 0
-        for cm, cd in zip(cms, cds):
+        for cm, cd in zip(cms[:n_contact], cds[:n_contact]):
             size = cm.residualSize()
             kp_b = cm.baumgarte_corrector_parameters.Kp
             if kp_b != 0.0:
@@ -682,7 +851,7 @@ class PinocchioSimulator(EvalSimulator):
             idx += size
 
         self._solver.solve(delassus, g, cms, cds, self._settings, self._result)
-        forces = (1.0 / dt) * self._result.retrieveConstraintImpulses()
+        forces = (1.0 / dt) * np.asarray(self._result.retrieveConstraintImpulses()).ravel()
         v_new = v + dt * pin.aba(model, data, q, v, tau + Jc.T @ forces, self._fext)
         self._q = pin.integrate(model, q, v_new * dt)
         self._v = v_new
