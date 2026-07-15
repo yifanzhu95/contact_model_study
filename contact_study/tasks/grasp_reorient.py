@@ -259,14 +259,14 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 250,
+            max_steps          = 500,
             success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
             cost_weights       = {
                 "w_quat": 75.0, #5.0
                 "w_pos": 400.0, #40.0
                 "w_velo": 0.0,
-                "w_contact": 750.0,#250.0,#500.0,#2.5
-                "w_joint": 6.0, #0.1
+                "w_contact": 550.0,#250.0,#500.0,#2.5
+                "w_joint": 10.0, #0.1
                 "w_joint_velo": 0.0,
                 "w_fallen": 300.0, #30.0,
                 "w_quat_term": 100.0, #10.0
