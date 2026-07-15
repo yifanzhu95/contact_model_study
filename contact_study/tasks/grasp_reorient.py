@@ -43,7 +43,7 @@ _MJ_CTRL_TO_URDF_JOINT = [
 # conaffinity=0 on every geom) to isolate the actuator/PD model from the contact
 # model in the MuJoCo-vs-Pinocchio eval comparison. Swap back to the plain
 # scene for normal grasping runs (the no-contact scene can't grasp the cube).
-GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites_simple.xml"#"leap_hand/leap_hand_right_w_sites_simple.xml"
+GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites_yoke_removed.xml"#"leap_hand/leap_hand_right_w_sites_simple.xml"
 #"leap_hand/leap_hand_right_w_sites_spheres.xml"
 #GRASP_SCENE_XML = "leap_hand_old/leap_right_hand_simple copy.xml"#
 
