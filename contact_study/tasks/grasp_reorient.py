@@ -58,8 +58,15 @@ _ARMATURE = 0.001
 
 # Pinocchio eval: mirror tests/replay_pinocchio_controls.py's simulation scheme —
 _PIN_USE_DIRECT_KD  = True  # False (default): derive kd from zeta + mass matrix. True: use _PIN_KD directly.
-_PIN_KD             = _PID_KD + _PID_KD   # direct damping gain, used when _PIN_USE_DIRECT_KD is True
+_PIN_KD             = _JOINT_DAMPING + _PID_KD   # direct damping gain, used when _PIN_USE_DIRECT_KD is True
 _PIN_GRAVITY_COMP   = False  # gravity-compensation torque on the hand PD
+# Joint-level constraints mirroring the scene's <joint range> / <joint frictionloss>.
+# Pinocchio's aba enforces neither on its own (model.lower/upperPositionLimit and
+# model.friction are inert metadata, like model.damping); both are added as
+# constraint models in the same ADMM solve as the contacts.
+_PIN_ENFORCE_JOINT_LIMITS = True
+_PIN_LIMIT_MARGIN         = 0.0    # rad; >0 engages a bound before it is crossed
+_PIN_JOINT_FRICTION       = False   # honor the scene's <joint frictionloss>
 
 _DRAKE_PID_EFFORT = 100.0
 
@@ -525,7 +532,7 @@ class GraspReorientTask(BaseTask):
         ]
         pid = DrakePidActuation(
             kp=_PID_KP, ki=_PID_KI, kd=_PID_KD,
-            ctrl_joint_names=list(_MJ_CTRL_TO_URDF_JOINT), effort=DRAKE_PID_EFFORT,
+            ctrl_joint_names=list(_MJ_CTRL_TO_URDF_JOINT), effort=_DRAKE_PID_EFFORT,
         )
 
         return DrakeSimulator(
@@ -558,6 +565,7 @@ class GraspReorientTask(BaseTask):
         from contact_study.contact_models.pinocchio_sim import (
             PinocchioSimulator, PinocchioJointChannel, PinocchioFreeBodyChannel,
             PinocchioPdActuation, PinocchioContactConfig,
+            PinocchioJointConstraintConfig,
         )
 
         # Pinocchio joint names come from the MJCF, so read them off the loaded
@@ -617,6 +625,23 @@ class GraspReorientTask(BaseTask):
         # Baumgarte corrector on the contact position error.
         contact_cfg = PinocchioContactConfig()
 
+        # Joint position limits + dry friction, enforced as ADMM constraints.
+        # frictionloss is read off the MuJoCo model (dof_frictionloss) rather than
+        # Pinocchio's model.friction: this scene sets it via a <default> block, and
+        # Pinocchio's MJCF parser does not apply <default> inheritance (the same gap
+        # it has for contype/conaffinity), so its model.friction would read 0.
+        frictionloss = None
+        if _PIN_JOINT_FRICTION:
+            frictionloss = {
+                mjm.joint(j).name: float(mjm.dof_frictionloss[int(mjm.jnt_dofadr[j])])
+                for j in hand_jids
+            }
+        joint_cfg = PinocchioJointConstraintConfig(
+            enforce_limits = _PIN_ENFORCE_JOINT_LIMITS,
+            limit_margin   = _PIN_LIMIT_MARGIN,
+            frictionloss   = frictionloss,
+        )
+
         return PinocchioSimulator(
             model_path     = self.config.eval_model_paths[self.config.eval_sim],  # the MJCF (not URDF)
             config         = self.config,
@@ -626,6 +651,7 @@ class GraspReorientTask(BaseTask):
             joint_channels = joint_channels,
             free_channels  = free_channels,
             contact_cfg    = contact_cfg,
+            joint_cfg      = joint_cfg,
             video_path     = video_path,
             render         = render,
         )
