@@ -6,7 +6,7 @@
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=03:00:00
+#SBATCH --time=06:00:00
 
 set -euo pipefail
 
@@ -22,7 +22,7 @@ cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 # ---------------------------------------------------------------------------
 TASK="grasp_reorient"
 MODEL="M2"
-N_EPISODES=5          # episodes to run for this one weight set
+N_EPISODES=10          # episodes to run for this one weight set
 
 # Shared MPPI / eval knobs.
 N_SAMPLES=256
@@ -42,7 +42,7 @@ mkdir -p "$VIDEO_DIR"
 VIDEO_PATH="$VIDEO_DIR/${TASK}_${MODEL}_eval.gif"
 
 # EGL for headless (offscreen) rendering on the GPU node.
-export MUJOCO_GL="egl"
+#export MUJOCO_GL="egl"
 
 module load miniconda
 conda activate contact_modeling

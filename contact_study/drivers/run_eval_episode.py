@@ -31,7 +31,7 @@ from __future__ import annotations
 import os
 # For Drake eval, MuJoCo must not grab a GL backend (it shadows Drake's VTK GLX
 # context). Default to "disable"; override to "egl" for MuJoCo-eval rendering.
-os.environ.setdefault("MUJOCO_GL", "egl")
+os.environ.setdefault("MUJOCO_GL", "disable")
 
 import argparse
 import dataclasses
