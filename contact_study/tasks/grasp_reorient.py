@@ -291,7 +291,7 @@ class GraspReorientTask(BaseTask):
             # Eval ("real") sim timestep; rollout_dt = 10x this = 0.001 (the
             # MuJoCo planning step the GPU rollouts use).
             timestep           = 0.0001,
-            eval_substeps_per_rollout = 20,
+            eval_substeps_per_rollout = 40,
             difficulty         = self.goal_difficulty,
         )
 
