@@ -49,7 +49,7 @@
             <joint name="3" pos="0 0 0" axis="0 0 -1" range="-0.366 2.042" actuatorfrcrange="-0.95 0.95" />
             <geom size="0.01 0.0125 0.0175" pos="0 -0.0075 0.0145" type="box" />
             <geom type="mesh" mesh="white_tip" />
-            <site name="if_tip" pos="-0.01 -0.05 0.015" group="4"/>
+            <site name="if_tip" pos="-0.01 -0.0475 0.015" group="4"/>
           </body>
         </body>
       </body>
@@ -75,7 +75,7 @@
             <joint name="7" pos="0 0 0" axis="0 0 -1" range="-0.366 2.042" actuatorfrcrange="-0.95 0.95" />
             <geom size="0.01 0.0125 0.0175" pos="0 -0.0075 0.0145" type="box" />
             <geom type="mesh" mesh="white_tip" />
-            <site name="mf_tip" pos="-0.01 -0.05 0.015" group="4"/>
+            <site name="mf_tip" pos="-0.01 -0.0475 0.015" group="4"/>
           </body>
         </body>
       </body>
@@ -101,7 +101,7 @@
             <joint name="11" pos="0 0 0" axis="0 0 -1" range="-0.366 2.042" actuatorfrcrange="-0.95 0.95" />
             <geom size="0.01 0.0125 0.0175" pos="0 -0.0075 0.0145" type="box" />
             <geom type="mesh" mesh="white_tip" />
-            <site name="rf_tip" pos="-0.01 -0.05 0.015" group="4"/>
+            <site name="rf_tip" pos="-0.01 -0.0475 0.015" group="4"/>
           </body>
         </body>
       </body>
@@ -127,7 +127,7 @@
             <geom size="0.01 0.012 0.015" pos="0 -0.019 -0.014" type="box"/>
             <geom size="0.004 0.012 0.009" pos="0.015 -0.0175 -0.0115" type="box" />
             <geom type="mesh" mesh="white_tip_thumb" />
-            <site name="th_tip" pos="-0.01 -0.06 -0.015" group="4"/>
+            <site name="th_tip" pos="-0.009 -0.0595 -0.015" group="4"/>
           </body>
         </body>
       </body>
