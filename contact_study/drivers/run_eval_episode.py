@@ -31,7 +31,7 @@ from __future__ import annotations
 import os
 # For Drake eval, MuJoCo must not grab a GL backend (it shadows Drake's VTK GLX
 # context). Default to "disable"; override to "egl" for MuJoCo-eval rendering.
-os.environ.setdefault("MUJOCO_GL", "egl")
+os.environ.setdefault("MUJOCO_GL", "disable")
 
 import argparse
 import dataclasses
@@ -284,6 +284,14 @@ def main():
                    help="MPPI rollout substeps per control step (control frequency knob).")
     p.add_argument("--eval_substeps", type=int, default=None,
                    help="Eval steps per rollout step (default: task config, usually 10).")
+    p.add_argument("--resample_interval", type=int, default=1,
+                   help="Plan steps between MPPI noise resamples (1=every step; "
+                        "omit=sample once and reuse, the default).")
+    p.add_argument("--time_constrained", action=argparse.BooleanOptionalAction, default=False,
+                   help="Stop rollouts once --plan_budget_ms elapses (capped at the horizon).")
+    p.add_argument("--plan_budget_ms", type=float, default=None,
+                   help="Wall-clock rollout budget per plan() in ms; required with "
+                        "--time_constrained.")
     p.add_argument("--eval_sim",    type=str,   default="none",
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
@@ -353,6 +361,9 @@ def main():
             njmax          = 200,
             seed           = ep_seed,
             debug          = args.debug,
+            resample_interval = args.resample_interval,
+            time_constrained  = args.time_constrained,
+            plan_budget_ms    = args.plan_budget_ms,
         )
 
         result = run_eval_episode(

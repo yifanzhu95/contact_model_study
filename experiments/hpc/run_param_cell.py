@@ -110,6 +110,9 @@ def run_cell(cell_id: int, overrides: dict, args) -> dict:
             njmax          = args.njmax,
             seed           = ep_seed,
             debug          = args.debug,
+            resample_interval = args.resample_interval,
+            time_constrained  = args.time_constrained,
+            plan_budget_ms    = args.plan_budget_ms,
         )
 
         result = run_eval_episode(
@@ -159,12 +162,15 @@ def run_cell(cell_id: int, overrides: dict, args) -> dict:
         "std_step_ms":           float(np.mean(step_sd)),
         "mean_elapsed_s":        float(np.mean(elapsed)),
         "mppi": {
-            "n_samples":   args.n_samples,
-            "horizon":     args.horizon,
-            "temperature": args.temperature,
-            "noise_sigma": args.noise_sigma,
-            "substeps":    args.substeps,
-            "delta":       args.delta,
+            "n_samples":         args.n_samples,
+            "horizon":           args.horizon,
+            "temperature":       args.temperature,
+            "noise_sigma":       args.noise_sigma,
+            "substeps":          args.substeps,
+            "delta":             args.delta,
+            "resample_interval": args.resample_interval,
+            "time_constrained":  args.time_constrained,
+            "plan_budget_ms":    args.plan_budget_ms,
         },
         "seed":     args.seed,
         "eval_sim": args.eval_sim,
@@ -212,6 +218,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--njmax",         type=int,   default=200)
     p.add_argument("--use_full_graph",
                    action=argparse.BooleanOptionalAction, default=False)
+    p.add_argument("--resample_interval", type=int, default=None,
+                   help="Plan steps between MPPI noise resamples (1=every step; "
+                        "omit=sample once and reuse, the default).")
+    p.add_argument("--time_constrained", action=argparse.BooleanOptionalAction, default=False,
+                   help="Stop rollouts once --plan_budget_ms elapses (capped at the horizon).")
+    p.add_argument("--plan_budget_ms", type=float, default=None,
+                   help="Wall-clock rollout budget per plan() in ms; required with "
+                        "--time_constrained.")
     p.add_argument("--seed",          type=int,   default=None)
     p.add_argument("--debug",         action="store_true")
     return p

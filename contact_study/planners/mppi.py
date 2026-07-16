@@ -40,6 +40,37 @@ class MPPIConfig:
     delta_range:     tuple[float, float] = (-0.1, 0.1)
     use_full_graph:  bool  = True   # True=single mega CUDA graph, False=step+reset graphs
     seed:            int | None = None  # seed for deterministic noise sampling
+    # plan() steps between noise resamples: 1=every step, None=sample once at
+    # construction and reuse for the whole episode.
+    resample_interval: int | None = 1
+    # Stop rollouts once plan_budget_ms of wall-clock has elapsed (capped at
+    # horizon) instead of always unrolling the full horizon.
+    time_constrained: bool  = False
+    plan_budget_ms:   float | None = None   # required when time_constrained
+
+    def __post_init__(self):
+        if self.resample_interval is not None and self.resample_interval < 1:
+            raise ValueError(
+                f"resample_interval must be >= 1 or None, got {self.resample_interval}"
+            )
+        if self.use_spline_noise and self.resample_interval is not None:
+            raise ValueError(
+                "use_spline_noise is incompatible with resample_interval: spline noise is "
+                "built host-side with CubicSpline and has no GPU sampler, so resampling it "
+                "every step would defeat the purpose. Use Gaussian noise to resample."
+            )
+        if self.time_constrained:
+            if self.plan_budget_ms is None or self.plan_budget_ms <= 0:
+                raise ValueError(
+                    "time_constrained=True requires plan_budget_ms > 0, got "
+                    f"{self.plan_budget_ms}"
+                )
+            if self.use_full_graph:
+                raise ValueError(
+                    "time_constrained=True requires use_full_graph=False: the full-graph path "
+                    "bakes the entire horizon unroll into one replayed CUDA graph and cannot "
+                    "stop early."
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +84,24 @@ def _broadcast_1d_to_2d_kernel(
 ):
     n, i = wp.tid()
     dst[n, i] = src[i]
+
+@wp.kernel
+def _sample_gaussian_noise_kernel(
+    seed:  int,
+    sigma: float,
+    eps:   wp.array3d(dtype=float),   # (N, H, nu)  [out]
+):
+    """Resample the MPPI noise block in place on the GPU.
+
+    Each element gets its own RNG stream keyed by (seed, flat index), so the
+    draw is reproducible for a given seed and decorrelated across seeds. Written
+    in place: eps is read by _add_noise_and_clip_kernel outside any CUDA graph,
+    so in-place writes are safe but the buffer must never be swapped.
+    """
+    n, h, u = wp.tid()
+    tid   = (n * eps.shape[1] + h) * eps.shape[2] + u
+    state = wp.rand_init(seed, tid)
+    eps[n, h, u] = sigma * wp.randn(state)
 
 @wp.kernel
 def _add_noise_and_clip_kernel(
@@ -223,6 +272,15 @@ class MPPIController:
         self.weights_wp = task.cost_weights_wp
         self._accumulate_costs_kernel = _make_accumulate_kernel(self.cost_fn_wp_func)
 
+        # Noise-resampling bookkeeping. _resample_count only ever advances (it
+        # keys the RNG seed), so no two resamples in this controller's lifetime
+        # can replay the same noise block.
+        self._plan_count     = 0
+        self._resample_count = 0
+        # Rollout steps actually taken by the last plan() — < horizon only when
+        # the time-constrained path truncated.
+        self.last_n_steps    = self.pc.horizon
+
         self._setup_warp_arrays()
         self._setup_warp_backend()
 
@@ -259,6 +317,14 @@ class MPPIController:
 
         # Deterministic noise: use seed from config if provided, else fall back to shared rng
         noise_rng = np.random.default_rng(self.pc.seed) if self.pc.seed is not None else self.rng
+
+        if self.pc.resample_interval is not None:
+            # Resampling path: the block is drawn on the GPU by _maybe_resample_noise,
+            # so only an int base seed is taken from noise_rng here. The first plan()
+            # call always resamples, so these zeros are never actually rolled out.
+            self._noise_seed = int(noise_rng.integers(0, 2**31 - 1))
+            self._static_eps_wp = wp.zeros((N, H, nu), dtype=wp.float32, device="cuda")
+            return
 
         if self.pc.use_spline_noise:
             t_knots    = np.linspace(0, H - 1, self.pc.n_spline_points)
@@ -344,15 +410,37 @@ class MPPIController:
     def reset(self):
         """Clear the action sequence (call at the start of a new episode)."""
         self.U_wp.zero_()
+        # Restart the resample cadence so a fresh goal begins on fresh noise.
+        # _resample_count deliberately keeps advancing (it keys the seed).
+        self._plan_count = 0
 
-    def _gpu_weight_update(self) -> tuple[float, float]:
+    def _maybe_resample_noise(self):
+        """Redraw the noise block every `resample_interval` plan() calls (no-op if None)."""
+        k = self.pc.resample_interval
+        if k is not None and self._plan_count % k == 0:
+            wp.launch(
+                _sample_gaussian_noise_kernel,
+                dim=(self.pc.n_samples, self.pc.horizon, self.nu),
+                inputs=[self._noise_seed + self._resample_count, self.pc.noise_sigma],
+                outputs=[self._static_eps_wp],
+            )
+            self._resample_count += 1
+        self._plan_count += 1
+
+    def _gpu_weight_update(self, n_eff: int | None = None) -> tuple[float, float]:
         """Compute MPPI weights and U update entirely on GPU.
 
         Returns (eta, beta) as Python scalars — the only values transferred
         from device to host. eta is used for adaptive temperature; beta
         (min cost) is returned for optional debug logging.
+
+        n_eff caps the update at the rollout steps that were actually simulated
+        (time-constrained path). Rows beyond it never influenced a cost, so
+        weighting their noise would inject variance from weights that never saw
+        them; they are left untouched. None means the full horizon.
         """
-        N, H, nu = self.pc.n_samples, self.pc.horizon, self.nu
+        N, nu = self.pc.n_samples, self.nu
+        H = n_eff if n_eff is not None else self.pc.horizon
         low, high = self.pc.delta_range
 
         # Find minimum cost
@@ -435,7 +523,13 @@ class MPPIController:
         return beta >= self._COST_SENTINEL or math.isnan(eta) or math.isinf(eta)
 
     def plan(self, mjd: mujoco.MjData) -> np.ndarray:
-        """Run MPPI and return the first action. Dispatches based on use_full_graph."""
+        """Run MPPI and return the first action.
+
+        Dispatches on time_constrained, then use_full_graph.
+        """
+        self._maybe_resample_noise()
+        if self.pc.time_constrained:
+            return self._plan_time_constrained(mjd)
         if self.pc.use_full_graph:
             return self._plan_full_graph(mjd)
         else:
@@ -517,6 +611,81 @@ class MPPIController:
             eta, beta = self._gpu_weight_update()
 
             if self.pc.debug:
+                self._print_debug(mjd, beta, eta)
+
+            if self._is_degenerate(beta, eta):
+                self.U_wp.zero_()
+                if self.pc.debug:
+                    print(f"  [MPPI] all rollouts NaN (beta={beta:.2e}, eta={eta}) — zero action")
+                return np.zeros(self.nu, dtype=np.float32)
+
+            self._update_adaptive_temp(eta)
+
+        return self._extract_action()
+
+    def _plan_time_constrained(self, mjd: mujoco.MjData) -> np.ndarray:
+        """Step rollouts against a wall-clock budget, capped at the horizon.
+
+        Unrolls like _plan_step_graphs but stops as soon as plan_budget_ms has
+        elapsed, then finishes the current step and computes the action from the
+        steps that did run. The deadline is only tested *after* a completed step,
+        so a too-small budget degrades to a 1-step horizon rather than no action.
+        """
+        N, H = self.pc.n_samples, self.pc.horizon
+        budget_s = self.pc.plan_budget_ms * 1e-3
+
+        self.qpos_reset.assign(mjd.qpos)
+        self.qvel_reset.assign(mjd.qvel)
+        self.ctrl_reset.assign(mjd.ctrl)
+
+        for _ in range(self.pc.n_iterations):
+            wp.launch(
+                _add_noise_and_clip_kernel,
+                dim=(N, H, self.nu),
+                inputs=[self.U_wp, self._static_eps_wp, self._ctrl_range_wp, self._has_limits_wp],
+                outputs=[self.V_wp],
+            )
+            wp.capture_launch(self.reset_graph)
+
+            deadline = time.perf_counter() + budget_s
+            n_eff = 0
+            for t in range(H):
+                wp.launch(
+                    _assign_ctrl_kernel,
+                    dim=(N, self.nu),
+                    inputs=[self.V_wp, t, self.d.ctrl],
+                )
+                for _ in range(self.pc.substeps):
+                    wp.capture_launch(self.step_graph)
+
+                # Warp launches are async, so without this sync the clock would
+                # measure CPU enqueue time rather than real GPU progress and the
+                # loop would run the full horizon regardless of the budget.
+                wp.synchronize()
+
+                # Decide `terminal` before accumulating: a terminal cost replaces
+                # the running cost rather than adding to it, so each step needs
+                # exactly one launch carrying the correct flag.
+                last  = (t == H - 1) or (time.perf_counter() >= deadline)
+                n_eff = t + 1
+                wp.launch(
+                    self._accumulate_costs_kernel,
+                    dim=N,
+                    inputs=[
+                        self.d.qpos, self.d.qvel, self.d.ctrl, self.d.site_xpos, self.d.site_xmat,
+                        last, self.goal_wp, self.indices_wp, self.weights_wp
+                    ],
+                    outputs=[self.costs_wp],
+                )
+                if last:
+                    break
+
+            self.last_n_steps = n_eff
+            eta, beta = self._gpu_weight_update(n_eff=n_eff)
+
+            if self.pc.debug:
+                print(f"  [MPPI] time-constrained: {n_eff}/{H} steps in "
+                      f"{self.pc.plan_budget_ms:.1f} ms budget")
                 self._print_debug(mjd, beta, eta)
 
             if self._is_degenerate(beta, eta):
