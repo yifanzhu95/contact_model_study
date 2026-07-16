@@ -1,12 +1,12 @@
 <mujoco model="leap_right">
   <default>
-    <position kp="3.0" kv="0.01" />
-    <joint damping="0.1" armature="0.001"/>
+    <position kp="21.0" kv="0.01" />
+    <joint damping="1.0" armature="0.05"/>
   </default>
   <compiler angle="radian" />
   <asset>
-    <mesh name="white_tip" content_type="model/obj" file="meshes/white_tip_iso.obj" />
-    <mesh name="white_tip_thumb" content_type="model/obj" file="meshes/white_tip_thumb_iso.obj" />
+    <mesh name="white_tip" content_type="model/obj" file="meshes/tip.obj" />
+    <mesh name="white_tip_thumb" content_type="model/obj" file="meshes/thumb_tip.obj" />
   </asset>
   <worldbody>
     <geom size="0.011 0.013 0.017" pos="-0.00229421 -0.00849997 0.0140263" quat="1.28159e-06 0.965926 3.434e-07 -0.258819" type="box" />

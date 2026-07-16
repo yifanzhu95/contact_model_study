@@ -50,11 +50,11 @@ GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites_yoke_removed.xml"#"leap_han
 # Drake PidController gains for the eval hand (position control, mirroring the
 # MuJoCo position servos kp=3.0 kv=0.01). Starting points to tune against Drake's
 # solver; _PID_EFFORT is the per-joint actuator force clamp DrakeSimulator adds.
-_PID_KP = 3.0
+_PID_KP = 21.0
 _PID_KI = 0.0
 _PID_KD = 0.01
-_JOINT_DAMPING = 0.1
-_ARMATURE = 0.001
+_JOINT_DAMPING = 1.0
+_ARMATURE = 0.05
 
 # Pinocchio eval: mirror tests/replay_pinocchio_controls.py's simulation scheme —
 _PIN_USE_DIRECT_KD  = True  # False (default): derive kd from zeta + mass matrix. True: use _PIN_KD directly.
@@ -292,7 +292,7 @@ class GraspReorientTask(BaseTask):
             # Eval ("real") sim timestep; rollout_dt = 10x this = 0.001 (the
             # MuJoCo planning step the GPU rollouts use).
             timestep           = 0.0001,
-            eval_substeps_per_rollout = 10,
+            eval_substeps_per_rollout = 20,
             difficulty         = self.goal_difficulty,
         )
 
