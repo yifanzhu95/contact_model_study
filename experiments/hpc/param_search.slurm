@@ -44,6 +44,12 @@ SETTLE=1.0
 GEOMETRY="accurate"
 SEED=0
 
+# MPPI noise resampling / time-constrained planning. Both are opt-in; the
+# values below reproduce the original behavior exactly.
+RESAMPLE_INTERVAL=""     # plan steps between noise resamples (1=every step); empty=never
+TIME_CONSTRAINED=0       # 1 = stop rollouts once PLAN_BUDGET_MS elapses
+PLAN_BUDGET_MS=""        # rollout budget per plan in ms; required when TIME_CONSTRAINED=1
+
 # ---------------------------------------------------------------------------
 # 2. Map this task's ID to one index per axis (mixed-radix decode).
 #    Peel off the lowest axis first, then divide it out for the next.
@@ -83,6 +89,12 @@ echo "cell ${SLURM_ARRAY_TASK_ID}: model=$SEL_MODEL "\
 # The first task queues the combine job to run once the whole array finishes
 # ok, so a single `sbatch param_search.slurm` produces the merged results too.
 
+# Only pass the opt-in MPPI flags when they are actually set, so the default
+# configuration invokes run_param_cell.py exactly as before.
+EXTRA_ARGS=()
+[[ -n "$RESAMPLE_INTERVAL" ]] && EXTRA_ARGS+=(--resample_interval "$RESAMPLE_INTERVAL")
+[[ "$TIME_CONSTRAINED" == "1" ]] && EXTRA_ARGS+=(--time_constrained --plan_budget_ms "$PLAN_BUDGET_MS")
+
 python experiments/hpc/run_param_cell.py \
     --cell_id     "$SLURM_ARRAY_TASK_ID" \
     --outdir      "$OUTDIR" \
@@ -101,4 +113,5 @@ python experiments/hpc/run_param_cell.py \
     --settle      "$SETTLE" \
     --geometry    "$GEOMETRY" \
     --seed        "$SEED" \
+    "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}" \
     --debug
