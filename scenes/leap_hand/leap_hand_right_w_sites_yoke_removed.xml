@@ -169,20 +169,40 @@
       <geom size="0.002 0.002 0.002" pos="-0.033 -0.033 -0.033" type="box" rgba="0.05 0.05 0.05 1" contype="0" conaffinity="0" group="1" />
     </body>
   </worldbody>
-  <!-- Palm <-> first-link-of-each-finger contact exclusions. The palm is a set of
-       loose geoms on the worldbody (there is no named "palm" body in this scene),
-       so these reference MuJoCo's world body by its name, "world". Each finger's
-       first link sits flush against the palm at the grasp pose (the thumb base
-       actually penetrates it by ~7e-5 m), producing permanently-active contacts
-       that fight the actuators for no physical reason.
-       NOTE: the floor is also a worldbody geom, so these pairs also disable
-       floor <-> first-link contact. Those links sit at the palm, well above the
-       floor (z=-0.25), so they would never touch it anyway. -->
+  
   <contact>
     <exclude name="palm_if_bs" body1="world" body2="mcp_joint"/>
     <exclude name="palm_mf_bs" body1="world" body2="mcp_joint_2"/>
     <exclude name="palm_rf_bs" body1="world" body2="mcp_joint_3"/>
     <exclude name="palm_th_mp" body1="world" body2="thumb_temp_base"/>
+
+    <!-- index finger (mcp_joint/pip/dip/fingertip) vs ring finger (mcp_joint_3/pip_3/dip_3/fingertip_3), all links -->
+    <exclude name="if_rf_mcp_mcp" body1="mcp_joint" body2="mcp_joint_3"/>
+    <exclude name="if_rf_mcp_pip" body1="mcp_joint" body2="pip_3"/>
+    <exclude name="if_rf_mcp_dip" body1="mcp_joint" body2="dip_3"/>
+    <exclude name="if_rf_mcp_tip" body1="mcp_joint" body2="fingertip_3"/>
+    <exclude name="if_rf_pip_mcp" body1="pip" body2="mcp_joint_3"/>
+    <exclude name="if_rf_pip_pip" body1="pip" body2="pip_3"/>
+    <exclude name="if_rf_pip_dip" body1="pip" body2="dip_3"/>
+    <exclude name="if_rf_pip_tip" body1="pip" body2="fingertip_3"/>
+    <exclude name="if_rf_dip_mcp" body1="dip" body2="mcp_joint_3"/>
+    <exclude name="if_rf_dip_pip" body1="dip" body2="pip_3"/>
+    <exclude name="if_rf_dip_dip" body1="dip" body2="dip_3"/>
+    <exclude name="if_rf_dip_tip" body1="dip" body2="fingertip_3"/>
+    <exclude name="if_rf_tip_mcp" body1="fingertip" body2="mcp_joint_3"/>
+    <exclude name="if_rf_tip_pip" body1="fingertip" body2="pip_3"/>
+    <exclude name="if_rf_tip_dip" body1="fingertip" body2="dip_3"/>
+    <exclude name="if_rf_tip_tip" body1="fingertip" body2="fingertip_3"/>
+
+    <!-- finger links vs world/palm, excluding fingertips -->
+    <exclude name="palm_if_pip" body1="world" body2="pip"/>
+    <exclude name="palm_if_dip" body1="world" body2="dip"/>
+    <exclude name="palm_mf_pip" body1="world" body2="pip_2"/>
+    <exclude name="palm_mf_dip" body1="world" body2="dip_2"/>
+    <exclude name="palm_rf_pip" body1="world" body2="pip_3"/>
+    <exclude name="palm_rf_dip" body1="world" body2="dip_3"/>
+    <exclude name="palm_th_pip" body1="world" body2="thumb_pip"/>
+    <exclude name="palm_th_dip" body1="world" body2="thumb_dip"/>
   </contact>
   <actuator>
     <position name="0" joint="0" ctrllimited="true" ctrlrange="-0.314 2.23" />
