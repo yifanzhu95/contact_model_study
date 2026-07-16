@@ -5,10 +5,6 @@
   </default>
   <compiler angle="radian" />
   <asset>
-    <!--
-    <mesh name="white_tip" content_type="model/obj" file="meshes/white_tip.obj" />
-    <mesh name="white_tip_thumb" content_type="model/obj" file="meshes/white_tip_thumb.obj" />
-    -->
     <mesh name="white_tip" content_type="model/obj" file="meshes/white_tip_iso.obj" />
     <mesh name="white_tip_thumb" content_type="model/obj" file="meshes/white_tip_thumb_iso.obj" />
   </asset>
