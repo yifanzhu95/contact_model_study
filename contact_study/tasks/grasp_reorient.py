@@ -43,18 +43,17 @@ _MJ_CTRL_TO_URDF_JOINT = [
 # conaffinity=0 on every geom) to isolate the actuator/PD model from the contact
 # model in the MuJoCo-vs-Pinocchio eval comparison. Swap back to the plain
 # scene for normal grasping runs (the no-contact scene can't grasp the cube).
-GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites_yoke_removed.xml"#"leap_hand/leap_hand_right_w_sites_simple.xml"
-#"leap_hand/leap_hand_right_w_sites_spheres.xml"
-#GRASP_SCENE_XML = "leap_hand_old/leap_right_hand_simple copy.xml"#
+#GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites_yoke_removed.xml"
+GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites_yoke_removed_capsule.xml"
 
 # Drake PidController gains for the eval hand (position control, mirroring the
 # MuJoCo position servos kp=3.0 kv=0.01). Starting points to tune against Drake's
 # solver; _PID_EFFORT is the per-joint actuator force clamp DrakeSimulator adds.
-_PID_KP = 21.0
+_PID_KP = 3.0
 _PID_KI = 0.0
 _PID_KD = 0.01
-_JOINT_DAMPING = 1.0
-_ARMATURE = 0.05
+_JOINT_DAMPING = 0.1 #this is maybe too low it was 0.1 befor
+_ARMATURE = 0.001
 
 # Pinocchio eval: mirror tests/replay_pinocchio_controls.py's simulation scheme —
 _PIN_USE_DIRECT_KD  = True  # False (default): derive kd from zeta + mass matrix. True: use _PIN_KD directly.
@@ -259,8 +258,8 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 500,
-            success_thresholds = {"pos": 0.05, "quat": 0.05, "vel": 0.1},
+            max_steps          = 250,
+            success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             cost_weights       = {
                 "w_quat": 75.0, #5.0
                 "w_pos": 400.0, #40.0
