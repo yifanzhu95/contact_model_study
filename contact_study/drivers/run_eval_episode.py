@@ -284,7 +284,7 @@ def main():
                    help="MPPI rollout substeps per control step (control frequency knob).")
     p.add_argument("--eval_substeps", type=int, default=None,
                    help="Eval steps per rollout step (default: task config, usually 10).")
-    p.add_argument("--resample_interval", type=int, default=1,
+    p.add_argument("--resample_interval", type=int, default=None,
                    help="Plan steps between MPPI noise resamples (1=every step; "
                         "omit=sample once and reuse, the default).")
     p.add_argument("--time_constrained", action=argparse.BooleanOptionalAction, default=False,
