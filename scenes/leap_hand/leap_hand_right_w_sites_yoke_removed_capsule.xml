@@ -4,10 +4,6 @@
     <joint damping="0.1" armature="0.001"/>
   </default>
   <compiler angle="radian" />
-  <asset>
-    <mesh name="white_tip" content_type="model/obj" file="meshes/white_tip.obj" />
-    <mesh name="white_tip_thumb" content_type="model/obj" file="meshes/white_tip_thumb.obj" />
-  </asset>
   <worldbody>
     <geom size="0.011 0.013 0.017" pos="-0.00229421 -0.00849997 0.0140263" quat="1.28159e-06 0.965926 3.434e-07 -0.258819" type="box" />
     <geom size="0.011 0.013 0.017" pos="-0.00229427 0.037 0.0140262" quat="1.28159e-06 0.965926 3.434e-07 -0.258819" type="box" />
@@ -44,7 +40,10 @@
             <inertial pos="0 0 0" quat="0.706755 0.706755 0.0223155 0.0223155" mass="0.016" diaginertia="3.37527e-06 2.863e-06 1.54873e-06" />
             <joint name="3" pos="0 0 0" axis="0 0 -1" range="-0.366 2.042" actuatorfrcrange="-0.95 0.95" />
             <geom size="0.01 0.0125 0.0175" pos="0 -0.0075 0.0145" type="box" />
+            <!--
             <geom type="mesh" mesh="white_tip" />
+            -->
+            <geom type="capsule" fromto="0 -0.0075 0.0145 -0.001 -0.035 0.015" size="0.0125" />
             <site name="if_tip" pos="-0.01 -0.05 0.015" group="4"/>
           </body>
         </body>
@@ -70,7 +69,10 @@
             <inertial pos="0 0 0" quat="0.706755 0.706755 0.0223155 0.0223155" mass="0.016" diaginertia="3.37527e-06 2.863e-06 1.54873e-06" />
             <joint name="7" pos="0 0 0" axis="0 0 -1" range="-0.366 2.042" actuatorfrcrange="-0.95 0.95" />
             <geom size="0.01 0.0125 0.0175" pos="0 -0.0075 0.0145" type="box" />
+            <!--
             <geom type="mesh" mesh="white_tip" />
+            -->
+            <geom type="capsule" fromto="0 -0.0075 0.0145 -0.001 -0.035 0.015" size="0.0125" />
             <site name="mf_tip" pos="-0.01 -0.05 0.015" group="4"/>
           </body>
         </body>
@@ -96,7 +98,10 @@
             <inertial pos="0 0 0" quat="0.706755 0.706755 0.0223155 0.0223155" mass="0.016" diaginertia="3.37527e-06 2.863e-06 1.54873e-06" />
             <joint name="11" pos="0 0 0" axis="0 0 -1" range="-0.366 2.042" actuatorfrcrange="-0.95 0.95" />
             <geom size="0.01 0.0125 0.0175" pos="0 -0.0075 0.0145" type="box" />
+            <!--
             <geom type="mesh" mesh="white_tip" />
+            -->
+            <geom type="capsule" fromto="0 -0.0075 0.0145 -0.001 -0.035 0.015" size="0.0125" />
             <site name="rf_tip" pos="-0.01 -0.05 0.015" group="4"/>
           </body>
         </body>
@@ -122,7 +127,10 @@
             <geom size="0.01 0.018 0.012" pos="0 -0.0085 -0.015" type="box" />
             <geom size="0.01 0.012 0.015" pos="0 -0.019 -0.014" type="box"/>
             <geom size="0.004 0.012 0.009" pos="0.015 -0.0175 -0.0115" type="box" />
+            <!--
             <geom type="mesh" mesh="white_tip_thumb" />
+            -->
+            <geom type="capsule" fromto="0 -0.019 -0.014 -0.001 -0.0465 -0.015" size="0.0125" />
             <site name="th_tip" pos="-0.01 -0.06 -0.015" group="4"/>
           </body>
         </body>
