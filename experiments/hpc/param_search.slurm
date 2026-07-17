@@ -2,13 +2,13 @@
 #SBATCH --job-name=cont_modeling_param_search
 #SBATCH --output=logs/cont_modeling_param_search%A_%a.out
 #SBATCH --error=logs/cont_modeling_param_search%A_%a.err
-#SBATCH --array=0-242          # must equal (#MODELS * #W_QUAT * #W_POS * #W_CONTACT * #W_JOINT) - 1
+#SBATCH --array=0-323          # must equal (#MODELS * #W_QUAT * #W_POS * #W_CONTACT * #W_JOINT) - 1
                                # default grid: 4 * 3 * 3 * 3 * 3 = 324  ->  0-323
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=03:00:00
+#SBATCH --time=01:00:00
 
 set -euo pipefail
 
@@ -26,7 +26,7 @@ cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 TASK="grasp_reorient"
 N_EPISODES=5          # episodes per weight set -> success rate
 
-MODELS=("M2" "M3" "M4")
+MODELS=("M1" "M2" "M3" "M4")
 W_QUAT=("100" "75" "50")
 W_POS=("500" "400" "300")
 W_CONTACT=("1000" "750" "500")
@@ -34,11 +34,11 @@ W_JOINT=("8" "6" "4")
 
 # Shared MPPI / eval knobs (single values, not swept).
 N_SAMPLES=256
-HORIZON=48
+HORIZON=8
 TEMPERATURE=10.0
 NOISE_SIGMA=0.01
 DELTA=0.1
-SUBSTEPS=16
+SUBSTEPS=8
 EVAL_SIM="none" #"none"
 SETTLE=1.0
 GEOMETRY="accurate"

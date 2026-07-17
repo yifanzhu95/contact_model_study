@@ -6,7 +6,7 @@
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=06:00:00
+#SBATCH --time=01:00:00
 
 set -euo pipefail
 
@@ -26,11 +26,11 @@ N_EPISODES=10          # episodes to run for this one weight set
 
 # Shared MPPI / eval knobs.
 N_SAMPLES=256
-HORIZON=48
-TEMPERATURE=10.0
+HORIZON=8
+TEMPERATURE=0.50
 NOISE_SIGMA=0.01
 DELTA=0.1
-SUBSTEPS=16
+SUBSTEPS=8
 EVAL_SIM="none"
 SETTLE=1.0
 SEED=0

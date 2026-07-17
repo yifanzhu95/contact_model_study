@@ -2,13 +2,13 @@
 #SBATCH --job-name=cont_modeling_num_rollout_eval
 #SBATCH --output=logs/cont_modeling_num_rollout_eval%A_%a.out
 #SBATCH --error=logs/cont_modeling_num_rollout_eval%A_%a.err
-#SBATCH --array=0-14          # must equal (#MODELS * #N_SAMPLES) - 1
+#SBATCH --array=0-19          # must equal (#MODELS * #N_SAMPLES) - 1
                               # default grid: 4 * 5 = 20  ->  0-19
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=04:00:00
+#SBATCH --time=01:00:00
 
 set -euo pipefail
 
@@ -46,15 +46,15 @@ cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 TASK="grasp_reorient"
 N_EPISODES=5                                    # episodes per (model, n_samples) cell
 
-MODELS=("M2" "M3" "M4")
+MODELS=("M1" "M2" "M3" "M4")
 N_SAMPLES=("16" "64" "256" "1024" "4096")    # the swept rollout counts
 
 # Shared MPPI / eval knobs (single values, not swept).
-HORIZON=48
-TEMPERATURE=10.0
+HORIZON=8
+TEMPERATURE=0.50
 NOISE_SIGMA=0.01
 DELTA=0.1
-SUBSTEPS=16
+SUBSTEPS=8
 EVAL_SIM="none"                 # "none" uses the task default; "mujoco" is faster
 SETTLE=1.0
 GEOMETRY="accurate"

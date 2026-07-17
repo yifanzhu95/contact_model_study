@@ -2,13 +2,13 @@
 #SBATCH --job-name=cont_modeling_cntrl_freq_eval
 #SBATCH --output=logs/cont_modeling_cntrl_freq_eval%A_%a.out
 #SBATCH --error=logs/cont_modeling_cntrl_freq_eval%A_%a.err
-#SBATCH --array=0-17          # must equal (#MODELS * #SUBSTEPS_SWEEP) - 1
+#SBATCH --array=0-31          # must equal (#MODELS * #SUBSTEPS_SWEEP) - 1
                               # default grid: 4 * 8 = 32  ->  0-31
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=04:00:00
+#SBATCH --time=03:00:00
 
 set -euo pipefail
 
@@ -52,13 +52,13 @@ cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 TASK="grasp_reorient"
 N_EPISODES=5                                   # episodes per (model, substeps) cell
 
-MODELS=("M2" "M3" "M4")
+MODELS=("M1" "M2" "M3" "M4")
 SUBSTEPS_SWEEP=("2" "4" "8" "16" "32" "64")   # the swept substep counts
 
 # Shared MPPI / eval knobs (single values, not swept).
 N_SAMPLES=256
-HORIZON=48
-TEMPERATURE=10.0
+HORIZON=8
+TEMPERATURE=0.50
 NOISE_SIGMA=0.01
 DELTA=0.1
 EVAL_SIM="none"                 # "none" uses the task default; "mujoco" is faster
