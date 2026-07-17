@@ -276,15 +276,15 @@ def main():
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
     p.add_argument("--n_samples",   type=int,   default=256)
     p.add_argument("--horizon",     type=int,   default=8)
-    p.add_argument("--temperature", type=float, default=0.5)#10.0)
-    p.add_argument("--noise_sigma", type=float, default=0.01,)#0.01)
+    p.add_argument("--temperature", type=float, default=0.01)#0.10)
+    p.add_argument("--noise_sigma", type=float, default=0.02,)#0.01)
     p.add_argument("--delta",       type=float, default=0.1,#0.1,
                    help="Per-step MPPI delta clip magnitude (action units).")
     p.add_argument("--substeps",    type=int,   default=8,#16,
                    help="MPPI rollout substeps per control step (control frequency knob).")
     p.add_argument("--eval_substeps", type=int, default=None,
                    help="Eval steps per rollout step (default: task config, usually 10).")
-    p.add_argument("--resample_interval", type=int, default=None,
+    p.add_argument("--resample_interval", type=int, default=1,
                    help="Plan steps between MPPI noise resamples (1=every step; "
                         "omit=sample once and reuse, the default).")
     p.add_argument("--time_constrained", action=argparse.BooleanOptionalAction, default=False,
