@@ -217,8 +217,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--nconmax",       type=int,   default=50)
     p.add_argument("--njmax",         type=int,   default=200)
     p.add_argument("--use_full_graph",
-                   action=argparse.BooleanOptionalAction, default=False)
-    p.add_argument("--resample_interval", type=int, default=None,
+                   action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--resample_interval", type=int, default=1,
                    help="Plan steps between MPPI noise resamples (1=every step; "
                         "omit=sample once and reuse, the default).")
     p.add_argument("--time_constrained", action=argparse.BooleanOptionalAction, default=False,
