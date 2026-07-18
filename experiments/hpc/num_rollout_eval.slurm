@@ -8,7 +8,7 @@
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=01:00:00
+#SBATCH --time=00:30:00
 
 set -euo pipefail
 
@@ -44,15 +44,15 @@ cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 #    their lengths above).
 # ---------------------------------------------------------------------------
 TASK="grasp_reorient"
-N_EPISODES=5                                    # episodes per (model, n_samples) cell
+N_EPISODES=10                                    # episodes per (model, n_samples) cell
 
 MODELS=("M1" "M2" "M3" "M4")
 N_SAMPLES=("16" "64" "256" "1024" "4096")    # the swept rollout counts
 
 # Shared MPPI / eval knobs (single values, not swept).
 HORIZON=8
-TEMPERATURE=0.50
-NOISE_SIGMA=0.01
+TEMPERATURE=0.01
+NOISE_SIGMA=0.02
 DELTA=0.1
 SUBSTEPS=8
 EVAL_SIM="none"                 # "none" uses the task default; "mujoco" is faster

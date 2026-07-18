@@ -76,6 +76,7 @@ def run_cell(args):
             noise_sigma    = args.noise_sigma,
             substeps       = args.substeps,
             warm_start     = True,
+            resample_interval = 1,
             use_full_graph = args.use_full_graph,
             delta_range    = (-args.delta, args.delta),
             nconmax        = args.nconmax,
