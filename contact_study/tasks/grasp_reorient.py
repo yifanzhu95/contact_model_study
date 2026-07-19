@@ -66,6 +66,13 @@ _PIN_GRAVITY_COMP   = False  # gravity-compensation torque on the hand PD
 _PIN_ENFORCE_JOINT_LIMITS = True
 _PIN_LIMIT_MARGIN         = 0.0    # rad; >0 engages a bound before it is crossed
 _PIN_JOINT_FRICTION       = False   # honor the scene's <joint frictionloss>
+# Pinocchio render only: overlay a translucent copy of the goal cube (same colors
+# and shape as the manipulated "obj" cube, cloned from its <geom> shell) at the
+# target reorientation pose (_TARGET_POS/_TARGET_QUAT), so the video shows where
+# and how the cube should end up. Visual-only — it never enters the contact solve.
+# _PIN_GOAL_OPACITY scales every goal-geom alpha (0 = invisible, 1 = opaque).
+_PIN_SHOW_GOAL            = True
+_PIN_GOAL_OPACITY         = 0.3
 
 _DRAKE_PID_EFFORT = 100.0
 
@@ -107,7 +114,7 @@ def _euler_to_quat(euler) -> np.ndarray:
 
 # Goal/target pose for the cube reorientation, defined here rather than read
 # from a mocap body in the scene. pos + intrinsic-xyz Euler (rad).
-_TARGET_POS   = np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
+_TARGET_POS   = np.array([0.03, 0.04, 0.08], dtype=np.float64)#np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
 _TARGET_EULER = np.array([0.0, 0.5235, 0.0], dtype=np.float64)
 _TARGET_QUAT  = _euler_to_quat(_TARGET_EULER)   # wxyz
 
@@ -154,7 +161,12 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
     c_quat = 1.0 - dot_prod * dot_prod
 
     pos_diff = p_obj - p_target
-    c_pos = wp.dot(pos_diff, pos_diff)
+    # Per-axis squared position error, weighted independently in X/Y/Z (see the
+    # cost sum below). c_pos is their isotropic total, used by the terminal cost.
+    c_pos_x = pos_diff[0] * pos_diff[0]
+    c_pos_y = pos_diff[1] * pos_diff[1]
+    c_pos_z = pos_diff[2] * pos_diff[2]
+    c_pos = c_pos_x + c_pos_y + c_pos_z
 
     c_joint = float(0.0)
     for i in range(n_manip):
@@ -186,31 +198,33 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
     c_contact = float(0.0)
     for i in range(5, 9):
         p_tip = site_xpos[indices[i]]
-        dp = wp.length(p_obj - p_tip) - float(0.035)
+        dp = wp.length(p_obj - p_tip)# - float(0.035)
         #dp = wp.length(p_tip) - float(0.035)
         if dp > 0.0:
             c_contact = c_contact + dp*dp
 
     fallen = float(0.0)
-    if qpos[obj_qpos_adr + 2] < 0.08:
+    if qpos[obj_qpos_adr + 2] < 0.07:
         fallen = 1.0
 
     c_velo = wp.dot(v_obj, v_obj) + wp.dot(w_obj, w_obj)
 
     cost = (
         weights[0] * c_quat +
-        weights[1] * c_pos +
-        weights[2] * c_velo +
-        weights[3] * c_contact +
-        weights[4] * c_joint +
-        weights[5] * c_joint_velo +
-        weights[6] * fallen
+        weights[1] * c_pos_x +      # w_pos_x
+        weights[2] * c_pos_y +      # w_pos_y
+        weights[3] * c_pos_z +      # w_pos_z
+        weights[4] * c_velo +
+        weights[5] * c_contact +
+        weights[6] * c_joint +
+        weights[7] * c_joint_velo +
+        weights[8] * fallen
     )
     if terminal:
         cost = (
-            weights[7] * c_quat +   # w_quat_term
-            weights[8] * c_pos +    # w_pos_term
-            weights[9] * fallen     # w_fallen_term
+            weights[9] * c_quat +    # w_quat_term
+            weights[10] * c_pos +    # w_pos_term (isotropic X/Y/Z)
+            weights[11] * fallen     # w_fallen_term
         )
     return cost
 
@@ -258,18 +272,23 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 250,
+            max_steps          = 100,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
+            # NOTE: insertion order must match the weights[...] indexing in
+            # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI
+            # override rebuilds the array from this dict's key order.
             cost_weights       = {
-                "w_quat": 10.0, #5.0
-                "w_pos": 20.0, #40.0
+                "w_quat": 10.0,
+                "w_pos_x": 80.0,   # separate X/Y/Z position-error weights
+                "w_pos_y": 80.0,
+                "w_pos_z": 10.0,
                 "w_velo": 0.0,
-                "w_contact": 1.25,#250.0,#500.0,#2.5
-                "w_joint": 0.10, #0.1
+                "w_contact": 50.0,
+                "w_joint": 1.0,
                 "w_joint_velo": 0.0,
-                "w_fallen": 30.0, #30.0,
-                "w_quat_term": 10.0, #10.0
-                "w_pos_term": 10.0, #10.0
+                "w_fallen": 200.0,
+                "w_quat_term": 100.0,
+                "w_pos_term": 100.0,
                 "w_fallen_term": 0.0,
             },
             # BaseTask.load() loads this static file directly — no MJCF is
@@ -339,7 +358,7 @@ class GraspReorientTask(BaseTask):
 
         w = self.config.cost_weights
         weights_list = [
-            w["w_quat"], w["w_pos"], w["w_velo"],
+            w["w_quat"], w["w_pos_x"], w["w_pos_y"], w["w_pos_z"], w["w_velo"],
             w["w_contact"], w["w_joint"], w["w_joint_velo"],
             w["w_fallen"],
             w["w_quat_term"], w["w_pos_term"], w["w_fallen_term"]
@@ -653,4 +672,7 @@ class GraspReorientTask(BaseTask):
             joint_cfg      = joint_cfg,
             video_path     = video_path,
             render         = render,
+            # Translucent goal-cube overlay at the reorientation target (render only).
+            goal_pose      = (_TARGET_POS, _TARGET_QUAT) if _PIN_SHOW_GOAL else None,
+            goal_opacity   = _PIN_GOAL_OPACITY,
         )

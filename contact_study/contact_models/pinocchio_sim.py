@@ -306,6 +306,42 @@ def parse_mjcf_excludes(mjcf_path) -> set[frozenset[str]]:
     }
 
 
+def parse_body_box_geoms(mjcf_path, body_name):
+    """Read the box <geom> children of the named <body> as
+    (half_extents[3], local_pos[3], local_quat_wxyz[4], rgba[4]) tuples, so the
+    body's on-screen appearance can be cloned elsewhere (e.g. a translucent goal
+    marker built from the manipulated cube's own face plates). Poses/sizes are in
+    the body frame, exactly as MuJoCo stores them (<geom size> is a box HALF-side;
+    a missing quat is identity and a missing rgba is MuJoCo's 0.5 0.5 0.5 1
+    default). Only box geoms are returned; other primitives/meshes are skipped."""
+    tree = ET.parse(mjcf_path)
+    body = None
+    for b in tree.getroot().iter("body"):
+        if b.get("name") == body_name:
+            body = b
+            break
+    if body is None:
+        return []
+    geoms = []
+    for g in body.findall("geom"):   # direct children only (the body's own shell)
+        if g.get("type") != "box":
+            continue
+        size = np.fromstring(g.get("size", ""), sep=" ", dtype=float)
+        if size.shape[0] != 3:
+            continue
+        pos = np.fromstring(g.get("pos", "0 0 0"), sep=" ", dtype=float)
+        if pos.shape[0] != 3:
+            pos = np.zeros(3)
+        quat = np.fromstring(g.get("quat", "1 0 0 0"), sep=" ", dtype=float)
+        if quat.shape[0] != 4:
+            quat = np.array([1.0, 0.0, 0.0, 0.0])
+        rgba = np.fromstring(g.get("rgba", "0.5 0.5 0.5 1"), sep=" ", dtype=float)
+        if rgba.shape[0] != 4:
+            rgba = np.array([0.5, 0.5, 0.5, 1.0])
+        geoms.append((size, pos, quat, rgba))
+    return geoms
+
+
 def _canonical_body_name(name: str) -> str:
     """Map a body/frame name onto a simulator-neutral name so MJCF <exclude>
     tags match Pinocchio frames. MuJoCo calls the root body "world"; Pinocchio's
@@ -392,11 +428,21 @@ class PinocchioSimulator(EvalSimulator):
         joint_cfg: PinocchioJointConstraintConfig | None = None,
         video_path: str | None = None,
         render: bool = True,
+        goal_pose: "tuple[np.ndarray, np.ndarray] | None" = None,
+        goal_opacity: float = 0.3,
+        goal_body_name: str = "obj",
     ):
         import pinocchio as pin
 
         self._pin = pin
         self._config = config
+        self._model_path = model_path
+        # Optional translucent goal marker: (world_pos[3], world_quat_wxyz[4]) of
+        # the target pose, rendered as a clone of `goal_body_name`'s visual geoms
+        # (see _add_goal_marker). None => no marker. Visual model only.
+        self._goal_pose = goal_pose
+        self._goal_opacity = float(goal_opacity)
+        self._goal_body_name = goal_body_name
         self.nq = nq
         self.nv = nv
         self._joint_channels = joint_channels or []
@@ -549,12 +595,46 @@ class PinocchioSimulator(EvalSimulator):
             self._setup_viewer()
 
     # -- viewer --------------------------------------------------------------
+    def _add_goal_marker(self):
+        """Clone the goal body's box visual geoms into the visual model as a
+        static, translucent marker at the goal pose, so the render shows the
+        target cube in the SAME colors/shape as the manipulated one. Each cloned
+        geom is anchored to the universe joint (joint 0) at goal_pose * its body-
+        frame placement, and its alpha is scaled by goal_opacity; the geoms live
+        only in the visual model, so they never enter collision detection or the
+        contact solve. No-op if no goal pose was given or coal is unavailable."""
+        if self._goal_pose is None:
+            return
+        coal = _coal_module()
+        if coal is None:
+            return
+        pin = self._pin
+        pos, quat = self._goal_pose
+        w, x, y, z = np.asarray(quat, dtype=float)
+        goal_M = pin.SE3(pin.Quaternion(w, x, y, z).matrix(),
+                         np.asarray(pos, dtype=float))
+        alpha = self._goal_opacity
+        geoms = parse_body_box_geoms(self._model_path, self._goal_body_name)
+        for i, (half, gpos, gquat, rgba) in enumerate(geoms):
+            gw, gx, gy, gz = gquat
+            local_M = pin.SE3(pin.Quaternion(gw, gx, gy, gz).matrix(),
+                              np.asarray(gpos, dtype=float))
+            box = coal.Box(2.0 * half[0], 2.0 * half[1], 2.0 * half[2])
+            go = pin.GeometryObject(f"goal_marker_{i}", 0, 0, goal_M * local_M, box)
+            go.overrideMaterial = True
+            go.meshColor = np.array([rgba[0], rgba[1], rgba[2], rgba[3] * alpha])
+            self._visual_model.addGeometryObject(go)
+
     def _setup_viewer(self):
         global _PANDA_VIEWER
         # Panda3D's headless EGL pipe must be selected before the panda3d import.
         from panda3d.core import loadPrcFileData
         loadPrcFileData("", "load-display p3headlessgl")
         from pinocchio.visualize import Panda3dVisualizer
+
+        # Add the goal-cube overlay (if requested) BEFORE the visualizer loads the
+        # visual model, so its geoms get uploaded with the rest of the scene.
+        self._add_goal_marker()
 
         # Apply MJCF rgba (stored in meshColor) instead of the default material.
         for go in self._visual_model.geometryObjects:

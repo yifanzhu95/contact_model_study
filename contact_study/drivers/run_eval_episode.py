@@ -276,7 +276,7 @@ def main():
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
     p.add_argument("--n_samples",   type=int,   default=256)
     p.add_argument("--horizon",     type=int,   default=8)
-    p.add_argument("--temperature", type=float, default=0.01)#0.10)
+    p.add_argument("--temperature", type=float, default=0.01)#0.01)
     p.add_argument("--noise_sigma", type=float, default=0.02,)#0.01)
     p.add_argument("--delta",       type=float, default=0.1,#0.1,
                    help="Per-step MPPI delta clip magnitude (action units).")
@@ -301,7 +301,7 @@ def main():
                    help="Number of episodes to run; reports the aggregate success rate.")
     p.add_argument("--weights",     nargs="+", default=[],
                    help="Cost-weight overrides as name=value tokens "
-                        "(e.g. --weights w_quat=50 w_pos=400). Order must match "
+                        "(e.g. --weights w_quat=50 w_pos_x=400). Order must match "
                         "the task's config.cost_weights insertion order.")
     p.add_argument("--video",       type=str,   default="videos/grasp_reorient_eval.gif")
     p.add_argument("--results",     type=str,   default=None,
