@@ -155,6 +155,15 @@ def _make_accumulate_kernel(cost_fn_wp: wp.func):
 # ---------------------------------------------------------------------------
 
 @wp.kernel
+def _scale_kernel(
+    x: wp.array(dtype=float),
+    s: float,
+):
+    i = wp.tid()
+    x[i] = x[i] * s
+
+
+@wp.kernel
 def _find_min_kernel(
     costs:   wp.array(dtype=float),
     min_val: wp.array(dtype=float),
@@ -442,6 +451,15 @@ class MPPIController:
         N, nu = self.pc.n_samples, self.nu
         H = n_eff if n_eff is not None else self.pc.horizon
         low, high = self.pc.delta_range
+
+        # Normalize the accumulated trajectory cost by the horizon length, so the
+        # MPPI temperature `lam` is invariant to the horizon. Every sample in this
+        # update ran the same number of steps, so this is a uniform rescale that
+        # leaves the relative sample weighting unchanged (mathematically identical
+        # to using lam*horizon); it also rescales the reported min cost `beta`.
+        if self.pc.horizon > 0:
+            wp.launch(_scale_kernel, dim=N,
+                      inputs=[self.costs_wp, 1.0 / float(self.pc.horizon)])
 
         # Find minimum cost
         self.min_cost_wp.assign(self._big_float_np)
