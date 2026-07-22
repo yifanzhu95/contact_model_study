@@ -81,14 +81,26 @@ _DRAKE_PID_EFFORT = 100.0
 #   qpos = [16 hand joints, obj pos(3), obj quat(wxyz)(4)]  (nq = 23)
 #   ctrl = [16 hand joint position targets]                  (nu = 16)
 # Initial velocity is zero (hand + cube start at rest).
+# _INIT_QPOS = np.array([
+#     0.74346777,  -0.56903687,  0.91440081,   0.5741493,
+#     -0.010605284, -0.08351411, 0.70321997,   1.0184264,
+#     0.80782262,   0.61122899,  0.92718954,   0.61047876,
+#     0.69887738,   1.438706,    1.3375555,    0.19482527,
+#
+#     0.018495468,  0.033628956, 0.083264539,
+#     0.93823638, 0.12995374, 0.31377877,  0.066086313,
+# ], dtype=np.float64)
+
+# Hand at its old tuned pose + cube at the scene XML's default "obj" body
+# pos/quat, so the cube starts resting in the center of the palm.
 _INIT_QPOS = np.array([
     0.74346777,  -0.56903687,  0.91440081,   0.5741493,
     -0.010605284, -0.08351411, 0.70321997,   1.0184264,
     0.80782262,   0.61122899,  0.92718954,   0.61047876,
     0.69887738,   1.438706,    1.3375555,    0.19482527,
 
-    0.018495468,  0.033628956, 0.083264539,  
-    0.93823638, 0.12995374, 0.31377877,  0.066086313,
+    0.01, 0.0258, 0.08,
+    0.965926, 0.0, 0.258819, 0.0,
 ], dtype=np.float64)
 
 _INIT_CTRL = np.array([
@@ -114,7 +126,7 @@ def _euler_to_quat(euler) -> np.ndarray:
 
 # Goal/target pose for the cube reorientation, defined here rather than read
 # from a mocap body in the scene. pos + intrinsic-xyz Euler (rad).
-_TARGET_POS   = np.array([0.01 , 0.03, 0.08], dtype=np.float64)#np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
+_TARGET_POS   = np.array([0.02 , 0.03, 0.08], dtype=np.float64)#np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
 _TARGET_EULER = np.array([0.0, 0.5235, 0.0], dtype=np.float64)
 _TARGET_QUAT  = _euler_to_quat(_TARGET_EULER)   # wxyz
 
@@ -237,6 +249,9 @@ class GraspReorientTask(BaseTask):
     dynamic lifting and rotation).
 
     Goal difficulty levels (set via task.goal_difficulty):
+        0 — Trivial: fixed 90° clockwise spin around the normal of the
+            currently-shown face. Like level 1 but the turn direction is not
+            sampled — it never spins counter-clockwise.
         1 — Easiest: ±90° spin around the normal of the currently-shown face.
             The face stays the same; only the in-plane orientation changes.
         2 — Medium:  ±90° rotation around a randomly-chosen object-frame axis
@@ -247,7 +262,7 @@ class GraspReorientTask(BaseTask):
 
     # Controls which sampling method sample_new_goal dispatches to.
     # Override on an instance before the first episode to change difficulty.
-    goal_difficulty: int = 1
+    goal_difficulty: int = 0
 
 
     # Object-frame axis that is the surface normal for each face index.
@@ -272,23 +287,23 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 250,
+            max_steps          = 300,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # NOTE: insertion order must match the weights[...] indexing in
             # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI
             # override rebuilds the array from this dict's key order.
             cost_weights       = {
-                "w_quat": 5.0,
+                "w_quat": 10.0,
                 "w_pos_x": 10.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-                "w_pos_y": 20.0,    #Y is across the fingers
-                "w_pos_z": 10.0,
+                "w_pos_y": 40.0,    #Y is across the fingers
+                "w_pos_z": 7.50,
                 "w_velo": 0.0,
-                "w_contact": 2.0,
-                "w_joint": 0.1,
+                "w_contact": 10.0,
+                "w_joint": 0.10,
                 "w_joint_velo": 0.0,
-                "w_fallen": 200.0,
-                "w_quat_term": 50.0,
-                "w_pos_term": 2500.0,
+                "w_fallen": 30.0,
+                "w_quat_term": 10.0,
+                "w_pos_term": 10.0,
                 "w_fallen_term": 0.0,
             },
             # BaseTask.load() loads this static file directly — no MJCF is
@@ -476,6 +491,26 @@ class GraspReorientTask(BaseTask):
 
         self._update_goal(mjd, new_quat)
 
+    def sample_new_goal_by_z_rot_cw(self, mjd: mujoco.MjData, rng: np.random.Generator):
+        """Difficulty 0: fixed 90° clockwise spin around the normal of the
+        currently-shown face.
+
+        Identical to difficulty 1 except the rotation direction is not sampled —
+        the goal always spins clockwise (negative angle by the right-hand rule
+        about the face normal), never counter-clockwise. This is the easiest
+        goal since both the face and the turn direction are fixed.
+        """
+        axis = np.array(self._FACE_NORMALS[self._face_index], dtype=float)
+        angle = -np.pi / 2.0  # clockwise about the face normal
+
+        c, s = np.cos(angle / 2.0), np.sin(angle / 2.0)
+        q_rot = np.array([c, s * axis[0], s * axis[1], s * axis[2]])
+
+        new_quat = np.zeros(4)
+        mujoco.mju_mulQuat(new_quat, self.target_quat, q_rot)
+
+        self._update_goal(mjd, new_quat)
+
     def sample_new_goal_by_z_rot(self, mjd: mujoco.MjData, rng: np.random.Generator):
         """Difficulty 1: ±90° spin around the normal of the currently-shown face.
 
@@ -496,7 +531,9 @@ class GraspReorientTask(BaseTask):
 
     def sample_new_goal(self, mjd: mujoco.MjData, rng: np.random.Generator):
         """Dispatch to the appropriate sampler based on self.goal_difficulty."""
-        if self.goal_difficulty == 1:
+        if self.goal_difficulty == 0:
+            self.sample_new_goal_by_z_rot_cw(mjd, rng)
+        elif self.goal_difficulty == 1:
             self.sample_new_goal_by_z_rot(mjd, rng)
         elif self.goal_difficulty == 2:
             self.sample_new_goal_by_rot(mjd, rng)
