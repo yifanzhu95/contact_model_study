@@ -8,6 +8,18 @@ import numpy as np
 # instead of from the model's first keyframe.
 _USE_INIT_VECTORS = True
 
+# Set to True to reproduce the MuJoCo eval simulator's model mutations
+# (contact_study.sim.mujoco_sim.MujocoSimulator): override the timestep to the
+# task's fine eval timestep AND harden every contact via the M1 hard-contact
+# preset. With the default soft XML contacts the grasp is stable; flipping this
+# on should make the cube fly off exactly like `run_eval_episode --eval_sim
+# mujoco`, isolating the mismatch to the eval sim's model config (not the state).
+_MIMIC_EVAL_SIM = True
+
+# Eval sim timestep for grasp_reorient (TaskConfig.timestep). The XML declares
+# no <option timestep>, so the plain viewer runs at MuJoCo's 0.002 default.
+_EVAL_TIMESTEP = 0.0001
+
 _INIT_QPOS = np.array([
     0.74584225, -0.56908888,  0.91610734,  0.57389701,
     -0.03141543,-0.08227948,  0.70719126,  1.01884   ,
@@ -28,6 +40,22 @@ _INIT_CTRL = np.array([
 
 # Load a built-in sample model (Humanoid) that contains pre-saved keyframes
 model = mujoco.MjModel.from_xml_path("scenes/leap_hand/leap_hand_right_w_sites_yoke_removed.xml")#"scenes/leap_hand/scene_leap_cube.xml")
+
+if _MIMIC_EVAL_SIM:
+    # Mirror MujocoSimulator.__init__: set the fine eval timestep FIRST (the
+    # hard-contact preset derives its solref timeconst from opt.timestep), then
+    # harden every contact row toward the near-rigid M1 limit. This mutates the
+    # model in place, exactly as the eval sim does before stepping.
+    from contact_study.contact_models.api import _apply_hard_contact_preset
+    from contact_study.contact_models.config import ContactModelConfig
+
+    model.opt.timestep = _EVAL_TIMESTEP
+    _apply_hard_contact_preset(model, ContactModelConfig.M1().mujoco)
+    print(
+        f"[_MIMIC_EVAL_SIM] hardened contacts + timestep={model.opt.timestep} "
+        "(reproducing the MuJoCo eval simulator)"
+    )
+
 data = mujoco.MjData(model)
 
 if _USE_INIT_VECTORS:
