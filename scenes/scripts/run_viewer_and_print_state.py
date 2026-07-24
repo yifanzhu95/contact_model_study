@@ -4,20 +4,49 @@ import mujoco.viewer
 import numpy as np
 
 
+# Set to True to initialize qpos/ctrl from _INIT_QPOS / _INIT_CTRL below
+# instead of from the model's first keyframe.
+_USE_INIT_VECTORS = True
+
+_INIT_QPOS = np.array([
+    0.74584225, -0.56908888,  0.91610734,  0.57389701,
+    -0.03141543,-0.08227948,  0.70719126,  1.01884   ,
+    0.8062692 ,  0.61073483,  0.92851892,  0.61009699,
+    0.69503869,  1.44318449,  1.33446145,  0.19279398,
+    
+    0.02842596,  0.03650061,  0.07292401,  
+    1, 0, 0, 0
+], dtype=np.float64)
+
+
+_INIT_CTRL = np.array([
+ 0.765751 , -0.568012 ,  0.916951 ,  0.573897 , -0.0191225, -0.0837503,
+  0.709056 ,  1.01884  ,  0.830768 ,  0.610365 ,  0.929305 ,  0.610097 ,
+  0.69912  ,  1.44581  ,  1.33179  ,  0.192794 
+], dtype=np.float64)
+
+
 # Load a built-in sample model (Humanoid) that contains pre-saved keyframes
-model = mujoco.MjModel.from_xml_path("scenes/balance_stick/ur5e_balance_stick.xml")#"scenes/leap_hand/scene_leap_cube.xml")
+model = mujoco.MjModel.from_xml_path("scenes/leap_hand/leap_hand_right_w_sites_yoke_removed.xml")#"scenes/leap_hand/scene_leap_cube.xml")
 data = mujoco.MjData(model)
 
-# Verify the model actually has a 2nd keyframe (index 1)
+if _USE_INIT_VECTORS:
+    # Initialize qpos/ctrl from the hard-coded vectors above.
+    data.qpos[:] = _INIT_QPOS
+    data.ctrl[:] = _INIT_CTRL
+    print(f"Successfully loaded control from _INIT_CTRL: {data.ctrl}")
+else:
+    # Verify the model actually has a 2nd keyframe (index 1)
 
-# Extract the control vector from the 2nd keyframe (index 1)
-# model.key_ctrl holds a flattened array of shape (nkey, nact)
-target_ctrl = model.key_ctrl[0]
+    # Extract the control vector from the 2nd keyframe (index 1)
+    # model.key_ctrl holds a flattened array of shape (nkey, nact)
+    target_ctrl = model.key_ctrl[0]
 
-print(f"Successfully loaded control from 2nd keyframe: {target_ctrl}")
+    print(f"Successfully loaded control from 2nd keyframe: {target_ctrl}")
 
-# Initialize data to the first keyframe (qpos, qvel, ctrl, etc.)
-mujoco.mj_resetDataKeyframe(model, data, 0)
+    # Initialize data to the first keyframe (qpos, qvel, ctrl, etc.)
+    mujoco.mj_resetDataKeyframe(model, data, 0)
+
 mujoco.mj_forward(model, data)
 
 # Launch the interactive viewer
@@ -39,13 +68,13 @@ with mujoco.viewer.launch_passive(model, data) as viewer:
 
         # 3. Print the current states
         print(
-            "Ctrl:",data.ctrl
+            "Ctrl:", np.array2string(data.ctrl, separator=", ")
         )
         print(
-            "Qpos:",data.qpos
+            "Qpos:", np.array2string(data.qpos, separator=", ")
         )
         print(
-            "Qvel:",data.qvel
+            "Qvel:", np.array2string(data.qvel, separator=", ")
         )
         for site_id in range(model.nsite):
             site_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_SITE, site_id)
