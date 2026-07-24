@@ -191,16 +191,24 @@ def _euler_to_quat_wxyz(angles, seq="xyz"):
 
 
 def _root_body_pose(body):
-    """Fixed world pose (pos[3], quat_wxyz[4]) of a worldbody root <body>, read
-    from its pos + quat/euler attributes (MuJoCo radian, xyz euler). Pinocchio's
-    MJCF parser drops the root body's own placement, so we recover it here and
-    reapply it when merging the subtree (e.g. the UR5e base's quat="0 0 0 -1",
-    which otherwise leaves the whole arm rotated 180 deg about z). A body carrying
-    a free joint returns identity: its pose comes from the free-joint qpos we
-    write each step, not from a fixed mount."""
-    has_free = (body.find("freejoint") is not None or
-                any(j.get("type") == "free" for j in body.findall("joint")))
-    if has_free:
+    """Placement (pos[3], quat_wxyz[4]) to REAPPLY to a worldbody root <body> when
+    merging its subtree, or identity when none is needed.
+
+    Pinocchio's MJCF parser only drops the placement of a root body that has NO
+    joint — a body welded straight to the world (e.g. the UR5e base with
+    quat="0 0 0 -1", which otherwise leaves the whole arm rotated 180 deg about
+    z). That dropped pose is read here from the body's pos + quat/euler and
+    reapplied by merge_models.
+
+    A root body that carries a joint keeps its placement baked into that joint's
+    jointPlacement, so reapplying it would double-count (it left the LEAP fingers
+    offset by their mount translation and rotated by their mount quat). Return
+    identity for those:
+      - a free joint: pose comes from the free-joint qpos we write each step;
+      - a hinge/slide joint: the parser already placed the joint at the mount."""
+    has_joint = (body.find("freejoint") is not None or
+                 len(body.findall("joint")) > 0)
+    if has_joint:
         return np.zeros(3), np.array([1.0, 0.0, 0.0, 0.0])
     pos = np.fromstring(body.get("pos", "0 0 0"), sep=" ", dtype=float)
     if pos.shape[0] != 3:
@@ -213,6 +221,13 @@ def _root_body_pose(body):
     else:
         quat = np.array([1.0, 0.0, 0.0, 0.0])
     return pos, quat
+
+
+# Name of the synthetic wrapper <body> that split_into_single_root_mjcfs uses to
+# carry the loose <worldbody> geoms at the world frame. Canonicalized to "world"
+# by _canonical_body_name so the scene's <exclude body1="world" .../> tags match
+# the wrapped geoms.
+_WORLD_GEOMS_BODY = "world_geoms"
 
 
 def split_into_single_root_mjcfs(mjcf_path, scene_dir):
@@ -251,12 +266,7 @@ def split_into_single_root_mjcfs(mjcf_path, scene_dir):
     token = (f"{datetime.datetime.now():%Y%m%d_%H%M%S}_"
              f"{os.getpid()}_{uuid.uuid4().hex[:8]}")
 
-    # Capture root poses BEFORE re-parenting the body elements into the split
-    # trees (attributes survive, but read them up front to keep this explicit).
-    root_poses = [_root_body_pose(body) for body in bodies]
-
-    tmp_paths = []
-    for i, body in enumerate(bodies):
+    def _write_split(children, label):
         new_root = ET.Element("mujoco", root.attrib)
         if compiler is not None:
             new_root.append(compiler)
@@ -265,14 +275,33 @@ def split_into_single_root_mjcfs(mjcf_path, scene_dir):
         for d in defaults:
             new_root.append(d)
         new_worldbody = ET.SubElement(new_root, "worldbody")
-        if i == 0:
-            for geom in loose_geoms:
-                new_worldbody.append(geom)
-        new_worldbody.append(body)
-
-        tmp_path = os.path.join(scene_dir, f"_tmp_pin_sim_split_{token}_{i}.xml")
+        for child in children:
+            new_worldbody.append(child)
+        tmp_path = os.path.join(scene_dir, f"_tmp_pin_sim_split_{token}_{label}.xml")
         ET.ElementTree(new_root).write(tmp_path)
-        tmp_paths.append(tmp_path)
+        return tmp_path
+
+    # One split per root <body>, each reapplied at its own fixed world pose by
+    # merge_models (Pinocchio drops the root placement; see _root_body_pose).
+    tmp_paths = []
+    root_poses = []
+    for i, body in enumerate(bodies):
+        tmp_paths.append(_write_split([body], str(i)))
+        root_poses.append(_root_body_pose(body))
+
+    # Loose <worldbody> geoms (palm plates, floor) belong to the WORLD frame, not
+    # to any finger. Give them their own identity-placed wrapper <body> split
+    # instead of folding them into the first finger: folding made merge_models
+    # reapply that finger's mount rotation to them, tilting the palm plates and
+    # floor (a ~120 deg rotation for this LEAP hand). The wrapper's name
+    # canonicalizes to "world" (see _canonical_body_name) so <exclude
+    # body1="world" .../> tags still match the wrapped geoms.
+    if loose_geoms:
+        wrapper = ET.Element("body", {"name": _WORLD_GEOMS_BODY, "pos": "0 0 0"})
+        for geom in loose_geoms:
+            wrapper.append(geom)
+        tmp_paths.append(_write_split([wrapper], "worldgeoms"))
+        root_poses.append((np.zeros(3), np.array([1.0, 0.0, 0.0, 0.0])))
     return tmp_paths, root_poses
 
 
@@ -470,8 +499,10 @@ def _canonical_body_name(name: str) -> str:
     tags match Pinocchio frames. MuJoCo calls the root body "world"; Pinocchio's
     MJCF parser calls the same frame "universe". Geoms declared loose on the
     <worldbody> (e.g. this LEAP scene's palm plates) hang off that frame in both,
-    so an <exclude body1="world" .../> must match Pinocchio's "universe"."""
-    return "world" if name == "universe" else name
+    so an <exclude body1="world" .../> must match Pinocchio's "universe". Those
+    loose geoms are now carried by the _WORLD_GEOMS_BODY wrapper body (see
+    split_into_single_root_mjcfs), so its name canonicalizes to "world" too."""
+    return "world" if name in ("universe", _WORLD_GEOMS_BODY) else name
 
 
 def build_collision_pairs(pin, model, geom_model, use_mesh_geoms, excluded_body_pairs=None):
