@@ -30,10 +30,26 @@ _ARM_JOINTS = [
     "wrist_1_joint", "wrist_2_joint", "wrist_3_joint",
 ]
 
+# --- Pinocchio eval actuation ------------------------------------------------
+# The MJCF drives each arm joint with a position servo (general actuator,
+# gainprm=kp, biasprm=[0,-kp,-kd]), i.e. force = kp*(ctrl-q) - kd*qvel:
+# kp=2000/kd=400 on the shoulder+elbow (size3) joints, kp=500/kd=100 on the
+# three wrists (size1). We reproduce those per-joint gains directly so the
+# Pinocchio PD matches the MJCF actuator as closely as possible, in ctrl order
+# [pan, lift, elbow, wrist1, wrist2, wrist3]. (Note: the shared PD applies the
+# -kd*qvel damping OUTSIDE the force clamp, whereas MuJoCo clamps the summed
+# force; the gains themselves are identical.)
+_PIN_KP = np.array([2000.0, 2000.0, 2000.0, 500.0, 500.0, 500.0], dtype=np.float64)
+_PIN_KD = np.array([ 400.0,  400.0,  400.0, 100.0, 100.0, 100.0], dtype=np.float64)
+_PIN_ZETA          = 1.0     # unused with use_direct_kd=True
+_PIN_USE_DIRECT_KD = True
+_PIN_GRAVITY_COMP  = False   # match the MJCF servo, which does no gravity comp
+_PIN_ARMATURE      = 0.1     # matches the joints' <joint armature="0.1"> default
+
 # "home" keyframe values, duplicated here so the cost's arm target doesn't
 # depend on re-reading the keyframe at runtime.
 _HOME_ARM_QPOS = np.array(
-    [-1.5708, -1.5708, 1.5708, 0.0, 1.5708, 0.0], dtype=np.float64
+    [-1.5708, -0.7854, 1.5708, -0.7854, 1.5708, 0], dtype=np.float64
 )
 # z matches the plate top surface (~0.493, from the arm's home pose) plus the
 # stick capsule's half-length (0.1) + radius (0.01) so it rests flush instead
@@ -42,7 +58,7 @@ _HOME_ARM_QPOS = np.array(
 # solref timeconst clamped to ~2*dt at the fine eval timestep) that penetration
 # was corrected in essentially one step, producing a ~49 m/s velocity spike.
 # +0.001 clearance absorbs the reset's random tilt without reintroducing it.
-_STICK_INIT_POS  = np.array([-0.13399598, 0.59876665, 0.604], dtype=np.float64)
+_STICK_INIT_POS  = np.array([-0.13399637, 0.78270567, 0.20233457], dtype=np.float64)
 _STICK_INIT_QUAT = np.array([1,0,0,0], dtype=np.float64)
 
 # Camera: fixed position, aimed at the robot's initial working point (the
@@ -119,13 +135,15 @@ def balance_stick_cost_wp(qpos: wp.array(dtype=float),
         # the plate and fell), a hard terminal penalty on top of the tilt/home/
         # plate terms.
         fallen = float(0.0)
-        if qpos[obj_qpos_adr + 2] < 0.25:
+        if qpos[obj_qpos_adr + 2] < 0.0:
             fallen = 1.0
         return (
             weights[5] * c_tilt +
             weights[6] * c_home +
             weights[7] * c_plate +
-            weights[8] * fallen
+            weights[8] * fallen +
+            weights[9] * c_linvel +
+            weights[10] * c_angvel
         )
     return (
         weights[0] * c_tilt +
@@ -157,30 +175,35 @@ class BalanceStickTask(BaseTask):
         self.config = TaskConfig(
             name               = "balance_stick",
             complexity         = ContactComplexity.LOW,
-            max_steps          = 1000,
+            max_steps          = 500,
             success_thresholds = {"tilt": 0.1, "plate": 0.05, "vel": 0.5},
             cost_weights       = {
-                "w_tilt":       1.0,
-                "w_home":       5.0,
-                "w_plate":      1.0,
-                "w_linvel":     0.05,
-                "w_angvel":     0.05,
+                "w_tilt":       0.0,
+                "w_home":       0.0,
+                "w_plate":      0.0,
+                "w_linvel":     1.0,
+                "w_angvel":     0.50,
                 "w_tilt_term":  100.0,
-                "w_home_term":  50.0,
+                "w_home_term":  0.1,
                 "w_plate_term": 0.0,
-                "w_fallen_term":100.0,
+                "w_fallen_term":1000.0,
+                "w_linvel_term":10.0,
+                "w_angvel_term":5.0,
             },
             # No {geometry} variant for this scene.
             xml_path_template  = BALANCE_SCENE_XML,
             rollout_model_path = str(SCENES_DIR / BALANCE_SCENE_XML),
             rollout_is_urdf    = False,
-            eval_sim           = EvalSimulatorKind.MUJOCO,
-            eval_model_paths   = {EvalSimulatorKind.MUJOCO: str(SCENES_DIR / BALANCE_SCENE_XML)},
+            eval_sim           = EvalSimulatorKind.PINOCCHIO,
+            eval_model_paths   = {
+                EvalSimulatorKind.MUJOCO:    str(SCENES_DIR / BALANCE_SCENE_XML),
+                EvalSimulatorKind.PINOCCHIO: str(SCENES_DIR / BALANCE_SCENE_XML),
+            },
             cam_pos            = tuple(float(v) for v in _CAM_POS),
             cam_rotmat         = _CAM_ROTMAT,
             cam_fps            = 30.0,
             timestep           = 0.0001,
-            eval_substeps_per_rollout = 10,
+            eval_substeps_per_rollout = 40,
         )
 
     def initialize_task(self):
@@ -204,6 +227,7 @@ class BalanceStickTask(BaseTask):
         weights_list = [
             w["w_tilt"], w["w_home"], w["w_plate"], w["w_linvel"], w["w_angvel"],
             w["w_tilt_term"], w["w_home_term"], w["w_plate_term"], w["w_fallen_term"],
+            w["w_linvel_term"], w["w_angvel_term"],
         ]
 
         self.index_vector_wp = wp.array(self.index_vector, dtype=wp.int32, device="cuda")
@@ -263,5 +287,88 @@ class BalanceStickTask(BaseTask):
     def has_failed(self, mjd: mujoco.MjData) -> bool:
         # Fallen (>~60 deg from vertical) or slid/toppled off the plate.
         tilt, plate_err = self._tilt_and_plate_err(mjd)
-        #return bool(tilt > 1.0 or plate_err > 0.3)
-        return False
+        #return False
+        return bool(tilt > 0.25 or plate_err > 0.3)
+
+    # --- eval simulator -------------------------------------------------
+    def make_eval_simulator(self, video_path: str | None = None, render: bool = True):
+        if self.config.eval_sim == EvalSimulatorKind.PINOCCHIO:
+            return self._make_pinocchio_simulator(video_path=video_path, render=render)
+        return super().make_eval_simulator(video_path=video_path, render=render)
+
+    def _make_pinocchio_simulator(self, video_path: str | None = None, render: bool = True):
+        """Pinocchio + ADMM eval simulator for the balance-stick scene. It parses
+        the same MJCF the rollout uses (eval_model_paths[PINOCCHIO]), so the six
+        arm joints map 1:1 to the MuJoCo qpos/qvel/ctrl indices (identity channels)
+        and the free stick is the "obj_joint" freejoint. The only intended contact
+        is stick<->plate; every stick<->arm pair is dropped by the MJCF's own
+        <contact><exclude> tags (build_collision_pairs honours them)."""
+        from contact_study.contact_models.pinocchio_sim import (
+            PinocchioSimulator, PinocchioJointChannel, PinocchioFreeBodyChannel,
+            PinocchioPdActuation, PinocchioContactConfig,
+        )
+
+        mjm = self.mjm
+        arm_jids = [
+            mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_JOINT, name)
+            for name in _ARM_JOINTS
+        ]
+        joint_channels = [
+            PinocchioJointChannel(
+                pin_name=mjm.joint(j).name,
+                q_adr=int(mjm.jnt_qposadr[j]),
+                v_adr=int(mjm.jnt_dofadr[j]),
+            )
+            for j in arm_jids
+        ]
+        # The free stick: MuJoCo freejoint -> Pinocchio free-flyer of the same name.
+        free_channels = [
+            PinocchioFreeBodyChannel(
+                pin_name="obj_joint",
+                q_adr=int(self.index_vector[5]), v_adr=int(self.index_vector[6]),
+            )
+        ]
+        # PD desired positions arrive in MuJoCo control order; name each controlled
+        # joint by its actuator's target joint. _ARM_JOINTS is already that order,
+        # but sourcing it from the actuators keeps it robust to XML reordering.
+        ctrl_joint_names = [
+            mjm.joint(int(mjm.actuator(a).trnid[0])).name for a in range(mjm.nu)
+        ]
+        # Per-actuator torque saturation from the MJCF's actuator forcerange
+        # (±150 N*m on the size3 joints, ±28 on the wrists), so the Pinocchio PD
+        # clamps its torque exactly like MuJoCo's actuator does. This scene sets
+        # the limit on the actuator (actuator_forcerange), not on the joint
+        # (jnt_actfrcrange is 0), so read it from the actuator in control order.
+        force_limit = np.array([
+            mjm.actuator_forcerange[a]
+            if mjm.actuator_forcelimited[a]
+            else (-np.inf, np.inf)
+            for a in range(mjm.nu)
+        ], dtype=np.float64)
+        pid = PinocchioPdActuation(
+            ctrl_joint_names=ctrl_joint_names,
+            kp=_PIN_KP,
+            zeta=_PIN_ZETA,
+            gravity_comp=_PIN_GRAVITY_COMP,
+            armature=_PIN_ARMATURE,
+            use_direct_kd=_PIN_USE_DIRECT_KD,
+            kd=_PIN_KD,
+            force_limit=force_limit,
+        )
+        # stick<->plate frictional point contacts (the arm pairs are excluded in
+        # the MJCF). Defaults keep use_mesh_geoms=True so the capsule/cylinder
+        # primitives are collidable (only box geoms are kept when it is False).
+        contact_cfg = PinocchioContactConfig()
+
+        return PinocchioSimulator(
+            model_path     = self.config.eval_model_paths[self.config.eval_sim],
+            config         = self.config,
+            nq             = self.mjm.nq,
+            nv             = self.mjm.nv,
+            pid            = pid,
+            joint_channels = joint_channels,
+            free_channels  = free_channels,
+            contact_cfg    = contact_cfg,
+            video_path     = video_path,
+            render         = render,
+        )

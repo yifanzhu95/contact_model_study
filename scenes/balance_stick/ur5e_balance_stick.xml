@@ -135,6 +135,16 @@
     </body>
   </worldbody>
 
+  <contact>
+    <exclude body1="stick" body2="base"/>
+    <exclude body1="stick" body2="shoulder_link"/>
+    <exclude body1="stick" body2="upper_arm_link"/>
+    <exclude body1="stick" body2="forearm_link"/>
+    <exclude body1="stick" body2="wrist_1_link"/>
+    <exclude body1="stick" body2="wrist_2_link"/>
+    <exclude body1="stick" body2="wrist_3_link"/>
+  </contact>
+
   <actuator>
     <general class="size3" name="shoulder_pan" joint="shoulder_pan_joint"/>
     <general class="size3" name="shoulder_lift" joint="shoulder_lift_joint"/>

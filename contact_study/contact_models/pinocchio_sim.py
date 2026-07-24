@@ -165,14 +165,81 @@ class PinocchioContactConfig:
 # ---------------------------------------------------------------------------
 # Model build / contact helpers (self-contained; mirrors replay_pinocchio_controls.py)
 # ---------------------------------------------------------------------------
+def _quat_mul(a, b):
+    """Hamilton product of two wxyz quaternions."""
+    aw, ax, ay, az = a
+    bw, bx, by, bz = b
+    return np.array([
+        aw * bw - ax * bx - ay * by - az * bz,
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+    ], dtype=float)
+
+
+def _euler_to_quat_wxyz(angles, seq="xyz"):
+    """MuJoCo default (intrinsic, radian) euler -> wxyz quaternion: R = R0·R1·R2
+    for seq[0],seq[1],seq[2], each an intrinsic rotation about the moving axis."""
+    axes = {"x": (1, 0, 0), "y": (0, 1, 0), "z": (0, 0, 1)}
+    q = np.array([1.0, 0.0, 0.0, 0.0])
+    for ch, ang in zip(seq, angles):
+        ax, ay, az = axes[ch]
+        h = 0.5 * ang
+        s = np.sin(h)
+        q = _quat_mul(q, np.array([np.cos(h), ax * s, ay * s, az * s]))
+    return q
+
+
+def _root_body_pose(body):
+    """Fixed world pose (pos[3], quat_wxyz[4]) of a worldbody root <body>, read
+    from its pos + quat/euler attributes (MuJoCo radian, xyz euler). Pinocchio's
+    MJCF parser drops the root body's own placement, so we recover it here and
+    reapply it when merging the subtree (e.g. the UR5e base's quat="0 0 0 -1",
+    which otherwise leaves the whole arm rotated 180 deg about z). A body carrying
+    a free joint returns identity: its pose comes from the free-joint qpos we
+    write each step, not from a fixed mount."""
+    has_free = (body.find("freejoint") is not None or
+                any(j.get("type") == "free" for j in body.findall("joint")))
+    if has_free:
+        return np.zeros(3), np.array([1.0, 0.0, 0.0, 0.0])
+    pos = np.fromstring(body.get("pos", "0 0 0"), sep=" ", dtype=float)
+    if pos.shape[0] != 3:
+        pos = np.zeros(3)
+    if body.get("quat") is not None:
+        quat = np.fromstring(body.get("quat"), sep=" ", dtype=float)
+        quat = quat / (np.linalg.norm(quat) or 1.0)
+    elif body.get("euler") is not None:
+        quat = _euler_to_quat_wxyz(np.fromstring(body.get("euler"), sep=" ", dtype=float))
+    else:
+        quat = np.array([1.0, 0.0, 0.0, 0.0])
+    return pos, quat
+
+
 def split_into_single_root_mjcfs(mjcf_path, scene_dir):
     """Write one temp MJCF per <worldbody> root <body> (with the loose worldbody
     geoms folded into the first), so Pinocchio's first-body-only MJCF parser can
-    read each independent root into its own model. Returns the temp paths."""
+    read each independent root into its own model. Returns (temp_paths,
+    root_poses), where root_poses[i] is the (pos, quat_wxyz) fixed world placement
+    of subtree i's root body (Pinocchio drops it; merge_models reapplies it)."""
     tree = ET.parse(mjcf_path)
     root = tree.getroot()
     compiler = root.find("compiler")
     asset = root.find("asset")
+    # <default> class/childclass definitions must travel with the split models:
+    # bodies/geoms/joints that reference a class (e.g. the UR5e arm's
+    # childclass="ur5e", class="size3"/"visual") make Pinocchio's MJCF parser
+    # throw `unordered_map::at` on an undefined-class lookup otherwise. Scenes
+    # with no class references (e.g. the LEAP hand) are unaffected.
+    defaults = root.findall("default")
+    # Pinocchio's MJCF parser throws `unordered_map::at` on a <material> that
+    # carries a `class` attribute (it mishandles the material-class lookup even
+    # when the class is defined). Materials are visual-only and these split
+    # MJCFs are Pinocchio-only (never MuJoCo), so drop the attribute — the geoms
+    # still resolve the material by name; only the class-inherited specular/
+    # shininess (cosmetic) is lost.
+    if asset is not None:
+        for mat in asset.findall("material"):
+            mat.attrib.pop("class", None)
     worldbody = root.find("worldbody")
 
     loose_geoms = [el for el in worldbody if el.tag == "geom"]
@@ -184,6 +251,10 @@ def split_into_single_root_mjcfs(mjcf_path, scene_dir):
     token = (f"{datetime.datetime.now():%Y%m%d_%H%M%S}_"
              f"{os.getpid()}_{uuid.uuid4().hex[:8]}")
 
+    # Capture root poses BEFORE re-parenting the body elements into the split
+    # trees (attributes survive, but read them up front to keep this explicit).
+    root_poses = [_root_body_pose(body) for body in bodies]
+
     tmp_paths = []
     for i, body in enumerate(bodies):
         new_root = ET.Element("mujoco", root.attrib)
@@ -191,6 +262,8 @@ def split_into_single_root_mjcfs(mjcf_path, scene_dir):
             new_root.append(compiler)
         if asset is not None:
             new_root.append(asset)
+        for d in defaults:
+            new_root.append(d)
         new_worldbody = ET.SubElement(new_root, "worldbody")
         if i == 0:
             for geom in loose_geoms:
@@ -200,21 +273,71 @@ def split_into_single_root_mjcfs(mjcf_path, scene_dir):
         tmp_path = os.path.join(scene_dir, f"_tmp_pin_sim_split_{token}_{i}.xml")
         ET.ElementTree(new_root).write(tmp_path)
         tmp_paths.append(tmp_path)
-    return tmp_paths
+    return tmp_paths, root_poses
 
 
-def merge_models(pin, parts):
+def merge_models(pin, parts, root_poses):
     """Append single-root (model, collision, visual) tuples into one combined
-    model at the universe frame. appendModel merges one geometry model per call,
-    so run it twice per subtree against the same pre-merge snapshot to keep the
+    model, each placed at its root body's fixed world pose (root_poses[i] =
+    (pos, quat_wxyz)). We seed from an EMPTY model rather than parts[0] so the
+    FIRST subtree's root pose is applied too — Pinocchio's MJCF parser drops
+    every root <body>'s placement, including the seed's (this is what left the
+    UR5e arm rotated 180 deg). appendModel merges one geometry model per call, so
+    run it twice per subtree against the same pre-merge snapshot to keep the
     collision and visual geometry index-consistent. Returns (model, coll, vis)."""
-    model, coll, vis = parts[0]
-    aMb = pin.SE3.Identity()
-    for (mB, collB, visB) in parts[1:]:
+    model = pin.Model()
+    coll = pin.GeometryModel()
+    vis = pin.GeometryModel()
+    for (mB, collB, visB), (pos, quat) in zip(parts, root_poses):
+        w, x, y, z = quat
+        aMb = pin.SE3(pin.Quaternion(w, x, y, z).matrix(), np.asarray(pos, dtype=float))
         prev = model
         model, coll = pin.appendModel(prev, mB, coll, collB, 0, aMb)
         _, vis = pin.appendModel(prev, mB, vis, visB, 0, aMb)
     return model, coll, vis
+
+
+def ensure_obj_material_stubs(visual_model) -> int:
+    """Write a neutral stub .mtl next to any visual .obj mesh that references a
+    `mtllib` file which doesn't exist on disk. panda3d's OBJ loader (assimp)
+    aborts the whole load when it can't find a referenced .mtl ("failed to
+    locate material" -> "No object detected" -> the model fails as invalid),
+    whereas MuJoCo/coal ignore the missing .mtl entirely. The UR5e meshes here
+    were exported (Blender) with `mtllib Black.mtl` etc. but no .mtl files. The
+    panda3d viewer overrides every material anyway (overrideMaterial=True), so
+    the stub's content is cosmetic — it only needs to exist for assimp to parse
+    the geometry. Idempotent: skips any .mtl that already exists. Returns the
+    number of stubs written."""
+    written = 0
+    seen_objs = set()
+    for go in visual_model.geometryObjects:
+        mesh_path = getattr(go, "meshPath", "") or ""
+        if not mesh_path.lower().endswith(".obj") or mesh_path in seen_objs:
+            continue
+        seen_objs.add(mesh_path)
+        if not os.path.isfile(mesh_path):
+            continue
+        mesh_dir = os.path.dirname(mesh_path)
+        try:
+            with open(mesh_path) as f:
+                libs = [ln.split(None, 1)[1].strip()
+                        for ln in f if ln.startswith("mtllib") and len(ln.split()) > 1]
+        except OSError:
+            continue
+        for lib in libs:
+            mtl_path = os.path.join(mesh_dir, lib)
+            if os.path.isfile(mtl_path):
+                continue
+            # Name the material after the .mtl stem so a `usemtl Foo` in the .obj
+            # resolves; a neutral gray is fine (the viewer overrides it anyway).
+            stem = os.path.splitext(os.path.basename(lib))[0]
+            try:
+                with open(mtl_path, "w") as f:
+                    f.write(f"newmtl {stem}\nKa 0 0 0\nKd 0.6 0.6 0.6\nKs 0 0 0\nd 1\n")
+                written += 1
+            except OSError:
+                pass
+    return written
 
 
 def _box_half_extents(go):
@@ -456,13 +579,13 @@ class PinocchioSimulator(EvalSimulator):
 
         # --- build the combined Pinocchio model from the (multi-root) MJCF ----
         scene_dir = os.path.dirname(model_path)
-        tmp_paths = split_into_single_root_mjcfs(model_path, scene_dir)
+        tmp_paths, root_poses = split_into_single_root_mjcfs(model_path, scene_dir)
         try:
             parts = [pin.buildModelsFromMJCF(p, contacts=False) for p in tmp_paths]
         finally:
             for p in tmp_paths:
                 os.remove(p)
-        model, coll, vis = merge_models(pin, parts)
+        model, coll, vis = merge_models(pin, parts, root_poses)
         model.gravity = pin.Motion(np.array([0.0, 0.0, -9.81, 0.0, 0.0, 0.0]))
 
         self._model = model
@@ -635,6 +758,10 @@ class PinocchioSimulator(EvalSimulator):
         # Add the goal-cube overlay (if requested) BEFORE the visualizer loads the
         # visual model, so its geoms get uploaded with the rest of the scene.
         self._add_goal_marker()
+
+        # Make sure every visual .obj has the .mtl it names on disk, or assimp
+        # aborts the load (the UR5e meshes reference nonexistent Black.mtl etc.).
+        ensure_obj_material_stubs(self._visual_model)
 
         # Apply MJCF rgba (stored in meshColor) instead of the default material.
         for go in self._visual_model.geometryObjects:
