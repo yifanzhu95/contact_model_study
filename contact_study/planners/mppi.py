@@ -28,7 +28,16 @@ class MPPIConfig:
     temperature:     float = 1.0    # lambda: MPPI temperature (inverse temp)
     noise_sigma:     float = 0.01   # action noise std dev
     n_iterations:    int   = 1      # number of MPPI update iterations per call
-    warm_start:      bool  = True   # shift action sequence one step forward
+    # Warm start: shift the action sequence one step forward between plans.
+    # Default False to match irisim_warp, which keeps the running mean and does
+    # not roll it forward (the shift is commented out there).
+    warm_start:      bool  = False
+    # Rollout control parameterization. True (default, irisim_warp-style): each
+    # rollout step commands ctrl = current measured robot joint qpos + delta,
+    # re-reading the joint every step (a bounded servo relative to the current
+    # pose). False (legacy): accumulate the deltas onto the commanded target
+    # across the horizon (ctrl += delta).
+    ctrl_relative_to_qpos: bool = True
     nconmax:         int   = 200
     njmax:           int   = 500
     substeps:        int   = 1
@@ -47,11 +56,12 @@ class MPPIConfig:
     # horizon) instead of always unrolling the full horizon.
     time_constrained: bool  = False
     plan_budget_ms:   float | None = None   # required when time_constrained
-    # Normalize the accumulated *running* (per-step) trajectory cost by the
-    # (simulated) horizon length before the weight computation, so `temperature`
-    # is invariant to horizon. The terminal cost is a single-step value and is
-    # NOT divided by the horizon.
-    normalize_cost_by_horizon: bool = True
+    # Average the total trajectory cost (running + terminal) across the horizon
+    # length before the weight computation, so `temperature` is invariant to
+    # horizon. Unlike the old normalize_cost_by_horizon (which divided only the
+    # running sum and left the terminal cost un-normalized), the terminal cost is
+    # included in the mean here, matching irisim_warp's `total_cost / horizon`.
+    mean_cost_over_horizon: bool = True
     # Normalize the total trajectory cost (running + terminal) by the number of
     # samples before the weight computation, so `temperature` is invariant to
     # n_samples.
@@ -137,6 +147,22 @@ def _assign_ctrl_kernel(
     n, u = wp.tid()
     ctrl[n, u] += V[n, t, u]
 
+@wp.kernel
+def _assign_ctrl_relative_kernel(
+    V:         wp.array3d(dtype=float),   # (N, H, nu)
+    t:         int,                       # timestep index
+    qpos:      wp.array2d(dtype=float),   # (N, nq)
+    robot_adr: int,                       # robot-joint start index in qpos
+    ctrl:      wp.array2d(dtype=float),   # (N, nu)  [out]
+):
+    """irisim_warp-style servo control: ctrl = current robot joint qpos + delta.
+
+    Re-reads the measured joint from qpos each rollout step so the command is a
+    bounded servo relative to the current pose, rather than accumulating the
+    deltas onto the running command (see _assign_ctrl_kernel)."""
+    n, u = wp.tid()
+    ctrl[n, u] = qpos[n, robot_adr + u] + V[n, t, u]
+
 def _make_accumulate_kernel(cost_fn_wp: wp.func):
     @wp.kernel
     def _kernel(
@@ -172,14 +198,16 @@ def _combine_costs_kernel(
 ):
     """Fold the separately-accumulated terminal cost into the running-cost sum.
 
-    The running cost is a sum over horizon steps, so it is scaled by
-    running_scale (1/H) to a per-step average before the terminal cost — a
-    single-step value that must not be divided by the horizon — is added. The
-    combined total is then scaled by total_scale (1/N). Written in place into
-    `running`, which downstream kernels read as the per-sample trajectory cost.
+    The terminal cost is added to the running-cost sum and the combined total is
+    scaled by running_scale (1/H when mean_cost_over_horizon is set) to a
+    per-step mean over the whole trajectory — matching irisim_warp's
+    `total_cost / horizon`, which likewise averages every step including the
+    terminal one. total_scale (1/N) is applied on top for sample invariance.
+    Written in place into `running`, which downstream kernels read as the
+    per-sample trajectory cost.
     """
     n = wp.tid()
-    running[n] = (running[n] * running_scale + terminal[n]) * total_scale
+    running[n] = (running[n] + terminal[n]) * running_scale * total_scale
 
 
 @wp.kernel
@@ -299,6 +327,16 @@ class MPPIController:
         self.indices_wp = task.cost_idx_wp
         self.weights_wp = task.cost_weights_wp
         self._accumulate_costs_kernel = _make_accumulate_kernel(self.cost_fn_wp_func)
+
+        # Robot-joint start address in qpos for the relative (servo) control
+        # parameterization (ctrl_relative_to_qpos). Taken from the task's cost
+        # index vector (slot 2 = robot_qpos_adr) when available, else 0 (robot
+        # joints lead qpos).
+        self.robot_qpos_adr = 0
+        if self.indices_wp is not None:
+            idx_np = self.indices_wp.numpy()
+            if idx_np.shape[0] > 2:
+                self.robot_qpos_adr = int(idx_np[2])
 
         # Noise-resampling bookkeeping. _resample_count only ever advances (it
         # keys the RNG seed), so no two resamples in this controller's lifetime
@@ -422,11 +460,7 @@ class MPPIController:
 
             for t in range(self.pc.horizon):
                 terminal = (t == self.pc.horizon - 1)
-                wp.launch(
-                    _assign_ctrl_kernel,
-                    dim=(self.pc.n_samples, self.nu),
-                    inputs=[self.V_wp, t, self.d.ctrl],
-                )
+                self._launch_assign_ctrl(t)
                 for _ in range(self.pc.substeps):
                     api.step(self.m, self.d)
                 # Terminal cost goes to its own buffer so it can be excluded from
@@ -449,6 +483,26 @@ class MPPIController:
         # Restart the resample cadence so a fresh goal begins on fresh noise.
         # _resample_count deliberately keeps advancing (it keys the seed).
         self._plan_count = 0
+
+    def _launch_assign_ctrl(self, t: int):
+        """Write the rollout controls for horizon step t into d.ctrl.
+
+        ctrl_relative_to_qpos selects the parameterization (see MPPIConfig):
+        True re-reads the current robot joint qpos each step (irisim_warp servo),
+        False accumulates the delta onto the running command.
+        """
+        if self.pc.ctrl_relative_to_qpos:
+            wp.launch(
+                _assign_ctrl_relative_kernel,
+                dim=(self.pc.n_samples, self.nu),
+                inputs=[self.V_wp, t, self.d.qpos, self.robot_qpos_adr, self.d.ctrl],
+            )
+        else:
+            wp.launch(
+                _assign_ctrl_kernel,
+                dim=(self.pc.n_samples, self.nu),
+                inputs=[self.V_wp, t, self.d.ctrl],
+            )
 
     def _maybe_resample_noise(self):
         """Redraw the noise block every `resample_interval` plan() calls (no-op if None)."""
@@ -480,15 +534,15 @@ class MPPIController:
         low, high = self.pc.delta_range
 
         # Fold the terminal cost into the running-cost sum and normalize. The
-        # running (per-step) sum is divided by the horizon so the MPPI
-        # temperature `lam` is invariant to horizon, while the single-step
-        # terminal cost is added untouched; the combined total is divided by the
+        # combined total (running + terminal) is divided by the horizon so the
+        # MPPI temperature `lam` is invariant to horizon — a mean over the whole
+        # trajectory, matching irisim_warp; the total is then divided by the
         # sample count for invariance to n_samples. Every sample in this update
         # ran the same number of steps, so this is a uniform rescale that leaves
         # the relative sample weighting unchanged; it also rescales the reported
         # min cost `beta`. costs_wp holds the folded total afterward.
         running_scale = 1.0
-        if self.pc.normalize_cost_by_horizon and self.pc.horizon > 0:
+        if self.pc.mean_cost_over_horizon and self.pc.horizon > 0:
             running_scale /= float(self.pc.horizon)
         total_scale = 1.0
         if self.pc.normalize_cost_by_samples and N > 0:
@@ -643,11 +697,7 @@ class MPPIController:
 
             for t in range(H):
                 terminal = (t == H - 1)
-                wp.launch(
-                    _assign_ctrl_kernel,
-                    dim=(N, self.nu),
-                    inputs=[self.V_wp, t, self.d.ctrl],
-                )
+                self._launch_assign_ctrl(t)
                 # Launch one-step graph substeps times — keeps the graph small
                 # regardless of substep count (unlike the full-graph path which
                 # bakes all substeps into a single captured graph).
@@ -706,11 +756,7 @@ class MPPIController:
             deadline = time.perf_counter() + budget_s
             n_eff = 0
             for t in range(H):
-                wp.launch(
-                    _assign_ctrl_kernel,
-                    dim=(N, self.nu),
-                    inputs=[self.V_wp, t, self.d.ctrl],
-                )
+                self._launch_assign_ctrl(t)
                 for _ in range(self.pc.substeps):
                     wp.capture_launch(self.step_graph)
 

@@ -103,7 +103,7 @@ _DRAKE_PID_EFFORT = 100.0
 #     0.965926, 0.0, 0.258819, 0.0,
 # ], dtype=np.float64)
 _INIT_QPOS = np.array([
-  0.73250957, -0.57492066,  0.91550966,  0.57389726, -0.03141543,
+    0.73250957, -0.57492066,  0.91550966,  0.57389726, -0.03141543,
  -0.08227948,  0.70719126,  1.01884   ,  0.80476691,  0.61226898,
   0.92855251,  0.61009647,  0.69248676,  1.45820128,  1.33131904,
   0.19204115,  0.03003797,  0.03583275,  0.07519783,  0.99971718,
@@ -186,11 +186,12 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
     c_quat = 1.0 - dot_prod * dot_prod
 
     pos_diff = p_obj - p_target
-    # Per-axis squared position error, weighted independently in X/Y/Z (see the
-    # cost sum below). c_pos is their isotropic total, used by the terminal cost.
-    c_pos_x = pos_diff[0] * pos_diff[0]
-    c_pos_y = pos_diff[1] * pos_diff[1]
-    c_pos_z = pos_diff[2] * pos_diff[2]
+    # Per-axis L1 (absolute) position error, weighted independently in X/Y/Z (see
+    # the cost sum below), matching irisim_warp's LeapDexReal. c_pos is their L1
+    # total, used by the terminal cost.
+    c_pos_x = wp.abs(pos_diff[0])
+    c_pos_y = wp.abs(pos_diff[1])
+    c_pos_z = wp.abs(pos_diff[2])
     c_pos = c_pos_x + c_pos_y + c_pos_z
 
     c_joint = float(0.0)
@@ -220,13 +221,14 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
     #     dy = wp.max(wp.abs(local[1]) - half, 0.0)
     #     dz = wp.max(wp.abs(local[2]) - half, 0.0)
     #     c_contact = c_contact + (dx * dx + dy * dy + dz * dz)
+    # Contact: L1 (linear) distance from each fingertip to the cube center,
+    # matching irisim_warp's LeapDexReal (`contact_cost += wp.length(fp - obj)`),
+    # rather than the squared, dp>0-gated distance used before.
     c_contact = float(0.0)
     for i in range(5, 9):
         p_tip = site_xpos[indices[i]]
-        dp = wp.length(p_obj - p_tip)# - float(0.035)
-        #dp = wp.length(p_tip) - float(0.035)
-        if dp > 0.0:
-            c_contact = c_contact + dp*dp
+        dp = wp.length(p_obj - p_tip)
+        c_contact = c_contact + dp
 
     fallen = float(0.0)
     if qpos[obj_qpos_adr + 2] < 0.07:
@@ -300,7 +302,7 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 500,
+            max_steps          = 10,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # NOTE: insertion order must match the weights[...] indexing in
             # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI

@@ -226,12 +226,19 @@ def run_eval_episode(
                 print(f"  step {t:4d}: task failed")
             break
 
-        # 2. Plan on the GPU and integrate the delta into the absolute command.
+        # 2. Plan on the GPU and turn the planned delta into the absolute command.
         # step_times measures only this MPPI call, not the eval-sim advance below.
         plan_start = time.perf_counter()
         action = controller.plan(mjd)
         step_times.append((time.perf_counter() - plan_start) * 1e3)
-        u = u + action
+        if controller.pc.ctrl_relative_to_qpos:
+            # Servo parameterization (mirrors the rollout): command the current
+            # measured robot joint qpos plus the planned delta, re-read each step,
+            # instead of accumulating the delta onto the running command.
+            adr = controller.robot_qpos_adr
+            u = st.qpos[adr : adr + controller.nu] + action
+        else:
+            u = u + action
         if clip_lo is not None:
             u = np.clip(u, clip_lo, clip_hi)
 
@@ -275,7 +282,7 @@ def main():
     p.add_argument("--task",        type=str,   default="cart_pole")
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
     p.add_argument("--n_samples",   type=int,   default=256)
-    p.add_argument("--horizon",     type=int,   default=48)
+    p.add_argument("--horizon",     type=int,   default=8)
     p.add_argument("--temperature", type=float, default=0.01)#0.00008)
     p.add_argument("--noise_sigma", type=float, default=0.02,)#0.01)
     p.add_argument("--delta",       type=float, default=0.1,#0.1,
@@ -354,7 +361,7 @@ def main():
             temperature    = args.temperature,
             noise_sigma    = args.noise_sigma,
             substeps       = args.substeps,
-            warm_start     = True,
+            warm_start     = False,   # match irisim_warp: keep the running mean, no shift
             use_full_graph = True,
             delta_range    = (-args.delta, args.delta),
             nconmax        = 50,

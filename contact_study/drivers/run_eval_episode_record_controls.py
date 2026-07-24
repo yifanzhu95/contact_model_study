@@ -182,12 +182,19 @@ def run_eval_episode_record_controls(
                 print(f"  step {t:4d}: task failed")
             break
 
-        # 2. Plan on the GPU and integrate the delta into the absolute command.
+        # 2. Plan on the GPU and turn the planned delta into the absolute command.
         # step_times measures only this MPPI call, not the eval-sim advance below.
         plan_start = time.perf_counter()
         action = controller.plan(mjd)
         step_times.append((time.perf_counter() - plan_start) * 1e3)
-        u = u + action
+        if controller.pc.ctrl_relative_to_qpos:
+            # Servo parameterization (mirrors the rollout): command the current
+            # measured robot joint qpos plus the planned delta, re-read each step,
+            # instead of accumulating the delta onto the running command.
+            adr = controller.robot_qpos_adr
+            u = st.qpos[adr : adr + controller.nu] + action
+        else:
+            u = u + action
         if clip_lo is not None:
             u = np.clip(u, clip_lo, clip_hi)
 
@@ -283,7 +290,7 @@ def main():
         temperature    = args.temperature,
         noise_sigma    = args.noise_sigma,
         substeps       = args.substeps,
-        warm_start     = True,
+        warm_start     = False,   # match irisim_warp: keep the running mean, no shift
         use_full_graph = False,
         delta_range    = (-args.delta, args.delta),
         nconmax        = 50,
