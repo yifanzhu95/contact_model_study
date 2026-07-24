@@ -21,14 +21,14 @@ cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 #    Unlike param_search.slurm there is no grid — just edit the values below.
 # ---------------------------------------------------------------------------
 TASK="grasp_reorient"
-MODEL="M2"
-N_EPISODES=10          # episodes to run for this one weight set
+MODEL="M3"
+N_EPISODES=30          # episodes to run for this one weight set
 
 # Shared MPPI / eval knobs.
 N_SAMPLES=256
 HORIZON=8
-TEMPERATURE=0.50
-NOISE_SIGMA=0.01
+TEMPERATURE=0.01
+NOISE_SIGMA=0.02
 DELTA=0.1
 SUBSTEPS=8
 EVAL_SIM="none"
@@ -37,7 +37,7 @@ SEED=0
 
 # Videos go to <root>/videos. run_eval_episode renders one per episode, naming
 # them <stem>_ep000.gif, <stem>_ep001.gif, ... when N_EPISODES > 1.
-VIDEO_DIR="$ROOT_DIR/videos"
+VIDEO_DIR="/home/kg878/scratch_pi_amd78/kg878/contact_modeling_videos" # "$ROOT_DIR/videos"
 mkdir -p "$VIDEO_DIR"
 VIDEO_PATH="$VIDEO_DIR/${TASK}_${MODEL}_eval.gif"
 

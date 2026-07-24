@@ -47,6 +47,15 @@ class MPPIConfig:
     # horizon) instead of always unrolling the full horizon.
     time_constrained: bool  = False
     plan_budget_ms:   float | None = None   # required when time_constrained
+    # Normalize the accumulated *running* (per-step) trajectory cost by the
+    # (simulated) horizon length before the weight computation, so `temperature`
+    # is invariant to horizon. The terminal cost is a single-step value and is
+    # NOT divided by the horizon.
+    normalize_cost_by_horizon: bool = True
+    # Normalize the total trajectory cost (running + terminal) by the number of
+    # samples before the weight computation, so `temperature` is invariant to
+    # n_samples.
+    normalize_cost_by_samples: bool = False
 
     def __post_init__(self):
         if self.resample_interval is not None and self.resample_interval < 1:
@@ -155,12 +164,22 @@ def _make_accumulate_kernel(cost_fn_wp: wp.func):
 # ---------------------------------------------------------------------------
 
 @wp.kernel
-def _scale_kernel(
-    x: wp.array(dtype=float),
-    s: float,
+def _combine_costs_kernel(
+    running:       wp.array(dtype=float),   # (N,)  running-cost sum [in/out: total]
+    terminal:      wp.array(dtype=float),   # (N,)  terminal cost
+    running_scale: float,                   # 1/H  (or 1.0 to disable)
+    total_scale:   float,                   # 1/N  (or 1.0 to disable)
 ):
-    i = wp.tid()
-    x[i] = x[i] * s
+    """Fold the separately-accumulated terminal cost into the running-cost sum.
+
+    The running cost is a sum over horizon steps, so it is scaled by
+    running_scale (1/H) to a per-step average before the terminal cost — a
+    single-step value that must not be divided by the horizon — is added. The
+    combined total is then scaled by total_scale (1/N). Written in place into
+    `running`, which downstream kernels read as the per-sample trajectory cost.
+    """
+    n = wp.tid()
+    running[n] = (running[n] * running_scale + terminal[n]) * total_scale
 
 
 @wp.kernel
@@ -306,7 +325,11 @@ class MPPIController:
         # Scratch buffer for the on-GPU warm-start shift (swapped with U_wp).
         self.U_shift_wp = wp.zeros((H, nu), dtype=wp.float32, device="cuda")
         self.V_wp = wp.zeros((N, H, nu), dtype=wp.float32, device="cuda")
+        # Running (per-step) cost sum and the terminal cost are accumulated into
+        # separate buffers so the running sum can be horizon-normalized without
+        # dividing the single-step terminal cost; _gpu_weight_update folds them.
         self.costs_wp = wp.zeros(N, dtype=wp.float32, device="cuda")
+        self.terminal_costs_wp = wp.zeros(N, dtype=wp.float32, device="cuda")
 
         # GPU arrays for weight computation (costs never transferred to CPU)
         self.w_wp        = wp.zeros(N,        dtype=wp.float32, device="cuda")
@@ -374,6 +397,7 @@ class MPPIController:
             wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nv), inputs=[self.qvel_reset, self.d.qvel])
             wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nu), inputs=[self.ctrl_reset, self.d.ctrl])
             self.costs_wp.zero_()
+            self.terminal_costs_wp.zero_()
         return capture.graph
 
     def create_step_graph(self):
@@ -394,6 +418,7 @@ class MPPIController:
             wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nv), inputs=[self.qvel_reset, self.d.qvel])
             wp.launch(_broadcast_1d_to_2d_kernel, dim=(self.pc.n_samples, self.nu), inputs=[self.ctrl_reset, self.d.ctrl])
             self.costs_wp.zero_()
+            self.terminal_costs_wp.zero_()
 
             for t in range(self.pc.horizon):
                 terminal = (t == self.pc.horizon - 1)
@@ -404,6 +429,8 @@ class MPPIController:
                 )
                 for _ in range(self.pc.substeps):
                     api.step(self.m, self.d)
+                # Terminal cost goes to its own buffer so it can be excluded from
+                # the horizon normalization in _gpu_weight_update.
                 wp.launch(
                     self._accumulate_costs_kernel,
                     dim=self.pc.n_samples,
@@ -411,7 +438,7 @@ class MPPIController:
                         self.d.qpos, self.d.qvel, self.d.ctrl, self.d.site_xpos, self.d.site_xmat,
                         terminal, self.goal_wp, self.indices_wp, self.weights_wp
                     ],
-                    outputs=[self.costs_wp],
+                    outputs=[self.terminal_costs_wp if terminal else self.costs_wp],
                 )
 
         return capture.graph
@@ -452,14 +479,24 @@ class MPPIController:
         H = n_eff if n_eff is not None else self.pc.horizon
         low, high = self.pc.delta_range
 
-        # Normalize the accumulated trajectory cost by the horizon length, so the
-        # MPPI temperature `lam` is invariant to the horizon. Every sample in this
-        # update ran the same number of steps, so this is a uniform rescale that
-        # leaves the relative sample weighting unchanged (mathematically identical
-        # to using lam*horizon); it also rescales the reported min cost `beta`.
-        if self.pc.horizon > 0:
-            wp.launch(_scale_kernel, dim=N,
-                      inputs=[self.costs_wp, 1.0 / float(self.pc.horizon)])
+        # Fold the terminal cost into the running-cost sum and normalize. The
+        # running (per-step) sum is divided by the horizon so the MPPI
+        # temperature `lam` is invariant to horizon, while the single-step
+        # terminal cost is added untouched; the combined total is divided by the
+        # sample count for invariance to n_samples. Every sample in this update
+        # ran the same number of steps, so this is a uniform rescale that leaves
+        # the relative sample weighting unchanged; it also rescales the reported
+        # min cost `beta`. costs_wp holds the folded total afterward.
+        running_scale = 1.0
+        if self.pc.normalize_cost_by_horizon and self.pc.horizon > 0:
+            running_scale /= float(self.pc.horizon)
+        total_scale = 1.0
+        if self.pc.normalize_cost_by_samples and N > 0:
+            total_scale /= float(N)
+        wp.launch(
+            _combine_costs_kernel, dim=N,
+            inputs=[self.costs_wp, self.terminal_costs_wp, running_scale, total_scale],
+        )
 
         # Find minimum cost
         self.min_cost_wp.assign(self._big_float_np)
@@ -616,6 +653,7 @@ class MPPIController:
                 # bakes all substeps into a single captured graph).
                 for _ in range(self.pc.substeps):
                     wp.capture_launch(self.step_graph)
+                # Terminal cost goes to its own buffer (see create_rollout_graph).
                 wp.launch(
                     self._accumulate_costs_kernel,
                     dim=N,
@@ -623,7 +661,7 @@ class MPPIController:
                         self.d.qpos, self.d.qvel, self.d.ctrl, self.d.site_xpos, self.d.site_xmat,
                         terminal, self.goal_wp, self.indices_wp, self.weights_wp
                     ],
-                    outputs=[self.costs_wp],
+                    outputs=[self.terminal_costs_wp if terminal else self.costs_wp],
                 )
 
             eta, beta = self._gpu_weight_update()
@@ -686,6 +724,8 @@ class MPPIController:
                 # exactly one launch carrying the correct flag.
                 last  = (t == H - 1) or (time.perf_counter() >= deadline)
                 n_eff = t + 1
+                # The terminal step's cost goes to its own buffer so horizon
+                # normalization in _gpu_weight_update skips it (see above).
                 wp.launch(
                     self._accumulate_costs_kernel,
                     dim=N,
@@ -693,7 +733,7 @@ class MPPIController:
                         self.d.qpos, self.d.qvel, self.d.ctrl, self.d.site_xpos, self.d.site_xmat,
                         last, self.goal_wp, self.indices_wp, self.weights_wp
                     ],
-                    outputs=[self.costs_wp],
+                    outputs=[self.terminal_costs_wp if last else self.costs_wp],
                 )
                 if last:
                     break
