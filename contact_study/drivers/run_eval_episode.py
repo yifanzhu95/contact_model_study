@@ -282,10 +282,10 @@ def main():
     p.add_argument("--task",        type=str,   default="cart_pole")
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
     p.add_argument("--n_samples",   type=int,   default=256)
-    p.add_argument("--horizon",     type=int,   default=8)
+    p.add_argument("--horizon",     type=int,   default=48)
     p.add_argument("--temperature", type=float, default=0.01)#0.00008)
     p.add_argument("--noise_sigma", type=float, default=0.02,)#0.01)
-    p.add_argument("--delta",       type=float, default=0.1,#0.1,
+    p.add_argument("--delta",       type=float, default=0.06,#0.1,
                    help="Per-step MPPI delta clip magnitude (action units).")
     p.add_argument("--substeps",    type=int,   default=8,
                    help="MPPI rollout substeps per control step (control frequency knob).")

@@ -63,9 +63,8 @@ Naming Conventions
 -->
 
 <mujoco model="leap_rh">
-  <compiler angle="radian" meshdir="./assets/"/>
-  <!-- impratio="100" cone="elliptic" 
-  <option integrator="implicitfast" cone="elliptic"/>  -->
+  <compiler angle="radian" meshdir="./leap_hand/assets/"/>
+  <!-- <option integrator="implicitfast" cone="elliptic" impratio="100"/> -->
 
   <!-- mesh assets -->
   <asset>
@@ -86,13 +85,13 @@ Naming Conventions
 
   <!-- defaults -->
   <default>
-    <!-- constraint stiffness solref="0.008 1" solimp= 0.95 0.99 0.0001 0.5 2 "0.999 0.999 0.001 0.0001 1" 
-    <geom solimp="0.90 0.95 0.01 0.5 2" solref="0.008 1" friction="0.5"/>   -->
+    <!-- constraint stiffness -->
+    <!-- <geom solimp="0.999 0.999 0.001 0.0001 1" solref="0.0001 1" friction=".2"/> -->
 
     <!-- actuator defaults -->
     <position kp="3.0" kv="0.01" />
     <joint damping="0.03" frictionloss="0.001"/>
-    <!-- ADDED THE ARMATURE AND FORCE RANGE AND IT STABALIZED THE SIM A LOT! frictionloss="0.001" <-Moved  armature="0.0015" -->
+
     <!-- geom class defaults -->
     <default class="visual">
       <geom group="1" type="mesh" contype="0" conaffinity="0" density="0" material="black" />
