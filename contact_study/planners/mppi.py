@@ -252,28 +252,24 @@ def _normalize_kernel(
     arr[n] = arr[n] / (total[0] + float(1e-8))
 
 @wp.kernel
-def _weighted_sum_kernel(
+def _weighted_mean_kernel(
     weights: wp.array(dtype=float),    # (N,)
-    eps:     wp.array3d(dtype=float),  # (N, H, nu)
-    dU:      wp.array2d(dtype=float),  # (H, nu)
+    samples: wp.array3d(dtype=float),  # (N, H, nu)  clamped control samples V
+    out:     wp.array2d(dtype=float),  # (H, nu)  [out]  new mean (replaced)
     N:       int,
 ):
-    """One thread per (h, u); inner loop over N avoids atomic collisions."""
+    """Weighted mean of the sample trajectories: out[h,u] = sum_n w[n]*V[n,h,u].
+
+    One thread per (h, u); inner loop over N avoids atomic collisions. With
+    normalized weights (sum_n w[n] = 1) this is a convex combination, so when the
+    samples V are clamped to delta_range the resulting mean is clamped too. Reads
+    `samples` and writes a separate `out`, so it is safe to pass U itself as
+    `out` (full replacement, no read-before-write hazard)."""
     h, u = wp.tid()
     val = float(0.0)
     for n in range(N):
-        val = val + weights[n] * eps[n, h, u]
-    dU[h, u] = val
-
-@wp.kernel
-def _apply_dU_kernel(
-    U:    wp.array2d(dtype=float),  # (H, nu)
-    dU:   wp.array2d(dtype=float),  # (H, nu)
-    low:  float,
-    high: float,
-):
-    h, u = wp.tid()
-    U[h, u] = U[h, u] + wp.clamp(dU[h, u], low, high)
+        val = val + weights[n] * samples[n, h, u]
+    out[h, u] = val
 
 @wp.kernel
 def _shift_U_kernel(
@@ -371,7 +367,6 @@ class MPPIController:
 
         # GPU arrays for weight computation (costs never transferred to CPU)
         self.w_wp        = wp.zeros(N,        dtype=wp.float32, device="cuda")
-        self.dU_wp       = wp.zeros((H, nu),  dtype=wp.float32, device="cuda")
         self.min_cost_wp = wp.zeros(1,        dtype=wp.float32, device="cuda")
         self.eta_wp      = wp.zeros(1,        dtype=wp.float32, device="cuda")
         self._big_float_np = np.array([1e30], dtype=np.float32)
@@ -531,7 +526,6 @@ class MPPIController:
         """
         N, nu = self.pc.n_samples, self.nu
         H = n_eff if n_eff is not None else self.pc.horizon
-        low, high = self.pc.delta_range
 
         # Fold the terminal cost into the running-cost sum and normalize. The
         # combined total (running + terminal) is divided by the horizon so the
@@ -567,14 +561,15 @@ class MPPIController:
         # Normalize weights in-place
         wp.launch(_normalize_kernel, dim=N, inputs=[self.w_wp, self.eta_wp])
 
-        # Compute weighted noise sum: dU[h,u] = sum_n w[n]*eps[n,h,u]
-        self.dU_wp.zero_()
-        wp.launch(_weighted_sum_kernel, dim=(H, nu),
-                  inputs=[self.w_wp, self._static_eps_wp, self.dU_wp, N])
-
-        # Clip dU and add to U, all on GPU
-        wp.launch(_apply_dU_kernel, dim=(H, nu),
-                  inputs=[self.U_wp, self.dU_wp, low, high])
+        # Replace the mean with the weighted average of the CLAMPED samples:
+        # U[h,u] = sum_n w[n] * V[n,h,u], where V = clamp(U + eps, delta_range).
+        # Because every V is clamped to delta_range and the weights form a convex
+        # combination (sum_n w[n] = 1), the new mean — and the returned action
+        # U[0] — is intrinsically bounded to delta_range, so the clamp is always
+        # in force. (The previous update, U += clamp(sum_n w[n]*eps), clamped only
+        # the increment and let U integrate past delta_range across plans.)
+        wp.launch(_weighted_mean_kernel, dim=(H, nu),
+                  inputs=[self.w_wp, self.V_wp, self.U_wp, N])
 
         # Single sync: only scalars cross device→host boundary
         wp.synchronize()
