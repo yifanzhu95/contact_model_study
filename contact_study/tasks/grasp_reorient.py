@@ -43,7 +43,7 @@ _MJ_CTRL_TO_URDF_JOINT = [
 # conaffinity=0 on every geom) to isolate the actuator/PD model from the contact
 # model in the MuJoCo-vs-Pinocchio eval comparison. Swap back to the plain
 # scene for normal grasping runs (the no-contact scene can't grasp the cube).
-GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites_yoke_removed.xml"
+GRASP_SCENE_XML = "leap/env_leap_cube.xml"#"leap_hand/leap_hand_right_w_sites_yoke_removed.xml"
 #GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites_yoke_removed_capsule.xml"
 
 # Drake PidController gains for the eval hand (position control, mirroring the
@@ -302,23 +302,23 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 10,
+            max_steps          = 100,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # NOTE: insertion order must match the weights[...] indexing in
             # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI
             # override rebuilds the array from this dict's key order.
             cost_weights       = {
-                "w_quat": 10.0,#100.0,
-                "w_pos_x": 7.5,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-                "w_pos_y": 15.0,#80.0,    #Y is across the fingers
-                "w_pos_z": 7.5,#15.0,
+                "w_quat": 0.0,#100.0,
+                "w_pos_x": 0.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+                "w_pos_y": 0.0,#80.0,    #Y is across the fingers
+                "w_pos_z": 0.0,#15.0,
                 "w_velo": 0.0,
-                "w_contact": 5.0,
-                "w_joint": 0.60,
+                "w_contact": 0.05,
+                "w_joint": 0.01,
                 "w_joint_velo": 0.0,
-                "w_fallen": 200.0,
-                "w_quat_term": 10.0,
-                "w_pos_term": 10.0,
+                "w_fallen": 0.0,
+                "w_quat_term": 5.0,
+                "w_pos_term": 5000.0,
                 "w_fallen_term": 0.0,
             },
             # BaseTask.load() loads this static file directly — no MJCF is
