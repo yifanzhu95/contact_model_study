@@ -14,7 +14,7 @@ Every parameter is a command-line input:
     python run_param_cell.py \
         --cell_id 4 --outdir results/param_search_run \
         --task grasp_reorient --model M2 --n_episodes 5 \
-        --weights w_quat=20 w_pos=15 w_contact=10 w_joint=0.05
+        --weights w_quat=20 w_pos_x=15 w_pos_y=15 w_pos_z=15 w_contact=10 w_joint=0.05
 """
 
 from __future__ import annotations

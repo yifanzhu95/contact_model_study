@@ -2,8 +2,8 @@
 #SBATCH --job-name=cont_modeling_param_search
 #SBATCH --output=logs/cont_modeling_param_search%A_%a.out
 #SBATCH --error=logs/cont_modeling_param_search%A_%a.err
-#SBATCH --array=0-323          # must equal (#MODELS * #W_QUAT * #W_POS * #W_CONTACT * #W_JOINT) - 1
-                               # default grid: 4 * 3 * 3 * 3 * 3 = 324  ->  0-323
+#SBATCH --array=0-161         # must equal (#MODELS * #W_QUAT * #W_POS_X * #W_POS_Y * #W_POS_Z * #W_CONTACT * #W_JOINT) - 1
+                               # default grid: 4 * 3 * 3 * 3 * 3 * 3 * 3 = 2916  ->  0-2915
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
@@ -26,11 +26,15 @@ cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 TASK="grasp_reorient"
 N_EPISODES=5          # episodes per weight set -> success rate
 
-MODELS=("M1" "M2" "M3" "M4")
-W_QUAT=("10.0" "5.0" "2.5")
-W_POS=("80" "40" "20")
-W_CONTACT=("5" "2.5" "1.25")
-W_JOINT=("0.2" "0.1" "0.05")
+MODELS=("M2" "M3") #("M1" "M2" "M3" "M4")
+W_QUAT=("20.0" "10.0" "5.0")
+# Position error is weighted separately per axis (X is down the fingers,
+# Y across the fingers, Z vertical) -> three independent search axes.
+W_POS_X=("15" "7.5" "3.75")
+W_POS_Y=("30" "15" "7.5")
+W_POS_Z=("15" "7.5" "3.75")
+W_CONTACT=("5.0")
+W_JOINT=("0.6")
 
 # Shared MPPI / eval knobs (single values, not swept).
 N_SAMPLES=256
@@ -48,21 +52,27 @@ SEED=0
 # 2. Map this task's ID to one index per axis (mixed-radix decode).
 #    Peel off the lowest axis first, then divide it out for the next.
 # ---------------------------------------------------------------------------
-NM=${#MODELS[@]}; NQ=${#W_QUAT[@]}; NP=${#W_POS[@]}; NC=${#W_CONTACT[@]}; NJ=${#W_JOINT[@]}
+NM=${#MODELS[@]}; NQ=${#W_QUAT[@]}
+NPX=${#W_POS_X[@]}; NPY=${#W_POS_Y[@]}; NPZ=${#W_POS_Z[@]}
+NC=${#W_CONTACT[@]}; NJ=${#W_JOINT[@]}
 
 T=$SLURM_ARRAY_TASK_ID
-MODEL_IDX=$((   T % NM )); T=$(( T / NM ))
-QUAT_IDX=$((    T % NQ )); T=$(( T / NQ ))
-POS_IDX=$((     T % NP )); T=$(( T / NP ))
-CONTACT_IDX=$(( T % NC )); T=$(( T / NC ))
-JOINT_IDX=$((   T % NJ ))
+MODEL_IDX=$((   T % NM  )); T=$(( T / NM  ))
+QUAT_IDX=$((    T % NQ  )); T=$(( T / NQ  ))
+POS_X_IDX=$((   T % NPX )); T=$(( T / NPX ))
+POS_Y_IDX=$((   T % NPY )); T=$(( T / NPY ))
+POS_Z_IDX=$((   T % NPZ )); T=$(( T / NPZ ))
+CONTACT_IDX=$(( T % NC  )); T=$(( T / NC  ))
+JOINT_IDX=$((   T % NJ  ))
 
 # ---------------------------------------------------------------------------
 # 3. Select the actual values for this cell.
 # ---------------------------------------------------------------------------
 SEL_MODEL=${MODELS[$MODEL_IDX]}
 SEL_W_QUAT=${W_QUAT[$QUAT_IDX]}
-SEL_W_POS=${W_POS[$POS_IDX]}
+SEL_W_POS_X=${W_POS_X[$POS_X_IDX]}
+SEL_W_POS_Y=${W_POS_Y[$POS_Y_IDX]}
+SEL_W_POS_Z=${W_POS_Z[$POS_Z_IDX]}
 SEL_W_CONTACT=${W_CONTACT[$CONTACT_IDX]}
 SEL_W_JOINT=${W_JOINT[$JOINT_IDX]}
 
@@ -77,7 +87,8 @@ eval "$(conda shell.bash hook)"
 conda activate contact_modeling
 
 echo "cell ${SLURM_ARRAY_TASK_ID}: model=$SEL_MODEL "\
-     "w_quat=$SEL_W_QUAT w_pos=$SEL_W_POS w_contact=$SEL_W_CONTACT w_joint=$SEL_W_JOINT"\
+     "w_quat=$SEL_W_QUAT w_pos_x=$SEL_W_POS_X w_pos_y=$SEL_W_POS_Y w_pos_z=$SEL_W_POS_Z"\
+     "w_contact=$SEL_W_CONTACT w_joint=$SEL_W_JOINT"\
      "-> $OUTDIR"
 
 # The first task queues the combine job to run once the whole array finishes
@@ -89,7 +100,8 @@ python experiments/hpc/run_param_cell.py \
     --task        "$TASK" \
     --model       "$SEL_MODEL" \
     --n_episodes  "$N_EPISODES" \
-    --weights     "w_quat=$SEL_W_QUAT" "w_pos=$SEL_W_POS" \
+    --weights     "w_quat=$SEL_W_QUAT" \
+                  "w_pos_x=$SEL_W_POS_X" "w_pos_y=$SEL_W_POS_Y" "w_pos_z=$SEL_W_POS_Z" \
                   "w_contact=$SEL_W_CONTACT" "w_joint=$SEL_W_JOINT" \
     --n_samples   "$N_SAMPLES" \
     --horizon     "$HORIZON" \
