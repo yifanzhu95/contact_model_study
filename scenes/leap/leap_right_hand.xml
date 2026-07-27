@@ -90,7 +90,7 @@ Naming Conventions
 
     <!-- actuator defaults -->
     <position kp="3.0" kv="0.01" />
-    <joint damping="0.03" frictionloss="0.001"/>
+    <joint damping="0.03"/>
 
     <!-- geom class defaults -->
     <default class="visual">

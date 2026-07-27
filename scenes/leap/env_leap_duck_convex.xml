@@ -47,7 +47,7 @@
     </body>
     
     <body name="obj" pos="0.01 0.035 0.1">
-        <freejoint name="cube_table"/>
+        <freejoint name="obj_joint"/>
         <geom type="mesh" mesh="rubber_duck_mesh" friction="0.5" rgba="0.97 0.6 0 0.8" conaffinity="0" contype="0"/>
 
         <!-- <geom type="mesh" mesh="rubber_duck_collision_0" rgba="0.9909314043975451 0.27625373322012614 0.1738987770894782 1"/>

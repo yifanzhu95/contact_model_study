@@ -620,7 +620,7 @@ class MPPIController:
         return action_np
 
     # Costs at or above this value mean wp.atomic_min was never written (all NaN rollouts).
-    _COST_SENTINEL = 1e29
+    _COST_SENTINEL = 1e9
 
     def _is_degenerate(self, beta: float, eta: float) -> bool:
         """True only when *all* rollout costs were NaN (beta never left the sentinel).

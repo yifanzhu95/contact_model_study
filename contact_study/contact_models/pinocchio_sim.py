@@ -229,6 +229,67 @@ def _root_body_pose(body):
 # the wrapped geoms.
 _WORLD_GEOMS_BODY = "world_geoms"
 
+# MJCF top-level sections that MuJoCo *merges* (rather than replaces) when the
+# same section appears in an included file: their children accumulate into a
+# single section. Everything else (compiler, default, option, statistic, visual,
+# ...) is left as separate sibling elements — the split/exclude parsers read
+# those via find()/findall() and don't need them coalesced.
+_MJCF_MERGE_SECTIONS = frozenset({
+    "asset", "worldbody", "contact", "actuator", "sensor",
+    "equality", "tendon", "keyframe",
+})
+
+
+def load_mjcf_root_with_includes(mjcf_path):
+    """Parse an MJCF and recursively splice every <include file="..."/> inline,
+    returning a single flattened <mujoco> root with no <include> elements.
+
+    Pinocchio's MJCF machinery here (split_into_single_root_mjcfs,
+    parse_mjcf_excludes, ...) reads the scene with ElementTree, which — unlike
+    MuJoCo's own loader — does not follow <include>. Scenes like
+    scenes/leap/env_leap_*.xml keep the hand in a separate file and pull it in
+    with <include file="./leap_right_hand.xml"/>; without this the hand bodies,
+    assets, contacts, and actuators are invisible to the Pinocchio path.
+
+    Included children are merged the way MuJoCo merges them: the container
+    sections in _MJCF_MERGE_SECTIONS (asset/worldbody/contact/...) coalesce into
+    one element so downstream find("worldbody")/find("asset") see the union;
+    other sections are appended as siblings. <include> paths are resolved
+    relative to the file that contains them, and nested includes are followed."""
+    root = ET.parse(mjcf_path).getroot()
+    base_dir = os.path.dirname(os.path.abspath(mjcf_path))
+
+    merged = ET.Element(root.tag, dict(root.attrib))
+    sections = {}  # tag -> element, for the mergeable container sections
+
+    def _append(child):
+        tag = child.tag
+        if tag in _MJCF_MERGE_SECTIONS:
+            existing = sections.get(tag)
+            if existing is None:
+                sections[tag] = child
+                merged.append(child)
+            else:
+                for sub in list(child):
+                    existing.append(sub)
+                # carry over any section-level attributes (rare) without clobber
+                for k, v in child.attrib.items():
+                    existing.attrib.setdefault(k, v)
+        else:
+            merged.append(child)
+
+    def _splice(node, node_dir):
+        for child in list(node):
+            if child.tag == "include":
+                inc_path = os.path.join(node_dir, child.get("file"))
+                inc_root = load_mjcf_root_with_includes(inc_path)
+                _splice(inc_root, os.path.dirname(os.path.abspath(inc_path)))
+            else:
+                _append(child)
+
+    _splice(root, base_dir)
+    return merged
+
 
 def split_into_single_root_mjcfs(mjcf_path, scene_dir):
     """Write one temp MJCF per <worldbody> root <body> (with the loose worldbody
@@ -236,8 +297,7 @@ def split_into_single_root_mjcfs(mjcf_path, scene_dir):
     read each independent root into its own model. Returns (temp_paths,
     root_poses), where root_poses[i] is the (pos, quat_wxyz) fixed world placement
     of subtree i's root body (Pinocchio drops it; merge_models reapplies it)."""
-    tree = ET.parse(mjcf_path)
-    root = tree.getroot()
+    root = load_mjcf_root_with_includes(mjcf_path)
     compiler = root.find("compiler")
     asset = root.find("asset")
     # <default> class/childclass definitions must travel with the split models:
@@ -448,8 +508,7 @@ def parse_mjcf_excludes(mjcf_path) -> set[frozenset[str]]:
     deliberately treats as "not adjacent" (see its docstring) since that same
     joint-parent-is-universe shape also covers legitimate independent contacts
     (separate fingers, hand<->object) that must NOT be excluded."""
-    tree = ET.parse(mjcf_path)
-    contact = tree.getroot().find("contact")
+    contact = load_mjcf_root_with_includes(mjcf_path).find("contact")
     if contact is None:
         return set()
     return {
@@ -466,9 +525,8 @@ def parse_body_box_geoms(mjcf_path, body_name):
     the body frame, exactly as MuJoCo stores them (<geom size> is a box HALF-side;
     a missing quat is identity and a missing rgba is MuJoCo's 0.5 0.5 0.5 1
     default). Only box geoms are returned; other primitives/meshes are skipped."""
-    tree = ET.parse(mjcf_path)
     body = None
-    for b in tree.getroot().iter("body"):
+    for b in load_mjcf_root_with_includes(mjcf_path).iter("body"):
         if b.get("name") == body_name:
             body = b
             break

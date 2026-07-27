@@ -33,7 +33,7 @@
     </body>
     
     <body name="obj" pos="0.02 0.05 0.1">
-        <freejoint name="cube_table"/>
+        <freejoint name="obj_joint"/>
         <geom name="obj" type="mesh" mesh="rubber_duck_mesh" 
               friction="0.5" mass="0.1" rgba="0.97 0.6 0 1.0"/>
     </body>

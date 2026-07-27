@@ -103,11 +103,11 @@ _DRAKE_PID_EFFORT = 100.0
 #     0.965926, 0.0, 0.258819, 0.0,
 # ], dtype=np.float64)
 _INIT_QPOS = np.array([
-    0.73250957, -0.57492066,  0.91550966,  0.57389726, -0.03141543,
- -0.08227948,  0.70719126,  1.01884   ,  0.80476691,  0.61226898,
-  0.92855251,  0.61009647,  0.69248676,  1.45820128,  1.33131904,
-  0.19204115,  0.03003797,  0.03583275,  0.07519783,  0.99971718,
-  0.02210808, -0.00391438, -0.00784028
+  0.7306556 , -0.57294676,  0.91455542,  0.57397513, -0.00982115,
+ -0.08351474,  0.70322145,  1.01842742,  0.80682442,  0.6185803 ,
+  0.92213785,  0.61048887,  0.69884434,  1.43870596,  1.33755504,
+  0.19482521,  0.03581112,  0.04188448,  0.08187345,  0.91316114,
+ -0.29130514,  0.28487302, -0.01119862
 ], dtype=np.float64)
 
 
@@ -118,9 +118,9 @@ _INIT_QPOS = np.array([
 #     0.69912,     1.44581,   1.33179,   0.192794,
 # ], dtype=np.float64)
 _INIT_CTRL = np.array([
- 0.765751 , -0.568012 ,  0.916951 ,  0.573897 , -0.0191225, -0.0837503,
+0.765751 , -0.568012 ,  0.916951 ,  0.573897 , -0.0191225, -0.0837503,
   0.709056 ,  1.01884  ,  0.830768 ,  0.610365 ,  0.929305 ,  0.610097 ,
-  0.69912  ,  1.44581  ,  1.33179  ,  0.192794 
+  0.69912  ,  1.44581  ,  1.33179  ,  0.192794
 ], dtype=np.float64)
 
 
@@ -139,7 +139,7 @@ def _euler_to_quat(euler) -> np.ndarray:
 
 # Goal/target pose for the cube reorientation, defined here rather than read
 # from a mocap body in the scene. pos + intrinsic-xyz Euler (rad).
-_TARGET_POS   = np.array([0.02842596,  0.03650061,  0.07292401], dtype=np.float64)#np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
+_TARGET_POS   = np.array([0.02, 0.02, 0.08], dtype=np.float64)#np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
 _TARGET_EULER = np.array([0.0, 0.0, 0.0], dtype=np.float64)
 _TARGET_QUAT  = _euler_to_quat(_TARGET_EULER)   # wxyz
 
@@ -231,7 +231,7 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
         c_contact = c_contact + dp
 
     fallen = float(0.0)
-    if qpos[obj_qpos_adr + 2] < 0.07:
+    if qpos[obj_qpos_adr + 2] < 0.08:
         fallen = 1.0
 
     c_velo = wp.dot(v_obj, v_obj) + wp.dot(w_obj, w_obj)
@@ -302,23 +302,23 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 100,
+            max_steps          = 4000,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # NOTE: insertion order must match the weights[...] indexing in
             # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI
             # override rebuilds the array from this dict's key order.
             cost_weights       = {
-                "w_quat": 0.0,#100.0,
-                "w_pos_x": 0.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-                "w_pos_y": 0.0,#80.0,    #Y is across the fingers
-                "w_pos_z": 0.0,#15.0,
+                "w_quat": 10.0,#100.0,
+                "w_pos_x": 7.50,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+                "w_pos_y": 15.0,#80.0,    #Y is across the fingers
+                "w_pos_z": 7.50,#15.0,
                 "w_velo": 0.0,
-                "w_contact": 0.05,
-                "w_joint": 0.01,
+                "w_contact": 5.0,
+                "w_joint": 0.60,
                 "w_joint_velo": 0.0,
-                "w_fallen": 0.0,
-                "w_quat_term": 5.0,
-                "w_pos_term": 5000.0,
+                "w_fallen": 200.0,
+                "w_quat_term": 0.0,
+                "w_pos_term": 2.0,
                 "w_fallen_term": 0.0,
             },
             # BaseTask.load() loads this static file directly — no MJCF is
