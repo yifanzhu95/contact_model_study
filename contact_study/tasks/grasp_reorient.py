@@ -52,7 +52,7 @@ GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites_yoke_removed.xml"
 _PID_KP = 3.0
 _PID_KI = 0.0
 _PID_KD = 0.01
-_JOINT_DAMPING = 0.1 #this is maybe too low it was 0.1 befor
+_JOINT_DAMPING = 0.3#0.1 #this is maybe too low it was 0.1 befor
 _ARMATURE = 0.001
 
 # Pinocchio eval: mirror tests/replay_pinocchio_controls.py's simulation scheme —
@@ -302,22 +302,22 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 10,
+            max_steps          = 4000,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # NOTE: insertion order must match the weights[...] indexing in
             # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI
             # override rebuilds the array from this dict's key order.
             cost_weights       = {
-                "w_quat": 10.0,#100.0,
-                "w_pos_x": 7.5,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-                "w_pos_y": 15.0,#80.0,    #Y is across the fingers
+                "w_quat": 50.0,#10.0,#100.0,
+                "w_pos_x": 30.0,#7.5,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+                "w_pos_y": 40.0,#15.0,#80.0,    #Y is across the fingers
                 "w_pos_z": 7.5,#15.0,
                 "w_velo": 0.0,
-                "w_contact": 5.0,
-                "w_joint": 0.60,
+                "w_contact": 5.0,#5.0,
+                "w_joint": 0.6,#0.60,
                 "w_joint_velo": 0.0,
-                "w_fallen": 200.0,
-                "w_quat_term": 10.0,
+                "w_fallen": 30.0,#200.0,
+                "w_quat_term": 20.0,#10.0,
                 "w_pos_term": 10.0,
                 "w_fallen_term": 0.0,
             },
