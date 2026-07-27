@@ -18,26 +18,26 @@ _MIMIC_EVAL_SIM = True
 
 # Eval sim timestep for grasp_reorient (TaskConfig.timestep). The XML declares
 # no <option timestep>, so the plain viewer runs at MuJoCo's 0.002 default.
-_EVAL_TIMESTEP = 0.0001
+_EVAL_TIMESTEP = 0.001
 
 _INIT_QPOS = np.array([
-    0.73250957, -0.57492066,  0.91550966,  0.57389726, -0.03141543,
- -0.08227948,  0.70719126,  1.01884   ,  0.80476691,  0.61226898,
-  0.92855251,  0.61009647,  0.69248676,  1.45820128,  1.33131904,
-  0.19204115,  0.03003797,  0.03583275,  0.07519783,  0.99971718,
-  0.02210808, -0.00391438, -0.00784028
+0.8856324 , -0.5772693 ,  0.91517996,  0.57431053, -0.00982115,
+ -0.08351446,  0.70322145,  1.01842742,  0.93985903,  0.61461682,
+  0.92791674,  0.61061926,  0.69409676,  1.5753059 ,  1.33007183,
+  0.19137944,  0.01553361,  0.03530202,  0.09368509,  
+  0.99995794, -0.00283257,  0.00792515,  0.00364544
 ], dtype=np.float64)
 
 
 _INIT_CTRL = np.array([
- 0.765751 , -0.568012 ,  0.916951 ,  0.573897 , -0.0191225, -0.0837503,
-  0.709056 ,  1.01884  ,  0.830768 ,  0.610365 ,  0.929305 ,  0.610097 ,
-  0.69912  ,  1.44581  ,  1.33179  ,  0.192794 
+0.93256  , -0.568012 ,  0.916951 ,  0.573897 , -0.0191225, -0.0837503,
+  0.709056 ,  1.01884  ,  0.97072  ,  0.610365 ,  0.929305 ,  0.610097 ,
+  0.69912  ,  1.544325 ,  1.33179  ,  0.192794
 ], dtype=np.float64)
 
 
 # Load a built-in sample model (Humanoid) that contains pre-saved keyframes
-model = mujoco.MjModel.from_xml_path("scenes/leap_hand/leap_hand_right_w_sites_yoke_removed.xml")#"scenes/leap_hand/scene_leap_cube.xml")
+model = mujoco.MjModel.from_xml_path("scenes/leap/env_leap_cube.xml")#"scenes/leap_hand/scene_leap_cube.xml")
 
 if _MIMIC_EVAL_SIM:
     # Mirror MujocoSimulator.__init__: set the fine eval timestep FIRST (the
