@@ -139,7 +139,7 @@ def _euler_to_quat(euler) -> np.ndarray:
 
 # Goal/target pose for the cube reorientation, defined here rather than read
 # from a mocap body in the scene. pos + intrinsic-xyz Euler (rad).
-_TARGET_POS   = np.array([0.02, 0.02, 0.08], dtype=np.float64)#np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
+_TARGET_POS   = np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
 _TARGET_EULER = np.array([0.0, 0.0, 0.0], dtype=np.float64)
 _TARGET_QUAT  = _euler_to_quat(_TARGET_EULER)   # wxyz
 
@@ -302,7 +302,7 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 4000,
+            max_steps          = 500,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # NOTE: insertion order must match the weights[...] indexing in
             # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI
@@ -317,8 +317,8 @@ class GraspReorientTask(BaseTask):
                 "w_joint": 0.60,
                 "w_joint_velo": 0.0,
                 "w_fallen": 200.0,
-                "w_quat_term": 0.0,
-                "w_pos_term": 2.0,
+                "w_quat_term": 100.0,
+                "w_pos_term": 100.0,
                 "w_fallen_term": 0.0,
             },
             # BaseTask.load() loads this static file directly — no MJCF is
@@ -339,8 +339,8 @@ class GraspReorientTask(BaseTask):
             cam_fps            = 30.0,
             # Eval ("real") sim timestep; rollout_dt = 10x this = 0.001 (the
             # MuJoCo planning step the GPU rollouts use).
-            timestep           = 0.0001,
-            eval_substeps_per_rollout = 40,
+            timestep           = 0.0005,
+            eval_substeps_per_rollout = 8,
             difficulty         = self.goal_difficulty,
         )
 

@@ -158,8 +158,8 @@ class PinocchioContactConfig:
     # affects collision geoms; the visual meshes are untouched.
     use_convex_tips: bool = True
     baumgarte_kp: float = 100.0
-    baumgarte_kd: float = 0.05
-    admm_max_iterations: int = 5000
+    baumgarte_kd: float = 0.1
+    admm_max_iterations: int = 1000
 
 
 # ---------------------------------------------------------------------------
