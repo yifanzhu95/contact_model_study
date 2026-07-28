@@ -2,13 +2,13 @@
 #SBATCH --job-name=cont_modeling_param_search
 #SBATCH --output=logs/cont_modeling_param_search%A_%a.out
 #SBATCH --error=logs/cont_modeling_param_search%A_%a.err
-#SBATCH --array=0-161         # must equal (#MODELS * #W_QUAT * #W_POS_X * #W_POS_Y * #W_POS_Z * #W_CONTACT * #W_JOINT) - 1
+#SBATCH --array=0-17         # must equal (#MODELS * #W_QUAT * #W_POS_X * #W_POS_Y * #W_POS_Z * #W_CONTACT * #W_JOINT) - 1
                                # default grid: 4 * 3 * 3 * 3 * 3 * 3 * 3 = 2916  ->  0-2915
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=00:45:00
+#SBATCH --time=00:30:00
 
 set -euo pipefail
 
@@ -27,14 +27,14 @@ TASK="grasp_reorient"
 N_EPISODES=5          # episodes per weight set -> success rate
 
 MODELS=("M2" "M3") #("M1" "M2" "M3" "M4")
-W_QUAT=("20.0" "10.0" "5.0")
+W_QUAT=("10.0")
 # Position error is weighted separately per axis (X is down the fingers,
 # Y across the fingers, Z vertical) -> three independent search axes.
-W_POS_X=("15" "7.5" "3.75")
-W_POS_Y=("30" "15" "7.5")
-W_POS_Z=("15" "7.5" "3.75")
-W_CONTACT=("5.0")
-W_JOINT=("0.6")
+W_POS_X=("3.75")
+W_POS_Y=("15")
+W_POS_Z=("3.75")
+W_CONTACT=("10" "5.0" "2.5")
+W_JOINT=("1.2" "0.6" "0.3")
 
 # Shared MPPI / eval knobs (single values, not swept).
 N_SAMPLES=256
