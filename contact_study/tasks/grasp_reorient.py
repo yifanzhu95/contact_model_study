@@ -303,12 +303,12 @@ class GraspReorientTask(BaseTask):
             # override rebuilds the array from this dict's key order.
             cost_weights       = {
                 "w_quat": 10.0,#100.0,
-                "w_pos_x": 7.50,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+                "w_pos_x": 3.75,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
                 "w_pos_y": 15.0,#80.0,    #Y is across the fingers
-                "w_pos_z": 7.50,#15.0,
+                "w_pos_z": 3.750,#15.0,
                 "w_velo": 0.0,
-                "w_contact": 5.0,
-                "w_joint": 0.60,
+                "w_contact": 10.0,
+                "w_joint": 0.30,
                 "w_joint_velo": 0.0,
                 "w_fallen": 200.0,
                 "w_quat_term": 10.0,
