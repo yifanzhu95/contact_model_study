@@ -71,8 +71,17 @@ _PIN_JOINT_FRICTION       = False   # honor the scene's <joint frictionloss>
 # target reorientation pose (_TARGET_POS/_TARGET_QUAT), so the video shows where
 # and how the cube should end up. Visual-only — it never enters the contact solve.
 # _PIN_GOAL_OPACITY scales every goal-geom alpha (0 = invisible, 1 = opaque).
-_PIN_SHOW_GOAL            = True
+# OFF by default: _TARGET_POS sits where the cube is held, so this overlay drew a
+# translucent "shadow" cube right on top of the real one in the palm. The scene's
+# <body name="goal"> marker (upper-right of frame, textured like the cube, spun by
+# _update_goal) shows the target orientation instead — see _GOAL_MARKER_BODY.
+_PIN_SHOW_GOAL            = False
 _PIN_GOAL_OPACITY         = 0.3
+
+# Scene body (a MuJoCo mocap body) used as the on-screen reorientation target.
+# _update_goal rewrites its orientation for both renderers: mjd.mocap_quat for
+# MuJoCo, PinocchioSimulator.set_goal_quat for the Pinocchio/Panda3d video.
+_GOAL_MARKER_BODY = "goal"
 
 _DRAKE_PID_EFFORT = 100.0
 
@@ -273,6 +282,15 @@ class GraspReorientTask(BaseTask):
     # Override on an instance before the first episode to change difficulty.
     goal_difficulty: int = 0
 
+    # Most recently built eval simulator, so _update_goal can spin its goal
+    # marker. Class-level on purpose: the drivers build TWO task instances per
+    # episode (a ROLLOUT one that samples goals and an EVAL one that owns the
+    # simulator and the video), and it is the rollout instance that gets
+    # sample_new_goal called on it. A per-instance handle would therefore always
+    # be None on the side that needs it. One eval sim exists at a time per
+    # process, so the latest one is unambiguously the one being recorded.
+    _active_eval_sim = None
+
 
     # Object-frame axis that is the surface normal for each face index.
     # Matches the face_twist_axes table in sample_new_goal_by_face.
@@ -296,7 +314,7 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 4000,
+            max_steps          = 100,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # NOTE: insertion order must match the weights[...] indexing in
             # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI
@@ -551,11 +569,27 @@ class GraspReorientTask(BaseTask):
 
     def _update_goal(self, mjd: mujoco.MjData, new_quat: np.ndarray) -> None:
         """Write a new target quaternion to the mocap body, goal vector, and GPU array."""
-        target_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, "obj_target")
-        if target_id >= 0:
-            mocap_id = self.mjm.body_mocapid[target_id]
-            if mocap_id >= 0:
-                mjd.mocap_quat[mocap_id] = new_quat
+        # On-screen target marker. _GOAL_MARKER_BODY is this scene's mocap body;
+        # "obj_target" is the name older scenes (scenes/scripts/build_grasp_
+        # reorient_scene.py, env_allegro_cube.xml) use for the same thing.
+        # Break only on a body we could actually drive: scenes that carry a
+        # non-mocap <body name="goal"> (env_leap_duck/spam/tomato) must still
+        # fall through to an "obj_target" mocap body if they have one.
+        for body_name in (_GOAL_MARKER_BODY, "obj_target"):
+            target_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, body_name)
+            if target_id >= 0:
+                mocap_id = self.mjm.body_mocapid[target_id]
+                if mocap_id >= 0:
+                    mjd.mocap_quat[mocap_id] = new_quat
+                    break
+
+        # Mirror onto the eval simulator's own renderer. The drivers sample goals
+        # on the ROLLOUT task but record video from the EVAL sim, so without this
+        # the marker would only ever turn in the MuJoCo view. Guarded by hasattr:
+        # only PinocchioSimulator implements it.
+        sim = GraspReorientTask._active_eval_sim
+        if sim is not None and hasattr(sim, "set_goal_quat"):
+            sim.set_goal_quat(new_quat)
 
         self.target_quat = new_quat.copy()
         self.goal_vector = np.concatenate([
@@ -568,7 +602,9 @@ class GraspReorientTask(BaseTask):
     # --- Drake eval simulator ----------------------------------------------
     def make_eval_simulator(self, video_path: str | None = None, render: bool = True):
         if self.config.eval_sim == EvalSimulatorKind.PINOCCHIO:
-            return self._make_pinocchio_simulator(video_path=video_path, render=render)
+            sim = self._make_pinocchio_simulator(video_path=video_path, render=render)
+            GraspReorientTask._active_eval_sim = sim   # see _update_goal
+            return sim
         if self.config.eval_sim != EvalSimulatorKind.DRAKE:
             return super().make_eval_simulator(video_path=video_path, render=render)
 
