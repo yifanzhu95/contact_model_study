@@ -960,6 +960,14 @@ class PinocchioSimulator(EvalSimulator):
         viz.loadViewerModel(group_name="pin_eval")
         viz.displayVisuals(True)
 
+        # panda3d_viewer draws its own world-origin axes (red/green/blue rays)
+        # and ground grid by default (ViewerApp reads show-axes/show-grid, both
+        # defaulting True). They are debug scaffolding, not part of the scene —
+        # the MJCF's own <geom name="floor"> is the real ground — so drop them
+        # from the recorded video.
+        viz.viewer.show_axes(False)
+        viz.viewer.show_grid(False)
+
         # Camera from the shared TaskConfig pose (same framing as MuJoCo/Drake).
         R, eye = camera_pose_from_config(self._config)
         forward = np.asarray(R)[:, 2]

@@ -10,28 +10,26 @@
   </visual>
 
   <asset>
-    <texture name='cube_surface' file="./textures/iris_block.png" gridsize="3 4" gridlayout=".U..LFRB.D.."/>
-    <material name="obj_material" texture="cube_surface" specular="5" shininess=".0"/>
-
-    <!-- Per-face crops of the same atlas (see textures/iris_block.png), used as
-    flat "sticker" geoms so Pinocchio's Panda3d viewer (which has no notion of
-    MuJoCo's cube gridlayout unwrap and would otherwise stretch the whole atlas
-    across every face) shows the correct face image too. R/L/U/D/F/B are
-    MuJoCo's box-face labels; empirically (see env_leap_cube.xml history) they
-    map to world axes as +X=R, -X=L, +Y=U, -Y=D, +Z=F, -Z=B for an
-    unrotated box, matching the atlas cell each letter occupies. -->
-    <texture type="2d" name="cube_face_R" file="./textures/iris_block_R.png"/>
-    <texture type="2d" name="cube_face_L" file="./textures/iris_block_L.png"/>
-    <texture type="2d" name="cube_face_U" file="./textures/iris_block_U.png"/>
-    <texture type="2d" name="cube_face_D" file="./textures/iris_block_D.png"/>
-    <texture type="2d" name="cube_face_F" file="./textures/iris_block_F.png"/>
-    <texture type="2d" name="cube_face_B" file="./textures/iris_block_B.png"/>
-    <material name="obj_material_R" texture="cube_face_R" specular="5" shininess="0"/>
-    <material name="obj_material_L" texture="cube_face_L" specular="5" shininess="0"/>
-    <material name="obj_material_U" texture="cube_face_U" specular="5" shininess="0"/>
-    <material name="obj_material_D" texture="cube_face_D" specular="5" shininess="0"/>
-    <material name="obj_material_F" texture="cube_face_F" specular="5" shininess="0"/>
-    <material name="obj_material_B" texture="cube_face_B" specular="5" shininess="0"/>
+    <!-- The cube's appearance: ONE texture (the IRIS block atlas) on a UV-mapped
+    cube mesh. objects/iris_cube.obj is a unit cube (half-extent 1, scaled per
+    geom below) whose 6 faces carry texture coordinates indexing into the atlas
+    cells — i.e. the mesh encodes in plain OBJ `vt` exactly what this texture
+    used to declare as gridsize="3 4" gridlayout=".U..LFRB.D..".
+    That swap is the point: gridlayout is a MuJoCo-only feature, so Pinocchio's
+    Panda3d viewer ignored it and stretched the whole atlas across every face
+    (the reason this scene previously needed six pre-cropped per-face images on
+    six sticker geoms). OBJ texture coordinates are understood by both renderers,
+    so one texture + one geom now works everywhere. The UVs were solved against
+    the old gridlayout box and verified face-by-face from all 6 axis views —
+    identical cell and orientation on every face. -->
+    <texture type="2d" name="cube_surface" file="./textures/iris_block.png"/>
+    <material name="obj_material" texture="cube_surface" texuniform="false" specular="5" shininess=".0"/>
+    <!-- NB: <mesh file> resolves against `meshdir`, which the included
+    leap_right_hand.xml sets to ./leap_hand/assets/ — hence the ../../ hop back
+    out to scenes/leap/objects/. (<texture file> above is unaffected: texturedir
+    is unset, so it resolves against the model directory.) -->
+    <mesh name="iris_cube" file="../../objects/iris_cube.obj" scale="0.035 0.035 0.035"/>
+    <mesh name="iris_cube_goal" file="../../objects/iris_cube.obj" scale="0.015 0.015 0.015"/>
 
     <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
       markrgb="0.8 0.8 0.8" width="300" height="300"/>
@@ -55,48 +53,25 @@
     screen (-0.66, 0.56) — far enough out to read as a corner inset, with the
     cube's corners still landing inside the frame. Visual only
     (contype/conaffinity 0, density 0): it never collides and carries no mass. -->
-    <body name="goal" pos="0.014 -0.0531 0.1353" quat="1 0 0 0" mocap="true">
-      <!-- Same per-face sticker treatment as the "obj" cube below, so the target
-      shows the same textures; just scaled down (0.015 vs 0.035 half-size). -->
-      <geom name="goal_face_R" type="box" material="obj_material_R" size="0.0003 0.015 0.015"
-        pos="0.0153 0 0" contype="0" conaffinity="0" density="0"/>
-      <geom name="goal_face_L" type="box" material="obj_material_L" size="0.0003 0.015 0.015"
-        pos="-0.0153 0 0" contype="0" conaffinity="0" density="0"/>
-      <geom name="goal_face_U" type="box" material="obj_material_U" size="0.015 0.0003 0.015"
-        pos="0 0.0153 0" contype="0" conaffinity="0" density="0"/>
-      <geom name="goal_face_D" type="box" material="obj_material_D" size="0.015 0.0003 0.015"
-        pos="0 -0.0153 0" contype="0" conaffinity="0" density="0"/>
-      <geom name="goal_face_F" type="box" material="obj_material_F" size="0.015 0.015 0.0003"
-        pos="0 0 0.0153" contype="0" conaffinity="0" density="0"/>
-      <geom name="goal_face_B" type="box" material="obj_material_B" size="0.015 0.015 0.0003"
-        pos="0 0 -0.0153" contype="0" conaffinity="0" density="0"/>
+    <body name="goal" pos="0.005 -0.07 0.1353" quat="1 0 0 0" mocap="true">
+      <!-- Same textured cube mesh as "obj" below, just at the smaller goal scale. -->
+      <geom name="goal_visual" type="mesh" mesh="iris_cube_goal" material="obj_material"
+        contype="0" conaffinity="0" density="0"/>
     </body>
     
     <body name="obj" pos="-0.00 0.05 0.07">
         <freejoint name="obj_joint"/>
-        <!-- Collision + physics body. group="3" hides it from all three
-        renderers (MuJoCo default mjvOption, Drake's illustration/perception
-        roles, and Pinocchio's visual model all treat group>=3 as
-        collision-only) so it doesn't fight with the per-face stickers below;
-        it remains the sole proximity/mass-carrying geometry. -->
+        <!-- Collision + physics body. Kept a box (exact and cheap) rather than
+        the mesh; group="3" hides it from all three renderers (MuJoCo's default
+        mjvOption, Drake's illustration/perception roles, and Pinocchio's visual
+        model all treat group>=3 as collision-only) so it doesn't z-fight with
+        the visual mesh. It remains the sole proximity/mass-carrying geometry. -->
         <geom name="obj" type="box" material="obj_material" size="0.035 0.035 0.035"
               quat="1 0 0 0" friction="0.5" rgba="1.0 1.0 0 0.99" mass="0.14" group="3"
               />
-        <!-- Visual-only per-face stickers (contype/conaffinity 0, density 0):
-        thin slabs flush against each face, textured with that face's own
-        crop so every simulator shows the correct image per side. -->
-        <geom name="obj_face_R" type="box" material="obj_material_R" size="0.0003 0.035 0.035"
-              pos="0.0353 0 0" rgba="1.0 1.0 0 0.99" contype="0" conaffinity="0" density="0"/>
-        <geom name="obj_face_L" type="box" material="obj_material_L" size="0.0003 0.035 0.035"
-              pos="-0.0353 0 0" rgba="1.0 1.0 0 0.99" contype="0" conaffinity="0" density="0"/>
-        <geom name="obj_face_U" type="box" material="obj_material_U" size="0.035 0.0003 0.035"
-              pos="0 0.0353 0" rgba="1.0 1.0 0 0.99" contype="0" conaffinity="0" density="0"/>
-        <geom name="obj_face_D" type="box" material="obj_material_D" size="0.035 0.0003 0.035"
-              pos="0 -0.0353 0" rgba="1.0 1.0 0 0.99" contype="0" conaffinity="0" density="0"/>
-        <geom name="obj_face_F" type="box" material="obj_material_F" size="0.035 0.035 0.0003"
-              pos="0 0 0.0353" rgba="1.0 1.0 0 0.99" contype="0" conaffinity="0" density="0"/>
-        <geom name="obj_face_B" type="box" material="obj_material_B" size="0.035 0.035 0.0003"
-              pos="0 0 -0.0353" rgba="1.0 1.0 0 0.99" contype="0" conaffinity="0" density="0"/>
+        <!-- Visual-only textured cube (contype/conaffinity 0, density 0). -->
+        <geom name="obj_visual" type="mesh" mesh="iris_cube" material="obj_material"
+              contype="0" conaffinity="0" density="0"/>
     </body>
     
   </worldbody>

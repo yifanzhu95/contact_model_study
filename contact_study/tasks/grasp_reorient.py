@@ -152,7 +152,7 @@ _TARGET_QUAT  = _euler_to_quat(_TARGET_EULER)   # wxyz
 # frame, and the camera looks down its own -z. We convert that to the
 # (right, down, forward) world_from_camera columns this config uses (the Drake
 # optical-axis convention: +X right, +Y down, +Z forward/viewing direction).
-_CAM_POS     = (0.2, 0.02, 0.4)
+_CAM_POS     = (0.19, 0.01, 0.4)
 _cam_right   = np.array([0.0, 1.0, 0.0]);  _cam_right /= np.linalg.norm(_cam_right)
 _cam_up      = np.array([-1.0, 0.0, 0.5]); _cam_up    /= np.linalg.norm(_cam_up)
 _cam_fwd     = -np.cross(_cam_right, _cam_up)   # camera -z = viewing direction
