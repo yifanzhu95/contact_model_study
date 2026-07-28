@@ -13,6 +13,26 @@
     <texture name='cube_surface' file="./textures/iris_block.png" gridsize="3 4" gridlayout=".U..LFRB.D.."/>
     <material name="obj_material" texture="cube_surface" specular="5" shininess=".0"/>
 
+    <!-- Per-face crops of the same atlas (see textures/iris_block.png), used as
+    flat "sticker" geoms so Pinocchio's Panda3d viewer (which has no notion of
+    MuJoCo's cube gridlayout unwrap and would otherwise stretch the whole atlas
+    across every face) shows the correct face image too. R/L/U/D/F/B are
+    MuJoCo's box-face labels; empirically (see env_leap_cube.xml history) they
+    map to world axes as +X=R, -X=L, +Y=U, -Y=D, +Z=F, -Z=B for an
+    unrotated box, matching the atlas cell each letter occupies. -->
+    <texture type="2d" name="cube_face_R" file="./textures/iris_block_R.png"/>
+    <texture type="2d" name="cube_face_L" file="./textures/iris_block_L.png"/>
+    <texture type="2d" name="cube_face_U" file="./textures/iris_block_U.png"/>
+    <texture type="2d" name="cube_face_D" file="./textures/iris_block_D.png"/>
+    <texture type="2d" name="cube_face_F" file="./textures/iris_block_F.png"/>
+    <texture type="2d" name="cube_face_B" file="./textures/iris_block_B.png"/>
+    <material name="obj_material_R" texture="cube_face_R" specular="5" shininess="0"/>
+    <material name="obj_material_L" texture="cube_face_L" specular="5" shininess="0"/>
+    <material name="obj_material_U" texture="cube_face_U" specular="5" shininess="0"/>
+    <material name="obj_material_D" texture="cube_face_D" specular="5" shininess="0"/>
+    <material name="obj_material_F" texture="cube_face_F" specular="5" shininess="0"/>
+    <material name="obj_material_B" texture="cube_face_B" specular="5" shininess="0"/>
+
     <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
       markrgb="0.8 0.8 0.8" width="300" height="300"/>
     <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0."/>
@@ -24,16 +44,59 @@
 
     <geom name="floor" pos="0 0 -0.1" size="0 0 0.05" type="plane" material="groundplane"/>
 
-    <body name="goal" pos="-0.01 -0.1 0.2" quat="0.707 0 0 -0.707">
-      <geom name="goal-visual-above" size="0.025 0.025 0.025" material="obj_material" type="box" conaffinity="0" contype="0"
-        pos="0 0 0" quat="1 0 0 0" rgba="1 0  1 0.2"/>
+    <!-- Reorientation target marker. mocap="true" so the task's _update_goal can
+    rewrite its orientation each time a new goal is sampled (MuJoCo drives it via
+    mjd.mocap_quat; the Pinocchio viewer via PinocchioSimulator.set_goal_quat).
+    pos places it in the UPPER-LEFT of the eval camera's frame. That camera
+    (_CAM_POS/_CAM_ROTMAT in tasks/grasp_reorient.py) sits at (0.2, 0.02, 0.4)
+    with right=+Y, up=(-0.894, 0, 0.447) and forward=(-0.447, 0, -0.894); the
+    Panda3d lens measures tan(fov/2) = 0.346 horizontal / 0.268 vertical, so
+    this pos is cam + 0.32*forward - 0.073*right + 0.048*up, i.e. normalized
+    screen (-0.66, 0.56) — far enough out to read as a corner inset, with the
+    cube's corners still landing inside the frame. Visual only
+    (contype/conaffinity 0, density 0): it never collides and carries no mass. -->
+    <body name="goal" pos="0.014 -0.0531 0.1353" quat="1 0 0 0" mocap="true">
+      <!-- Same per-face sticker treatment as the "obj" cube below, so the target
+      shows the same textures; just scaled down (0.015 vs 0.035 half-size). -->
+      <geom name="goal_face_R" type="box" material="obj_material_R" size="0.0003 0.015 0.015"
+        pos="0.0153 0 0" contype="0" conaffinity="0" density="0"/>
+      <geom name="goal_face_L" type="box" material="obj_material_L" size="0.0003 0.015 0.015"
+        pos="-0.0153 0 0" contype="0" conaffinity="0" density="0"/>
+      <geom name="goal_face_U" type="box" material="obj_material_U" size="0.015 0.0003 0.015"
+        pos="0 0.0153 0" contype="0" conaffinity="0" density="0"/>
+      <geom name="goal_face_D" type="box" material="obj_material_D" size="0.015 0.0003 0.015"
+        pos="0 -0.0153 0" contype="0" conaffinity="0" density="0"/>
+      <geom name="goal_face_F" type="box" material="obj_material_F" size="0.015 0.015 0.0003"
+        pos="0 0 0.0153" contype="0" conaffinity="0" density="0"/>
+      <geom name="goal_face_B" type="box" material="obj_material_B" size="0.015 0.015 0.0003"
+        pos="0 0 -0.0153" contype="0" conaffinity="0" density="0"/>
     </body>
     
     <body name="obj" pos="-0.00 0.05 0.07">
         <freejoint name="obj_joint"/>
-        <geom name="obj" type="box" material="obj_material" size="0.035 0.035 0.035" 
-              quat="1 0 0 0" friction="0.5" rgba="1.0 1.0 0 0.99" mass="0.14"
+        <!-- Collision + physics body. group="3" hides it from all three
+        renderers (MuJoCo default mjvOption, Drake's illustration/perception
+        roles, and Pinocchio's visual model all treat group>=3 as
+        collision-only) so it doesn't fight with the per-face stickers below;
+        it remains the sole proximity/mass-carrying geometry. -->
+        <geom name="obj" type="box" material="obj_material" size="0.035 0.035 0.035"
+              quat="1 0 0 0" friction="0.5" rgba="1.0 1.0 0 0.99" mass="0.14" group="3"
               />
+        <!-- Visual-only per-face stickers (contype/conaffinity 0, density 0):
+        thin slabs flush against each face, textured with that face's own
+        crop so every simulator shows the correct image per side. -->
+        <geom name="obj_face_R" type="box" material="obj_material_R" size="0.0003 0.035 0.035"
+              pos="0.0353 0 0" rgba="1.0 1.0 0 0.99" contype="0" conaffinity="0" density="0"/>
+        <geom name="obj_face_L" type="box" material="obj_material_L" size="0.0003 0.035 0.035"
+              pos="-0.0353 0 0" rgba="1.0 1.0 0 0.99" contype="0" conaffinity="0" density="0"/>
+        <geom name="obj_face_U" type="box" material="obj_material_U" size="0.035 0.0003 0.035"
+              pos="0 0.0353 0" rgba="1.0 1.0 0 0.99" contype="0" conaffinity="0" density="0"/>
+        <geom name="obj_face_D" type="box" material="obj_material_D" size="0.035 0.0003 0.035"
+              pos="0 -0.0353 0" rgba="1.0 1.0 0 0.99" contype="0" conaffinity="0" density="0"/>
+        <geom name="obj_face_F" type="box" material="obj_material_F" size="0.035 0.035 0.0003"
+              pos="0 0 0.0353" rgba="1.0 1.0 0 0.99" contype="0" conaffinity="0" density="0"/>
+        <geom name="obj_face_B" type="box" material="obj_material_B" size="0.035 0.035 0.0003"
+              pos="0 0 -0.0353" rgba="1.0 1.0 0 0.99" contype="0" conaffinity="0" density="0"/>
     </body>
     
   </worldbody>

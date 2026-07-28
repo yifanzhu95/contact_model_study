@@ -643,6 +643,9 @@ class PinocchioSimulator(EvalSimulator):
         goal_pose: "tuple[np.ndarray, np.ndarray] | None" = None,
         goal_opacity: float = 0.3,
         goal_body_name: str = "obj",
+        goal_marker_body: str = "goal",
+        msaa_samples: int = 8,
+        render_size: "tuple[int, int] | None" = (1280, 960),
     ):
         import pinocchio as pin
 
@@ -655,6 +658,19 @@ class PinocchioSimulator(EvalSimulator):
         self._goal_pose = goal_pose
         self._goal_opacity = float(goal_opacity)
         self._goal_body_name = goal_body_name
+        # Name of the scene's static goal-marker <body> (MuJoCo mocap body). Its
+        # visual geoms are re-placed by set_goal_quat whenever a new goal is
+        # sampled — Pinocchio has no mocap concept, so the marker is a fixed
+        # body whose geometry placements we rewrite directly (see
+        # _index_goal_marker). None/absent body => set_goal_quat is a no-op.
+        self._goal_marker_body = goal_marker_body
+        # Offscreen-render anti-aliasing. Both only apply to the FIRST viewer
+        # built in the process (the Panda3D ShowBase is a singleton — see
+        # _PANDA_VIEWER — so later episodes reuse its framebuffer as-is).
+        # msaa_samples: MSAA sample count (0 disables); render_size: offscreen
+        # framebuffer/video resolution, None keeps panda3d's 800x600 default.
+        self._msaa_samples = int(msaa_samples)
+        self._render_size = render_size
         self.nq = nq
         self.nv = nv
         self._joint_channels = joint_channels or []
@@ -803,8 +819,63 @@ class PinocchioSimulator(EvalSimulator):
         self._frame_dt = 1.0 / config.cam_fps if config.cam_fps > 0 else 0.0
         self._next_frame_t = 0.0
         self._viz = None
+        self._goal_marker_M0 = None
+        self._goal_marker_geoms = []
         if self._want_render:
+            self._index_goal_marker()
             self._setup_viewer()
+
+    # -- runtime goal marker -------------------------------------------------
+    def _index_goal_marker(self):
+        """Record the visual geoms belonging to the goal-marker body, together
+        with their placements EXPRESSED IN THAT BODY'S FRAME, so set_goal_quat
+        can spin the marker in place later.
+
+        The marker is a jointless <body> (a MuJoCo mocap body), so Pinocchio
+        anchors its geoms to the universe joint with their world placement baked
+        in — there is no joint whose q we could write to move it. What we can do
+        is rewrite each GeometryObject.placement directly: display() runs
+        updateGeometryPlacements, which recomputes oMg = oMi[parentJoint] *
+        placement every frame, so a new placement takes effect immediately.
+
+        The body's own world pose is read off the model frame of the same name
+        (merge_models reapplies the root placement there), and each geom's
+        body-local offset is M_body^-1 * placement."""
+        self._goal_marker_M0 = None
+        self._goal_marker_geoms = []
+        name = self._goal_marker_body
+        if not name:
+            return
+        model = self._model
+        if not model.existFrame(name):
+            return
+        M_body = model.frames[model.getFrameId(name)].placement
+        M_body_inv = M_body.inverse()
+        for gid, go in enumerate(self._visual_model.geometryObjects):
+            if model.frames[go.parentFrame].name == name:
+                self._goal_marker_geoms.append((gid, M_body_inv * go.placement))
+        if self._goal_marker_geoms:
+            self._goal_marker_M0 = M_body
+
+    def set_goal_quat(self, quat_wxyz) -> None:
+        """Re-orient the scene's goal-marker body about its own origin (its
+        position is left at the scene's placement). Mirrors writing
+        mjd.mocap_quat for the same body in MuJoCo. No-op when the scene has no
+        such body or rendering is off."""
+        if self._goal_marker_M0 is None:
+            return
+        pin = self._pin
+        w, x, y, z = np.asarray(quat_wxyz, dtype=float)
+        n = np.sqrt(w * w + x * x + y * y + z * z)
+        if n == 0.0:
+            return
+        R = pin.Quaternion(w / n, x / n, y / n, z / n).matrix()
+        M_body = pin.SE3(R, self._goal_marker_M0.translation)
+        # The visualizer holds a reference to this same GeometryModel (verified:
+        # viz.visual_model is self._visual_model), so writing here is enough —
+        # the next display() re-derives oMg from these placements.
+        for gid, local_M in self._goal_marker_geoms:
+            self._visual_model.geometryObjects[gid].placement = M_body * local_M
 
     # -- viewer --------------------------------------------------------------
     def _add_goal_marker(self):
@@ -842,6 +913,27 @@ class PinocchioSimulator(EvalSimulator):
         # Panda3D's headless EGL pipe must be selected before the panda3d import.
         from panda3d.core import loadPrcFileData
         loadPrcFileData("", "load-display p3headlessgl")
+        # Multisample anti-aliasing. panda3d_viewer's ViewerApp already requests
+        # AntialiasAttrib.MAuto on the scene root, but that only takes effect if
+        # the framebuffer actually has samples — which it does not by default, so
+        # the offscreen render comes out with hard, stair-stepped edges. These
+        # two prc settings are what ViewerConfig.enable_antialiasing writes; they
+        # must be loaded before the ShowBase/framebuffer is created. Only applied
+        # on the FIRST viewer (the ShowBase is process-wide, see _PANDA_VIEWER).
+        if _PANDA_VIEWER is None and self._msaa_samples > 0:
+            loadPrcFileData("", "framebuffer-multisample 1")
+            loadPrcFileData("", f"multisamples {self._msaa_samples}")
+        if _PANDA_VIEWER is None:
+            # MSAA only smooths geometry silhouettes. The cube-face textures
+            # alias on their own when minified (a 180px sticker drawn ~40px
+            # wide), which shows up as crawling//sparkling letter edges. Trilinear
+            # mipmapping plus anisotropic filtering is the fix for that half.
+            loadPrcFileData("", "texture-minfilter linear_mipmap_linear")
+            loadPrcFileData("", "texture-magfilter linear")
+            loadPrcFileData("", "texture-anisotropic-degree 16")
+            if self._render_size is not None:
+                w, h = self._render_size
+                loadPrcFileData("", f"win-size {int(w)} {int(h)}")
         from pinocchio.visualize import Panda3dVisualizer
 
         # Add the goal-cube overlay (if requested) BEFORE the visualizer loads the
