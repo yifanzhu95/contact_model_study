@@ -314,23 +314,23 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 100,
+            max_steps          = 2000,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # NOTE: insertion order must match the weights[...] indexing in
             # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI
             # override rebuilds the array from this dict's key order.
             cost_weights       = {
                 "w_quat": 10.0,#100.0,
-                "w_pos_x": 3.75,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+                "w_pos_x": 7.50,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
                 "w_pos_y": 15.0,#80.0,    #Y is across the fingers
-                "w_pos_z": 3.750,#15.0,
+                "w_pos_z": 15.0,#15.0,
                 "w_velo": 0.0,
-                "w_contact": 10.0,
-                "w_joint": 0.30,
+                "w_contact": 12.50,
+                "w_joint": 0.60,
                 "w_joint_velo": 0.0,
                 "w_fallen": 200.0,
-                "w_quat_term": 10.0,
-                "w_pos_term": 100.0,
+                "w_quat_term": 100.0,
+                "w_pos_term": 200.0,
                 "w_fallen_term": 0.0,
             },
             # BaseTask.load() loads this static file directly — no MJCF is
