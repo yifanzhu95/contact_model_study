@@ -296,7 +296,7 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 1000,
+            max_steps          = 4000,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # NOTE: insertion order must match the weights[...] indexing in
             # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI
@@ -311,7 +311,7 @@ class GraspReorientTask(BaseTask):
                 "w_joint": 0.60,
                 "w_joint_velo": 0.0,
                 "w_fallen": 200.0,
-                "w_quat_term": 100.0,
+                "w_quat_term": 10.0,
                 "w_pos_term": 100.0,
                 "w_fallen_term": 0.0,
             },
