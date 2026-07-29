@@ -283,6 +283,8 @@ def main():
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
     p.add_argument("--n_samples",   type=int,   default=256)
     p.add_argument("--horizon",     type=int,   default=8)
+    p.add_argument("--n_iterations", type=int,  default=1,
+                   help="Number of MPPI update iterations per plan() call.")
     p.add_argument("--temperature", type=float, default=0.01)#0.00008)
     p.add_argument("--noise_sigma", type=float, default=0.02,)#0.01)
     p.add_argument("--delta",       type=float, default=0.1,#0.1,
@@ -358,6 +360,7 @@ def main():
         mppi_cfg = MPPIConfig(
             n_samples      = args.n_samples,
             horizon        = args.horizon,
+            n_iterations   = args.n_iterations,
             temperature    = args.temperature,
             noise_sigma    = args.noise_sigma,
             substeps       = args.substeps,
