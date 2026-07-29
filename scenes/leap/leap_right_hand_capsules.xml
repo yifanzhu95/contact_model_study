@@ -104,6 +104,27 @@ Naming Conventions
     <default class="collision">
       <geom material="black" group="3" />
     </default>
+    <!-- All finger collision geoms are capsules (the palm is still boxes).
+    Two conventions are used, both derived from the boxes they replace:
+      * "motor" capsules approximate a Dynamixel housing (or housing+bracket)
+        with a capsule along the box's longest axis; radius = mean of the two
+        remaining half-extents and cylinder half-length = longest half-extent
+        minus that radius, so the capsule's total extent along every axis
+        matches the original box to within ~1mm.
+      * "plate" capsules approximate the thin bracket plates. These run along
+        the plate's long (lateral) axis with a radius equal to the plate's
+        half-thickness plus ~1mm, and are shifted so the capsule is flush with
+        the palm-facing face of the plate: the back (nail-side) half of each
+        plate is intentionally dropped, since only the grasping side is
+        contact-relevant. Palm-facing local direction per link (measured from
+        fingertip motion under flexion): +x for *_bs / th_mp, -x for *_md /
+        *_ds, -z for *_px / th_px / th_ds. -->
+    <default class="motor">
+      <geom type="capsule" size="0.012" material="black" group="3" />
+    </default>
+    <default class="plate">
+      <geom type="capsule" size="0.004" material="black" group="3" />
+    </default>
     <!-- Collision-only now: group="3" drops these from every renderer's visual
     model (MuJoCo's default mjvOption, Drake's illustration/perception roles,
     and Pinocchio's visual model all treat group>=3 as collision-only -
@@ -277,7 +298,7 @@ Naming Conventions
           <joint name="if_mcp" class="mcp" />
           <geom name="if_bs_visual" pos="0.0084 0.0077 0.01465" quat="1 0 0 0" class="visual"
             mesh="base" />
-          <geom name="if_bs_collision_1" size="0.01 0.003 0.017" pos="0 0.018 0.0147" type="box" class="collision" />
+          <geom name="if_bs_collision_1" fromto="0.006 0.018 0.0017 0.006 0.018 0.0277" class="plate" />
           <!-- <geom name="if_bs_collision_2" size="0.014 0.02 0.01" pos="-0.027 0.042 0.015"
           type="box"/> -->
           <!-- <geom name="if_bs_collision_3" size="0.017 0.003 0.01" pos="-0.0262 0.02 0.0146"
@@ -295,8 +316,8 @@ Naming Conventions
             <joint name="if_rot" class="rot" />
             <geom name="if_px_visual" pos="0.0096 0.0002 0.0007" quat="0.500003 -0.5 -0.5 -0.499997"
               class="visual" mesh="proximal" />
-            <geom name="if_px_collision" size="0.017 0.013 0.011" pos="0.0075 -0.0002 -0.011"
-              type="box" class="collision" />
+            <geom name="if_px_collision" fromto="0.0025 -0.0002 -0.011 0.0125 -0.0002 -0.011"
+              class="motor" />
 
             <body name="if_md" pos="0.015 0.0143 -0.013" quat="0.500003 0.5 -0.5 0.499997">
               <inertial pos="0.0054215 -0.029148 0.015" quat="0.687228 0.687228 0.166487 0.166487"
@@ -304,15 +325,15 @@ Naming Conventions
               <joint name="if_pip" class="pip" />
               <geom name="if_md_visual" pos="0.0211 -0.0084 0.0097" quat="2.67949e-08 -1 0 0"
                 class="visual" mesh="medial" />
-              <geom name="if_md_collision_1" size="0.008 0.003 0.013" pos="0 -0.02 0.015" type="box" class="collision" />
+              <geom name="if_md_collision_1" fromto="-0.004 -0.02 0.006 -0.004 -0.02 0.024" class="plate" />
               <!-- <geom name="if_md_collision_2" size="0.01 0.002 0.017" pos="0 -0.016 0.015"
               type="box"/> -->
               <!-- <geom name="if_md_collision_3" size="0.007 0.01 0.002" pos="0 -0.0045 0.03"
               type="box"/> -->
               <!-- <geom name="if_md_collision_4" size="0.007 0.01 0.002" pos="0 -0.0045 0"
               type="box"/> -->
-              <geom name="if_md_collision_5" size="0.017 0.011 0.013" pos="0.0075 -0.035 0.015"
-                type="box" class="collision" />
+              <geom name="if_md_collision_5" fromto="0.0025 -0.035 0.015 0.0125 -0.035 0.015"
+                class="motor" />
 
               <body name="if_ds" pos="0 -0.0361 0.0002">
                 <inertial pos="-0.0008794 -0.027019 0.014594"
@@ -321,8 +342,8 @@ Naming Conventions
                 <joint name="if_dip" class="dip" />
                 <geom name="if_ds_visual" pos="0.0132 -0.0061 0.0144" quat="2.67949e-08 1 0 0"
                   class="visual" mesh="distal" />
-                <geom name="if_ds_collision_1" size="0.01 0.003 0.015" pos="0 -0.017 0.015"
-                  type="box" class="collision" />
+                <geom name="if_ds_collision_1" fromto="-0.006 -0.017 0.004 -0.006 -0.017 0.026"
+                  class="plate" />
                 <!-- <geom name="if_ds_collision_2" size="0.007 0.011 0.002" pos="0 -0.006 0.03"
                 type="box"/> -->
                 <!-- <geom name="if_ds_collision_3" size="0.007 0.011 0.002" pos="0 -0.006 -0.001"
@@ -348,7 +369,7 @@ Naming Conventions
           <joint name="mf_mcp" class="mcp" />
           <geom name="mf_bs_visual" pos="0.0084 0.0077 0.01465" quat="1 0 0 0" class="visual"
             mesh="base" />
-          <geom name="mf_bs_collision_1" size="0.01 0.003 0.017" pos="0 0.018 0.0147" type="box" class="collision" />
+          <geom name="mf_bs_collision_1" fromto="0.006 0.018 0.0017 0.006 0.018 0.0277" class="plate" />
           <!-- <geom name="mf_bs_collision_2" size="0.014 0.02 0.01" pos="-0.027 0.042 0.015"
           type="box"/> -->
           <!-- <geom name="mf_bs_collision_3" size="0.017 0.003 0.01" pos="-0.0262 0.02 0.0146"
@@ -366,8 +387,8 @@ Naming Conventions
             <joint name="mf_rot" class="rot" />
             <geom name="mf_px_visual" pos="0.0096 0.0003 0.0007" quat="0.500003 -0.5 -0.5 -0.499997"
               class="visual" mesh="proximal" />
-            <geom name="mf_px_collision" size="0.017 0.013 0.011" pos="0.0075 -0.0002 -0.011"
-              type="box" class="collision" />
+            <geom name="mf_px_collision" fromto="0.0025 -0.0002 -0.011 0.0125 -0.0002 -0.011"
+              class="motor" />
 
             <body name="mf_md" pos="0.015 0.0143 -0.013" quat="0.500003 0.5 -0.5 0.499997">
               <inertial pos="0.0054215 -0.029148 0.015" quat="0.687228 0.687228 0.166487 0.166487"
@@ -375,15 +396,15 @@ Naming Conventions
               <joint name="mf_pip" class="pip" />
               <geom name="mf_md_visual" pos="0.0211 -0.0084 0.0097" quat="1.32679e-06 -1 0 0"
                 class="visual" mesh="medial" />
-              <geom name="mf_md_collision_1" size="0.008 0.003 0.013" pos="0 -0.02 0.015" type="box" class="collision" />
+              <geom name="mf_md_collision_1" fromto="-0.004 -0.02 0.006 -0.004 -0.02 0.024" class="plate" />
               <!-- <geom name="mf_md_collision_2" size="0.01 0.002 0.017" pos="0 -0.016 0.015"
               type="box"/> -->
               <!-- <geom name="mf_md_collision_3" size="0.007 0.01 0.002" pos="0 -0.0045 0.03"
               type="box"/> -->
               <!-- <geom name="mf_md_collision_4" size="0.007 0.01 0.002" pos="0 -0.0045 0"
               type="box"/> -->
-              <geom name="mf_md_collision_5" size="0.017 0.011 0.013" pos="0.0075 -0.035 0.015"
-                type="box" class="collision" />
+              <geom name="mf_md_collision_5" fromto="0.0025 -0.035 0.015 0.0125 -0.035 0.015"
+                class="motor" />
 
               <body name="mf_ds" pos="0 -0.0361 0.0002">
                 <inertial pos="-0.0008794 -0.027019 0.014594"
@@ -392,8 +413,8 @@ Naming Conventions
                 <joint name="mf_dip" class="dip" />
                 <geom name="mf_ds_visual" pos="0.0132 -0.0061 0.0145" quat="1.32679e-06 1 0 0"
                   class="visual" mesh="distal" />
-                <geom name="mf_ds_collision_1" size="0.01 0.003 0.015" pos="0 -0.017 0.015"
-                  type="box" class="collision" />
+                <geom name="mf_ds_collision_1" fromto="-0.006 -0.017 0.004 -0.006 -0.017 0.026"
+                  class="plate" />
                 <!-- <geom name="mf_ds_collision_2" size="0.007 0.011 0.002" pos="0 -0.006 0.03"
                 type="box"/> -->
                 <!-- <geom name="mf_ds_collision_3" size="0.007 0.011 0.002" pos="0 -0.006 -0.001"
@@ -418,7 +439,7 @@ Naming Conventions
           <joint name="rf_mcp" class="mcp" />
           <geom name="rf_bs_visual" pos="0.0084 0.0077 0.01465" quat="1 0 0 0" class="visual"
             mesh="base" />
-          <geom name="rf_bs_collision_1" size="0.01 0.003 0.017" pos="0 0.018 0.0147" type="box" class="collision" />
+          <geom name="rf_bs_collision_1" fromto="0.006 0.018 0.0017 0.006 0.018 0.0277" class="plate" />
           <!-- <geom name="rf_bs_collision_2" size="0.014 0.02 0.01" pos="-0.027 0.042 0.015"
           type="box"/> -->
           <!-- <geom name="rf_bs_collision_3" size="0.017 0.003 0.01" pos="-0.0262 0.02 0.0146"
@@ -436,8 +457,8 @@ Naming Conventions
             <joint name="rf_rot" class="rot" />
             <geom name="rf_px_visual" pos="0.0096 0.0003 0.0007" quat="0.500003 -0.5 -0.5 -0.499997"
               class="visual" mesh="proximal" />
-            <geom name="rf_px_collision" size="0.017 0.013 0.011" pos="0.0075 -0.0002 -0.011"
-              type="box" class="collision" />
+            <geom name="rf_px_collision" fromto="0.0025 -0.0002 -0.011 0.0125 -0.0002 -0.011"
+              class="motor" />
 
             <body name="rf_md" pos="0.015 0.0143 -0.013" quat="0.500003 0.5 -0.5 0.499997">
               <inertial pos="0.0054215 -0.029148 0.015" quat="0.687228 0.687228 0.166487 0.166487"
@@ -445,15 +466,15 @@ Naming Conventions
               <joint name="rf_pip" class="pip" />
               <geom name="rf_md_visual" pos="0.0211 -0.0084 0.0097" quat="0 -1 0 0" class="visual"
                 mesh="medial" />
-              <geom name="rf_md_collision_1" size="0.008 0.003 0.013" pos="0 -0.02 0.015" type="box" class="collision" />
+              <geom name="rf_md_collision_1" fromto="-0.004 -0.02 0.006 -0.004 -0.02 0.024" class="plate" />
               <!-- <geom name="rf_md_collision_2" size="0.01 0.002 0.017" pos="0 -0.016 0.015"
               type="box"/> -->
               <!-- <geom name="rf_md_collision_3" size="0.007 0.01 0.002" pos="0 -0.0045 0.03"
               type="box"/> -->
               <!-- <geom name="rf_md_collision_4" size="0.007 0.01 0.002" pos="0 -0.0045 0"
               type="box"/> -->
-              <geom name="rf_md_collision_5" size="0.017 0.011 0.013" pos="0.0075 -0.035 0.015"
-                type="box" class="collision" />
+              <geom name="rf_md_collision_5" fromto="0.0025 -0.035 0.015 0.0125 -0.035 0.015"
+                class="motor" />
 
               <body name="rf_ds" pos="0 -0.03609 0.0002">
                 <inertial pos="-0.0008794 -0.027019 0.014594"
@@ -462,8 +483,8 @@ Naming Conventions
                 <joint name="rf_dip" class="dip" />
                 <geom name="rf_ds_visual" pos="0.0132 -0.0061 0.0145" quat="0 1 0 0" class="visual"
                   mesh="distal" />
-                <geom name="rf_ds_collision_1" size="0.01 0.003 0.015" pos="0 -0.017 0.015"
-                  type="box" class="collision" />
+                <geom name="rf_ds_collision_1" fromto="-0.006 -0.017 0.004 -0.006 -0.017 0.026"
+                  class="plate" />
                 <!-- <geom name="rf_ds_collision_2" size="0.007 0.011 0.002" pos="0 -0.006 0.03"
                 type="box"/> -->
                 <!-- <geom name="rf_ds_collision_3" size="0.007 0.011 0.002" pos="0 -0.006 -0.001"
@@ -488,8 +509,8 @@ Naming Conventions
           <joint name="th_cmc" class="thumb_cmc" />
           <geom name="th_mp_visual" pos="-0.0053 0.0003 0.00078" quat="0.500003 -0.5 -0.5 -0.499997"
             class="visual" mesh="proximal" />
-          <geom name="th_mp_collision" size="0.017 0.013 0.011" pos="-0.0075 -0.0002 -0.011"
-            type="box" class="collision" />
+          <geom name="th_mp_collision" fromto="-0.0125 -0.0002 -0.011 -0.0025 -0.0002 -0.011"
+            class="motor" />
 
           <body name="th_bs" pos="0 0.0143 -0.013" quat="0.500003 0.5 -0.5 0.499997">
             <inertial pos="0 0 -0.0070806" quat="0.707107 0.707107 0 0" mass="0.003"
@@ -509,7 +530,7 @@ Naming Conventions
               <joint name="th_mcp" class="thumb_mcp" />
               <geom name="th_px_visual" pos="0.0439 0.0579 -0.0086" quat="1 0 0 0" class="visual"
                 mesh="thumb_proximal" />
-              <geom name="th_px_collision_1" size="0.01 0.02 0.012" pos="0 0.0105 -0.014" type="box" class="collision" />
+              <geom name="th_px_collision_1" fromto="0 0.0015 -0.014 0 0.0195 -0.014" size="0.011" class="motor" />
               <!-- <geom name="th_px_collision_2" size="0.01 0.002 0.016" pos="0 0.031 -0.015"
               type="box"/> -->
               <!-- <geom name="th_px_collision_3" size="0.007 0.01 0.002" pos="0 0.042 0.001"
@@ -526,8 +547,8 @@ Naming Conventions
                 <joint name="th_ipl" class="thumb_ipl" />
                 <geom name="th_ds_visual" pos="0.0625 0.0784 0.0489" quat="1 0 0 0" class="visual"
                   mesh="thumb_distal" />
-                <geom name="th_ds_collision_1" size="0.01 0.018 0.012" pos="0 -0.0085 -0.015"
-                  type="box" class="collision" />
+                <geom name="th_ds_collision_1" fromto="0 -0.0155 -0.015 0 -0.0015 -0.015"
+                  size="0.011" class="motor" />
                 <!-- <geom name="th_ds_collision_2" size="0.01 0.002 0.015" pos="0 -0.029 -0.014"
                 type="box"/> -->
                 <!-- <geom name="th_ds_collision_3" size="0.004 0.012 0.009" pos="0.015 -0.0175
