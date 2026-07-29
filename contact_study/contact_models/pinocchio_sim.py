@@ -645,7 +645,7 @@ class PinocchioSimulator(EvalSimulator):
         goal_body_name: str = "obj",
         goal_marker_body: str = "goal",
         msaa_samples: int = 8,
-        render_size: "tuple[int, int] | None" = (1280, 960),
+        render_size: "tuple[int, int] | None" = (400,300),#(1280, 960),
     ):
         import pinocchio as pin
 
