@@ -81,6 +81,11 @@ Naming Conventions
     <mesh name="thumb_proximal" file="thumb_proximal.obj"/>
     <mesh name="thumb_distal" file="thumb_distal.obj"/>
     <mesh name="thumb_tip" file="thumb_tip.obj"/>
+    <!-- Higher-detail visual-only fingertip meshes (same body-local frame/scale
+    as tip.obj/thumb_tip.obj: verified their vertex bounding boxes match to
+    within ~0.1mm, so no extra pos/quat offset is needed on the geoms below). -->
+    <mesh name="tip_vis" file="tip_vis.obj"/>
+    <mesh name="thumb_tip_vis" file="thumb_tip_vis.obj"/>
   </asset>
 
   <!-- defaults -->
@@ -99,11 +104,26 @@ Naming Conventions
     <default class="collision">
       <geom material="black" group="3" />
     </default>
+    <!-- Collision-only now: group="3" drops these from every renderer's visual
+    model (MuJoCo's default mjvOption, Drake's illustration/perception roles,
+    and Pinocchio's visual model all treat group>=3 as collision-only -
+    verified earlier in this file's history), while contype/conaffinity stay at
+    their default (1/1) so they remain the actual contact geometry. The
+    tip_vis/thumb_tip_vis classes below are the visual replacement. -->
     <default class="tip">
-      <geom type="mesh" mesh="tip" friction="0.5" material="white" />
+      <geom type="mesh" mesh="tip" friction="0.5" material="white" group="3" />
     </default>
     <default class="thumb_tip">
-      <geom type="mesh" mesh="thumb_tip" friction="0.5" material="white" />
+      <geom type="mesh" mesh="thumb_tip" friction="0.5" material="white" group="3" />
+    </default>
+    <!-- Visual-only fingertip meshes: contype/conaffinity 0 + density 0 (never
+    collide, carry no mass), group="1" so they render normally everywhere,
+    matching the "visual" class convention above. -->
+    <default class="tip_vis">
+      <geom type="mesh" mesh="tip_vis" material="white" group="1" contype="0" conaffinity="0" density="0" />
+    </default>
+    <default class="thumb_tip_vis">
+      <geom type="mesh" mesh="thumb_tip_vis" material="white" group="1" contype="0" conaffinity="0" density="0" />
     </default>
 
     <!-- joint class defaults -->
@@ -308,6 +328,7 @@ Naming Conventions
                 type="box"/> -->
 
                 <geom name="if_tip" class="tip" />
+                <geom name="if_tip_vis" class="tip_vis" />
                 <site name="if_tip" pos="0 -0.05 0.015" group="4"/>
               </body>
 
@@ -375,6 +396,7 @@ Naming Conventions
                 type="box"/> -->
 
                 <geom name="mf_tip" class="tip" />
+                <geom name="mf_tip_vis" class="tip_vis" />
                 <site name="mf_tip" pos="0 -0.05 0.015" group="4"/>
               </body>
             </body>
@@ -441,6 +463,7 @@ Naming Conventions
                 type="box"/> -->
 
                 <geom name="rf_tip" class="tip" />
+                <geom name="rf_tip_vis" class="tip_vis" />
                 <site name="rf_tip" pos="0 -0.05 0.015" group="4"/>
               </body>
             </body>
@@ -501,6 +524,7 @@ Naming Conventions
                 -0.0115" type="box"/> -->
 
                 <geom name="th_tip" class="thumb_tip" />
+                <geom name="th_tip_vis" class="thumb_tip_vis" />
                 <site name="th_tip" pos="0 -0.06 -0.015" group="4"/>
               </body>
             </body>
