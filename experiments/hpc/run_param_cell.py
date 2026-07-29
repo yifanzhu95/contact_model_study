@@ -103,7 +103,7 @@ def run_cell(cell_id: int, overrides: dict, args) -> dict:
             temperature    = args.temperature,
             noise_sigma    = args.noise_sigma,
             substeps       = args.substeps,
-            warm_start     = True,
+            warm_start     = False,
             use_full_graph = args.use_full_graph,
             delta_range    = (-args.delta, args.delta),
             nconmax        = args.nconmax,
