@@ -75,7 +75,7 @@ def run_cell(args):
             temperature    = args.temperature,
             noise_sigma    = args.noise_sigma,
             substeps       = args.substeps,
-            warm_start     = True,
+            warm_start     = False,
             resample_interval = 1,
             use_full_graph = args.use_full_graph,
             delta_range    = (-args.delta, args.delta),
@@ -145,9 +145,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--geometry",      type=str,   default="accurate",
                    choices=[g.value for g in GeometryVariant])
     p.add_argument("--nconmax",       type=int,   default=50)
-    p.add_argument("--njmax",         type=int,   default=200)
+    p.add_argument("--njmax",         type=int,   default=300)
     p.add_argument("--use_full_graph",
-                   action=argparse.BooleanOptionalAction, default=False)
+                   action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--seed",          type=int,   default=None)
     p.add_argument("--debug",         action="store_true")
     return p
