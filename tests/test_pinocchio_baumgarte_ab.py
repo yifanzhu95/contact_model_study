@@ -276,9 +276,7 @@ def run_condition(cond, mjm, channels, args):
         wspeed.append(float(np.linalg.norm(st.qvel[obj_vadr + 3:obj_vadr + 6])))
         zpos.append(float(pos[2]))
         ncon.append(int(probe["ncon"]))
-
-        if want_video:
-            sim.render()
+        # Video frames are captured inside sim.step(), on the sim clock at cam_fps.
 
         # Stop once the cube has clearly been flung (or the state blew up).
         if not np.all(np.isfinite(st.qpos)) or np.linalg.norm(pos) > 2.0:

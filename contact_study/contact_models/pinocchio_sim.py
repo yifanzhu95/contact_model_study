@@ -40,7 +40,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from contact_study.sim.base import EvalSimulator, EvalState, camera_pose_from_config
+from contact_study.sim.base import (
+    EvalSimulator, EvalState, FrameClock, camera_pose_from_config, resolve_video_path,
+)
 
 # A geom whose in-plane box half-extents both exceed this is treated as the floor
 # and excluded from all collision pairs.
@@ -646,6 +648,7 @@ class PinocchioSimulator(EvalSimulator):
         goal_marker_body: str = "goal",
         msaa_samples: int = 8,
         render_size: "tuple[int, int] | None" = (400,300),#(1280, 960),
+        use_mp4: bool = True,
     ):
         import pinocchio as pin
 
@@ -681,6 +684,9 @@ class PinocchioSimulator(EvalSimulator):
         self._timestep = float(config.timestep)
         self._video_path = video_path
         self._want_render = render or (video_path is not None)
+        # Output container for save_video: .mp4 (default) or .gif. The flag wins
+        # over whatever extension the caller passes.
+        self._use_mp4 = bool(use_mp4)
 
         # --- build the combined Pinocchio model from the (multi-root) MJCF ----
         scene_dir = os.path.dirname(model_path)
@@ -813,11 +819,11 @@ class PinocchioSimulator(EvalSimulator):
         self._v = np.zeros(model.nv)
         self._q_des = self._q.copy()
 
-        # Rendering (throttled to cam_fps, mirroring MujocoSimulator).
+        # Rendering: frames are captured from inside step() on the SIM clock (one
+        # per 1/cam_fps of simulated time, at the substep nearest each deadline),
+        # mirroring MujocoSimulator — see FrameClock.
         self._frames: list[np.ndarray] = []
-        self._t = 0.0
-        self._frame_dt = 1.0 / config.cam_fps if config.cam_fps > 0 else 0.0
-        self._next_frame_t = 0.0
+        self._clock = FrameClock(config.cam_fps)
         self._viz = None
         self._goal_marker_M0 = None
         self._goal_marker_geoms = []
@@ -1254,8 +1260,7 @@ class PinocchioSimulator(EvalSimulator):
 
     # -- EvalSimulator interface --------------------------------------------
     def reset(self, qpos, qvel) -> None:
-        self._t = 0.0
-        self._next_frame_t = 0.0
+        self._clock.reset()
         self._frames = []
         self.set_state(qpos, qvel)
 
@@ -1287,26 +1292,27 @@ class PinocchioSimulator(EvalSimulator):
     def step(self, n_substeps: int = 1) -> None:
         for _ in range(n_substeps):
             self._substep()
-            self._t += self._timestep
+            if self._clock.advance(self._timestep) and self._viz is not None:
+                self._capture()
 
-    def render(self) -> None:
-        if self._viz is None:
-            return
-        if self._frame_dt > 0 and self._t + 1e-9 < self._next_frame_t:
-            return
-        self._next_frame_t += self._frame_dt
+    def _capture(self) -> None:
         self._viz.display(self._q)
         self._frames.append(self._viz.captureImage())
 
-    def save_video(self, path: str | None = None) -> None:
+    def save_video(self, path: str | None = None) -> str | None:
         if not self._frames:
-            return
+            return None
         import mediapy as media
         out = path or self._video_path
         if out is None:
-            return
-        kwargs = {"codec": "gif"} if str(out).lower().endswith(".gif") else {}
-        media.write_video(out, self._frames, fps=int(self._config.cam_fps), **kwargs)
+            return None
+        out = resolve_video_path(out, self._use_mp4)
+        os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+        kwargs = {"codec": "gif"} if out.lower().endswith(".gif") else {}
+        # The frames are cam_fps apart in sim time, so writing at cam_fps replays
+        # the episode in real time.
+        media.write_video(out, self._frames, fps=float(self._config.cam_fps), **kwargs)
+        return out
 
     @property
     def timestep(self) -> float:

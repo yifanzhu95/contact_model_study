@@ -137,20 +137,19 @@ def run_random_episode(
         if clip_lo is not None:
             u = np.clip(u, clip_lo, clip_hi)
 
-        # 3. Apply, advance the eval sim (finer steps over the same control_dt),
-        #    capture a frame.
+        # 3. Apply and advance the eval sim (finer steps over the same control_dt).
+        #    Frames are captured inside step(), on the sim clock at cam_fps.
         sim.apply_control(u)
         sim.step(eval_steps_per_control)
-        sim.render()
 
         if verbose and t % 25 == 0:
             print(f"  step {t:4d}  t={t*control_dt:5.2f}s  "
                   f"u[0]={float(u[0]):+8.3f}")
 
     if video_path is not None:
-        sim.save_video(video_path)
+        written = sim.save_video(video_path)
         if verbose:
-            print(f"  Saved video -> {video_path}")
+            print(f"  Saved video -> {written}")
 
     success = steps_to_success is not None
     if verbose:

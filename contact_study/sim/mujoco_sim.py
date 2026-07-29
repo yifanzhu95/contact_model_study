@@ -7,10 +7,14 @@ Because it *is* MuJoCo, get_state/apply_control are identity index maps.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import mujoco
 
-from contact_study.sim.base import EvalSimulator, EvalState, camera_pose_from_config
+from contact_study.sim.base import (
+    EvalSimulator, EvalState, FrameClock, camera_pose_from_config, resolve_video_path,
+)
 
 
 class MujocoSimulator(EvalSimulator):
@@ -23,6 +27,7 @@ class MujocoSimulator(EvalSimulator):
         height: int | None = None,
         width: int | None = None,
         hard_contact: bool = True,
+        use_mp4: bool = True,
     ):
         height = height if height is not None else config.cam_height
         width = width if width is not None else config.cam_width
@@ -48,20 +53,22 @@ class MujocoSimulator(EvalSimulator):
         self._config = config
         self._camera_name = camera_name
         self._frames: list[np.ndarray] = []
+        # Output container for save_video: .mp4 (default) or .gif. The flag wins
+        # over whatever extension the caller passes.
+        self._use_mp4 = bool(use_mp4)
 
         self._renderer = (
             mujoco.Renderer(mjm, height=height, width=width) if render else None
         )
         self._cam = self._build_camera()
 
-        # Capture frames at cam_fps, not every render() call — render() is
-        # called once per (fine) sim step, and at cam_fps=30 with a small
-        # timestep that's far more frames than the video needs, so storing all
-        # of them blows up memory on long episodes. Mirrors Drake's VideoWriter,
-        # which already captures on its own fps clock during AdvanceTo.
-        self._t = 0.0
-        self._frame_dt = 1.0 / config.cam_fps if config.cam_fps > 0 else 0.0
-        self._next_frame_t = 0.0
+        # Frames are captured from inside step(), on the SIM clock: one frame per
+        # 1/cam_fps of simulated time, taken at the fine substep nearest each
+        # deadline. That keeps playback real-time regardless of how many fine steps
+        # the caller advances per control step, and bounds the frame count to
+        # cam_fps per simulated second. Mirrors Drake's VideoWriter, which already
+        # captures on its own fps clock during AdvanceTo.
+        self._clock = FrameClock(config.cam_fps)
 
     # -- camera --------------------------------------------------------------
     def _build_camera(self):
@@ -89,8 +96,8 @@ class MujocoSimulator(EvalSimulator):
 
     # -- EvalSimulator interface --------------------------------------------
     def reset(self, qpos: np.ndarray, qvel: np.ndarray) -> None:
-        self._t = 0.0
-        self._next_frame_t = 0.0
+        self._clock.reset()
+        self._frames = []
         self.set_state(qpos, qvel)
 
     def set_state(self, qpos: np.ndarray, qvel: np.ndarray) -> None:
@@ -105,28 +112,30 @@ class MujocoSimulator(EvalSimulator):
         self.mjd.ctrl[:] = ctrl
 
     def step(self, n_substeps: int = 1) -> None:
+        dt = self.mjm.opt.timestep
         for _ in range(n_substeps):
             mujoco.mj_step(self.mjm, self.mjd)
-        self._t += n_substeps * self.mjm.opt.timestep
+            if self._clock.advance(dt) and self._renderer is not None:
+                self._capture()
 
-    def render(self) -> None:
-        if self._renderer is None:
-            return
-        if self._frame_dt > 0 and self._t + 1e-9 < self._next_frame_t:
-            return
-        self._next_frame_t += self._frame_dt
+    def _capture(self) -> None:
         self._renderer.update_scene(self.mjd, camera=self._cam)
         self._frames.append(self._renderer.render())
 
-    def save_video(self, path: str) -> None:
+    def save_video(self, path: str) -> str | None:
         if not self._frames:
-            return
+            return None
         import mediapy as media
+        out = resolve_video_path(path, self._use_mp4)
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
         # mediapy defaults to the h264 codec and does not infer "gif" from the
         # extension, so the ffmpeg GIF muxer rejects an h264-encoded .gif. Select
         # the codec from the extension (Drake's eval path writes gifs natively).
-        kwargs = {"codec": "gif"} if str(path).lower().endswith(".gif") else {}
-        media.write_video(path, self._frames, fps=int(self._config.cam_fps), **kwargs)
+        kwargs = {"codec": "gif"} if out.lower().endswith(".gif") else {}
+        # The frames are cam_fps apart in sim time, so writing at cam_fps replays
+        # the episode in real time.
+        media.write_video(out, self._frames, fps=float(self._config.cam_fps), **kwargs)
+        return out
 
     @property
     def timestep(self) -> float:

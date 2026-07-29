@@ -37,7 +37,9 @@ from typing import Callable
 
 import numpy as np
 
-from contact_study.sim.base import EvalSimulator, EvalState, camera_pose_from_config
+from contact_study.sim.base import (
+    EvalSimulator, EvalState, camera_pose_from_config, resolve_video_path,
+)
 
 
 @dataclass
@@ -103,6 +105,7 @@ class DrakeSimulator(EvalSimulator):
         video_path: str | None = None,
         pid_plant_dt: float = 0.0,
         extra_models_fn: Callable | None = None,
+        use_mp4: bool = True,
     ):
         from pydrake.math import RigidTransform, RotationMatrix
         from pydrake.common.eigen_geometry import Quaternion
@@ -187,13 +190,30 @@ class DrakeSimulator(EvalSimulator):
         self._pid_nu = nu
 
         self._video = None
+        self._use_mp4 = bool(use_mp4)
         if video_path is not None:
+            # Drake's VideoWriter only writes MP4 through its "cv2" backend (the
+            # default "PIL" one is GIF-only), so MP4 needs opencv-python. Fall back
+            # to a GIF rather than failing the run when it isn't installed.
+            backend = "PIL"
+            if self._use_mp4:
+                try:
+                    import cv2  # noqa: F401
+                    backend = "cv2"
+                except ImportError:
+                    print("  [drake] MP4 needs opencv-python for VideoWriter's cv2 "
+                          "backend; writing a GIF instead (pip install opencv-python).")
+                    self._use_mp4 = False
+            self._video_path = resolve_video_path(video_path, self._use_mp4)
             R, p = camera_pose_from_config(config)
             camera_pose = RigidTransform(RotationMatrix(R), p)
+            # VideoWriter samples on the SIM clock at cam_fps during AdvanceTo, so
+            # Drake videos are real-time without the FrameClock the other sims use.
             self._video = VideoWriter.AddToBuilder(
-                filename=video_path, builder=builder,
+                filename=self._video_path, builder=builder,
                 sensor_pose=camera_pose, fps=config.cam_fps,
                 width=config.cam_width, height=config.cam_height,
+                backend=backend,
             )
 
         self._diagram = builder.Build()
@@ -308,16 +328,18 @@ class DrakeSimulator(EvalSimulator):
         self._t += n_substeps * self._timestep
         self._simulator.AdvanceTo(self._t)
 
-    def render(self) -> None:
-        # VideoWriter captures automatically during AdvanceTo at its fps clock.
-        pass
-
-    def save_video(self, path: str | None = None) -> None:
+    def save_video(self, path: str | None = None) -> str | None:
         if self._video is None:
-            return
+            return None
         self._video.Save()
-        if path is not None and path != self._video_path:
-            os.replace(self._video_path, path)
+        out = self._video_path
+        if path is not None:
+            # The container is fixed at construction (VideoWriter owns the file),
+            # so only the requested name/location can change here.
+            out = resolve_video_path(path, self._use_mp4)
+            if out != self._video_path:
+                os.replace(self._video_path, out)
+        return out
 
     @property
     def timestep(self) -> float:

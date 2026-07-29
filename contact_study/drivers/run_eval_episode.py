@@ -96,6 +96,7 @@ def run_eval_episode(
     eval_sim:    EvalSimulatorKind | None = None,
     condition:   str  = "B",
     video_path:  str | None = None,
+    use_mp4:     bool = True,
     ep_idx:      int  = 0,
     fin_ep_on_success: bool = True,
     debug:       bool = False,
@@ -149,7 +150,7 @@ def run_eval_episode(
     # Only stand up a renderer when a video is requested (avoids a GL context per
     # episode during headless sweeps).
     sim = eval_task.make_eval_simulator(
-        video_path=video_path, render=video_path is not None
+        video_path=video_path, render=video_path is not None, use_mp4=use_mp4
     )
 
     # ---- initial state ----------------------------------------------------
@@ -160,6 +161,8 @@ def run_eval_episode(
     # Settle (objects fall to rest / hand closes onto the object). Hold the
     # initial command each rollout step so a position-controlled hand doesn't go
     # limp; advance the eval sim a full rollout step (eval_substeps fine steps).
+    # This phase IS recorded: the eval sims capture frames on their own sim clock
+    # inside step(), so the video opens with the settle just like Drake's has.
     if settle_seconds > 0.0:
         n_settle = int(settle_seconds / rollout_dt)
         for _ in range(n_settle):
@@ -242,11 +245,11 @@ def run_eval_episode(
         if clip_lo is not None:
             u = np.clip(u, clip_lo, clip_hi)
 
-        # 3. Apply, advance the eval sim (finer steps over the same control_dt),
-        #    capture a frame.
+        # 3. Apply and advance the eval sim (finer steps over the same control_dt).
+        #    Video frames are captured inside step(), on the sim clock at cam_fps,
+        #    so the recording plays back in real time at any control frequency.
         sim.apply_control(u)
         sim.step(eval_steps_per_control)
-        sim.render()
 
         if debug and t % 10 == 0:
             print(f"  [ep {ep_idx:02d} | step {t:04d}]  qpos_norm={np.linalg.norm(st.qpos):.4f}  "
@@ -257,9 +260,11 @@ def run_eval_episode(
     elapsed = time.perf_counter() - ep_start
 
     if video_path is not None:
-        sim.save_video(video_path)
+        # save_video returns the path actually written (the container comes from
+        # use_mp4, so the extension may differ from video_path's).
+        written = sim.save_video(video_path)
         if verbose:
-            print(f"  Saved video -> {video_path}")
+            print(f"  Saved video -> {written}")
 
     final_qpos = sim.get_state().qpos
     step_arr = np.asarray(step_times)
@@ -310,7 +315,9 @@ def main():
                    help="Cost-weight overrides as name=value tokens "
                         "(e.g. --weights w_quat=50 w_pos_x=400). Order must match "
                         "the task's config.cost_weights insertion order.")
-    p.add_argument("--video",       type=str,   default="videos/grasp_reorient_eval.gif")
+    p.add_argument("--video",       type=str,   default="videos/grasp_reorient_eval.mp4")
+    p.add_argument("--video_format", type=str,  default="mp4", choices=["mp4", "gif"],
+                   help="Video container; overrides --video's extension.")
     p.add_argument("--results",     type=str,   default=None,
                    help="JSON path for the episode result(s) (auto-named if omitted).")
     p.add_argument("--debug",       action="store_true",
@@ -325,10 +332,11 @@ def main():
     # unwanted; only render when the caller explicitly passed --video (or
     # there's a single episode, matching the old default behavior).
     want_video = args.video is not None or args.n_episodes == 1
+    use_mp4 = args.video_format == "mp4"
     base_video_path = args.video
     if base_video_path is None and want_video:
         VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
-        base_video_path = str(VIDEOS_DIR / f"{args.task}_eval.gif")
+        base_video_path = str(VIDEOS_DIR / f"{args.task}_eval.{args.video_format}")
 
     contact_cfg = MODEL_FACTORIES[args.model]()
     eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
@@ -379,6 +387,7 @@ def main():
             mppi_cfg    = mppi_cfg,
             rng         = rng,
             video_path  = video_path,
+            use_mp4     = use_mp4,
             cost_weight_overrides = overrides or None,
             settle_seconds = args.settle,
             eval_substeps  = args.eval_substeps,

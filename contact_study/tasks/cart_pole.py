@@ -185,7 +185,8 @@ class CartPoleTask(BaseTask):
         )
 
     # --- eval simulator -----------------------------------------------------
-    def make_eval_simulator(self, video_path: str | None = None, render: bool = True):
+    def make_eval_simulator(self, video_path: str | None = None, render: bool = True,
+                            use_mp4: bool = True):
         if self.config.eval_sim == EvalSimulatorKind.DRAKE:
             from contact_study.contact_models.drake_sim import (
                 DrakeSimulator, DrakeJointChannel, DrakePidActuation,
@@ -209,8 +210,10 @@ class CartPoleTask(BaseTask):
                     kp=PID_KP, ki=PID_KI, kd=PID_KD, ctrl_joint_names=["CartSlider"],
                 ),
                 pid_plant_dt   = 0.0,   # continuous plant (no contact; accurate)
+                use_mp4        = use_mp4,
             )
-        return super().make_eval_simulator(video_path=video_path, render=render)
+        return super().make_eval_simulator(video_path=video_path, render=render,
+                                           use_mp4=use_mp4)
 
 
 # Register at import time (keeps the decorator-free constructor above readable).

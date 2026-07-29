@@ -131,12 +131,16 @@ class ActuatorTestTask(BaseTask):
         return False
 
     # --- eval simulator -------------------------------------------------
-    def make_eval_simulator(self, video_path: str | None = None, render: bool = True):
+    def make_eval_simulator(self, video_path: str | None = None, render: bool = True,
+                            use_mp4: bool = True):
         if self.config.eval_sim == EvalSimulatorKind.PINOCCHIO:
-            return self._make_pinocchio_simulator(video_path=video_path, render=render)
-        return super().make_eval_simulator(video_path=video_path, render=render)
+            return self._make_pinocchio_simulator(video_path=video_path, render=render,
+                                                  use_mp4=use_mp4)
+        return super().make_eval_simulator(video_path=video_path, render=render,
+                                           use_mp4=use_mp4)
 
-    def _make_pinocchio_simulator(self, video_path: str | None = None, render: bool = True):
+    def _make_pinocchio_simulator(self, video_path: str | None = None, render: bool = True,
+                                  use_mp4: bool = True):
         """Pinocchio eval simulator for the hinge chain (no free bodies, no
         contacts of interest — each adjacent body pair is excluded via the
         MJCF's own <contact><exclude> tags). PD gains mirror grasp_reorient.py's
@@ -187,4 +191,5 @@ class ActuatorTestTask(BaseTask):
             free_channels  = [],
             video_path     = video_path,
             render         = render,
+            use_mp4        = use_mp4,
         )

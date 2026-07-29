@@ -19,7 +19,9 @@ indices.
 from __future__ import annotations
 
 import abc
+import math
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -59,14 +61,24 @@ class EvalSimulator(abc.ABC):
         """Advance the simulation by `n_substeps` control-timestep increments."""
         ...
 
-    @abc.abstractmethod
     def render(self) -> None:
-        """Capture one video frame (no-op if rendering is disabled)."""
-        ...
+        """Deprecated no-op, kept so older call sites still work.
+
+        Frames are captured on the SIM clock from inside step() (see FrameClock),
+        not on the caller's control clock — a driver that calls render() once per
+        control step would otherwise write a video whose playback speed depends on
+        the control frequency.
+        """
+        return None
 
     @abc.abstractmethod
-    def save_video(self, path: str) -> None:
-        """Write any captured frames to `path`."""
+    def save_video(self, path: str) -> str | None:
+        """Write any captured frames to `path`.
+
+        Returns the path actually written, which may differ from `path`: the
+        container (.mp4/.gif) is chosen by the simulator's `use_mp4` flag, so the
+        extension is normalized here. Returns None when there is nothing to write.
+        """
         ...
 
     @property
@@ -74,6 +86,47 @@ class EvalSimulator(abc.ABC):
     def timestep(self) -> float:
         """Control/integration timestep in seconds."""
         ...
+
+
+class FrameClock:
+    """Sim-time video frame scheduler.
+
+    advance() is called once per FINE sim substep and returns True on the substep
+    whose sim time lands closest to the next 1/fps deadline. Capturing there (rather
+    than once per control step, as the drivers used to via render()) makes the stored
+    frames evenly spaced in SIM time, so a video written at `fps` plays back in real
+    time no matter what the control frequency is — and the frame count stays ~fps per
+    simulated second instead of scaling with the control rate.
+    """
+
+    def __init__(self, fps: float):
+        self.frame_dt = 1.0 / fps if fps and fps > 0 else 0.0
+        self.reset()
+
+    def reset(self) -> None:
+        self.t = 0.0
+        self.next_t = 0.0
+
+    def advance(self, dt: float) -> bool:
+        """Advance the clock by one substep; True if this substep should be captured."""
+        self.t += dt
+        if self.frame_dt <= 0.0:
+            return False
+        # Round, don't floor: fire on the substep whose end time is nearest the
+        # deadline, i.e. as soon as we are within half a substep of it.
+        if self.t + 0.5 * dt < self.next_t - 1e-12:
+            return False
+        self.next_t += self.frame_dt
+        if self.next_t <= self.t:
+            # frame_dt < dt (fps faster than the sim can resolve): drop the
+            # deadlines we cannot hit rather than emitting duplicate frames.
+            self.next_t += math.ceil((self.t - self.next_t) / self.frame_dt) * self.frame_dt
+        return True
+
+
+def resolve_video_path(path, use_mp4: bool) -> str:
+    """Force `path`'s extension to match the requested container (.mp4 or .gif)."""
+    return str(Path(path).with_suffix(".mp4" if use_mp4 else ".gif"))
 
 
 def camera_pose_from_config(config) -> tuple[np.ndarray, np.ndarray]:

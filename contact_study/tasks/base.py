@@ -129,12 +129,16 @@ class BaseTask(abc.ABC):
         """Check whether the episode has failed (e.g. object fell). Override per task."""
         return False
 
-    def make_eval_simulator(self, video_path: str | None = None, render: bool = True):
+    def make_eval_simulator(self, video_path: str | None = None, render: bool = True,
+                            use_mp4: bool = True):
         """Build the eval/"real" simulator selected by self.config.eval_sim.
 
         The MuJoCo branch is generic. The Drake branch needs a task-specific
         joint-channel/actuation map, so tasks that support Drake eval override
         this method (delegating MuJoCo back to super()).
+
+        use_mp4 selects the video container (.mp4 when True, .gif otherwise); it
+        overrides the extension of video_path / the path passed to save_video.
         """
         if self.config is None:
             raise NotImplementedError(
@@ -142,7 +146,7 @@ class BaseTask(abc.ABC):
             )
         if self.config.eval_sim == EvalSimulatorKind.MUJOCO:
             from contact_study.sim.mujoco_sim import MujocoSimulator
-            return MujocoSimulator(self.mjm, self.config, render=render)
+            return MujocoSimulator(self.mjm, self.config, render=render, use_mp4=use_mp4)
         raise NotImplementedError(
             f"Drake eval for {type(self).__name__} requires a task-specific channel "
             f"map; override make_eval_simulator()."

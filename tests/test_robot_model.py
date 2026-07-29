@@ -14,7 +14,7 @@ joint. Control dimensions / limits come from the task's loaded MuJoCo model
 Usage:
     python tests/test_robot_model.py --task grasp_reorient
     python tests/test_robot_model.py --task cart_pole --eval_sim mujoco
-    python tests/test_robot_model.py --task grasp_reorient --eval_sim drake --video out.gif
+    python tests/test_robot_model.py --task grasp_reorient --eval_sim drake --video out.mp4
 """
 
 from __future__ import annotations
@@ -148,8 +148,7 @@ def run_robot_model_test(
             elapsed = k * dt
             ctrl = ctrl_fn(elapsed)
             sim.apply_control(ctrl)
-            sim.step(1)
-            sim.render()
+            sim.step(1)   # frames are captured inside step(), on the sim clock
             step += 1
             if step % print_every == 0:
                 st = sim.get_state()
@@ -158,8 +157,7 @@ def run_robot_model_test(
                       f"qpos={np.array2string(st.qpos, precision=3)}")
 
     if video_path is not None:
-        sim.save_video(video_path)
-        print(f"  Saved video -> {video_path}")
+        print(f"  Saved video -> {sim.save_video(video_path)}")
 
 
 def main():
@@ -178,7 +176,7 @@ def main():
     parser.add_argument("--fallback_amplitude", type=float, default=1.0,
                          help="+/- range to sweep for actuators with no ctrlrange (rare).")
     parser.add_argument("--print_every", type=int, default=50, help="Print state every N steps.")
-    parser.add_argument("--video", type=str, default="videos/test_robot_model.gif", help="Optional video output path.")
+    parser.add_argument("--video", type=str, default="videos/test_robot_model.mp4", help="Optional video output path.")
     parser.add_argument("--video_width", type=int, default=None,
                          help="Video frame width in pixels (default: task config, usually 640). "
                               "Lower this if the process gets OOM-killed.")

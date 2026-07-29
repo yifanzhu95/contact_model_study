@@ -61,6 +61,7 @@ def run_eval_episode_record_controls(
     eval_sim:    EvalSimulatorKind | None = None,
     condition:   str  = "B",
     video_path:  str | None = None,
+    use_mp4:     bool = True,
     controls_path: str | None = None,
     ep_idx:      int  = 0,
     fin_ep_on_success: bool = True,
@@ -104,7 +105,7 @@ def run_eval_episode_record_controls(
     # Only stand up a renderer when a video is requested (avoids a GL context per
     # episode during headless sweeps).
     sim = eval_task.make_eval_simulator(
-        video_path=video_path, render=video_path is not None
+        video_path=video_path, render=video_path is not None, use_mp4=use_mp4
     )
 
     # ---- initial state ----------------------------------------------------
@@ -115,6 +116,8 @@ def run_eval_episode_record_controls(
     # Settle (objects fall to rest / hand closes onto the object). Hold the
     # initial command each rollout step so a position-controlled hand doesn't go
     # limp; advance the eval sim a full rollout step (eval_substeps fine steps).
+    # This phase IS recorded: the eval sims capture frames on their own sim clock
+    # inside step(), so the video opens with the settle just like Drake's has.
     if settle_seconds > 0.0:
         n_settle = int(settle_seconds / rollout_dt)
         for _ in range(n_settle):
@@ -201,11 +204,11 @@ def run_eval_episode_record_controls(
         # Record the control command actually applied to the eval sim this step.
         controls_log.append(u.copy())
 
-        # 3. Apply, advance the eval sim (finer steps over the same control_dt),
-        #    capture a frame.
+        # 3. Apply and advance the eval sim (finer steps over the same control_dt).
+        #    Video frames are captured inside step(), on the sim clock at cam_fps,
+        #    so the recording plays back in real time at any control frequency.
         sim.apply_control(u)
         sim.step(eval_steps_per_control)
-        sim.render()
 
         if debug and t % 10 == 0:
             print(f"  [ep {ep_idx:02d} | step {t:04d}]  qpos_norm={np.linalg.norm(st.qpos):.4f}  "
@@ -216,9 +219,11 @@ def run_eval_episode_record_controls(
     elapsed = time.perf_counter() - ep_start
 
     if video_path is not None:
-        sim.save_video(video_path)
+        # save_video returns the path actually written (the container comes from
+        # use_mp4, so the extension may differ from video_path's).
+        written = sim.save_video(video_path)
         if verbose:
-            print(f"  Saved video -> {video_path}")
+            print(f"  Saved video -> {written}")
 
     controls_arr = np.stack(controls_log) if controls_log else np.empty((0,) + u.shape)
     if controls_path is not None:
@@ -263,7 +268,9 @@ def main():
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
     p.add_argument("--seed",        type=int,   default=None)
-    p.add_argument("--video",       type=str,   default="videos/grasp_reorient_eval.gif")
+    p.add_argument("--video",       type=str,   default="videos/grasp_reorient_eval.mp4")
+    p.add_argument("--video_format", type=str,  default="mp4", choices=["mp4", "gif"],
+                   help="Video container; overrides --video's extension.")
     p.add_argument("--controls",    type=str,   default=None,
                    help="Output .npy path for the per-step control log (auto-named if omitted).")
     p.add_argument("--debug",       action="store_true",
@@ -274,7 +281,8 @@ def main():
     rng = np.random.default_rng(args.seed)
 
     VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
-    video_path = args.video if args.video is not None else str(VIDEOS_DIR / f"{args.task}_eval.gif")
+    video_path = args.video if args.video is not None else str(
+        VIDEOS_DIR / f"{args.task}_eval.{args.video_format}")
 
     controls_path = args.controls
     if controls_path is None:
@@ -305,6 +313,7 @@ def main():
         mppi_cfg      = mppi_cfg,
         rng           = rng,
         video_path    = video_path,
+        use_mp4       = args.video_format == "mp4",
         controls_path = controls_path,
         eval_substeps = args.eval_substeps,
         eval_sim      = eval_sim,

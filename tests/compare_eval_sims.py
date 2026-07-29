@@ -472,9 +472,7 @@ def _replay_and_record(
     for ctrl, substeps in zip(event_ctrl, event_substeps):
         sim.apply_control(ctrl)
         sim.step(int(substeps))
-        sim.render()
-    sim.save_video(str(video_path))
-    print(f"  Saved video -> {video_path}")
+    print(f"  Saved video -> {sim.save_video(str(video_path))}")
 
 
 def _record_videos(
@@ -489,7 +487,7 @@ def _record_videos(
     history with rendering on, and save a gif each."""
     video_dir.mkdir(parents=True, exist_ok=True)
     for kind in ALL_EVAL_SIMS:
-        video_path = video_dir / f"compare_eval_sims_{task_name}_{kind.value}.gif"
+        video_path = video_dir / f"compare_eval_sims_{task_name}_{kind.value}.mp4"
         cmd = [
             sys.executable, str(THIS_SCRIPT),
             "--replay_npz", str(npz_path),

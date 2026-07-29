@@ -600,13 +600,16 @@ class GraspReorientTask(BaseTask):
             self.goal_vector_wp.assign(self.goal_vector)
 
     # --- Drake eval simulator ----------------------------------------------
-    def make_eval_simulator(self, video_path: str | None = None, render: bool = True):
+    def make_eval_simulator(self, video_path: str | None = None, render: bool = True,
+                            use_mp4: bool = True):
         if self.config.eval_sim == EvalSimulatorKind.PINOCCHIO:
-            sim = self._make_pinocchio_simulator(video_path=video_path, render=render)
+            sim = self._make_pinocchio_simulator(video_path=video_path, render=render,
+                                                 use_mp4=use_mp4)
             GraspReorientTask._active_eval_sim = sim   # see _update_goal
             return sim
         if self.config.eval_sim != EvalSimulatorKind.DRAKE:
-            return super().make_eval_simulator(video_path=video_path, render=render)
+            return super().make_eval_simulator(video_path=video_path, render=render,
+                                               use_mp4=use_mp4)
 
         from contact_study.contact_models.drake_sim import (
             DrakeSimulator, DrakeJointChannel, DrakeFreeBodyChannel, DrakePidActuation,
@@ -652,9 +655,11 @@ class GraspReorientTask(BaseTask):
             # stable range regardless of how config.timestep is tuned.
             pid_plant_dt   = self.config.timestep / 2.0,
             pid            = pid,
+            use_mp4        = use_mp4,
         )
 
-    def _make_pinocchio_simulator(self, video_path: str | None = None, render: bool = True):
+    def _make_pinocchio_simulator(self, video_path: str | None = None, render: bool = True,
+                                  use_mp4: bool = True):
         """Pinocchio + ADMM eval simulator. Unlike the Drake path it parses the
         MJCF at eval_model_paths[PINOCCHIO] (the same scene the rollout model
         uses), so the 16 hand joints, the obj freejoint, and the control order
@@ -754,6 +759,7 @@ class GraspReorientTask(BaseTask):
             joint_cfg      = joint_cfg,
             video_path     = video_path,
             render         = render,
+            use_mp4        = use_mp4,
             # Translucent goal-cube overlay at the reorientation target (render only).
             goal_pose      = (_TARGET_POS, _TARGET_QUAT) if _PIN_SHOW_GOAL else None,
             goal_opacity   = _PIN_GOAL_OPACITY,

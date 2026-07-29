@@ -291,12 +291,16 @@ class BalanceStickTask(BaseTask):
         return bool(tilt > 0.25 or plate_err > 0.3)
 
     # --- eval simulator -------------------------------------------------
-    def make_eval_simulator(self, video_path: str | None = None, render: bool = True):
+    def make_eval_simulator(self, video_path: str | None = None, render: bool = True,
+                            use_mp4: bool = True):
         if self.config.eval_sim == EvalSimulatorKind.PINOCCHIO:
-            return self._make_pinocchio_simulator(video_path=video_path, render=render)
-        return super().make_eval_simulator(video_path=video_path, render=render)
+            return self._make_pinocchio_simulator(video_path=video_path, render=render,
+                                                  use_mp4=use_mp4)
+        return super().make_eval_simulator(video_path=video_path, render=render,
+                                           use_mp4=use_mp4)
 
-    def _make_pinocchio_simulator(self, video_path: str | None = None, render: bool = True):
+    def _make_pinocchio_simulator(self, video_path: str | None = None, render: bool = True,
+                                  use_mp4: bool = True):
         """Pinocchio + ADMM eval simulator for the balance-stick scene. It parses
         the same MJCF the rollout uses (eval_model_paths[PINOCCHIO]), so the six
         arm joints map 1:1 to the MuJoCo qpos/qvel/ctrl indices (identity channels)
@@ -371,4 +375,5 @@ class BalanceStickTask(BaseTask):
             contact_cfg    = contact_cfg,
             video_path     = video_path,
             render         = render,
+            use_mp4        = use_mp4,
         )
