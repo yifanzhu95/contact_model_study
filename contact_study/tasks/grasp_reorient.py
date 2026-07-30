@@ -344,7 +344,7 @@ class GraspReorientTask(BaseTask):
             eval_model_paths   = {
                 EvalSimulatorKind.DRAKE:     str(SCENES_DIR / "leap_hand/leap_hand_right.urdf"),
                 EvalSimulatorKind.MUJOCO:    str(SCENES_DIR / GRASP_SCENE_XML),
-                EvalSimulatorKind.PINOCCHIO: str(SCENES_DIR / GRASP_SCENE_XML),
+                EvalSimulatorKind.PINOCCHIO: str(SCENES_DIR / "leap/env_leap_cube_eval.xml"),#str(SCENES_DIR / GRASP_SCENE_XML),
             },
             cam_pos            = _CAM_POS,
             cam_rotmat         = _CAM_ROTMAT,

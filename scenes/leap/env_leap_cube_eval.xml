@@ -1,5 +1,5 @@
 <mujoco model="right_leap_hand scene">
-  <include file="./leap_right_hand.xml"/>
+  <include file="./leap_right_hand_eval.xml"/>
   <!--
   <include file="./leap_right_hand.xml"/>
   -->
