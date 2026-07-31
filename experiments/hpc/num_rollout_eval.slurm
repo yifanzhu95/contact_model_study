@@ -49,12 +49,14 @@ N_EPISODES=10                                    # episodes per (model, n_sample
 MODELS=("M1" "M2" "M3" "M4")
 N_SAMPLES=("16" "64" "256" "1024" "4096")    # the swept rollout counts
 
-# Shared MPPI / eval knobs (single values, not swept).
-HORIZON=8
+# Shared MPPI / eval knobs (single values, not swept). The rollout schedule is
+# specified in SECONDS and quantized against the task's rollout timestep; for
+# grasp_reorient (rollout_dt = 4 ms) these are 8 substeps × 8 control steps.
+TIME_HORIZON=0.256              # planning horizon in seconds
+STEP_TIME=0.032                 # control-step duration in seconds
 TEMPERATURE=0.01
 NOISE_SIGMA=0.02
 DELTA=0.1
-SUBSTEPS=8
 EVAL_SIM="none"                 # "none" uses the task default; "mujoco" is faster
 SETTLE=1.0
 GEOMETRY="accurate"
@@ -94,11 +96,11 @@ python experiments/hpc/run_num_rollout_cell.py \
     --model       "$SEL_MODEL" \
     --n_samples   "$SEL_N_SAMPLES" \
     --n_episodes  "$N_EPISODES" \
-    --horizon     "$HORIZON" \
+    --time_horizon "$TIME_HORIZON" \
     --temperature "$TEMPERATURE" \
     --noise_sigma "$NOISE_SIGMA" \
     --delta       "$DELTA" \
-    --substeps    "$SUBSTEPS" \
+    --step_time   "$STEP_TIME" \
     --eval_sim    "$EVAL_SIM" \
     --settle      "$SETTLE" \
     --geometry    "$GEOMETRY" \

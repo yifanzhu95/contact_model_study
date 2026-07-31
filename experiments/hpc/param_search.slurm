@@ -36,13 +36,15 @@ W_POS_Z=("3.75")
 W_CONTACT=("10" "5.0" "2.5")
 W_JOINT=("1.2" "0.6" "0.3")
 
-# Shared MPPI / eval knobs (single values, not swept).
+# Shared MPPI / eval knobs (single values, not swept). The rollout schedule is
+# specified in SECONDS and quantized against the task's rollout timestep; for
+# grasp_reorient (rollout_dt = 4 ms) these are 8 substeps × 8 control steps.
 N_SAMPLES=256
-HORIZON=8
+TIME_HORIZON=0.256              # planning horizon in seconds
+STEP_TIME=0.032                 # control-step duration in seconds
 TEMPERATURE=0.01
 NOISE_SIGMA=0.02
 DELTA=0.1
-SUBSTEPS=8
 EVAL_SIM="none" #"none"
 SETTLE=1.0
 GEOMETRY="accurate"
@@ -104,11 +106,11 @@ python experiments/hpc/run_param_cell.py \
                   "w_pos_x=$SEL_W_POS_X" "w_pos_y=$SEL_W_POS_Y" "w_pos_z=$SEL_W_POS_Z" \
                   "w_contact=$SEL_W_CONTACT" "w_joint=$SEL_W_JOINT" \
     --n_samples   "$N_SAMPLES" \
-    --horizon     "$HORIZON" \
+    --time_horizon "$TIME_HORIZON" \
     --temperature "$TEMPERATURE" \
     --noise_sigma "$NOISE_SIGMA" \
     --delta       "$DELTA" \
-    --substeps    "$SUBSTEPS" \
+    --step_time   "$STEP_TIME" \
     --eval_sim    "$EVAL_SIM" \
     --settle      "$SETTLE" \
     --geometry    "$GEOMETRY" \

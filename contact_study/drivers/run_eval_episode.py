@@ -75,6 +75,26 @@ def load_rollout_task(task_name: str, geometry: GeometryVariant = GeometryVarian
     return task
 
 
+def rollout_dt_for(task_config, eval_substeps: int | None = None) -> float:
+    """The planning-model timestep this driver stamps onto mjm before planning.
+
+    rollout_dt = eval_dt * eval_substeps_per_rollout. Exposed so sweep workers can
+    resolve an MPPIConfig's time-based schedule (MPPIConfig.resolve_schedule) into
+    step counts for labelling/logging *before* an episode runs, and get exactly the
+    same numbers the controller will resolve internally.
+    """
+    n = eval_substeps if eval_substeps is not None else task_config.eval_substeps_per_rollout
+    return task_config.timestep * n
+
+
+def resolve_mppi_schedule(mppi_cfg: MPPIConfig, task_config,
+                          eval_substeps: int | None = None) -> tuple[int, int, float]:
+    """Resolve (horizon, substeps, rollout_dt) for a config against a task."""
+    dt = rollout_dt_for(task_config, eval_substeps)
+    horizon, substeps = mppi_cfg.resolve_schedule(dt)
+    return horizon, substeps, dt
+
+
 def apply_cost_weight_overrides(task, overrides: dict) -> None:
     """Merge cost-weight overrides into the (loaded) task and rebuild weights_wp.
 

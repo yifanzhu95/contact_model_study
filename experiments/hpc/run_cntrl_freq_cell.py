@@ -1,28 +1,33 @@
 """run_cntrl_freq_cell.py
 
-HPC worker for the control-frequency (MPPI substeps) sweep — one
-(model, substeps) cell. Mirrors run_num_rollout_cell.py but sweeps
-MPPIConfig.step_substeps instead of n_samples, matching
-experiments/run_cntrl_freq_eval.py's SUBSTEPS_SWEEP grid.
+HPC worker for the control-frequency sweep — one (model, step_time) cell.
+Mirrors run_num_rollout_cell.py but sweeps MPPIConfig.step_time instead of
+n_samples, matching experiments/run_cntrl_freq_eval.py's grid.
+
+The control period is swept in SECONDS. The worker quantizes it against the
+task's rollout timestep (rollout_dt = eval_dt * eval_substeps_per_rollout) into
+a whole substep count and labels the cell with that resolved count, so the sweep
+plotters (which parse "<model>_sub<int>" and convert with the formula below)
+keep working unchanged.
 
 The SLURM script (cntrl_freq_eval.slurm) owns the sweep: it defines the list of
-substep counts (SUBSTEPS_SWEEP) and the MODELS inline, maps $SLURM_ARRAY_TASK_ID
-to one substeps value, and calls this worker once per model. This worker runs
-`--n_episodes` episodes for that one cell via `run_eval_episode` (no video),
-aggregates them into an AggregatedResult labelled "<model>_sub<substeps>", and
-writes ONE JSON to `--outdir` in the format the sweep plotters read
-(analysis/plot_cntrl_freq_sweep.py and its directory variant).
+control periods (STEP_TIME_SWEEP) and the MODELS inline, maps
+$SLURM_ARRAY_TASK_ID to one step_time value, and calls this worker once per
+model. This worker runs `--n_episodes` episodes for that one cell via
+`run_eval_episode` (no video), aggregates them into an AggregatedResult labelled
+"<model>_sub<substeps>", and writes ONE JSON to `--outdir`.
 
 Control frequency for a cell is:
     control_freq = 1 / (eval_sim_dt * eval_substeps_per_rollout * substeps)
 where eval_sim_dt and eval_substeps_per_rollout come from the task's
-TaskConfig (overridable via --eval_substeps). This worker prints the computed
-frequency and writes the two components to `<outdir>/meta.json` so the
-directory plotter can reconstruct exact frequencies without guessing a --dt.
+TaskConfig (overridable via --eval_substeps) and substeps is the resolved
+count. This worker prints the computed frequency and writes the two components
+to `<outdir>/meta.json` so the directory plotter can reconstruct exact
+frequencies without guessing a --dt.
 
     python run_cntrl_freq_cell.py \
         --outdir results/cntrl_freq_eval_run \
-        --task grasp_reorient --model M2 --substeps 5 \
+        --task grasp_reorient --model M2 --step_time 0.032 \
         --n_episodes 5
 """
 
@@ -45,7 +50,7 @@ from contact_study.planners.mppi import MPPIConfig
 from contact_study.tasks.config import EvalSimulatorKind
 
 from contact_study.drivers.run_eval_episode import (
-    run_eval_episode, load_rollout_task, MODEL_FACTORIES,
+    run_eval_episode, load_rollout_task, resolve_mppi_schedule, MODEL_FACTORIES,
 )
 
 
@@ -53,11 +58,10 @@ from contact_study.drivers.run_eval_episode import (
 # Single-cell runner
 # ---------------------------------------------------------------------------
 def run_cell(args):
-    """Run one (model, substeps) cell (n_episodes episodes) -> (AggregatedResult, control_freq, eval_dt, eval_substeps)."""
+    """Run one (model, step_time) cell -> (AggregatedResult, label, control_freq, eval_dt, eval_substeps)."""
     geometry = GeometryVariant(args.geometry)
     eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
     cfg      = MODEL_FACTORIES[args.model]()
-    label    = f"{args.model}_sub{args.substeps}"
 
     # Peek at the rollout task once for dimensions + eval-dt/eval_substeps.
     peek = load_rollout_task(args.task, geometry)
@@ -65,17 +69,30 @@ def run_cell(args):
     eval_dt       = peek.config.timestep
     eval_substeps = args.eval_substeps if args.eval_substeps is not None \
         else peek.config.eval_substeps_per_rollout
-    control_freq  = 1.0 / (eval_dt * eval_substeps * args.substeps)
+
+    # Quantize the requested durations into the step counts the controller will
+    # resolve internally. The label and the control frequency are both built from
+    # the RESOLVED substeps, so they describe what actually runs.
+    horizon, substeps, rollout_dt = resolve_mppi_schedule(
+        MPPIConfig(time_horizon=args.time_horizon, step_time=args.step_time),
+        peek.config, args.eval_substeps,
+    )
+    label        = f"{args.model}_sub{substeps}"
+    control_freq = 1.0 / (eval_dt * eval_substeps * substeps)
+
     print(f"[{label}]  nq={mjm.nq} nv={mjm.nv} nu={mjm.nu}  "
           f"max_steps={peek.config.max_steps}  n_episodes={args.n_episodes}")
     print(f"[{label}]  control_freq={control_freq:.3f} Hz  "
-          f"(eval_dt={eval_dt}, eval_substeps_per_rollout={eval_substeps}, substeps={args.substeps})")
+          f"(eval_dt={eval_dt}, eval_substeps_per_rollout={eval_substeps}, "
+          f"step_time={args.step_time:g}s -> substeps={substeps})")
+    print(f"[{label}]  time_horizon={args.time_horizon:g}s -> {horizon} steps "
+          f"({horizon*substeps*rollout_dt*1e3:.1f}ms)")
 
     # Reproducible per-episode seeds keyed by (seed, substeps, model) so cells
     # never share a stream but a run repeats.
     model_ord = list(MODEL_FACTORIES).index(args.model)
     seed_seq  = np.random.SeedSequence(
-        [s for s in (args.seed, args.substeps, model_ord) if s is not None] or None
+        [s for s in (args.seed, substeps, model_ord) if s is not None] or None
     )
     episode_seeds = seed_seq.spawn(args.n_episodes)
 
@@ -86,10 +103,10 @@ def run_cell(args):
 
         mppi_cfg = MPPIConfig(
             n_samples      = args.n_samples,
-            step_horizon   = args.horizon,
+            time_horizon   = args.time_horizon,
             temperature    = args.temperature,
             noise_sigma    = args.noise_sigma,
-            step_substeps  = args.substeps,
+            step_time      = args.step_time,
             warm_start     = False,
             resample_interval = 1,
             use_full_graph = args.use_full_graph,
@@ -126,7 +143,7 @@ def run_cell(args):
     print(f"  → success={agg.success_rate*100:.1f}%  "
           f"step_ms={agg.mean_step_ms:.3f}±{agg.std_step_ms:.3f}  "
           + (f"mean_steps={agg.mean_steps_to_success:.1f}" if succ else ""))
-    return agg, control_freq, eval_dt, eval_substeps
+    return agg, label, control_freq, eval_dt, eval_substeps
 
 
 # ---------------------------------------------------------------------------
@@ -137,8 +154,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--task",       type=str, default="grasp_reorient")
     p.add_argument("--model",      type=str, default="M2", choices=list(MODEL_FACTORIES),
                    help="Contact model for this cell.")
-    p.add_argument("--substeps",   type=int, required=True,
-                   help="MPPI rollout substeps per control step for this cell (the swept axis).")
+    p.add_argument("--step_time",  type=float, required=True,
+                   help="Control-step duration in SECONDS for this cell (the swept "
+                        "axis); quantized down to whole rollout steps.")
     p.add_argument("--n_episodes", type=int, default=10,
                    help="Episodes for this cell (used to estimate the success rate).")
     p.add_argument("--outdir",     type=str, default="results/cntrl_freq_eval_run",
@@ -146,7 +164,9 @@ def build_parser() -> argparse.ArgumentParser:
     # --- MPPI / eval knobs (all command-line inputs; n_samples held fixed) --
     p.add_argument("--n_samples",     type=int,   default=256,
                    help="Fixed MPPI sample count (held constant across the sweep).")
-    p.add_argument("--horizon",       type=int,   default=48)
+    p.add_argument("--time_horizon",  type=float, default=0.256,
+                   help="MPPI planning horizon in SECONDS (held constant across the "
+                        "sweep); quantized down to whole control steps.")
     p.add_argument("--temperature",   type=float, default=0.01)
     p.add_argument("--noise_sigma",   type=float, default=0.001)
     p.add_argument("--delta",         type=float, default=0.1,
@@ -174,8 +194,8 @@ def main():
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    agg, control_freq, eval_dt, eval_substeps = run_cell(args)
-    label    = f"{args.model}_sub{args.substeps}"
+    # The label carries the RESOLVED substep count, so run_cell owns it.
+    agg, label, control_freq, eval_dt, eval_substeps = run_cell(args)
     out_path = outdir / f"{label}.json"
     # save_results writes a JSON *list* of AggregatedResult dicts (one here), which
     # is exactly what the directory plotter merges across every cell file.

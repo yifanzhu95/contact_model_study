@@ -36,7 +36,7 @@ from contact_study.planners.mppi import MPPIConfig
 from contact_study.tasks.config import EvalSimulatorKind
 
 from contact_study.drivers.run_eval_episode import (
-    run_eval_episode, load_rollout_task, MODEL_FACTORIES,
+    run_eval_episode, load_rollout_task, resolve_mppi_schedule, MODEL_FACTORIES,
 )
 
 
@@ -82,8 +82,17 @@ def run_cell(cell_id: int, overrides: dict, args) -> dict:
     default_weights = dict(peek_task.config.cost_weights)
     full_weights    = {**default_weights, **overrides}
 
+    # Quantize the requested durations into the step counts the controller will
+    # resolve internally, for the log line and the result record.
+    horizon, substeps, rollout_dt = resolve_mppi_schedule(
+        MPPIConfig(time_horizon=args.time_horizon, step_time=args.step_time),
+        peek_task.config, args.eval_substeps,
+    )
+
     print(f"[cell {cell_id}]  {label}")
     print(f"  task={args.task}  model={args.model}  n_episodes={args.n_episodes}")
+    print(f"  rollout_dt={rollout_dt*1e3:.3f}ms  step_time={args.step_time:g}s -> "
+          f"{substeps} substeps  time_horizon={args.time_horizon:g}s -> {horizon} steps")
     print(f"  overrides={overrides}")
 
     # Reproducible per-episode seeds derived from the base seed AND the cell id,
@@ -99,10 +108,10 @@ def run_cell(cell_id: int, overrides: dict, args) -> dict:
 
         mppi_cfg = MPPIConfig(
             n_samples      = args.n_samples,
-            step_horizon   = args.horizon,
+            time_horizon   = args.time_horizon,
             temperature    = args.temperature,
             noise_sigma    = args.noise_sigma,
-            step_substeps  = args.substeps,
+            step_time      = args.step_time,
             warm_start     = False,
             use_full_graph = args.use_full_graph,
             delta_range    = (-args.delta, args.delta),
@@ -163,10 +172,14 @@ def run_cell(cell_id: int, overrides: dict, args) -> dict:
         "mean_elapsed_s":        float(np.mean(elapsed)),
         "mppi": {
             "n_samples":         args.n_samples,
-            "horizon":           args.horizon,
+            "time_horizon":      args.time_horizon,
             "temperature":       args.temperature,
             "noise_sigma":       args.noise_sigma,
-            "substeps":          args.substeps,
+            "step_time":         args.step_time,
+            # Resolved against rollout_dt — what the controller actually ran.
+            "step_horizon":      horizon,
+            "step_substeps":     substeps,
+            "rollout_dt":        rollout_dt,
             "delta":             args.delta,
             "resample_interval": args.resample_interval,
             "time_constrained":  args.time_constrained,
@@ -200,13 +213,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Directory for the per-cell JSON output.")
     # --- MPPI / eval knobs (all command-line inputs) -----------------------
     p.add_argument("--n_samples",     type=int,   default=256)
-    p.add_argument("--horizon",       type=int,   default=48)
+    p.add_argument("--time_horizon",  type=float, default=0.256,
+                   help="MPPI planning horizon in SECONDS (quantized down to whole "
+                        "control steps).")
     p.add_argument("--temperature",   type=float, default=1.0)
     p.add_argument("--noise_sigma",   type=float, default=0.01)
     p.add_argument("--delta",         type=float, default=0.1,
                    help="Per-step MPPI delta clip magnitude (action units).")
-    p.add_argument("--substeps",      type=int,   default=16,
-                   help="MPPI rollout substeps per control step (control-freq knob).")
+    p.add_argument("--step_time",     type=float, default=0.032,
+                   help="Control-step duration in SECONDS, i.e. the control-frequency "
+                        "knob (quantized down to whole rollout steps).")
     p.add_argument("--eval_substeps", type=int,   default=None,
                    help="Eval steps per rollout step (default: task config).")
     p.add_argument("--eval_sim",      type=str,   default="none",

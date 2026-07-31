@@ -34,7 +34,7 @@ from contact_study.planners.mppi import MPPIConfig
 from contact_study.tasks.config import EvalSimulatorKind
 
 from contact_study.drivers.run_eval_episode import (
-    run_eval_episode, load_rollout_task, MODEL_FACTORIES,
+    run_eval_episode, load_rollout_task, resolve_mppi_schedule, MODEL_FACTORIES,
 )
 
 
@@ -51,8 +51,18 @@ def run_cell(args):
     # Peek at the rollout task once for dimensions (before the episode loop).
     peek = load_rollout_task(args.task, geometry)
     mjm  = peek.mjm
+
+    # Quantize the requested durations into the step counts the controller will
+    # resolve internally, so the log reports what actually runs.
+    horizon, substeps, rollout_dt = resolve_mppi_schedule(
+        MPPIConfig(time_horizon=args.time_horizon, step_time=args.step_time),
+        peek.config, args.eval_substeps,
+    )
     print(f"[{label}]  nq={mjm.nq} nv={mjm.nv} nu={mjm.nu}  "
           f"max_steps={peek.config.max_steps}  n_episodes={args.n_episodes}")
+    print(f"[{label}]  rollout_dt={rollout_dt*1e3:.3f}ms  "
+          f"step_time={args.step_time:g}s -> {substeps} substeps  "
+          f"time_horizon={args.time_horizon:g}s -> {horizon} steps")
 
     # Reproducible per-episode seeds keyed by (seed, n_samples, model) so cells
     # never share a stream but a run repeats.
@@ -69,10 +79,10 @@ def run_cell(args):
 
         mppi_cfg = MPPIConfig(
             n_samples      = args.n_samples,
-            step_horizon   = args.horizon,
+            time_horizon   = args.time_horizon,
             temperature    = args.temperature,
             noise_sigma    = args.noise_sigma,
-            step_substeps  = args.substeps,
+            step_time      = args.step_time,
             warm_start     = False,
             resample_interval = 1, 
             use_full_graph = args.use_full_graph,
@@ -127,13 +137,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--outdir",     type=str, default="results/num_rollout_eval_run",
                    help="Directory for the per-cell JSON output.")
     # --- MPPI / eval knobs (all command-line inputs) -----------------------
-    p.add_argument("--horizon",       type=int,   default=48)
+    p.add_argument("--time_horizon",  type=float, default=0.256,
+                   help="MPPI planning horizon in SECONDS (quantized down to whole "
+                        "control steps).")
     p.add_argument("--temperature",   type=float, default=10.0)
     p.add_argument("--noise_sigma",   type=float, default=0.01)
     p.add_argument("--delta",         type=float, default=0.1,
                    help="Per-step MPPI delta clip magnitude (action units).")
-    p.add_argument("--substeps",      type=int,   default=16,
-                   help="MPPI rollout substeps per control step (control-freq knob).")
+    p.add_argument("--step_time",     type=float, default=0.032,
+                   help="Control-step duration in SECONDS, i.e. the control-frequency "
+                        "knob (quantized down to whole rollout steps).")
     p.add_argument("--eval_substeps", type=int,   default=None,
                    help="Eval steps per rollout step (default: task config).")
     p.add_argument("--eval_sim",      type=str,   default="none",
