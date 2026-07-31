@@ -8,7 +8,7 @@
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=04:00:00
+#SBATCH --time=05:00:00
 
 set -euo pipefail
 
@@ -56,7 +56,7 @@ cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 #    their lengths above).
 # ---------------------------------------------------------------------------
 TASK="grasp_reorient"
-N_EPISODES=10                                   # episodes per (model, substeps) cell
+N_EPISODES=30                                   # episodes per (model, substeps) cell
 
 MODELS=("M1" "M2" "M3" "M4")
 # The swept control periods, in SECONDS (nominal 0.032 s = 8 substeps).

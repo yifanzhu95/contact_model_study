@@ -8,7 +8,7 @@
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=01:00:00
+#SBATCH --time=02:00:00
 
 set -euo pipefail
 
@@ -44,7 +44,7 @@ cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 #    their lengths above).
 # ---------------------------------------------------------------------------
 TASK="grasp_reorient"
-N_EPISODES=10                                    # episodes per (model, n_samples) cell
+N_EPISODES=30                                    # episodes per (model, n_samples) cell
 
 MODELS=("M1" "M2" "M3" "M4")
 N_SAMPLES=("16" "64" "256" "1024" "4096")    # the swept rollout counts
