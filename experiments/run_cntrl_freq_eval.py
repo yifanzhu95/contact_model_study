@@ -114,10 +114,10 @@ def main():
         for substeps in SUBSTEPS_SWEEP:
             mppi_cfg = MPPIConfig(
                 n_samples      = args.n_samples,
-                horizon        = args.horizon,
+                step_horizon   = args.horizon,
                 temperature    = args.temperature,
                 noise_sigma    = args.noise_sigma,
-                substeps       = substeps,
+                step_substeps  = substeps,
                 warm_start     = True,
                 use_full_graph = args.use_full_graph,
                 nconmax        = args.nconmax,

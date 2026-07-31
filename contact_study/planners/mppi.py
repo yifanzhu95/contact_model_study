@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import time
+import warnings
 
 from scipy.interpolate import CubicSpline
 import numpy as np
@@ -21,10 +22,35 @@ from contact_study.contact_models import api
 from contact_study.contact_models.config import ContactModelConfig
 
 
+# Step counts used (with a warning) when a schedule quantity is specified
+# neither in time nor in steps. These are the historical MPPIConfig defaults.
+_FALLBACK_STEP_HORIZON  = 50
+_FALLBACK_STEP_SUBSTEPS = 1
+
+# Slack on the steps-per-duration ratio before flooring, so a duration that is
+# an exact multiple of rollout_dt in exact arithmetic (e.g. 0.1 / 0.02) is not
+# knocked down a step by binary floating-point representation error.
+_RATIO_TOL = 1e-6
+
+
 @dataclass
 class MPPIConfig:
     n_samples:       int   = 1024   # N: number of candidate trajectories
-    horizon:         int   = 50     # H: planning horizon (steps)
+    # --- rollout schedule: time-based (preferred) or step-based -------------
+    # The schedule is quantized against the planning model's rollout timestep
+    # (mjm.opt.timestep) by MPPIConfig.resolve_schedule, which the controller
+    # calls at construction. When a time-based field is set it wins and the
+    # corresponding step-based field is ignored; the quantization always rounds
+    # DOWN, so the realized durations never exceed the requested ones.
+    #   step_time    -> step_substeps = floor(step_time / rollout_dt)
+    #   time_horizon -> step_horizon  = floor(time_horizon / control_dt),
+    #                   where control_dt = step_substeps * rollout_dt
+    # When both the time-based and the step-based field of a quantity are None
+    # the fallback above is used and a warning is issued.
+    time_horizon:    float | None = 0.25   # planning horizon (seconds)
+    step_time:       float | None = 0.032   # control-step duration (seconds)
+    step_horizon:    int   | None = None   # H: planning horizon (control steps)
+    step_substeps:   int   | None = None   # physics steps per control step
     temperature:     float = 1.0    # lambda: MPPI temperature (inverse temp)
     noise_sigma:     float = 0.01   # action noise std dev
     n_iterations:    int   = 1      # number of MPPI update iterations per call
@@ -40,7 +66,6 @@ class MPPIConfig:
     ctrl_relative_to_qpos: bool = True
     nconmax:         int   = 200
     njmax:           int   = 500
-    substeps:        int   = 1
     adaptive_temp:   bool  = False
     adp_temp_params: tuple[float, float, float, float] = (10.0, 5.0, 0.9, 1.1)
     use_spline_noise:bool  = False   # toggle between spline and Gaussian noise
@@ -68,6 +93,14 @@ class MPPIConfig:
     normalize_cost_by_samples: bool = False
 
     def __post_init__(self):
+        for name in ("time_horizon", "step_time"):
+            val = getattr(self, name)
+            if val is not None and val <= 0.0:
+                raise ValueError(f"{name} must be > 0 or None, got {val}")
+        for name in ("step_horizon", "step_substeps"):
+            val = getattr(self, name)
+            if val is not None and val < 1:
+                raise ValueError(f"{name} must be >= 1 or None, got {val}")
         if self.resample_interval is not None and self.resample_interval < 1:
             raise ValueError(
                 f"resample_interval must be >= 1 or None, got {self.resample_interval}"
@@ -90,6 +123,62 @@ class MPPIConfig:
                     "bakes the entire horizon unroll into one replayed CUDA graph and cannot "
                     "stop early."
                 )
+
+    def resolve_schedule(self, rollout_dt: float) -> tuple[int, int]:
+        """Quantize the rollout schedule against the planning model's timestep.
+
+        Returns (horizon, substeps) in whole steps, both >= 1. `rollout_dt` is
+        the planning model's step (mjm.opt.timestep, which the driver stamps as
+        eval_dt * eval_substeps_per_rollout).
+
+        Substeps are resolved first: they define the control step the horizon is
+        counted in (control_dt = substeps * rollout_dt). Both conversions floor,
+        so substeps * rollout_dt <= step_time and horizon * control_dt <=
+        time_horizon — the realized schedule is the closest one that stays at or
+        under the requested durations. A requested duration shorter than one
+        step of its unit clamps to 1 with a warning, since a zero-length rollout
+        has nothing to plan with.
+        """
+        if rollout_dt <= 0.0:
+            raise ValueError(f"rollout_dt must be > 0, got {rollout_dt}")
+
+        def _floor_steps(duration: float, unit: float, name: str) -> int:
+            n = int(math.floor(duration / unit + _RATIO_TOL))
+            if n < 1:
+                warnings.warn(
+                    f"MPPIConfig.{name}={duration:g}s is shorter than one step of "
+                    f"{unit:g}s; clamping to 1 step ({unit:g}s).",
+                    stacklevel=3,
+                )
+                return 1
+            return n
+
+        if self.step_time is not None:
+            substeps = _floor_steps(self.step_time, rollout_dt, "step_time")
+        elif self.step_substeps is not None:
+            substeps = int(self.step_substeps)
+        else:
+            warnings.warn(
+                "MPPIConfig: neither step_time nor step_substeps is set; falling back to "
+                f"step_substeps={_FALLBACK_STEP_SUBSTEPS}.",
+                stacklevel=2,
+            )
+            substeps = _FALLBACK_STEP_SUBSTEPS
+
+        control_dt = substeps * rollout_dt
+        if self.time_horizon is not None:
+            horizon = _floor_steps(self.time_horizon, control_dt, "time_horizon")
+        elif self.step_horizon is not None:
+            horizon = int(self.step_horizon)
+        else:
+            warnings.warn(
+                "MPPIConfig: neither time_horizon nor step_horizon is set; falling back to "
+                f"step_horizon={_FALLBACK_STEP_HORIZON}.",
+                stacklevel=2,
+            )
+            horizon = _FALLBACK_STEP_HORIZON
+
+        return horizon, substeps
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +403,19 @@ class MPPIController:
         self.rng = rng or np.random.default_rng()
         self.lam = self.pc.temperature
 
+        # Rollout schedule in whole steps, quantized against the planning
+        # model's timestep (the driver stamps rollout_dt onto mjm before
+        # constructing the controller). self.horizon / self.substeps are the
+        # authoritative values from here on — read them, not the config fields,
+        # which may hold durations instead of step counts. They are written back
+        # onto the config so callers that only hold it (e.g. logging a run's
+        # parameters) see the resolved integers.
+        self.rollout_dt = float(self.mjm.opt.timestep)
+        self.horizon, self.substeps = self.pc.resolve_schedule(self.rollout_dt)
+        self.control_dt = self.substeps * self.rollout_dt
+        self.pc.step_horizon  = self.horizon
+        self.pc.step_substeps = self.substeps
+
         self.nu = self.mjm.nu
         self.nq = self.mjm.nq
         self.nv = self.mjm.nv
@@ -341,14 +443,14 @@ class MPPIController:
         self._resample_count = 0
         # Rollout steps actually taken by the last plan() — < horizon only when
         # the time-constrained path truncated.
-        self.last_n_steps    = self.pc.horizon
+        self.last_n_steps    = self.horizon
 
         self._setup_warp_arrays()
         self._setup_warp_backend()
 
     def _setup_warp_arrays(self):
         """Allocate Warp arrays on GPU once (avoids runtime host copies)."""
-        N, H, nu = self.pc.n_samples, self.pc.horizon, self.nu
+        N, H, nu = self.pc.n_samples, self.horizon, self.nu
 
         # Pre-allocate reset buffers
         self.qpos_reset = wp.empty(self.nq, dtype=wp.float32, device="cuda")
@@ -453,10 +555,10 @@ class MPPIController:
             self.costs_wp.zero_()
             self.terminal_costs_wp.zero_()
 
-            for t in range(self.pc.horizon):
-                terminal = (t == self.pc.horizon - 1)
+            for t in range(self.horizon):
+                terminal = (t == self.horizon - 1)
                 self._launch_assign_ctrl(t)
-                for _ in range(self.pc.substeps):
+                for _ in range(self.substeps):
                     api.step(self.m, self.d)
                 # Terminal cost goes to its own buffer so it can be excluded from
                 # the horizon normalization in _gpu_weight_update.
@@ -505,7 +607,7 @@ class MPPIController:
         if k is not None and self._plan_count % k == 0:
             wp.launch(
                 _sample_gaussian_noise_kernel,
-                dim=(self.pc.n_samples, self.pc.horizon, self.nu),
+                dim=(self.pc.n_samples, self.horizon, self.nu),
                 inputs=[self._noise_seed + self._resample_count, self.pc.noise_sigma],
                 outputs=[self._static_eps_wp],
             )
@@ -525,7 +627,7 @@ class MPPIController:
         them; they are left untouched. None means the full horizon.
         """
         N, nu = self.pc.n_samples, self.nu
-        H = n_eff if n_eff is not None else self.pc.horizon
+        H = n_eff if n_eff is not None else self.horizon
 
         # Fold the terminal cost into the running-cost sum and normalize. The
         # combined total (running + terminal) is divided by the horizon so the
@@ -536,8 +638,8 @@ class MPPIController:
         # the relative sample weighting unchanged; it also rescales the reported
         # min cost `beta`. costs_wp holds the folded total afterward.
         running_scale = 1.0
-        if self.pc.mean_cost_over_horizon and self.pc.horizon > 0:
-            running_scale /= float(self.pc.horizon)
+        if self.pc.mean_cost_over_horizon and self.horizon > 0:
+            running_scale /= float(self.horizon)
         total_scale = 1.0
         if self.pc.normalize_cost_by_samples and N > 0:
             total_scale /= float(N)
@@ -605,7 +707,7 @@ class MPPIController:
         # captured graph, so swapping the buffer reference is safe.
         action_np = self.U_wp[0].numpy().copy()
         if self.pc.warm_start:
-            H, nu = self.pc.horizon, self.nu
+            H, nu = self.horizon, self.nu
             wp.launch(
                 _shift_U_kernel,
                 dim=(H, nu),
@@ -641,7 +743,7 @@ class MPPIController:
 
     def _plan_full_graph(self, mjd: mujoco.MjData) -> np.ndarray:
         """Single mega CUDA graph: reset + full H-step unroll captured together."""
-        N, H = self.pc.n_samples, self.pc.horizon
+        N, H = self.pc.n_samples, self.horizon
 
         self.qpos_reset.assign(mjd.qpos)
         self.qvel_reset.assign(mjd.qvel)
@@ -675,7 +777,7 @@ class MPPIController:
 
     def _plan_step_graphs(self, mjd: mujoco.MjData) -> np.ndarray:
         """Separate reset + step graphs: reset once, then loop over H steps."""
-        N, H = self.pc.n_samples, self.pc.horizon
+        N, H = self.pc.n_samples, self.horizon
 
         self.qpos_reset.assign(mjd.qpos)
         self.qvel_reset.assign(mjd.qvel)
@@ -696,7 +798,7 @@ class MPPIController:
                 # Launch one-step graph substeps times — keeps the graph small
                 # regardless of substep count (unlike the full-graph path which
                 # bakes all substeps into a single captured graph).
-                for _ in range(self.pc.substeps):
+                for _ in range(self.substeps):
                     wp.capture_launch(self.step_graph)
                 # Terminal cost goes to its own buffer (see create_rollout_graph).
                 wp.launch(
@@ -732,7 +834,7 @@ class MPPIController:
         steps that did run. The deadline is only tested *after* a completed step,
         so a too-small budget degrades to a 1-step horizon rather than no action.
         """
-        N, H = self.pc.n_samples, self.pc.horizon
+        N, H = self.pc.n_samples, self.horizon
         budget_s = self.pc.plan_budget_ms * 1e-3
 
         self.qpos_reset.assign(mjd.qpos)
@@ -752,7 +854,7 @@ class MPPIController:
             n_eff = 0
             for t in range(H):
                 self._launch_assign_ctrl(t)
-                for _ in range(self.pc.substeps):
+                for _ in range(self.substeps):
                     wp.capture_launch(self.step_graph)
 
                 # Warp launches are async, so without this sync the clock would

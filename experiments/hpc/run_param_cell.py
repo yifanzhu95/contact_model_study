@@ -99,10 +99,10 @@ def run_cell(cell_id: int, overrides: dict, args) -> dict:
 
         mppi_cfg = MPPIConfig(
             n_samples      = args.n_samples,
-            horizon        = args.horizon,
+            step_horizon   = args.horizon,
             temperature    = args.temperature,
             noise_sigma    = args.noise_sigma,
-            substeps       = args.substeps,
+            step_substeps  = args.substeps,
             warm_start     = False,
             use_full_graph = args.use_full_graph,
             delta_range    = (-args.delta, args.delta),

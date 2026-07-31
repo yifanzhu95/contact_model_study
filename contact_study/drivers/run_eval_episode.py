@@ -15,8 +15,11 @@ The eval ("real") simulator runs at a finer timestep than the rollout/planning
 model: rollout_dt = eval_dt * eval_substeps_per_rollout (the eval sim takes that
 many steps per rollout step). The rollout step is inferred from the eval step and
 stamped onto the planning model. Control frequency stays a separate knob — one
-control step spans mppi_cfg.substeps rollout steps (control_dt = substeps *
+control step spans the MPPI substeps rollout steps (control_dt = substeps *
 rollout_dt), so the eval sim advances substeps * eval_substeps_per_rollout steps.
+The substep count and the horizon come from MPPIConfig either as step counts
+(step_substeps / step_horizon) or as durations (step_time / time_horizon), which
+the controller quantizes against rollout_dt.
 
 The contact model (M1..M4) used for rollouts is orthogonal to the eval simulator
 (set by the task's TaskConfig.eval_sim).
@@ -186,11 +189,13 @@ def run_eval_episode(
     else:
         clip_lo = clip_hi = None
 
-    # One control step = mppi_cfg.substeps rollout steps. The eval sim covers the
-    # same wall-clock with `eval_substeps` finer steps per rollout step. The
-    # episode runs for the task's configured max_steps control steps.
-    control_dt      = mppi_cfg.substeps * rollout_dt
-    eval_steps_per_control = mppi_cfg.substeps * eval_substeps
+    # One control step = controller.substeps rollout steps. The eval sim covers
+    # the same wall-clock with `eval_substeps` finer steps per rollout step. The
+    # episode runs for the task's configured max_steps control steps. Read the
+    # step counts off the controller: it resolved them from the config, which may
+    # have specified them as durations (step_time / time_horizon).
+    control_dt      = controller.control_dt
+    eval_steps_per_control = controller.substeps * eval_substeps
     n_steps         = cfg.max_steps
     steps_to_success: int | None = None
 
@@ -198,7 +203,9 @@ def run_eval_episode(
         print(f"  task={task_name}  eval_sim={eval_task.config.eval_sim.value}  "
               f"eval_dt={eval_dt*1e3:.2f}ms  rollout_dt={rollout_dt*1e3:.2f}ms  "
               f"control_dt={control_dt*1e3:.1f}ms  max_steps={n_steps}  "
-              f"horizon={mppi_cfg.horizon}  n_samples={mppi_cfg.n_samples}")
+              f"horizon={controller.horizon} steps "
+              f"({controller.horizon*control_dt*1e3:.1f}ms)  "
+              f"n_samples={mppi_cfg.n_samples}")
 
     step_times: list[float] = []
     ep_start = time.perf_counter()
@@ -287,7 +294,15 @@ def main():
     p.add_argument("--task",        type=str,   default="cart_pole")
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
     p.add_argument("--n_samples",   type=int,   default=256)
-    p.add_argument("--horizon",     type=int,   default=8)
+    p.add_argument("--horizon",     type=int,   default=8,
+                   help="MPPI planning horizon in control steps (ignored when "
+                        "--time_horizon is given).")
+    p.add_argument("--time_horizon", type=float, default=None,
+                   help="MPPI planning horizon in SECONDS; quantized down to whole "
+                        "control steps. Overrides --horizon.")
+    p.add_argument("--step_time",   type=float, default=None,
+                   help="Control-step duration in SECONDS; quantized down to whole "
+                        "rollout steps. Overrides --substeps.")
     p.add_argument("--n_iterations", type=int,  default=1,
                    help="Number of MPPI update iterations per plan() call.")
     p.add_argument("--temperature", type=float, default=0.01)#0.00008)
@@ -367,11 +382,13 @@ def main():
 
         mppi_cfg = MPPIConfig(
             n_samples      = args.n_samples,
-            horizon        = args.horizon,
+            step_horizon   = args.horizon,
+            time_horizon   = args.time_horizon,
+            step_time      = args.step_time,
             n_iterations   = args.n_iterations,
             temperature    = args.temperature,
             noise_sigma    = args.noise_sigma,
-            substeps       = args.substeps,
+            step_substeps  = args.substeps,
             warm_start     = False,   # match irisim_warp: keep the running mean, no shift
             use_full_graph = True,
             delta_range    = (-args.delta, args.delta),

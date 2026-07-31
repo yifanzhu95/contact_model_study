@@ -136,7 +136,7 @@ def main():
 
     mppi_cfg = MPPIConfig(
         n_samples      = args.n_samples,
-        horizon        = args.horizon,
+        step_horizon   = args.horizon,
         temperature    = args.temperature,
         noise_sigma    = args.noise_sigma,
         warm_start     = True,
@@ -146,7 +146,7 @@ def main():
         seed           = args.seed,
         debug          = args.debug,
         delta_range    = (-0.1, 0.1),
-        substeps       = 16
+        step_substeps  = 16
     )
 
     aggregated  = []   # AggregatedResult list for save_results

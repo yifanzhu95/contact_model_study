@@ -106,7 +106,7 @@ def main():
         for n_samples in N_SAMPLES_SWEEP:
             mppi_cfg = MPPIConfig(
                 n_samples      = n_samples,
-                horizon        = args.horizon,
+                step_horizon   = args.horizon,
                 temperature    = args.temperature,
                 noise_sigma    = args.noise_sigma,
                 warm_start     = True,

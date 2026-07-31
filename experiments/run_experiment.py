@@ -144,7 +144,7 @@ def run_one_episode(
 
     mppi_cfg = MPPIConfig(
         n_samples      = n_samples,
-        horizon        = horizon,
+        step_horizon   = horizon,
         temperature    = 0.01,
         noise_sigma    = 0.001,
         warm_start     = True,
@@ -181,7 +181,7 @@ def run_one_episode(
 
     steps_to_success = None
     episode_start    = time.perf_counter()
-    substeps         = mppi_cfg.substeps
+    substeps         = controller.substeps
     n_used           = n_samples
 
     for t in range(task_cfg.max_steps):

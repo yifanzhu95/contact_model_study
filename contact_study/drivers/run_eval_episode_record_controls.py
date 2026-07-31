@@ -141,11 +141,12 @@ def run_eval_episode_record_controls(
     else:
         clip_lo = clip_hi = None
 
-    # One control step = mppi_cfg.substeps rollout steps. The eval sim covers the
-    # same wall-clock with `eval_substeps` finer steps per rollout step. The
-    # episode runs for the task's configured max_steps control steps.
-    control_dt      = mppi_cfg.substeps * rollout_dt
-    eval_steps_per_control = mppi_cfg.substeps * eval_substeps
+    # One control step = controller.substeps rollout steps (resolved from the
+    # config, which may specify durations instead of step counts). The eval sim
+    # covers the same wall-clock with `eval_substeps` finer steps per rollout
+    # step. The episode runs for the task's configured max_steps control steps.
+    control_dt      = controller.control_dt
+    eval_steps_per_control = controller.substeps * eval_substeps
     n_steps         = cfg.max_steps
     steps_to_success: int | None = None
 
@@ -153,7 +154,7 @@ def run_eval_episode_record_controls(
         print(f"  task={task_name}  eval_sim={eval_task.config.eval_sim.value}  "
               f"eval_dt={eval_dt*1e3:.2f}ms  rollout_dt={rollout_dt*1e3:.2f}ms  "
               f"control_dt={control_dt*1e3:.1f}ms  max_steps={n_steps}  "
-              f"horizon={mppi_cfg.horizon}  n_samples={mppi_cfg.n_samples}")
+              f"horizon={controller.horizon}  n_samples={mppi_cfg.n_samples}")
 
     step_times: list[float] = []
     controls_log: list[np.ndarray] = []
@@ -294,10 +295,10 @@ def main():
 
     mppi_cfg = MPPIConfig(
         n_samples      = args.n_samples,
-        horizon        = args.horizon,
+        step_horizon   = args.horizon,
         temperature    = args.temperature,
         noise_sigma    = args.noise_sigma,
-        substeps       = args.substeps,
+        step_substeps  = args.substeps,
         warm_start     = False,   # match irisim_warp: keep the running mean, no shift
         use_full_graph = False,
         delta_range    = (-args.delta, args.delta),

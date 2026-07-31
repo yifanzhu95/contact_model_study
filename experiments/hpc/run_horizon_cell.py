@@ -1,7 +1,7 @@
 """run_horizon_cell.py
 
 HPC worker for the MPPI horizon-length sweep — one (model, horizon) cell.
-Mirrors run_num_rollout_cell.py but sweeps MPPIConfig.horizon instead of
+Mirrors run_num_rollout_cell.py but sweeps MPPIConfig.step_horizon instead of
 n_samples.
 
 The SLURM script (horizon_eval.slurm) owns the sweep: it defines the list of
@@ -71,10 +71,10 @@ def run_cell(args):
 
         mppi_cfg = MPPIConfig(
             n_samples      = args.n_samples,
-            horizon        = args.horizon,
+            step_horizon   = args.horizon,
             temperature    = args.temperature,
             noise_sigma    = args.noise_sigma,
-            substeps       = args.substeps,
+            step_substeps  = args.substeps,
             warm_start     = False,
             resample_interval = 1,
             use_full_graph = args.use_full_graph,

@@ -298,15 +298,15 @@ def run_compare(
         else:
             clip_lo = clip_hi = None
 
-        control_dt = mppi_cfg.substeps * rollout_dt
-        eval_steps_per_control = mppi_cfg.substeps * eval_substeps
+        control_dt = controller.control_dt
+        eval_steps_per_control = controller.substeps * eval_substeps
         n_steps = max_steps if max_steps is not None else cfg.max_steps
 
         print(f"task={task_name}  control_mode=mppi  model={contact_cfg.label}  "
               f"eval_sims={[k.value for k in ALL_EVAL_SIMS]} (primary={PRIMARY_SIM.value})  "
               f"eval_dt={eval_dt*1e3:.2f}ms  rollout_dt={rollout_dt*1e3:.2f}ms  "
               f"control_dt={control_dt*1e3:.1f}ms  max_steps={n_steps}  "
-              f"horizon={mppi_cfg.horizon}  n_samples={mppi_cfg.n_samples}")
+              f"horizon={controller.horizon}  n_samples={mppi_cfg.n_samples}")
 
         for t in range(n_steps):
             st = sims[PRIMARY_SIM].get_state()
@@ -598,10 +598,10 @@ def main():
     contact_cfg = MODEL_FACTORIES[args.model]()
     mppi_cfg = MPPIConfig(
         n_samples=args.n_samples,
-        horizon=args.horizon,
+        step_horizon=args.horizon,
         temperature=args.temperature,
         noise_sigma=args.noise_sigma,
-        substeps=args.substeps,
+        step_substeps=args.substeps,
         warm_start=True,
         use_full_graph=False,
         delta_range=(-args.delta, args.delta),

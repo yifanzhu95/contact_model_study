@@ -2,7 +2,7 @@
 
 HPC worker for the control-frequency (MPPI substeps) sweep — one
 (model, substeps) cell. Mirrors run_num_rollout_cell.py but sweeps
-MPPIConfig.substeps instead of n_samples, matching
+MPPIConfig.step_substeps instead of n_samples, matching
 experiments/run_cntrl_freq_eval.py's SUBSTEPS_SWEEP grid.
 
 The SLURM script (cntrl_freq_eval.slurm) owns the sweep: it defines the list of
@@ -86,10 +86,10 @@ def run_cell(args):
 
         mppi_cfg = MPPIConfig(
             n_samples      = args.n_samples,
-            horizon        = args.horizon,
+            step_horizon   = args.horizon,
             temperature    = args.temperature,
             noise_sigma    = args.noise_sigma,
-            substeps       = args.substeps,
+            step_substeps  = args.substeps,
             warm_start     = False,
             resample_interval = 1,
             use_full_graph = args.use_full_graph,

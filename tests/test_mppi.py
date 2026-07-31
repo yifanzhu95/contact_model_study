@@ -172,10 +172,10 @@ def run(
 
     mppi_cfg = MPPIConfig(
         n_samples      = n_samples,
-        horizon        = horizon,
+        step_horizon   = horizon,
         temperature    = 0.01,
         noise_sigma    = 0.001,
-        substeps       = 1,
+        step_substeps  = 1,
         warm_start     = True,
         use_full_graph = use_full_graph,
         seed           = seed,
@@ -240,7 +240,7 @@ def run(
             ep_start         = time.perf_counter()
             frames           = []
 
-            substeps = mppi_cfg.substeps
+            substeps = controller.substeps
 
             for t in range(max_steps):
                 step_start = time.perf_counter()

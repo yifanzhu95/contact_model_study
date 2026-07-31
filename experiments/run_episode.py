@@ -201,7 +201,7 @@ def run_episode(
                     mjm            = mjm,
                     cfg            = cfg,
                     budget_seconds = budget_seconds,
-                    horizon        = mppi_cfg.horizon,
+                    horizon        = controller.horizon,
                     initial_qpos   = mjd.qpos,
                     initial_qvel   = mjd.qvel,
                     rng            = rng,
@@ -214,7 +214,7 @@ def run_episode(
 
             mjd.ctrl[:] += ctrl
 
-            for _ in range(mppi_cfg.substeps):
+            for _ in range(controller.substeps):
                 mujoco.mj_step(mjm, mjd)
                 _sync_viewer()
                 _capture_frame()
@@ -357,7 +357,7 @@ def main():
 
         mppi_cfg = MPPIConfig(
             n_samples      = args.n_samples,
-            horizon        = args.horizon,
+            step_horizon   = args.horizon,
             temperature    = args.temperature,
             noise_sigma    = args.noise_sigma,
             warm_start     = True,
