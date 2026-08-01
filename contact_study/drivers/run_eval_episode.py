@@ -325,8 +325,8 @@ def main():
                         "rollout steps. Overrides --substeps.")
     p.add_argument("--n_iterations", type=int,  default=1,
                    help="Number of MPPI update iterations per plan() call.")
-    p.add_argument("--temperature", type=float, default=0.02)#0.00008)
-    p.add_argument("--noise_sigma", type=float, default=0.05,)#0.01)
+    p.add_argument("--temperature", type=float, default=0.01)#0.00008)
+    p.add_argument("--noise_sigma", type=float, default=0.01,)#0.01)
     p.add_argument("--delta",       type=float, default=0.1,#0.1,
                    help="Per-step MPPI delta clip magnitude (action units).")
     p.add_argument("--substeps",    type=int,   default=None,

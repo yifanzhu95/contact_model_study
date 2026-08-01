@@ -328,10 +328,10 @@ class GraspReorientTask(BaseTask):
             # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI
             # override rebuilds the array from this dict's key order.
             cost_weights       = {
-                "w_quat": 10.0,#100.0,
-                "w_pos_x": 7.50,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+                "w_quat": 5.0,#100.0,
+                "w_pos_x": 15.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
                 "w_pos_y": 15.0,#80.0,    #Y is across the fingers
-                "w_pos_z": 15.0,#15.0,
+                "w_pos_z": 7.50,#15.0,
                 "w_velo": 0.0,
                 "w_contact": 12.50,
                 "w_joint": 0.60,
@@ -343,15 +343,15 @@ class GraspReorientTask(BaseTask):
             },
             # BaseTask.load() loads this static file directly — no MJCF is
             # built at task-load time.
-            xml_path_template  = GRASP_SCENE_XML,
-            rollout_model_path = str(SCENES_DIR / GRASP_SCENE_XML),
+            xml_path_template  = "leap/env_leap_cube.xml",
+            rollout_model_path = str(SCENES_DIR / "leap/env_leap_cube.xml"),
             rollout_is_urdf    = False,
             eval_sim           = EvalSimulatorKind.PINOCCHIO,
             # Drake evals the URDF-derived hand; MuJoCo and Pinocchio both eval
             # the same MJCF scene the rollouts plan with (GRASP_SCENE_XML).
             eval_model_paths   = {
                 EvalSimulatorKind.DRAKE:     str(SCENES_DIR / "leap_hand/leap_hand_right.urdf"),
-                EvalSimulatorKind.MUJOCO:    str(SCENES_DIR / GRASP_SCENE_XML),
+                EvalSimulatorKind.MUJOCO:    str(SCENES_DIR / "leap/env_leap_cube_eval.xml"),
                 EvalSimulatorKind.PINOCCHIO: str(SCENES_DIR / "leap/env_leap_cube_eval.xml"),#str(SCENES_DIR / GRASP_SCENE_XML),
             },
             cam_pos            = _CAM_POS,
