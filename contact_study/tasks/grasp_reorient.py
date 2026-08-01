@@ -283,7 +283,7 @@ class GraspReorientTask(BaseTask):
 
     # Controls which sampling method sample_new_goal dispatches to.
     # Override on an instance before the first episode to change difficulty.
-    goal_difficulty: int = 3
+    goal_difficulty: int = 4
 
     # Most recently built eval simulator, so _update_goal can spin its goal
     # marker. Class-level on purpose: the drivers build TWO task instances per
@@ -328,10 +328,10 @@ class GraspReorientTask(BaseTask):
             # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI
             # override rebuilds the array from this dict's key order.
             cost_weights       = {
-                "w_quat": 10.0,#100.0,
-                "w_pos_x": 7.50,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+                "w_quat": 5.0,#100.0,
+                "w_pos_x": 15.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
                 "w_pos_y": 15.0,#80.0,    #Y is across the fingers
-                "w_pos_z": 15.0,#15.0,
+                "w_pos_z": 7.50,#15.0,
                 "w_velo": 0.0,
                 "w_contact": 12.50,
                 "w_joint": 0.60,
