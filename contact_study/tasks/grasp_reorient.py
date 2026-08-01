@@ -283,7 +283,7 @@ class GraspReorientTask(BaseTask):
 
     # Controls which sampling method sample_new_goal dispatches to.
     # Override on an instance before the first episode to change difficulty.
-    goal_difficulty: int = 3
+    goal_difficulty: int = 4
 
     # Most recently built eval simulator, so _update_goal can spin its goal
     # marker. Class-level on purpose: the drivers build TWO task instances per
