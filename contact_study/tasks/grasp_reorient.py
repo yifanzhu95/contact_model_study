@@ -276,6 +276,9 @@ class GraspReorientTask(BaseTask):
             (X, Y, or Z).  May change which face is shown.
         3 — Hard:    Jump to a completely different cube face (5 candidates),
             with a random 90° twist on top.
+        4 — Flip:    Fixed 180° roll about an axis lying in the currently-shown
+            face, so that face ends up on the bottom and the opposite face is
+            shown. No twist, no sampling.
     """
 
     # Controls which sampling method sample_new_goal dispatches to.
@@ -302,6 +305,11 @@ class GraspReorientTask(BaseTask):
         [1., 0., 0.],  # face 4: -X up
         [1., 0., 0.],  # face 5: +X up
     ]
+
+    # Face that ends up shown after a 180° flip of each face (see the face_rots
+    # table in sample_new_goal_by_face). Pairs share a normal axis, so a flip
+    # never changes _FACE_NORMALS[self._face_index].
+    _OPPOSITE_FACES = [3, 2, 1, 0, 5, 4]
 
     def __init__(self, geometry=None, role=None):
         kwargs = {}
@@ -556,6 +564,34 @@ class GraspReorientTask(BaseTask):
 
         self._update_goal(mjd, new_quat)
 
+    def sample_new_goal_by_flip(self, mjd: mujoco.MjData, rng: np.random.Generator):
+        """Difficulty 4: flip the cube over — the shown face becomes the bottom.
+
+        A 180° rotation about any axis lying in the shown face sends that face's
+        normal to its negative, so the opposite face is shown. The axis is the
+        first cardinal object axis perpendicular to the current face normal
+        (X, else Y), making the goal fully deterministic: no face choice, no
+        twist, no direction to sample. Harder than levels 0-2 because the cube
+        must actually be tipped over, but with a single fixed goal per face.
+        """
+        normal = np.array(self._FACE_NORMALS[self._face_index], dtype=float)
+
+        # First cardinal axis orthogonal to the face normal.
+        axis = np.zeros(3)
+        for i in range(3):
+            if abs(normal[i]) < 0.5:
+                axis[i] = 1.0
+                break
+
+        # 180° about that axis: cos(90°) = 0, sin(90°) = 1.
+        q_rot = np.array([0.0, axis[0], axis[1], axis[2]])
+
+        new_quat = np.zeros(4)
+        mujoco.mju_mulQuat(new_quat, self.target_quat, q_rot)
+
+        self._face_index = self._OPPOSITE_FACES[self._face_index]
+        self._update_goal(mjd, new_quat)
+
     def sample_new_goal(self, mjd: mujoco.MjData, rng: np.random.Generator):
         """Dispatch to the appropriate sampler based on self.goal_difficulty."""
         if self.goal_difficulty == 0:
@@ -564,6 +600,8 @@ class GraspReorientTask(BaseTask):
             self.sample_new_goal_by_z_rot(mjd, rng)
         elif self.goal_difficulty == 2:
             self.sample_new_goal_by_rot(mjd, rng)
+        elif self.goal_difficulty == 4:
+            self.sample_new_goal_by_flip(mjd, rng)
         else:
             self.sample_new_goal_by_face(mjd, rng)
 
