@@ -341,6 +341,30 @@ def _normalize_kernel(
     arr[n] = arr[n] / (total[0] + float(1e-8))
 
 @wp.kernel
+def _debug_stats_kernel(
+    w:     wp.array(dtype=float),   # (N,) NORMALIZED weights (sum_n w[n] = 1)
+    costs: wp.array(dtype=float),   # (N,) folded per-sample trajectory cost
+    out:   wp.array(dtype=float),   # 3-element: [sum w^2, sum cost, n_valid]
+):
+    """Debug-only reductions, both accumulated in a single pass over the samples.
+
+    out[0] = sum_n w[n]^2       -> effective sample size ESS = 1 / out[0]
+    out[1] = sum of non-NaN costs
+    out[2] = count of non-NaN costs   -> average cost = out[1] / out[2]
+
+    NaN rollouts (sim blew up) are skipped in the cost sum so one bad sample
+    can't poison the reported mean; their weight is already exactly zero
+    (_compute_weights_kernel), so they contribute nothing to the w^2 term.
+    Launched only when the debug flag is set — nothing here feeds the update.
+    """
+    n = wp.tid()
+    wp.atomic_add(out, 0, w[n] * w[n])
+    if wp.isnan(costs[n]):
+        return
+    wp.atomic_add(out, 1, costs[n])
+    wp.atomic_add(out, 2, float(1.0))
+
+@wp.kernel
 def _weighted_mean_kernel(
     weights: wp.array(dtype=float),    # (N,)
     samples: wp.array3d(dtype=float),  # (N, H, nu)  clamped control samples V
@@ -471,6 +495,10 @@ class MPPIController:
         self.w_wp        = wp.zeros(N,        dtype=wp.float32, device="cuda")
         self.min_cost_wp = wp.zeros(1,        dtype=wp.float32, device="cuda")
         self.eta_wp      = wp.zeros(1,        dtype=wp.float32, device="cuda")
+        # [sum w^2, sum cost, n_valid] — written only on debug plans.
+        self._dbg_wp     = wp.zeros(3,        dtype=wp.float32, device="cuda")
+        self._dbg_ess      = float("nan")
+        self._dbg_avg_cost = float("nan")
         self._big_float_np = np.array([1e30], dtype=np.float32)
 
         # Actuator limits
@@ -663,6 +691,15 @@ class MPPIController:
         # Normalize weights in-place
         wp.launch(_normalize_kernel, dim=N, inputs=[self.w_wp, self.eta_wp])
 
+        # Debug-only stats (ESS + mean cost). Skipped entirely unless debug is
+        # on, and folded into the sync below so it costs no extra device→host
+        # round-trip. Must come after the normalize kernel: ESS is defined on
+        # the normalized weights.
+        if self.pc.debug:
+            self._dbg_wp.zero_()
+            wp.launch(_debug_stats_kernel, dim=N,
+                      inputs=[self.w_wp, self.costs_wp, self._dbg_wp])
+
         # Replace the mean with the weighted average of the CLAMPED samples:
         # U[h,u] = sum_n w[n] * V[n,h,u], where V = clamp(U + eps, delta_range).
         # Because every V is clamped to delta_range and the weights form a convex
@@ -677,6 +714,10 @@ class MPPIController:
         wp.synchronize()
         eta  = float(self.eta_wp.numpy()[0]) + 1e-8
         beta = float(self.min_cost_wp.numpy()[0])
+        if self.pc.debug:
+            sum_w2, sum_cost, n_valid = (float(v) for v in self._dbg_wp.numpy())
+            self._dbg_ess      = 1.0 / (sum_w2 + 1e-8)
+            self._dbg_avg_cost = sum_cost / n_valid if n_valid > 0 else float("nan")
         return eta, beta
 
     def _update_adaptive_temp(self, eta: float):
@@ -686,20 +727,15 @@ class MPPIController:
             elif eta < self.pc.adp_temp_params[1]:
                 self.lam = self.pc.adp_temp_params[3] * self.lam
 
-    def _print_debug(self, mjd: mujoco.MjData, beta: float, eta: float):
-        if self.indices_wp is not None and len(self.indices_wp) >= 1:
-            idx      = self.indices_wp.numpy()
-            obj_pos  = mjd.qpos[idx[0] : idx[0] + 3]
-            obj_quat = mjd.qpos[idx[0] + 3 : idx[0] + 7]
-            print(
-                f"min cost: {beta:.4f}  "
-                f"eta: {eta:.4f}  "
-                f"lam: {self.lam:.6f}  "
-                f"obj_pos: {obj_pos}  "
-                f"obj_quat: {obj_quat}"
-            )
-        else:
-            print(f"min cost: {beta:.4f}  eta: {eta:.4f}  lam: {self.lam:.6f}")
+    def _print_debug(self, beta: float, eta: float):
+        """ESS and avg cost come from _debug_stats_kernel, which the last
+        _gpu_weight_update only launched because this same debug flag is set."""
+        print(
+            f"min cost: {beta:.4f}  "
+            f"avg cost: {self._dbg_avg_cost:.4f}  "
+            f"eta: {eta:.4f}  "
+            f"ESS: {self._dbg_ess:.1f}/{self.pc.n_samples}"
+        )
 
     def _extract_action(self) -> np.ndarray:
         # Only the first action crosses device→host; the warm-start shift stays
@@ -761,7 +797,7 @@ class MPPIController:
             eta, beta = self._gpu_weight_update()
 
             if self.pc.debug:
-                self._print_debug(mjd, beta, eta)
+                self._print_debug(beta, eta)
 
             if self._is_degenerate(beta, eta):
                 # All rollouts produced NaN costs; weight update may have written
@@ -814,7 +850,7 @@ class MPPIController:
             eta, beta = self._gpu_weight_update()
 
             if self.pc.debug:
-                self._print_debug(mjd, beta, eta)
+                self._print_debug(beta, eta)
 
             if self._is_degenerate(beta, eta):
                 self.U_wp.zero_()
@@ -887,7 +923,7 @@ class MPPIController:
             if self.pc.debug:
                 print(f"  [MPPI] time-constrained: {n_eff}/{H} steps in "
                       f"{self.pc.plan_budget_ms:.1f} ms budget")
-                self._print_debug(mjd, beta, eta)
+                self._print_debug(beta, eta)
 
             if self._is_degenerate(beta, eta):
                 self.U_wp.zero_()
