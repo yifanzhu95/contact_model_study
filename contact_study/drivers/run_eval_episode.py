@@ -317,16 +317,16 @@ def main():
     p.add_argument("--horizon",     type=int,   default=None,
                    help="MPPI planning horizon in control steps (ignored when "
                         "--time_horizon is given).")
-    p.add_argument("--time_horizon", type=float, default=0.25,
+    p.add_argument("--time_horizon", type=float, default=0.256,
                    help="MPPI planning horizon in SECONDS; quantized down to whole "
                         "control steps. Overrides --horizon.")
-    p.add_argument("--step_time",   type=float, default=0.032,
+    p.add_argument("--step_time",   type=float, default=0.064,
                    help="Control-step duration in SECONDS; quantized down to whole "
                         "rollout steps. Overrides --substeps.")
     p.add_argument("--n_iterations", type=int,  default=1,
                    help="Number of MPPI update iterations per plan() call.")
-    p.add_argument("--temperature", type=float, default=0.01)#0.00008)
-    p.add_argument("--noise_sigma", type=float, default=0.01,)#0.01)
+    p.add_argument("--temperature", type=float, default=0.02)#0.00008)
+    p.add_argument("--noise_sigma", type=float, default=0.04,)#0.01)
     p.add_argument("--delta",       type=float, default=0.1,#0.1,
                    help="Per-step MPPI delta clip magnitude (action units).")
     p.add_argument("--substeps",    type=int,   default=None,
