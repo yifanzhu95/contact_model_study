@@ -25,10 +25,34 @@ count. This worker prints the computed frequency and writes the two components
 to `<outdir>/meta.json` so the directory plotter can reconstruct exact
 frequencies without guessing a --dt.
 
+Time-constrained mode (--time_constrained)
+------------------------------------------
+By default a cell plans the FULL horizon no matter how long that takes, so the
+measured step time routinely exceeds the control period the cell is nominally
+running at — the sweep then reports success vs. a *nominal* control frequency.
+With --time_constrained the MPPI planner is given a wall-clock budget per plan()
+call (default: exactly one control period, i.e. --step_time) and truncates its
+horizon at the deadline, so the sweep reports success vs. a control frequency
+the planner can actually hit. The horizon becomes a ceiling rather than a
+target. This forces the step-graph path (--no-use_full_graph); the full-graph
+path bakes the whole unroll into one replayed CUDA graph and cannot stop early.
+
+plan() overshoots its budget by a roughly constant margin, so the reported
+mean_step_ms lands above it: the deadline is only tested AFTER a completed
+rollout step, and the weight update plus action extraction run after the loop.
+Measured at an 8 ms budget on grasp_reorient/M2, mean_step_ms ~= 10.9 ms. Read
+the budget as the request and mean_step_ms as the realized control period; pass
+--plan_budget_ms with the overhead pre-subtracted if the two must agree.
+
     python run_cntrl_freq_cell.py \
         --outdir results/cntrl_freq_eval_run \
         --task grasp_reorient --model M2 --step_time 0.032 \
         --n_episodes 5
+
+    python run_cntrl_freq_cell.py \
+        --outdir results/time_constrained_cntrl_freq_eval_run \
+        --task grasp_reorient --model M2 --step_time 0.032 \
+        --n_episodes 5 --time_constrained --no-use_full_graph
 """
 
 from __future__ import annotations
@@ -57,6 +81,21 @@ from contact_study.drivers.run_eval_episode import (
 # ---------------------------------------------------------------------------
 # Single-cell runner
 # ---------------------------------------------------------------------------
+def resolve_plan_budget_ms(args) -> float | None:
+    """Planning budget in ms for this cell, or None when unconstrained.
+
+    Defaults to the REQUESTED step_time rather than the quantized
+    substeps * rollout_dt: the budget is the control period the sweep is asking
+    about, and the two agree exactly whenever step_time is a whole multiple of
+    rollout_dt (which the whole 0.008-0.128 s grid is at rollout_dt = 4 ms).
+    """
+    if not args.time_constrained:
+        return None
+    if args.plan_budget_ms is not None:
+        return float(args.plan_budget_ms)
+    return float(args.step_time) * 1e3
+
+
 def run_cell(args):
     """Run one (model, step_time) cell -> (AggregatedResult, label, control_freq, eval_dt, eval_substeps)."""
     geometry = GeometryVariant(args.geometry)
@@ -80,6 +119,15 @@ def run_cell(args):
     label        = f"{args.model}_sub{substeps}"
     control_freq = 1.0 / (eval_dt * eval_substeps * substeps)
 
+    # MPPIConfig raises on time_constrained + use_full_graph, so honoring
+    # --use_full_graph here would just crash every cell. Force it off and say so.
+    budget_ms      = resolve_plan_budget_ms(args)
+    use_full_graph = args.use_full_graph
+    if args.time_constrained and use_full_graph:
+        print(f"[{label}]  --time_constrained forces --no-use_full_graph "
+              f"(the full-graph unroll cannot stop early); overriding.")
+        use_full_graph = False
+
     print(f"[{label}]  nq={mjm.nq} nv={mjm.nv} nu={mjm.nu}  "
           f"max_steps={peek.config.max_steps}  n_episodes={args.n_episodes}")
     print(f"[{label}]  control_freq={control_freq:.3f} Hz  "
@@ -87,6 +135,13 @@ def run_cell(args):
           f"step_time={args.step_time:g}s -> substeps={substeps})")
     print(f"[{label}]  time_horizon={args.time_horizon:g}s -> {horizon} steps "
           f"({horizon*substeps*rollout_dt*1e3:.1f}ms)")
+    if budget_ms is not None:
+        print(f"[{label}]  TIME-CONSTRAINED: plan budget={budget_ms:.3f} ms "
+              f"(= {1e3/budget_ms:.3f} Hz); the {horizon}-step horizon is a "
+              f"ceiling, not a target")
+    else:
+        print(f"[{label}]  unconstrained planning (full {horizon}-step horizon "
+              f"every plan call)")
 
     # Reproducible per-episode seeds keyed by (seed, substeps, model) so cells
     # never share a stream but a run repeats.
@@ -109,12 +164,14 @@ def run_cell(args):
             step_time      = args.step_time,
             warm_start     = False,
             resample_interval = 1,
-            use_full_graph = args.use_full_graph,
+            use_full_graph = use_full_graph,
             delta_range    = (-args.delta, args.delta),
             nconmax        = args.nconmax,
             njmax          = args.njmax,
             seed           = ep_seed,
             debug          = args.debug,
+            time_constrained = args.time_constrained,
+            plan_budget_ms   = budget_ms,
         )
 
         # video_path is left unset -> run_eval_episode builds no renderer.
@@ -181,7 +238,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--nconmax",       type=int,   default=200)
     p.add_argument("--njmax",         type=int,   default=500)
     p.add_argument("--use_full_graph",
-                   action=argparse.BooleanOptionalAction, default=True)
+                   action=argparse.BooleanOptionalAction, default=True,
+                   help="Single mega CUDA graph for the unroll. Forced off by "
+                        "--time_constrained, which needs to stop mid-horizon.")
+    # --- Time-constrained planning (off by default; see module docstring) ---
+    p.add_argument("--time_constrained",
+                   action=argparse.BooleanOptionalAction, default=False,
+                   help="Cap each plan() call at --plan_budget_ms of wall clock, "
+                        "truncating the horizon at the deadline. Defaults the "
+                        "budget to one control period (--step_time).")
+    p.add_argument("--plan_budget_ms", type=float, default=None,
+                   help="Planning budget in MILLISECONDS; only used with "
+                        "--time_constrained. Default: step_time * 1000, i.e. the "
+                        "planner gets exactly one control period to think.")
     p.add_argument("--seed",          type=int,   default=None)
     p.add_argument("--debug",         action="store_true")
     return p
@@ -205,12 +274,17 @@ def main():
     # control frequencies (1 / (eval_dt * eval_substeps_per_rollout * substeps))
     # without guessing a --dt. Every cell in a sweep shares the same eval_dt /
     # eval_substeps_per_rollout, so this is safe to overwrite from any cell.
+    # time_constrained is recorded for provenance (the plotter ignores extra
+    # keys); plan_budget_ms is per-cell, hence null in the shared file unless it
+    # was pinned explicitly rather than derived from each cell's step_time.
     meta_path = outdir / "meta.json"
     with open(meta_path, "w") as f:
         json.dump({
             "task":                     args.task,
             "eval_dt":                  eval_dt,
             "eval_substeps_per_rollout": eval_substeps,
+            "time_constrained":         args.time_constrained,
+            "plan_budget_ms":           args.plan_budget_ms,
         }, f, indent=2)
 
 
