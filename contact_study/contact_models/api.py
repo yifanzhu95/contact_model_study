@@ -25,15 +25,18 @@ docstring.
 
 Side effect warning
 -------------------
-_patch_mujoco_options and _apply_hard_contact_preset mutate the
-incoming MjModel in place (cone, solver, iterations, tolerance,
-and for M1 also geom_solref/geom_solimp/pair_*). If you reuse the
+_patch_mujoco_options, _apply_hard_contact_preset and
+_apply_solref_override mutate the incoming MjModel in place (cone,
+solver, iterations, tolerance, and for M1 or any config with an
+explicit solref_timeconst also geom_solref/geom_solimp/pair_*). If you reuse the
 same MjModel across multiple contact configs, later put_model calls
 will NOT restore the previous settings. For benchmarks that sweep
 over configs, re-load or deep-copy the MjModel between calls.
 """
 
 from __future__ import annotations
+
+import warnings
 
 import mujoco
 
@@ -74,9 +77,12 @@ _SOLVER_MAP = {
 def _patch_mujoco_options(mjm: mujoco.MjModel, cfg: ContactModelConfig) -> None:
     """Write MujocoSolverParams into the MjModel in place.
 
-    Patches mjm.opt (cone, solver, iterations, tolerance) and — if
-    cfg.mujoco.hard_contact is True — also patches every geom's
-    solref/solimp via _apply_hard_contact_preset.
+    Patches mjm.opt (cone, solver, iterations, tolerance); then — if
+    cfg.mujoco.hard_contact is True — every geom's solref/solimp via
+    _apply_hard_contact_preset; then — if cfg.mujoco.solref_timeconst /
+    solref_dampratio are set — the solref columns via
+    _apply_solref_override. The override runs last so it wins over the
+    preset for M1 as well as over the XML defaults for M2/M3/M4.
 
     Raises ValueError if cone != 'pyramidal' since MJWarp does not
     support any other cone type on GPU.
@@ -96,6 +102,59 @@ def _patch_mujoco_options(mjm: mujoco.MjModel, cfg: ContactModelConfig) -> None:
 
     if p.hard_contact:
         _apply_hard_contact_preset(mjm, p)
+
+    # Runs after the preset so an explicit timeconst overrides it.
+    _apply_solref_override(mjm, p)
+
+
+def _apply_solref_override(mjm: mujoco.MjModel, p: MujocoSolverParams) -> None:
+    """Overwrite the solref columns with explicit values, if any are set.
+
+    solref is (timeconst, dampratio) per contact row: timeconst sets how
+    fast position-level penetration is driven out, so shrinking it
+    stiffens contact and growing it softens it. This helper writes those
+    two numbers directly, independent of `hard_contact`, and leaves
+    solimp alone — so sweeping `solref_timeconst` varies contact
+    stiffness *only*, without also collapsing the constraint
+    regularizer the way _apply_hard_contact_preset does.
+
+    Each field is applied independently: setting only solref_timeconst
+    keeps whatever dampratio the XML (or the hard preset) supplied.
+
+    Stability
+    ---------
+    timeconst < 2·dt makes the semi-implicit integrator ring or diverge.
+    Unlike _apply_hard_contact_preset, which clamps, this warns and
+    applies the requested value anyway: a sweep probing the stiff limit
+    should get the cell it asked for, and the resulting failure is data.
+
+    Patches the same rows as the hard preset — mjm.geom_solref (ngeom, 2)
+    and, when npair > 0, mjm.pair_solref (npair, 2) for contacts arising
+    from explicit <pair> declarations.
+
+    Side effect: mutates mjm in place (put_model saves and restores it).
+    """
+    if p.solref_timeconst is None and p.solref_dampratio is None:
+        return
+
+    if p.solref_timeconst is not None:
+        dt = float(mjm.opt.timestep)
+        if p.solref_timeconst < 2.0 * dt:
+            warnings.warn(
+                f"solref_timeconst={p.solref_timeconst:g}s is below the "
+                f"2*dt={2.0 * dt:g}s stability floor for the semi-implicit "
+                f"integrator (mjm.opt.timestep={dt:g}s); contact may ring or "
+                f"diverge. Applying it as requested (no clamp).",
+                stacklevel=3,
+            )
+        mjm.geom_solref[:, 0] = p.solref_timeconst
+        if mjm.npair > 0:
+            mjm.pair_solref[:, 0] = p.solref_timeconst
+
+    if p.solref_dampratio is not None:
+        mjm.geom_solref[:, 1] = p.solref_dampratio
+        if mjm.npair > 0:
+            mjm.pair_solref[:, 1] = p.solref_dampratio
 
 
 def _apply_hard_contact_preset(mjm: mujoco.MjModel, p: MujocoSolverParams) -> None:

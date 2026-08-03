@@ -82,6 +82,25 @@ class MujocoSolverParams:
     hard_solref_timeconst_mult: float = 2.0
     hard_solref_dampratio:      float = 1.0
 
+    # --- Explicit solref override (applies to ANY mujoco-backed config) ---
+    # Absolute contact time constant in SECONDS, written to every geom/pair
+    # solref by api._apply_solref_override *after* the hard-contact preset, so
+    # it wins for M1 too. None leaves whatever is already there: the XML's own
+    # solref (MuJoCo's compiler default is 0.02 s, and the leap scenes declare
+    # none) for M2/M3/M4, or the preset's 2·dt for M1.
+    #
+    # This is deliberately independent of `hard_contact` and deliberately does
+    # NOT touch solimp, so it is a pure stiffness-of-position-correction axis —
+    # sweeping it stiffens/softens contact without also collapsing the
+    # constraint regularizer the way the hard-contact preset does.
+    #
+    # Stability: unlike the hard preset there is no clamp here. Values below
+    # 2 · mjm.opt.timestep make the semi-implicit integrator ring or blow up;
+    # _apply_solref_override warns rather than silently correcting, so a sweep
+    # that deliberately probes the unstable end still gets what it asked for.
+    solref_timeconst: Optional[float] = None
+    solref_dampratio: Optional[float] = None
+
 
 @dataclasses.dataclass
 class ComfreeParams:
