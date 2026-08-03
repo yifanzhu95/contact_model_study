@@ -77,6 +77,11 @@ def run_cell(args):
         ep_seed = int(episode_seeds[ep].generate_state(1)[0])
         rng     = np.random.default_rng(episode_seeds[ep])
 
+        if not args.delta is None:
+            delta = (-args.delta, args.delta)
+        else:
+            delta = (None, None)
+
         mppi_cfg = MPPIConfig(
             n_samples      = args.n_samples,
             time_horizon   = args.time_horizon,
@@ -84,9 +89,9 @@ def run_cell(args):
             noise_sigma    = args.noise_sigma,
             step_time      = args.step_time,
             warm_start     = False,
-            resample_interval = 1, 
+            resample_interval = 1,
             use_full_graph = args.use_full_graph,
-            delta_range    = (-args.delta, args.delta),
+            delta_range    = delta,
             nconmax        = args.nconmax,
             njmax          = args.njmax,
             seed           = ep_seed,

@@ -71,7 +71,10 @@ class MPPIConfig:
     use_spline_noise:bool  = False   # toggle between spline and Gaussian noise
     n_spline_points: int   = 5      # control points for spline-smoothed noise
     debug:           bool  = True
-    delta_range:     tuple[float, float] = (-0.1, 0.1)
+    # Per-step delta clip (low, high). Either side may be None to leave that
+    # side unconstrained (e.g. (None, 0.1) clips only the upper bound,
+    # (None, None) disables clipping entirely).
+    delta_range:     tuple[float | None, float | None] = (-0.1, 0.1)
     use_full_graph:  bool  = True   # True=single mega CUDA graph, False=step+reset graphs
     seed:            int | None = None  # seed for deterministic noise sampling
     # plan() steps between noise resamples: 1=every step, None=sample once at
@@ -86,7 +89,7 @@ class MPPIConfig:
     # horizon. Unlike the old normalize_cost_by_horizon (which divided only the
     # running sum and left the terminal cost un-normalized), the terminal cost is
     # included in the mean here, matching irisim_warp's `total_cost / horizon`.
-    mean_cost_over_horizon: bool = True
+    mean_cost_over_horizon: bool = False
     # Normalize the total trajectory cost (running + terminal) by the number of
     # samples before the weight computation, so `temperature` is invariant to
     # n_samples.
@@ -101,6 +104,11 @@ class MPPIConfig:
             val = getattr(self, name)
             if val is not None and val < 1:
                 raise ValueError(f"{name} must be >= 1 or None, got {val}")
+        delta_low, delta_high = self.delta_range
+        if delta_low is not None and delta_high is not None and delta_low >= delta_high:
+            raise ValueError(
+                f"delta_range low must be < high when both are set, got {self.delta_range}"
+            )
         if self.resample_interval is not None and self.resample_interval < 1:
             raise ValueError(
                 f"resample_interval must be >= 1 or None, got {self.resample_interval}"
@@ -501,14 +509,18 @@ class MPPIController:
         self._dbg_avg_cost = float("nan")
         self._big_float_np = np.array([1e30], dtype=np.float32)
 
-        # Actuator limits
+        # Actuator limits. A None side is replaced with +/-inf so the clamp
+        # kernel's single wp.clamp(val, low, high) call becomes a no-op on
+        # that side; if both sides are None, clamping is skipped entirely via
+        # has_limits.
         delta_low, delta_high = self.pc.delta_range
         delta_range_np = np.empty((self.nu, 2), dtype=np.float32)
-        delta_range_np[:, 0] = delta_low
-        delta_range_np[:, 1] = delta_high
+        delta_range_np[:, 0] = delta_low if delta_low is not None else -np.inf
+        delta_range_np[:, 1] = delta_high if delta_high is not None else np.inf
 
+        has_limits = not (delta_low is None and delta_high is None)
         self._ctrl_range_wp = wp.array(delta_range_np, dtype=wp.float32, device="cuda")
-        self._has_limits_wp = wp.array(np.ones(self.nu, dtype=bool), dtype=wp.bool, device="cuda")
+        self._has_limits_wp = wp.array(np.full(self.nu, has_limits, dtype=bool), dtype=wp.bool, device="cuda")
 
         # Deterministic noise: use seed from config if provided, else fall back to shared rng
         noise_rng = np.random.default_rng(self.pc.seed) if self.pc.seed is not None else self.rng

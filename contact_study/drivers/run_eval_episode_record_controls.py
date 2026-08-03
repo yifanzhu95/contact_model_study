@@ -293,6 +293,11 @@ def main():
     contact_cfg = MODEL_FACTORIES[args.model]()
     eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
 
+    if not args.delta is None:
+        delta = (-args.delta, args.delta)
+    else:
+        delta = (None, None)
+
     mppi_cfg = MPPIConfig(
         n_samples      = args.n_samples,
         step_horizon   = args.horizon,
@@ -301,7 +306,7 @@ def main():
         step_substeps  = args.substeps,
         warm_start     = False,   # match irisim_warp: keep the running mean, no shift
         use_full_graph = False,
-        delta_range    = (-args.delta, args.delta),
+        delta_range    = delta,
         nconmax        = 50,
         njmax          = 200,
         seed           = args.seed,

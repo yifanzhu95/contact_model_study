@@ -317,7 +317,7 @@ def main():
     p.add_argument("--horizon",     type=int,   default=None,
                    help="MPPI planning horizon in control steps (ignored when "
                         "--time_horizon is given).")
-    p.add_argument("--time_horizon", type=float, default=0.256,
+    p.add_argument("--time_horizon", type=float, default=0.352,
                    help="MPPI planning horizon in SECONDS; quantized down to whole "
                         "control steps. Overrides --horizon.")
     p.add_argument("--step_time",   type=float, default=0.064,
@@ -325,10 +325,11 @@ def main():
                         "rollout steps. Overrides --substeps.")
     p.add_argument("--n_iterations", type=int,  default=1,
                    help="Number of MPPI update iterations per plan() call.")
-    p.add_argument("--temperature", type=float, default=0.02)#0.00008)
-    p.add_argument("--noise_sigma", type=float, default=0.04,)#0.01)
-    p.add_argument("--delta",       type=float, default=0.1,#0.1,
-                   help="Per-step MPPI delta clip magnitude (action units).")
+    p.add_argument("--temperature", type=float, default=100.0)#0.00008)
+    p.add_argument("--noise_sigma", type=float, default=0.1,)#0.01)
+    p.add_argument("--delta",       type=float, default=None,#0.1,
+                   help="Per-step MPPI delta clip magnitude (action units); "
+                        "pass 'none' to disable the delta clamp entirely.")
     p.add_argument("--substeps",    type=int,   default=None,
                    help="MPPI rollout substeps per control step (control frequency knob).")
     p.add_argument("--eval_substeps", type=int, default=None,
@@ -400,6 +401,11 @@ def main():
         else:
             video_path = None
 
+        if not args.delta is None:
+            delta = (-args.delta, args.delta)
+        else:
+            delta = (None, None)
+
         mppi_cfg = MPPIConfig(
             n_samples      = args.n_samples,
             step_horizon   = args.horizon,
@@ -409,9 +415,9 @@ def main():
             temperature    = args.temperature,
             noise_sigma    = args.noise_sigma,
             step_substeps  = args.substeps,
-            warm_start     = False,   # match irisim_warp: keep the running mean, no shift
+            warm_start     = False,#Flase   # match irisim_warp: keep the running mean, no shift
             use_full_graph = True,
-            delta_range    = (-args.delta, args.delta),
+            delta_range    = delta,
             nconmax        = 50,
             njmax          = 300,
             seed           = ep_seed,

@@ -596,6 +596,12 @@ def main():
 
     rng = np.random.default_rng(args.seed)
     contact_cfg = MODEL_FACTORIES[args.model]()
+
+    if not args.delta is None:
+        delta = (-args.delta, args.delta)
+    else:
+        delta = (None, None)
+
     mppi_cfg = MPPIConfig(
         n_samples=args.n_samples,
         step_horizon=args.horizon,
@@ -604,7 +610,7 @@ def main():
         step_substeps=args.substeps,
         warm_start=True,
         use_full_graph=False,
-        delta_range=(-args.delta, args.delta),
+        delta_range=delta,
         nconmax=50,
         njmax=200,
         seed=args.seed,

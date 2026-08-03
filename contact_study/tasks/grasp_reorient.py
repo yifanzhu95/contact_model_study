@@ -127,6 +127,12 @@ _INIT_CTRL = np.array([
 ], dtype=np.float64)
 
 
+def _axis_angle_quat(axis, angle: float) -> np.ndarray:
+    """wxyz quaternion for a rotation of `angle` (rad) about `axis` (unit vector)."""
+    c, s = np.cos(angle / 2.0), np.sin(angle / 2.0)
+    return np.array([c, s * axis[0], s * axis[1], s * axis[2]])
+
+
 def _euler_to_quat(euler) -> np.ndarray:
     """Intrinsic-xyz Euler angles (rad) -> wxyz quaternion (MuJoCo convention,
     matching a <body ... euler="..."> with the default eulerseq="xyz")."""
@@ -274,16 +280,20 @@ class GraspReorientTask(BaseTask):
             The face stays the same; only the in-plane orientation changes.
         2 — Medium:  ±90° rotation around a randomly-chosen object-frame axis
             (X, Y, or Z).  May change which face is shown.
-        3 — Hard:    Jump to a completely different cube face (5 candidates),
+        3 — Adjacent face: jump to one of the 4 faces adjacent to the
+            currently-shown face (excludes the current face and its
+            opposite), with a random 90° twist (0/90/180/270) on the new
+            face on top.
+        4 — Hard:    Jump to a completely different cube face (5 candidates),
             with a random 90° twist on top.
-        4 — Flip:    Fixed 180° roll about an axis lying in the currently-shown
+        5 — Flip:    Fixed 180° roll about an axis lying in the currently-shown
             face, so that face ends up on the bottom and the opposite face is
             shown. No twist, no sampling.
     """
 
     # Controls which sampling method sample_new_goal dispatches to.
     # Override on an instance before the first episode to change difficulty.
-    goal_difficulty: int = 4
+    goal_difficulty: int = 3
 
     # Most recently built eval simulator, so _update_goal can spin its goal
     # marker. Class-level on purpose: the drivers build TWO task instances per
@@ -306,10 +316,29 @@ class GraspReorientTask(BaseTask):
         [1., 0., 0.],  # face 5: +X up
     ]
 
-    # Face that ends up shown after a 180° flip of each face (see the face_rots
-    # table in sample_new_goal_by_face). Pairs share a normal axis, so a flip
-    # never changes _FACE_NORMALS[self._face_index].
+    # Face that ends up shown after a 180° flip of each face (see _FACE_ROTS
+    # below). Pairs share a normal axis, so a flip never changes
+    # _FACE_NORMALS[self._face_index].
     _OPPOSITE_FACES = [3, 2, 1, 0, 5, 4]
+
+    # Six object-frame rotations, one per cube face (right-multiplied onto the
+    # canonical goal quat to select that face). Using Rx/Ry only ensures all 6
+    # faces are distinct:
+    #   face 0 — identity          (initial face)
+    #   face 1 — Rx +90°
+    #   face 2 — Rx -90°
+    #   face 3 — Rx 180°           (opposite face)
+    #   face 4 — Ry +90°
+    #   face 5 — Ry -90°
+    # Shared by sample_new_goal_by_face and sample_new_goal_by_adjacent_face.
+    _FACE_ROTS = [
+        _axis_angle_quat([1, 0, 0], 0.0),
+        _axis_angle_quat([1, 0, 0], np.pi / 2),
+        _axis_angle_quat([1, 0, 0], -np.pi / 2),
+        _axis_angle_quat([1, 0, 0], np.pi),
+        _axis_angle_quat([0, 1, 0], np.pi / 2),
+        _axis_angle_quat([0, 1, 0], -np.pi / 2),
+    ]
 
     def __init__(self, geometry=None, role=None):
         kwargs = {}
@@ -328,17 +357,17 @@ class GraspReorientTask(BaseTask):
             # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI
             # override rebuilds the array from this dict's key order.
             cost_weights       = {
-                "w_quat": 5.0,#100.0,
-                "w_pos_x": 20.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-                "w_pos_y": 20.0,#80.0,    #Y is across the fingers
-                "w_pos_z": 7.50,#15.0,
+                "w_quat": 10.0,#100.0,
+                "w_pos_x": 7.50,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+                "w_pos_y": 15.0,#80.0,    #Y is across the fingers
+                "w_pos_z": 15.0,#15.0,
                 "w_velo": 0.0,
-                "w_contact": 10.0,
+                "w_contact": 12.50,
                 "w_joint": 0.60,
                 "w_joint_velo": 0.0,
                 "w_fallen": 200.0,
-                "w_quat_term": 50.0,
-                "w_pos_term": 100.0,
+                "w_quat_term": 100.0,
+                "w_pos_term": 200.0,
                 "w_fallen_term": 0.0,
             },
             # BaseTask.load() loads this static file directly — no MJCF is
@@ -467,42 +496,47 @@ class GraspReorientTask(BaseTask):
         """Sample a new goal orientation corresponding to a different cube face.
 
         All 6 face orientations are derived from the canonical goal quaternion
-        (set at load time) by right-multiplying with one of 6 object-frame
-        rotations — one per cube face.  The current face index is tracked so
-        the selected face is always different from the previous goal.
+        (set at load time) by right-multiplying with one of the 6 object-frame
+        rotations in _FACE_ROTS (one per cube face).  The current face index is
+        tracked so the selected face is always different from the previous goal.
         """
-        # Six object-frame rotations, one per cube face (right-multiply onto
-        # canonical quat).  Using Rx/Ry only ensures all 6 faces are distinct:
-        #   face 0 — identity          (initial face)
-        #   face 1 — Rx +90°
-        #   face 2 — Rx -90°
-        #   face 3 — Rx 180°           (opposite face)
-        #   face 4 — Ry +90°
-        #   face 5 — Ry -90°
-        def _aa(axis, angle):
-            c, s = np.cos(angle / 2), np.sin(angle / 2)
-            return np.array([c, s * axis[0], s * axis[1], s * axis[2]])
-
-        face_rots = [
-            _aa([1, 0, 0],  0.0),
-            _aa([1, 0, 0],  np.pi / 2),
-            _aa([1, 0, 0], -np.pi / 2),
-            _aa([1, 0, 0],  np.pi),
-            _aa([0, 1, 0],  np.pi / 2),
-            _aa([0, 1, 0], -np.pi / 2),
-        ]
-
         # Pick uniformly from the 5 faces that are not the current one
         candidates = [i for i in range(6) if i != self._face_index]
         self._face_index = int(rng.choice(candidates))
 
         # Random 90° twist (0°/90°/180°/270°) around the selected face's normal
         twist_angle = int(rng.integers(0, 4)) * (np.pi / 2)
-        q_twist = _aa(self._FACE_NORMALS[self._face_index], twist_angle)
+        q_twist = _axis_angle_quat(self._FACE_NORMALS[self._face_index], twist_angle)
 
         # Combine: face rotation then twist (both in object frame)
         q_face_twist = np.zeros(4)
-        mujoco.mju_mulQuat(q_face_twist, face_rots[self._face_index], q_twist)
+        mujoco.mju_mulQuat(q_face_twist, self._FACE_ROTS[self._face_index], q_twist)
+
+        new_quat = np.zeros(4)
+        mujoco.mju_mulQuat(new_quat, self._canonical_quat, q_face_twist)
+
+        self._update_goal(mjd, new_quat)
+
+    def sample_new_goal_by_adjacent_face(self, mjd: mujoco.MjData, rng: np.random.Generator):
+        """Difficulty 3: jump to one of the 4 faces adjacent to the currently-
+        shown face (i.e. any face except the current one and its opposite),
+        then apply a random 90° twist (0°/90°/180°/270°) around the new face's
+        normal.  Easier than difficulty 4 (which can also jump to the opposite
+        face) but still requires tipping the cube onto a new face.
+        """
+        candidates = [
+            i for i in range(6)
+            if i != self._face_index and i != self._OPPOSITE_FACES[self._face_index]
+        ]
+        self._face_index = int(rng.choice(candidates))
+
+        # Random 90° twist (0°/90°/180°/270°) around the selected face's normal
+        twist_angle = int(rng.integers(0, 4)) * (np.pi / 2)
+        q_twist = _axis_angle_quat(self._FACE_NORMALS[self._face_index], twist_angle)
+
+        # Combine: face rotation then twist (both in object frame)
+        q_face_twist = np.zeros(4)
+        mujoco.mju_mulQuat(q_face_twist, self._FACE_ROTS[self._face_index], q_twist)
 
         new_quat = np.zeros(4)
         mujoco.mju_mulQuat(new_quat, self._canonical_quat, q_face_twist)
@@ -565,7 +599,7 @@ class GraspReorientTask(BaseTask):
         self._update_goal(mjd, new_quat)
 
     def sample_new_goal_by_flip(self, mjd: mujoco.MjData, rng: np.random.Generator):
-        """Difficulty 4: flip the cube over — the shown face becomes the bottom.
+        """Difficulty 5: flip the cube over — the shown face becomes the bottom.
 
         A 180° rotation about any axis lying in the shown face sends that face's
         normal to its negative, so the opposite face is shown. The axis is the
@@ -600,7 +634,9 @@ class GraspReorientTask(BaseTask):
             self.sample_new_goal_by_z_rot(mjd, rng)
         elif self.goal_difficulty == 2:
             self.sample_new_goal_by_rot(mjd, rng)
-        elif self.goal_difficulty == 4:
+        elif self.goal_difficulty == 3:
+            self.sample_new_goal_by_adjacent_face(mjd, rng)
+        elif self.goal_difficulty == 5:
             self.sample_new_goal_by_flip(mjd, rng)
         else:
             self.sample_new_goal_by_face(mjd, rng)
