@@ -334,6 +334,10 @@ def main():
                    help="MPPI rollout substeps per control step (control frequency knob).")
     p.add_argument("--eval_substeps", type=int, default=None,
                    help="Eval steps per rollout step (default: task config, usually 10).")
+    p.add_argument("--warm_start", action=argparse.BooleanOptionalAction, default=False,
+                   help="Shift the MPPI mean forward one control step after each "
+                        "plan(); --no-warm_start (default) keeps the running mean "
+                        "in place, matching irisim_warp.")
     p.add_argument("--resample_interval", type=int, default=1,
                    help="Plan steps between MPPI noise resamples (1=every step; "
                         "omit=sample once and reuse, the default).")
@@ -415,7 +419,7 @@ def main():
             temperature    = args.temperature,
             noise_sigma    = args.noise_sigma,
             step_substeps  = args.substeps,
-            warm_start     = False,#Flase   # match irisim_warp: keep the running mean, no shift
+            warm_start     = args.warm_start,   # off: match irisim_warp (keep the running mean, no shift)
             use_full_graph = True,
             delta_range    = delta,
             nconmax        = 50,
