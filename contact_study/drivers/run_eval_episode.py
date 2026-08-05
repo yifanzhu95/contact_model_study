@@ -1,9 +1,9 @@
-"""Closed-loop eval episode: pluggable "real" simulator + GPU-MPPI planner.
+"""Closed-loop eval episode: pluggable "real" simulator + GPU sampling planner.
 
 Generalizes tests/test_drake.py. Two task instances share the same TaskConfig:
 
   * a ROLLOUT task — owns the planning MuJoCo model + cost arrays; handed to the
-    MPPIController (which still owns the batched GPU rollout env).
+    planner (which still owns the batched GPU rollout env).
   * an EVAL task   — owns the high-fidelity "real" environment (an EvalSimulator,
     MuJoCo or Drake) that this loop actually steps.
 
@@ -11,15 +11,20 @@ Per control step: read eval state → mirror into the planning MjData →
 controller.plan() on the GPU → integrate the delta into the command → apply to
 the eval simulator → advance it → render.
 
+The planner is selectable (--planner): MPPI, CEM or the predictive sampler. All
+three share one rollout engine and differ only in how the sampled costs update
+the control distribution, so they are directly comparable — see
+contact_study/planners/__init__.py.
+
 The eval ("real") simulator runs at a finer timestep than the rollout/planning
 model: rollout_dt = eval_dt * eval_substeps_per_rollout (the eval sim takes that
 many steps per rollout step). The rollout step is inferred from the eval step and
 stamped onto the planning model. Control frequency stays a separate knob — one
-control step spans the MPPI substeps rollout steps (control_dt = substeps *
+control step spans the planner's substeps rollout steps (control_dt = substeps *
 rollout_dt), so the eval sim advances substeps * eval_substeps_per_rollout steps.
-The substep count and the horizon come from MPPIConfig either as step counts
-(step_substeps / step_horizon) or as durations (step_time / time_horizon), which
-the controller quantizes against rollout_dt.
+The substep count and the horizon come from the planner config either as step
+counts (step_substeps / step_horizon) or as durations (step_time /
+time_horizon), which the controller quantizes against rollout_dt.
 
 The contact model (M1..M4) used for rollouts is orthogonal to the eval simulator
 (set by the task's TaskConfig.eval_sim).
@@ -50,7 +55,11 @@ import contact_study.tasks  # noqa: F401 — registers all tasks
 
 from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
 from contact_study.evaluation.metrics import EpisodeResult
-from contact_study.planners.mppi import MPPIController, MPPIConfig
+from contact_study.planners import (
+    PLANNER_NAMES, PlannerConfig, make_planner, make_planner_config,
+    planner_name_for_config, resolve_planner_name,
+)
+from contact_study.planners.mppi import MPPIController, MPPIConfig  # noqa: F401 — re-export
 from contact_study.tasks.base import get_task
 from contact_study.tasks.config import TaskRole, EvalSimulatorKind
 
@@ -79,15 +88,15 @@ def rollout_dt_for(task_config, eval_substeps: int | None = None) -> float:
     """The planning-model timestep this driver stamps onto mjm before planning.
 
     rollout_dt = eval_dt * eval_substeps_per_rollout. Exposed so sweep workers can
-    resolve an MPPIConfig's time-based schedule (MPPIConfig.resolve_schedule) into
-    step counts for labelling/logging *before* an episode runs, and get exactly the
-    same numbers the controller will resolve internally.
+    resolve a planner config's time-based schedule (PlannerConfig.resolve_schedule)
+    into step counts for labelling/logging *before* an episode runs, and get exactly
+    the same numbers the controller will resolve internally.
     """
     n = eval_substeps if eval_substeps is not None else task_config.eval_substeps_per_rollout
     return task_config.timestep * n
 
 
-def resolve_mppi_schedule(mppi_cfg: MPPIConfig, task_config,
+def resolve_mppi_schedule(mppi_cfg: PlannerConfig, task_config,
                           eval_substeps: int | None = None) -> tuple[int, int, float]:
     """Resolve (horizon, substeps, rollout_dt) for a config against a task."""
     dt = rollout_dt_for(task_config, eval_substeps)
@@ -100,7 +109,7 @@ def apply_cost_weight_overrides(task, overrides: dict) -> None:
 
     The dict key order of cost_weights must match the array order used in the
     task's initialize_task — this holds for all built-in tasks. Must be called
-    before the MPPIController is built (it captures task.cost_weights_wp)."""
+    before the planner is built (it captures task.cost_weights_wp)."""
     weights = dict(task.config.cost_weights)
     weights.update(overrides)
     weights_arr = np.array([weights[k] for k in task.config.cost_weights], dtype=np.float32)
@@ -110,9 +119,10 @@ def apply_cost_weight_overrides(task, overrides: dict) -> None:
 def run_eval_episode(
     task_name:   str,
     contact_cfg: ContactModelConfig,
-    mppi_cfg:    MPPIConfig,
-    rng:         np.random.Generator,
+    planner_cfg: PlannerConfig | None = None,
+    rng:         np.random.Generator | None = None,
     geometry:    GeometryVariant = GeometryVariant.ACCURATE,
+    planner:     str | None = None,
     cost_weight_overrides: dict | None = None,
     settle_seconds: float = 0.0,
     eval_substeps: int | None = None,
@@ -124,25 +134,45 @@ def run_eval_episode(
     fin_ep_on_success: bool = True,
     debug:       bool = False,
     verbose:     bool = True,
+    mppi_cfg:    PlannerConfig | None = None,
 ) -> EpisodeResult:
     """Run one closed-loop eval episode and return an EpisodeResult.
 
     Drop-in replacement for the legacy experiments/run_episode.py `run_episode`,
     but built on the eval/rollout split: a ROLLOUT task (planning MuJoCo model +
-    cost arrays for the MPPIController) and an EVAL task (the pluggable "real"
+    cost arrays for the planner) and an EVAL task (the pluggable "real"
     EvalSimulator, MuJoCo or Drake). condition is a label only — only the
-    warm-started MPPIController ("B") path exists; the legacy fixed-budget
-    rollout ("A") path is gone.
+    warm-started planner ("B") path exists; the legacy fixed-budget rollout
+    ("A") path is gone.
+
+    planner_cfg picks the planner: an MPPIConfig runs MPPI, a CEMConfig runs CEM,
+    a PredictiveSamplerConfig runs the predictive sampler. `planner` may name it
+    explicitly (and is then checked against the config type). `mppi_cfg` is the
+    old name of `planner_cfg`, still accepted so existing sweep workers keep
+    working unchanged.
 
     The episode length is the task's TaskConfig.max_steps. mean_step_ms /
-    std_step_ms hold per-control-step MPPI planning latency (controller.plan()
-    only, excluding the eval-sim advance) in ms.
+    std_step_ms hold per-control-step planning latency (controller.plan() only,
+    excluding the eval-sim advance) in ms.
 
     cost_weight_overrides: optional {weight_name: value} merged into the rollout
         task's cost weights before planning (used by the weight grid search).
     fin_ep_on_success: stop at first success (default); if False, resample a new
         goal on each success and keep going (multi-goal mode).
     """
+    planner_cfg = planner_cfg if planner_cfg is not None else mppi_cfg
+    if planner_cfg is None:
+        raise ValueError("run_eval_episode needs a planner_cfg (or the legacy mppi_cfg)")
+    # The config type is authoritative; `planner` only has to agree with it.
+    cfg_planner = planner_name_for_config(planner_cfg)
+    planner = cfg_planner if planner is None else resolve_planner_name(planner)
+    if planner != cfg_planner:
+        raise ValueError(
+            f"planner={planner!r} does not match the config type "
+            f"{type(planner_cfg).__name__} (which selects {cfg_planner!r})"
+        )
+    rng = rng if rng is not None else np.random.default_rng()
+
     # ---- ROLLOUT task + planner ------------------------------------------
     rollout_task = get_task(task_name, geometry=geometry, role=TaskRole.ROLLOUT)
     mjm, mjd = rollout_task.load()
@@ -160,8 +190,8 @@ def run_eval_episode(
     rollout_dt = eval_dt * eval_substeps
     mjm.opt.timestep = rollout_dt
 
-    controller = MPPIController(
-        task=rollout_task, cfg=contact_cfg, mppi_cfg=mppi_cfg, rng=rng,
+    controller = make_planner(
+        planner, task=rollout_task, cfg=contact_cfg, planner_cfg=planner_cfg, rng=rng,
     )
 
     # ---- EVAL task + "real" simulator ------------------------------------
@@ -220,12 +250,14 @@ def run_eval_episode(
     steps_to_success: int | None = None
 
     if verbose:
-        print(f"  task={task_name}  eval_sim={eval_task.config.eval_sim.value}  "
+        print(f"  task={task_name}  planner={planner}  "
+              f"eval_sim={eval_task.config.eval_sim.value}  "
               f"eval_dt={eval_dt*1e3:.2f}ms  rollout_dt={rollout_dt*1e3:.2f}ms  "
               f"control_dt={control_dt*1e3:.1f}ms  max_steps={n_steps}  "
               f"horizon={controller.horizon} steps "
               f"({controller.horizon*control_dt*1e3:.1f}ms)  "
-              f"n_samples={mppi_cfg.n_samples}")
+              f"n_samples={planner_cfg.n_samples}  "
+              f"n_iterations={planner_cfg.n_iterations}")
 
     step_times: list[float] = []
     ep_start = time.perf_counter()
@@ -247,17 +279,18 @@ def run_eval_episode(
             if fin_ep_on_success:
                 break
             elif hasattr(rollout_task, "sample_new_goal"):
-                # Multi-goal mode: target a fresh goal and keep going.
+                # Multi-goal mode: target a fresh goal and keep going. reset()
+                # also restores whatever adaptive state the planner carries
+                # (MPPI's temperature, CEM's sigma).
                 rollout_task.sample_new_goal(mjd, rng)
                 controller.reset()
-                controller.lam = controller.pc.temperature
         if rollout_task.has_failed(mjd):
             if verbose:
                 print(f"  step {t:4d}: task failed")
             break
 
         # 2. Plan on the GPU and turn the planned delta into the absolute command.
-        # step_times measures only this MPPI call, not the eval-sim advance below.
+        # step_times measures only this plan() call, not the eval-sim advance below.
         plan_start = time.perf_counter()
         action = controller.plan(mjd)
         step_times.append((time.perf_counter() - plan_start) * 1e3)
@@ -302,7 +335,8 @@ def run_eval_episode(
         success          = steps_to_success is not None,
         steps_to_success = steps_to_success,
         final_cost       = float(np.linalg.norm(final_qpos - np.asarray(q0, dtype=float))),
-        n_samples_used   = mppi_cfg.n_samples,
+        n_samples_used   = planner_cfg.n_samples,
+        planner          = planner,
         elapsed_seconds  = elapsed,
         mean_step_ms     = float(step_arr.mean()) if len(step_arr) else 0.0,
         std_step_ms      = float(step_arr.std())  if len(step_arr) else 0.0,
@@ -313,34 +347,54 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--task",        type=str,   default="cart_pole")
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
+    p.add_argument("--planner",     type=str,   default="ps", choices=PLANNER_NAMES,
+                   help="Sampling planner: mppi (softmax-weighted mean), cem (elite "
+                        "refit) or predictive_sampler/ps (greedy best-of-N).")
     p.add_argument("--n_samples",   type=int,   default=256)
     p.add_argument("--horizon",     type=int,   default=None,
-                   help="MPPI planning horizon in control steps (ignored when "
+                   help="Planning horizon in control steps (ignored when "
                         "--time_horizon is given).")
     p.add_argument("--time_horizon", type=float, default=0.352,
-                   help="MPPI planning horizon in SECONDS; quantized down to whole "
+                   help="Planning horizon in SECONDS; quantized down to whole "
                         "control steps. Overrides --horizon.")
     p.add_argument("--step_time",   type=float, default=0.064,
                    help="Control-step duration in SECONDS; quantized down to whole "
                         "rollout steps. Overrides --substeps.")
-    p.add_argument("--n_iterations", type=int,  default=1,
-                   help="Number of MPPI update iterations per plan() call.")
-    p.add_argument("--temperature", type=float, default=100.0)#0.00008)
+    p.add_argument("--n_iterations", type=int,  default=None,
+                   help="Optimizer iterations per plan() call (default: the "
+                        "planner's own — 1 for mppi/predictive_sampler, 3 for cem).")
     p.add_argument("--noise_sigma", type=float, default=0.1,)#0.01)
     p.add_argument("--delta",       type=float, default=None,#0.1,
-                   help="Per-step MPPI delta clip magnitude (action units); "
+                   help="Per-step delta clip magnitude (action units); "
                         "pass 'none' to disable the delta clamp entirely.")
     p.add_argument("--substeps",    type=int,   default=None,
-                   help="MPPI rollout substeps per control step (control frequency knob).")
+                   help="Rollout substeps per control step (control frequency knob).")
     p.add_argument("--eval_substeps", type=int, default=None,
                    help="Eval steps per rollout step (default: task config, usually 10).")
     p.add_argument("--warm_start", action=argparse.BooleanOptionalAction, default=False,
-                   help="Shift the MPPI mean forward one control step after each "
-                        "plan(); --no-warm_start (default) keeps the running mean "
-                        "in place, matching irisim_warp.")
+                   help="Shift the planned sequence forward one control step after "
+                        "each plan(); --no-warm_start (default) keeps the running "
+                        "mean in place, matching irisim_warp.")
     p.add_argument("--resample_interval", type=int, default=1,
-                   help="Plan steps between MPPI noise resamples (1=every step; "
+                   help="Plan steps between noise resamples (1=every step; "
                         "omit=sample once and reuse, the default).")
+    # --- MPPI-only ---------------------------------------------------------
+    p.add_argument("--temperature", type=float, default=100.0)#0.00008)
+    # --- CEM-only ----------------------------------------------------------
+    p.add_argument("--n_elites",    type=int,   default=None,
+                   help="CEM elite-set size; overrides --elite_frac when set.")
+    p.add_argument("--elite_frac",  type=float, default=None,
+                   help="CEM elite fraction of --n_samples (default 0.1).")
+    p.add_argument("--cem_alpha",   type=float, default=None,
+                   help="CEM refit smoothing: new = alpha*old + (1-alpha)*fit "
+                        "(default 0.1).")
+    p.add_argument("--min_sigma",   type=float, default=None,
+                   help="CEM floor on the refit sigma (default 1e-3), keeping the "
+                        "search from collapsing.")
+    # --- predictive-sampler-only ------------------------------------------
+    p.add_argument("--include_nominal", action=argparse.BooleanOptionalAction, default=True,
+                   help="Predictive sampler: keep sample 0 unperturbed so the greedy "
+                        "update can never pick a sequence worse than the nominal.")
     p.add_argument("--time_constrained", action=argparse.BooleanOptionalAction, default=False,
                    help="Stop rollouts once --plan_budget_ms elapses (capped at the horizon).")
     p.add_argument("--plan_budget_ms", type=float, default=None,
@@ -363,10 +417,11 @@ def main():
     p.add_argument("--results",     type=str,   default=None,
                    help="JSON path for the episode result(s) (auto-named if omitted).")
     p.add_argument("--debug",       action="store_true",
-                   help="Verbose per-step diagnostics (also enables MPPI debug).")
+                   help="Verbose per-step diagnostics (also enables planner debug).")
     args = p.parse_args()
 
     wp.init()
+    planner = resolve_planner_name(args.planner)
     seed_seq = np.random.SeedSequence(args.seed)
     episode_seeds = seed_seq.spawn(args.n_episodes)
 
@@ -378,7 +433,7 @@ def main():
     base_video_path = args.video
     if base_video_path is None and want_video:
         VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
-        base_video_path = str(VIDEOS_DIR / f"{args.task}_eval.{args.video_format}")
+        base_video_path = str(VIDEOS_DIR / f"{args.task}_{planner}_eval.{args.video_format}")
 
     contact_cfg = MODEL_FACTORIES[args.model]()
     eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
@@ -410,13 +465,15 @@ def main():
         else:
             delta = (None, None)
 
-        mppi_cfg = MPPIConfig(
+        # One flat knob set for every planner; make_planner_config keeps only the
+        # fields the selected planner declares (--temperature for mppi, the
+        # --n_elites/--cem_alpha family for cem, ...). Knobs left at None are
+        # dropped so each config's own default stands.
+        planner_kwargs = dict(
             n_samples      = args.n_samples,
             step_horizon   = args.horizon,
             time_horizon   = args.time_horizon,
             step_time      = args.step_time,
-            n_iterations   = args.n_iterations,
-            temperature    = args.temperature,
             noise_sigma    = args.noise_sigma,
             step_substeps  = args.substeps,
             warm_start     = args.warm_start,   # off: match irisim_warp (keep the running mean, no shift)
@@ -429,12 +486,26 @@ def main():
             resample_interval = args.resample_interval,
             time_constrained  = args.time_constrained,
             plan_budget_ms    = args.plan_budget_ms,
+            temperature       = args.temperature,
+            include_nominal   = args.include_nominal,
         )
+        # These have no CLI default: leaving them out lets the planner's own
+        # default apply (e.g. CEM's n_iterations=3, elite_frac=0.1).
+        for name, val in (("n_iterations", args.n_iterations),
+                          ("n_elites",     args.n_elites),
+                          ("elite_frac",   args.elite_frac),
+                          ("alpha",        args.cem_alpha),
+                          ("min_sigma",    args.min_sigma)):
+            if val is not None:
+                planner_kwargs[name] = val
+
+        planner_cfg = make_planner_config(planner, **planner_kwargs)
 
         result = run_eval_episode(
             task_name   = args.task,
             contact_cfg = contact_cfg,
-            mppi_cfg    = mppi_cfg,
+            planner     = planner,
+            planner_cfg = planner_cfg,
             rng         = rng,
             video_path  = video_path,
             use_mp4     = use_mp4,
@@ -461,7 +532,8 @@ def main():
     mean_step_ms = float(np.mean([r.mean_step_ms for r in results]))
 
     print(f"\n{'='*60}")
-    print(f"  task={args.task}  model={args.model}  n_episodes={args.n_episodes}")
+    print(f"  task={args.task}  model={args.model}  planner={planner}  "
+          f"n_episodes={args.n_episodes}")
     print(f"  success_rate={success_rate:.3f}  ({n_success}/{len(results)})  "
           f"mean_step_ms={mean_step_ms:.3f}")
     print(f"{'='*60}")
@@ -469,11 +541,12 @@ def main():
     results_path = args.results
     if results_path is None:
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-        results_path = str(RESULTS_DIR / f"{args.task}_{args.model}_eval.json")
+        results_path = str(RESULTS_DIR / f"{args.task}_{args.model}_{planner}_eval.json")
     with open(results_path, "w") as f:
         json.dump({
             "task":          args.task,
             "model":         args.model,
+            "planner":       planner,
             "n_episodes":    args.n_episodes,
             "success_rate":  success_rate,
             "mean_step_ms":  mean_step_ms,
