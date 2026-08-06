@@ -36,6 +36,10 @@ class EpisodeResult:
     elapsed_seconds:   float
     mean_step_ms:      float = 0.0
     std_step_ms:       float = 0.0
+    # Which sampling planner produced the episode ("mppi" | "cem" |
+    # "predictive_sampler"). Defaulted so results written before the planner
+    # became selectable still load via EpisodeResult(**json_dict).
+    planner:           str   = "mppi"
 
 
 @dataclass
