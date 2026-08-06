@@ -14,30 +14,31 @@ _USE_INIT_VECTORS = True
 # preset. With the default soft XML contacts the grasp is stable; flipping this
 # on should make the cube fly off exactly like `run_eval_episode --eval_sim
 # mujoco`, isolating the mismatch to the eval sim's model config (not the state).
-_MIMIC_EVAL_SIM = True
+_MIMIC_EVAL_SIM = False
 
 # Eval sim timestep for grasp_reorient (TaskConfig.timestep). The XML declares
 # no <option timestep>, so the plain viewer runs at MuJoCo's 0.002 default.
 _EVAL_TIMESTEP = 0.001
 
 _INIT_QPOS = np.array([
-0.8856324 , -0.5772693 ,  0.91517996,  0.57431053, -0.00982115,
- -0.08351446,  0.70322145,  1.01842742,  0.93985903,  0.61461682,
-  0.92791674,  0.61061926,  0.69409676,  1.5753059 ,  1.33007183,
-  0.19137944,  0.01553361,  0.03530202,  0.09368509,  
-  0.99995794, -0.00283257,  0.00792515,  0.00364544
+5.74299632e-01, -5.68530386e-01,  9.13531510e-01,  5.73948062e-01,
+ -9.82115272e-03, -8.35144626e-02,  7.03221454e-01,  1.01842742e+00,
+  5.88681352e-01,  6.10758737e-01,  9.26063146e-01,  6.10230013e-01,
+  7.00238917e-01,  1.45217393e+00,  1.33872725e+00,  8.68901913e-01,
+  2.32854961e-02,  3.42861479e-02,  7.92305817e-02,  9.99977455e-01,
+ -9.40658784e-04, -4.87316782e-03,  4.52301601e-03
 ], dtype=np.float64)
 
 
 _INIT_CTRL = np.array([
-0.93256  , -0.568012 ,  0.916951 ,  0.573897 , -0.0191225, -0.0837503,
-  0.709056 ,  1.01884  ,  0.97072  ,  0.610365 ,  0.929305 ,  0.610097 ,
-  0.69912  ,  1.544325 ,  1.33179  ,  0.192794
+0.60184  , -0.568012 ,  0.916951 ,  0.573897 , -0.0191225, -0.0837503,
+  0.709056 ,  1.01884  ,  0.61456  ,  0.610365 ,  0.929305 ,  0.610097 ,
+  0.69912  ,  1.45882  ,  1.33179  ,  0.8657
 ], dtype=np.float64)
 
 
 # Load a built-in sample model (Humanoid) that contains pre-saved keyframes
-model = mujoco.MjModel.from_xml_path("scenes/leap/env_leap_cube.xml")#"scenes/leap_hand/scene_leap_cube.xml")
+model = mujoco.MjModel.from_xml_path("scenes/leap/env_leap_cube_eval.xml")#"scenes/leap_hand/scene_leap_cube.xml")
 
 if _MIMIC_EVAL_SIM:
     # Mirror MujocoSimulator.__init__: set the fine eval timestep FIRST (the
