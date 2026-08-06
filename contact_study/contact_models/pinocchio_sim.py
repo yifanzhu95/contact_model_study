@@ -48,6 +48,11 @@ from contact_study.sim.base import (
 # and excluded from all collision pairs.
 _FLOOR_HALFEXTENT_THRESH = 0.5
 
+# Debug flag: when True, each substep prints every detected contact's coal
+# penetration depth (m) and whether the ADMM solve converged. Off by default —
+# this fires every substep, so it is a lot of stdout at real step rates.
+PRINT_CONTACT_DEBUG = False
+
 
 # ---------------------------------------------------------------------------
 # Channel / actuation configuration (mirrors drake_sim.py)
@@ -137,7 +142,7 @@ class PinocchioJointConstraintConfig:
         timestep (bound = frictionloss * dt) when the constraint is built; passing
         the raw torque as the bound would lock the joint permanently.
     """
-    enforce_limits: bool = False
+    enforce_limits: bool = True #IDK IF THIS MAKES SENSE TO KEPP ON TBH.
     limit_margin: float = 0.0
     frictionloss: "dict[str, float] | None" = None
 
@@ -160,8 +165,8 @@ class PinocchioContactConfig:
     # affects collision geoms; the visual meshes are untouched.
     use_convex_tips: bool = True
     baumgarte_kp: float = 100.0
-    baumgarte_kd: float = 0.0
-    admm_max_iterations: int = 1000
+    baumgarte_kd: float = 50.0
+    admm_max_iterations: int = 5000
 
 
 # ---------------------------------------------------------------------------
@@ -715,7 +720,7 @@ class PinocchioSimulator(EvalSimulator):
         # pair; without this the collision results carry NaN normals.
         for req in self._geom_data.collisionRequests:
             req.enable_contact = True
-            req.num_max_contacts = 4
+            req.num_max_contacts = 16
 
         # Resolve channel joint names -> ids.
         self._joint_jid = {ch.pin_name: model.getJointId(ch.pin_name)
@@ -1051,6 +1056,7 @@ class PinocchioSimulator(EvalSimulator):
 
         baumgarte = pin.BaumgarteCorrectorParameters(cfg.baumgarte_kp, cfg.baumgarte_kd)
         cms = []
+        penetrations = []
         for k in range(len(gm.collisionPairs)):
             cr = gd.collisionResults[k]
             if not cr.isCollision():
@@ -1080,9 +1086,13 @@ class PinocchioSimulator(EvalSimulator):
                 n_contacts = 0
             for i in range(n_contacts):
                 try:
-                    p = np.asarray(cr.getContact(i).pos, dtype=float)
+                    contact_i = cr.getContact(i)
+                    p = np.asarray(contact_i.pos, dtype=float)
                     if np.all(np.isfinite(p)):  # box-box manifolds can return NaN
                         world_points.append(p)
+                        pen = float(contact_i.penetration_depth)
+                        if np.isfinite(pen):
+                            penetrations.append(pen)
                 except Exception:
                     pass
             if not world_points:
@@ -1097,6 +1107,14 @@ class PinocchioSimulator(EvalSimulator):
                 cm.setBaumgarteCorrectorParameters(baumgarte)
                 cms.append(pin.ConstraintModel(cm))
         cds = [cm.createData() for cm in cms]
+        if PRINT_CONTACT_DEBUG:
+            if penetrations:
+                print(f"[pinocchio_sim] contacts={len(penetrations)} "
+                      f"penetration(m): max={max(penetrations):.6f} "
+                      f"mean={sum(penetrations) / len(penetrations):.6f} "
+                      f"all={['%.6f' % p for p in penetrations]}")
+            else:
+                print("[pinocchio_sim] contacts=0 penetration(m): n/a")
         return cms, cds
 
     def _joints_at_limit(self, q):
@@ -1252,7 +1270,10 @@ class PinocchioSimulator(EvalSimulator):
                 g[idx:idx + size] += kp_b * cd.extract().constraint_position_error / dt
             idx += size
 
-        self._solver.solve(delassus, g, cms, cds, self._settings, self._result)
+        converged = self._solver.solve(delassus, g, cms, cds, self._settings, self._result)
+        if PRINT_CONTACT_DEBUG:
+            print(f"[pinocchio_sim] ADMM converged={converged} "
+                  f"iterations={self._result.iterations}")
         forces = (1.0 / dt) * np.asarray(self._result.retrieveConstraintImpulses()).ravel()
         v_new = v + dt * pin.aba(model, data, q, v, tau + Jc.T @ forces, self._fext)
         self._q = pin.integrate(model, q, v_new * dt)
