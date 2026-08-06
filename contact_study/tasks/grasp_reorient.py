@@ -201,7 +201,21 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
     c_pos_x = wp.abs(pos_diff[0])
     c_pos_y = wp.abs(pos_diff[1])
     c_pos_z = wp.abs(pos_diff[2])
+    
     c_pos = c_pos_x + c_pos_y + c_pos_z
+    # c_pos = wp.norm_l2(pos_diff) - 0.01
+    # if c_pos < 0.0:
+    #     c_pos = 0.0
+
+    # c_pos_x = c_pos_x - 0.02
+    # if c_pos_x < 0.0:
+    #     c_pos_x = 0.0
+    # c_pos_y = c_pos_y - 0.01
+    # if c_pos_y < 0.0:
+    #     c_pos_y = 0.0
+    # c_pos_z = c_pos_z - 0.02
+    # if c_pos_z < 0.0:
+    #     c_pos_z = 0.0
 
     c_joint = float(0.0)
     for i in range(n_manip):
@@ -213,26 +227,6 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
         dq = qvel[robot_qpos_adr + i]
         c_joint_velo = c_joint_velo + dq * dq
 
-    # Contact: squared distance from each fingertip to the cube *surface* (a box
-    # of half-extent 0.035), evaluated in the cube's local frame. This is an
-    # exterior box SDF: it is 0 once a tip touches the cube and stays 0 as the
-    # finger presses in, so closing onto the cube monotonically lowers the cost
-    # (the old distance-to-center penalty bottomed out above the surface and then
-    # *rose* as fingers curled past, fighting a firm grasp).
-    # half = float(0.035)
-    # # MuJoCo quat is (w,x,y,z); Warp quat is (x,y,z,w).
-    # q_cube = wp.quat(q_obj_v4[1], q_obj_v4[2], q_obj_v4[3], q_obj_v4[0])
-    # c_contact = float(0.0)
-    # for i in range(5, 9):
-    #     p_tip = site_xpos[indices[i]]
-    #     local = wp.quat_rotate_inv(q_cube, p_tip - p_obj)
-    #     dx = wp.max(wp.abs(local[0]) - half, 0.0)
-    #     dy = wp.max(wp.abs(local[1]) - half, 0.0)
-    #     dz = wp.max(wp.abs(local[2]) - half, 0.0)
-    #     c_contact = c_contact + (dx * dx + dy * dy + dz * dz)
-    # Contact: L1 (linear) distance from each fingertip to the cube center,
-    # matching irisim_warp's LeapDexReal (`contact_cost += wp.length(fp - obj)`),
-    # rather than the squared, dp>0-gated distance used before.
     c_contact = float(0.0)
     for i in range(5, 9):
         p_tip = site_xpos[indices[i]]
@@ -250,7 +244,7 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
         weights[1] * c_pos_x +      # w_pos_x
         weights[2] * c_pos_y +      # w_pos_y
         weights[3] * c_pos_z +      # w_pos_z
-        weights[4] * c_velo +
+        weights[4] * c_pos + #<- BIG CHANGE!!!!!!
         weights[5] * c_contact +
         weights[6] * c_joint +
         weights[7] * c_joint_velo +
@@ -289,11 +283,15 @@ class GraspReorientTask(BaseTask):
         5 — Flip:    Fixed 180° roll about an axis lying in the currently-shown
             face, so that face ends up on the bottom and the opposite face is
             shown. No twist, no sampling.
+        6 — Adjacent face, no twist: same face selection as level 3 (one of
+            the 4 faces adjacent to the currently-shown face), but with no
+            random twist — the new face's canonical (untwisted) orientation
+            is always used.
     """
 
     # Controls which sampling method sample_new_goal dispatches to.
     # Override on an instance before the first episode to change difficulty.
-    goal_difficulty: int = 3
+    goal_difficulty: int = 6
 
     # Most recently built eval simulator, so _update_goal can spin its goal
     # marker. Class-level on purpose: the drivers build TWO task instances per
@@ -351,23 +349,23 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 4000,
+            max_steps          = 2000,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # NOTE: insertion order must match the weights[...] indexing in
             # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI
             # override rebuilds the array from this dict's key order.
             cost_weights       = {
-                "w_quat": 10.0,#100.0,
+                "w_quat": 20.0,#100.0,
                 "w_pos_x": 7.50,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
                 "w_pos_y": 15.0,#80.0,    #Y is across the fingers
-                "w_pos_z": 15.0,#15.0,
+                "w_pos_z": 7.50,#15.0,
                 "w_velo": 0.0,
-                "w_contact": 12.50,
+                "w_contact": 12.50,#12.50,
                 "w_joint": 0.60,
                 "w_joint_velo": 0.0,
                 "w_fallen": 200.0,
-                "w_quat_term": 100.0,
-                "w_pos_term": 200.0,
+                "w_quat_term": 10.0,
+                "w_pos_term": 20.0,
                 "w_fallen_term": 0.0,
             },
             # BaseTask.load() loads this static file directly — no MJCF is
@@ -543,6 +541,24 @@ class GraspReorientTask(BaseTask):
 
         self._update_goal(mjd, new_quat)
 
+    def sample_new_goal_by_adjacent_face_no_twist(self, mjd: mujoco.MjData, rng: np.random.Generator):
+        """Difficulty 6: jump to one of the 4 faces adjacent to the currently-
+        shown face (same face selection as difficulty 3), but with no random
+        twist — the new face is always shown in its canonical orientation.
+        Easier than difficulty 3 since the controller only needs to tip the
+        cube onto the new face, never rotate it in-plane afterward.
+        """
+        candidates = [
+            i for i in range(6)
+            if i != self._face_index and i != self._OPPOSITE_FACES[self._face_index]
+        ]
+        self._face_index = int(rng.choice(candidates))
+
+        new_quat = np.zeros(4)
+        mujoco.mju_mulQuat(new_quat, self._canonical_quat, self._FACE_ROTS[self._face_index])
+
+        self._update_goal(mjd, new_quat)
+
     def sample_new_goal_by_rot(self, mjd: mujoco.MjData, rng: np.random.Generator):
         """Sample a new goal orientation by rotating +/- 90 degrees around an object-local cardinal axis."""
         axis_idx = rng.integers(0, 3)
@@ -638,6 +654,8 @@ class GraspReorientTask(BaseTask):
             self.sample_new_goal_by_adjacent_face(mjd, rng)
         elif self.goal_difficulty == 5:
             self.sample_new_goal_by_flip(mjd, rng)
+        elif self.goal_difficulty == 6:
+            self.sample_new_goal_by_adjacent_face_no_twist(mjd, rng)
         else:
             self.sample_new_goal_by_face(mjd, rng)
 
@@ -682,8 +700,10 @@ class GraspReorientTask(BaseTask):
             GraspReorientTask._active_eval_sim = sim   # see _update_goal
             return sim
         if self.config.eval_sim != EvalSimulatorKind.DRAKE:
-            return super().make_eval_simulator(video_path=video_path, render=render,
-                                               use_mp4=use_mp4)
+            sim = super().make_eval_simulator(video_path=video_path, render=render,
+                                              use_mp4=use_mp4)
+            GraspReorientTask._active_eval_sim = sim   # see _update_goal
+            return sim
 
         from contact_study.contact_models.drake_sim import (
             DrakeSimulator, DrakeJointChannel, DrakeFreeBodyChannel, DrakePidActuation,

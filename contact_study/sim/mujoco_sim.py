@@ -52,6 +52,7 @@ class MujocoSimulator(EvalSimulator):
         self.mjd = mujoco.MjData(mjm)
         self._config = config
         self._camera_name = camera_name
+        self._goal_mocap_id = self._resolve_goal_mocap_id()
         self._frames: list[np.ndarray] = []
         # Output container for save_video: .mp4 (default) or .gif. The flag wins
         # over whatever extension the caller passes.
@@ -110,6 +111,32 @@ class MujocoSimulator(EvalSimulator):
 
     def apply_control(self, ctrl: np.ndarray) -> None:
         self.mjd.ctrl[:] = ctrl
+
+    # -- goal marker -----------------------------------------------------
+    def _resolve_goal_mocap_id(self) -> int | None:
+        """Find the on-screen goal-marker mocap body's id, if this scene has one.
+
+        Mirrors the body-name fallback in grasp_reorient.py's _update_goal
+        ("goal", then the legacy "obj_target" name); None for scenes without
+        either (e.g. cart_pole), making set_goal_quat a no-op there."""
+        for body_name in ("goal", "obj_target"):
+            body_id = mujoco.mj_name2id(self.mjm, mujoco.mjtObj.mjOBJ_BODY, body_name)
+            if body_id >= 0:
+                mocap_id = self.mjm.body_mocapid[body_id]
+                if mocap_id >= 0:
+                    return mocap_id
+        return None
+
+    def set_goal_quat(self, quat_wxyz: np.ndarray) -> None:
+        """Re-orient the goal marker to match a newly sampled goal.
+
+        This simulator has its own MjData, separate from the rollout task's
+        (which is what grasp_reorient.sample_new_goal writes into), so the
+        driver mirrors new goals here explicitly — see _update_goal's
+        set_goal_quat call. No-op when this scene has no goal marker."""
+        if self._goal_mocap_id is None:
+            return
+        self.mjd.mocap_quat[self._goal_mocap_id] = quat_wxyz
 
     def step(self, n_substeps: int = 1) -> None:
         dt = self.mjm.opt.timestep

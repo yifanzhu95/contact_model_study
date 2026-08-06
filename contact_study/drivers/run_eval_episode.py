@@ -313,11 +313,11 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--task",        type=str,   default="cart_pole")
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
-    p.add_argument("--n_samples",   type=int,   default=256)
+    p.add_argument("--n_samples",   type=int,   default=64)
     p.add_argument("--horizon",     type=int,   default=None,
                    help="MPPI planning horizon in control steps (ignored when "
                         "--time_horizon is given).")
-    p.add_argument("--time_horizon", type=float, default=0.352,
+    p.add_argument("--time_horizon", type=float, default=0.352,#0.352,
                    help="MPPI planning horizon in SECONDS; quantized down to whole "
                         "control steps. Overrides --horizon.")
     p.add_argument("--step_time",   type=float, default=0.064,
@@ -325,8 +325,8 @@ def main():
                         "rollout steps. Overrides --substeps.")
     p.add_argument("--n_iterations", type=int,  default=1,
                    help="Number of MPPI update iterations per plan() call.")
-    p.add_argument("--temperature", type=float, default=100.0)#0.00008)
-    p.add_argument("--noise_sigma", type=float, default=0.1,)#0.01)
+    p.add_argument("--temperature", type=float, default=0.25)#0.00008)
+    p.add_argument("--noise_sigma", type=float, default=0.05,)#0.01)
     p.add_argument("--delta",       type=float, default=None,#0.1,
                    help="Per-step MPPI delta clip magnitude (action units); "
                         "pass 'none' to disable the delta clamp entirely.")
