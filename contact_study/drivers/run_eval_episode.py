@@ -347,7 +347,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--task",        type=str,   default="cart_pole")
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
-    p.add_argument("--planner",     type=str,   default="ps", choices=PLANNER_NAMES,
+    p.add_argument("--planner",     type=str,   default="mppi", choices=PLANNER_NAMES,
                    help="Sampling planner: mppi (softmax-weighted mean), cem (elite "
                         "refit) or predictive_sampler/ps (greedy best-of-N).")
     p.add_argument("--n_samples",   type=int,   default=256)
