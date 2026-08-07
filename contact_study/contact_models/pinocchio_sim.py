@@ -142,7 +142,7 @@ class PinocchioJointConstraintConfig:
         timestep (bound = frictionloss * dt) when the constraint is built; passing
         the raw torque as the bound would lock the joint permanently.
     """
-    enforce_limits: bool = True #IDK IF THIS MAKES SENSE TO KEPP ON TBH.
+    enforce_limits: bool = False #IDK IF THIS MAKES SENSE TO KEPP ON TBH.
     limit_margin: float = 0.0
     frictionloss: "dict[str, float] | None" = None
 
@@ -164,9 +164,9 @@ class PinocchioContactConfig:
     # triangulation noise, so the hull reproduces their shape almost exactly. Only
     # affects collision geoms; the visual meshes are untouched.
     use_convex_tips: bool = True
-    baumgarte_kp: float = 10.0
-    baumgarte_kd: float = 0.0
-    admm_max_iterations: int = 5000
+    baumgarte_kp: float = 100.0 #1000.0
+    baumgarte_kd: float = 1.0 #10.0
+    admm_max_iterations: int = 500000#500000
 
 
 # ---------------------------------------------------------------------------
@@ -811,7 +811,7 @@ class PinocchioSimulator(EvalSimulator):
         s.absolute_complementarity_tol = 1e-10
         s.relative_complementarity_tol = 1e-12
         s.admm_update_rule = pin.ADMMUpdateRule.SPECTRAL
-        s.anderson_capacity = 10
+        s.anderson_capacity = 100
         s.admm_proximal_rule = pin.ADMMProximalRule.AUTOMATIC
         s.stat_record = False
         s.solve_ncp = True
@@ -823,6 +823,19 @@ class PinocchioSimulator(EvalSimulator):
         self._q = pin.neutral(model)
         self._v = np.zeros(model.nv)
         self._q_des = self._q.copy()
+
+        # Cumulative contact/solver diagnostics, updated every substep regardless
+        # of PRINT_CONTACT_DEBUG (that flag only controls the per-substep print;
+        # this is cheap running bookkeeping for callers that want to inspect it
+        # programmatically, e.g. to detect penetration-driven sticking over an
+        # episode without parsing stdout). See diagnostics().
+        self._diag = {
+            "n_substeps": 0,
+            "n_contact_substeps": 0,
+            "max_n_contacts": 0,
+            "min_penetration_m": 0.0,   # most negative (deepest) seen; 0 = never penetrated
+            "n_nonconverged": 0,
+        }
 
         # Rendering: frames are captured from inside step() on the SIM clock (one
         # per 1/cam_fps of simulated time, at the substep nearest each deadline),
@@ -1107,10 +1120,18 @@ class PinocchioSimulator(EvalSimulator):
                 cm.setBaumgarteCorrectorParameters(baumgarte)
                 cms.append(pin.ConstraintModel(cm))
         cds = [cm.createData() for cm in cms]
+
+        # Diagnostics: penetration_depth is coal's SIGNED depth — negative means
+        # overlapping (more negative = deeper penetration), 0 = exactly touching.
+        # So the "worst" contact this substep is min(), not max().
+        if penetrations:
+            self._diag["n_contact_substeps"] += 1
+            self._diag["max_n_contacts"] = max(self._diag["max_n_contacts"], len(penetrations))
+            self._diag["min_penetration_m"] = min(self._diag["min_penetration_m"], min(penetrations))
         if PRINT_CONTACT_DEBUG:
             if penetrations:
                 print(f"[pinocchio_sim] contacts={len(penetrations)} "
-                      f"penetration(m): max={max(penetrations):.6f} "
+                      f"penetration(m): worst={min(penetrations):.6f} "
                       f"mean={sum(penetrations) / len(penetrations):.6f} "
                       f"all={['%.6f' % p for p in penetrations]}")
             else:
@@ -1197,6 +1218,7 @@ class PinocchioSimulator(EvalSimulator):
         model, data = self._model, self._data
         q, v = self._q, self._v
         dt = self._timestep
+        self._diag["n_substeps"] += 1
         cms, cds = self._detect_contacts()
         # Contacts occupy the leading rows; the Baumgarte pass below relies on it.
         n_contact = len(cms)
@@ -1271,6 +1293,8 @@ class PinocchioSimulator(EvalSimulator):
             idx += size
 
         converged = self._solver.solve(delassus, g, cms, cds, self._settings, self._result)
+        if not converged:
+            self._diag["n_nonconverged"] += 1
         if PRINT_CONTACT_DEBUG:
             print(f"[pinocchio_sim] ADMM converged={converged} "
                   f"iterations={self._result.iterations}")
@@ -1338,3 +1362,10 @@ class PinocchioSimulator(EvalSimulator):
     @property
     def timestep(self) -> float:
         return self._timestep
+
+    def diagnostics(self) -> dict:
+        """Cumulative contact/ADMM stats since __init__ (see self._diag). Cheap
+        running bookkeeping, always on, independent of PRINT_CONTACT_DEBUG —
+        for callers that want to check e.g. whether penetration/non-convergence
+        occurred over an episode without parsing stdout."""
+        return dict(self._diag)
