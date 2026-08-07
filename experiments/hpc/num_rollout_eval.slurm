@@ -52,11 +52,11 @@ N_SAMPLES=("16" "64" "256" "1024" "4096")    # the swept rollout counts
 # Shared MPPI / eval knobs (single values, not swept). The rollout schedule is
 # specified in SECONDS and quantized against the task's rollout timestep; for
 # grasp_reorient (rollout_dt = 4 ms) these are 8 substeps × 8 control steps.
-TIME_HORIZON=0.256              # planning horizon in seconds
-STEP_TIME=0.032                 # control-step duration in seconds
-TEMPERATURE=0.01
-NOISE_SIGMA=0.02
-DELTA=0.1
+TIME_HORIZON=0.352              # planning horizon in seconds
+STEP_TIME=0.064                 # control-step duration in seconds
+TEMPERATURE=0.25
+NOISE_SIGMA=0.025
+DELTA="none"
 EVAL_SIM="none"                 # "none" uses the task default; "mujoco" is faster
 SETTLE=1.0
 GEOMETRY="accurate"
