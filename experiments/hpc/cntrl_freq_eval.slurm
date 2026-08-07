@@ -62,12 +62,12 @@ MODELS=("M1" "M2" "M3" "M4")
 # The swept control periods, in SECONDS (nominal 0.032 s = 8 substeps).
 STEP_TIME_SWEEP=("0.008" "0.016" "0.032" "0.064" "0.128")
 
-# Shared MPPI / eval knobs (single values, not swept).
+# Shared MPPI / eval knobs (single values, not swept), matching run_eval_episode.py's
+# CLI defaults.
 N_SAMPLES=256
-TIME_HORIZON=0.256              # planning horizon in seconds (nominal)
-TEMPERATURE=0.01
-NOISE_SIGMA=0.02
-DELTA=0.1
+TIME_HORIZON=0.352              # planning horizon in seconds (nominal)
+TEMPERATURE=1.0
+NOISE_SIGMA=0.025
 EVAL_SIM="none"                 # "none" uses the task default; "mujoco" is faster
 SETTLE=1.0
 GEOMETRY="accurate"
@@ -111,7 +111,6 @@ python experiments/hpc/run_cntrl_freq_cell.py \
     --time_horizon "$TIME_HORIZON" \
     --temperature "$TEMPERATURE" \
     --noise_sigma "$NOISE_SIGMA" \
-    --delta       "$DELTA" \
     --eval_sim    "$EVAL_SIM" \
     --settle      "$SETTLE" \
     --geometry    "$GEOMETRY" \

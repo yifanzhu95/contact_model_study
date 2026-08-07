@@ -23,8 +23,8 @@ set -euo pipefail
 # The horizon is swept in SECONDS; run_horizon_cell.py quantizes it against the
 # task's rollout timestep and names the output file with the resulting step
 # count, so the plotter's <model>_h<int> labels are unchanged. With
-# grasp_reorient's rollout_dt = 4 ms and STEP_TIME = 0.032 s (8 substeps ->
-# 32 ms control period), the durations below land on 2/4/8/16/32 steps.
+# grasp_reorient's rollout_dt = 4 ms and STEP_TIME = 0.064 s (16 substeps ->
+# 64 ms control period), the durations below land on 1/2/4/8/16 steps.
 #
 # Keep #SBATCH --array in sync with the grid: it must be
 # 0-((#MODELS * #TIME_HORIZONS) - 1). The default 4×5 = 20 → 0-19.
@@ -57,12 +57,12 @@ MODELS=("M1" "M2" "M3" "M4")
 # The swept planning horizons, in SECONDS (nominal 0.256 s = 8 control steps).
 TIME_HORIZONS=("0.064" "0.128" "0.256" "0.512" "1.024")
 
-# Shared MPPI / eval knobs (single values, not swept).
+# Shared MPPI / eval knobs (single values, not swept), matching run_eval_episode.py's
+# CLI defaults.
 N_SAMPLES=256
-TEMPERATURE=0.01
-NOISE_SIGMA=0.02
-DELTA=0.1
-STEP_TIME=0.032                 # control-step duration in seconds (nominal)
+TEMPERATURE=1.0
+NOISE_SIGMA=0.025
+STEP_TIME=0.064                 # control-step duration in seconds (nominal)
 EVAL_SIM="none"                 # "none" uses the task default; "mujoco" is faster
 SETTLE=1.0
 GEOMETRY="accurate"
@@ -105,7 +105,6 @@ python experiments/hpc/run_horizon_cell.py \
     --n_samples   "$N_SAMPLES" \
     --temperature "$TEMPERATURE" \
     --noise_sigma "$NOISE_SIGMA" \
-    --delta       "$DELTA" \
     --step_time   "$STEP_TIME" \
     --eval_sim    "$EVAL_SIM" \
     --settle      "$SETTLE" \

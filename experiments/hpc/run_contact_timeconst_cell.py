@@ -139,6 +139,7 @@ def run_cell(args):
         ep_seed = int(episode_seeds[ep].generate_state(1)[0])
         rng     = np.random.default_rng(episode_seeds[ep])
 
+        delta_range = (-args.delta, args.delta) if args.delta is not None else (None, None)
         mppi_cfg = MPPIConfig(
             n_samples      = args.n_samples,
             time_horizon   = args.time_horizon,
@@ -148,7 +149,7 @@ def run_cell(args):
             warm_start     = False,
             resample_interval = 1,
             use_full_graph = args.use_full_graph,
-            delta_range    = (-args.delta, args.delta),
+            delta_range    = delta_range,
             nconmax        = args.nconmax,
             njmax          = args.njmax,
             seed           = ep_seed,
@@ -229,8 +230,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "the sweep; the nominal period used by the other sweeps).")
     p.add_argument("--temperature",   type=float, default=0.01)
     p.add_argument("--noise_sigma",   type=float, default=0.001)
-    p.add_argument("--delta",         type=float, default=0.1,
-                   help="Per-step MPPI delta clip magnitude (action units).")
+    p.add_argument("--delta",         type=float, default=None,
+                   help="Per-step MPPI delta clip magnitude (action units); "
+                        "default disables the clamp, matching run_eval_episode.py.")
     p.add_argument("--eval_substeps", type=int,   default=None,
                    help="Eval steps per rollout step (default: task config).")
     p.add_argument("--eval_sim",      type=str,   default="none",
