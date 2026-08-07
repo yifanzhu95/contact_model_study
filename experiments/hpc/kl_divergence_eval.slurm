@@ -99,7 +99,7 @@ cd "$PROJ_DIR"
 # 1. Fixed settings + the grids to sweep.
 # ---------------------------------------------------------------------------
 TASK="grasp_reorient"
-MODEL="M2"
+MODEL="M3"
 N_EPISODES=30                   # episodes per cell (drives the success-rate SE)
 
 # The swept degraded-planner compute. These two axes together define how far
