@@ -223,8 +223,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "control steps).")
     p.add_argument("--temperature",   type=float, default=1.0)
     p.add_argument("--noise_sigma",   type=float, default=0.01)
-    p.add_argument("--delta",         type=float, default=0.1,
-                   help="Per-step MPPI delta clip magnitude (action units).")
+    p.add_argument("--delta",         type=float, default=None,
+                   help="Per-step MPPI delta clip magnitude (action units); "
+                        "default disables the clamp, matching run_eval_episode.py.")
     p.add_argument("--step_time",     type=float, default=0.032,
                    help="Control-step duration in SECONDS, i.e. the control-frequency "
                         "knob (quantized down to whole rollout steps).")

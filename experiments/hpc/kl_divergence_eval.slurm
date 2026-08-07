@@ -120,14 +120,14 @@ KL_SHRINKAGE=0.001              # covariance shrinkage toward sigma^2 I
 KL_DIRECTION="forward"          # headline only; both directions are stored
 EXECUTE="mean"                  # "mean" matches the rest of the study
 
-# Shared MPPI / eval knobs. Both planners MUST agree on these — the KL is only
-# defined if the two distributions live in the same space, and the worker
-# raises if the resolved schedules differ.
-TIME_HORIZON=0.256
-STEP_TIME=0.032
-TEMPERATURE=0.01
-NOISE_SIGMA=0.02
-DELTA=0.1
+# Shared MPPI / eval knobs, matching run_eval_episode.py's CLI defaults. Both
+# planners MUST agree on these — the KL is only defined if the two
+# distributions live in the same space, and the worker raises if the resolved
+# schedules differ.
+TIME_HORIZON=0.352
+STEP_TIME=0.064
+TEMPERATURE=1.0
+NOISE_SIGMA=0.025
 EVAL_SIM="none"                 # "none" uses the task default
 SETTLE=1.0
 GEOMETRY="accurate"
@@ -187,7 +187,6 @@ python experiments/hpc/run_kl_divergence_cell.py \
     --step_time        "$STEP_TIME" \
     --temperature      "$TEMPERATURE" \
     --noise_sigma      "$NOISE_SIGMA" \
-    --delta            "$DELTA" \
     --eval_sim         "$EVAL_SIM" \
     --settle           "$SETTLE" \
     --geometry         "$GEOMETRY" \

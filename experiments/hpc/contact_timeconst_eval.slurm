@@ -101,9 +101,8 @@ TIMECONST_SWEEP=("0.01" "0.02" "0.04" "0.08" "0.16")
 STEP_TIME=0.032                 # control period in seconds (FIXED here)
 N_SAMPLES=256
 TIME_HORIZON=0.256              # planning horizon in seconds
-TEMPERATURE=0.01
-NOISE_SIGMA=0.02
-DELTA=0.1
+TEMPERATURE=1.0
+NOISE_SIGMA=0.025
 EVAL_SIM="none"                 # "none" uses the task default; "mujoco" is faster
 SETTLE=1.0
 GEOMETRY="accurate"
@@ -149,7 +148,6 @@ python experiments/hpc/run_contact_timeconst_cell.py \
     --time_horizon     "$TIME_HORIZON" \
     --temperature      "$TEMPERATURE" \
     --noise_sigma      "$NOISE_SIGMA" \
-    --delta            "$DELTA" \
     --eval_sim         "$EVAL_SIM" \
     --settle           "$SETTLE" \
     --geometry         "$GEOMETRY" \
