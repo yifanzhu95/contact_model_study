@@ -164,8 +164,8 @@ class PinocchioContactConfig:
     # triangulation noise, so the hull reproduces their shape almost exactly. Only
     # affects collision geoms; the visual meshes are untouched.
     use_convex_tips: bool = True
-    baumgarte_kp: float = 100.0
-    baumgarte_kd: float = 50.0
+    baumgarte_kp: float = 10.0
+    baumgarte_kd: float = 0.0
     admm_max_iterations: int = 5000
 
 
@@ -720,7 +720,7 @@ class PinocchioSimulator(EvalSimulator):
         # pair; without this the collision results carry NaN normals.
         for req in self._geom_data.collisionRequests:
             req.enable_contact = True
-            req.num_max_contacts = 16
+            req.num_max_contacts = 32
 
         # Resolve channel joint names -> ids.
         self._joint_jid = {ch.pin_name: model.getJointId(ch.pin_name)
