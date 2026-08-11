@@ -355,17 +355,17 @@ class GraspReorientTask(BaseTask):
             # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI
             # override rebuilds the array from this dict's key order.
             cost_weights       = {
-                "w_quat": 5.0,#100.0,
-                "w_pos_x": 15.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-                "w_pos_y": 15.0,#80.0,    #Y is across the fingers
-                "w_pos_z": 7.50,#15.0,
+                "w_quat": 20.0,#100.0,
+                "w_pos_x": 10.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+                "w_pos_y": 10.0,#80.0,    #Y is across the fingers
+                "w_pos_z": 5.0,#15.0,
                 "w_velo": 0.0,
                 "w_contact": 15.0,#12.50,
                 "w_joint": 4.0,
                 "w_joint_velo": 0.0,
                 "w_fallen": 200.0,
-                "w_quat_term": 200.0,
-                "w_pos_term": 400.0,
+                "w_quat_term": 600,#500.0,
+                "w_pos_term": 1000.0,
                 "w_fallen_term": 0.0,
             },
             # BaseTask.load() loads this static file directly — no MJCF is

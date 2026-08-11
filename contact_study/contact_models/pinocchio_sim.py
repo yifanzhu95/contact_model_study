@@ -166,7 +166,7 @@ class PinocchioContactConfig:
     use_convex_tips: bool = True
     baumgarte_kp: float = 100.0 #1000.0
     baumgarte_kd: float = 1.0 #10.0
-    admm_max_iterations: int = 500000#500000
+    admm_max_iterations: int = 50000#500000
 
 
 # ---------------------------------------------------------------------------
