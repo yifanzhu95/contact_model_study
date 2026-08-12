@@ -7,7 +7,10 @@ cell_<id>.json per SLURM array task, written by experiments/hpc/run_param_cell.p
 this script loads all of them and skips the combine_results.py step.
 
 Output columns (identical to param_search_to_csv.py):
-    <weight_key>, ...          — the overridden weight values
+    <axis_key>, ...            — one column per search axis: the overridden
+                                 weight values (w_quat, w_pos_x, w_quat_term,
+                                 w_pos_term, ...) plus any swept non-weight knobs
+                                 (temperature, noise_sigma, ...)
     success_rate_<M>           — per-model success rate (0–1)
     mean_success_rate          — average success rate across all evaluated models
     mean_step_ms_<M>           — per-model mean MPPI step latency
@@ -28,7 +31,7 @@ import argparse
 import json
 from pathlib import Path
 
-from param_search_to_csv import build_csv_rows, write_csv
+from param_search_to_csv import axes_of, build_csv_rows, write_csv
 
 
 def load_cells(indir: Path) -> list[dict]:
@@ -66,8 +69,8 @@ def main():
     fieldnames, rows = build_csv_rows(records)
 
     models = sorted({r["model"] for r in records})
-    override_keys = [k for k in fieldnames if k in records[0]["overrides"]]
-    print(f"  Hyperparameter axes : {override_keys}")
+    axis_keys = [k for k in fieldnames if k in axes_of(records[0])]
+    print(f"  Hyperparameter axes : {axis_keys}")
     print(f"  Models              : {models}")
     print(f"  Combinations        : {len(rows)}")
 
@@ -78,9 +81,8 @@ def main():
     top_n = min(5, len(rows))
     print(f"\n  Top-{top_n} by mean success rate:")
     rate_col = "mean_success_rate"
-    weight_cols = [k for k in fieldnames if k in records[0]["overrides"]]
     succ_cols  = [f"success_rate_{m}" for m in models]
-    preview_cols = weight_cols + succ_cols + [rate_col]
+    preview_cols = axis_keys + succ_cols + [rate_col]
     header = "  " + "  ".join(f"{c:>22}" for c in preview_cols)
     print(header)
     for r in rows[:top_n]:

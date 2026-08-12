@@ -59,9 +59,12 @@ def main():
     rich_rows = []
     aggregated = []
     for c in cells:
+        # "axes" carries the swept non-weight knobs (temperature, noise_sigma, ...)
+        # alongside the weight overrides; without it the CSV builder would group
+        # cells that differ only in those knobs into a single row.
         rich_rows.append({k: c[k] for k in (
-            "model", "label", "overrides", "full_weights", "success_rate",
-            "mean_steps_to_success", "mean_step_ms", "std_step_ms",
+            "model", "label", "overrides", "axes", "swept_knobs", "full_weights",
+            "success_rate", "mean_steps_to_success", "mean_step_ms", "std_step_ms",
             "mean_elapsed_s", "n_episodes",
         ) if k in c})
 
