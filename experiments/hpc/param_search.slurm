@@ -2,14 +2,14 @@
 #SBATCH --job-name=cont_modeling_param_search
 #SBATCH --output=logs/cont_modeling_param_search%A_%a.out
 #SBATCH --error=logs/cont_modeling_param_search%A_%a.err
-#SBATCH --array=0-17         # must equal (product of every axis length in AXES below) - 1.
+#SBATCH --array=0-53         # must equal (product of every axis length in AXES below) - 1.
                                # Each task prints the grid total; a task id past the
                                # end exits with an error instead of silently rerunning.
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=02:00:00
+#SBATCH --time=03:00:00
 
 set -euo pipefail
 
@@ -30,14 +30,14 @@ N_EPISODES=5          # episodes per cell -> success rate
 MODELS=("M2" "M3") #("M1" "M2" "M3" "M4")
 
 # --- running cost weights ---------------------------------------------------
-W_QUAT=("10.0")
+W_QUAT=("20.0")
 # Position error is weighted separately per axis (X is down the fingers,
 # Y across the fingers, Z vertical) -> three independent search axes.
-W_POS_X=("15")
-W_POS_Y=("15")
-W_POS_Z=("3.75")
-W_CONTACT=("10" "5.0" "2.5")
-W_JOINT=("1.2" "0.6" "0.3")
+W_POS_X=("10.0")
+W_POS_Y=("10.0")
+W_POS_Z=("5.0")
+W_CONTACT=("15.0")
+W_JOINT=("4.0")
 
 # --- terminal cost weights --------------------------------------------------
 # On the final horizon step these REPLACE the running cost (see
@@ -49,8 +49,8 @@ W_POS_TERM=("1500" "1000" "500")
 # --- MPPI knobs that are part of the grid -----------------------------------
 # Not cost weights, so they reach the worker through their own flags; listing
 # them in MPPI_AXES below turns them into recorded search axes (-> CSV columns).
-TEMPERATURE=("1.0")
-NOISE_SIGMA=("0.025")
+TEMPERATURE=("10.0")
+NOISE_SIGMA=("0.07" "0.035" "0.0175")
 
 # Shared MPPI / eval knobs (single values, never swept), matching
 # run_eval_episode.py's CLI defaults. The rollout schedule is specified in
