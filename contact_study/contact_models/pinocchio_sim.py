@@ -154,7 +154,17 @@ class PinocchioContactConfig:
     native Baumgarte corrector: its drift gets a push-back Kp*position_error/dt
     (+ Kd*velocity_error/dt), read straight off the constraint in the solve loop
     (mirroring results/g1-constraint-simulation.py). Kp=0 disables it."""
+    # Fallback sliding-friction coefficient, used for a contact pair whose geoms are
+    # not in the MJCF friction map (see mjcf_geom_friction) and for EVERY pair when
+    # use_mjcf_friction is False. Not the normal path — see below.
     friction: float = 0.5
+    # Take each contact pair's friction from the scene's own <geom friction>, combined
+    # the way MuJoCo combines it (mu = max(mu_a, mu_b)), instead of applying `friction`
+    # uniformly. The LEAP scenes declare friction="0.5" on the 4 fingertips and the
+    # cube only, leaving the palm/phalanx boxes and the floor at MuJoCo's 1.0 default,
+    # so a single global 0.5 made every non-tip contact half as sticky as it is in the
+    # MuJoCo rollout. Set False to go back to the flat `friction` value.
+    use_mjcf_friction: bool = True
     use_mesh_geoms: bool = True
     # Replace each triangle-mesh (BVH) collision geom with its convex hull so coal
     # uses the analytic convex-convex (GJK/EPA) contact path — one stable normal +
@@ -524,6 +534,58 @@ def parse_mjcf_excludes(mjcf_path) -> set[frozenset[str]]:
     }
 
 
+def mjcf_geom_friction(mjcf_path) -> dict[str, float]:
+    """{geom name -> sliding-friction coefficient}, exactly as MuJoCo loads it.
+
+    The values are read by compiling the MJCF with MuJoCo itself and taking
+    mjm.geom_friction[:, 0], rather than walking the XML: friction usually arrives
+    through a <default> class (the LEAP tips get theirs from `class="tip"`) or is
+    left off entirely so MuJoCo's own 1.0 default applies, and re-implementing that
+    resolution over ElementTree is exactly the kind of near-miss this map exists to
+    avoid. Same reasoning as tasks/grasp_reorient.py's frictionloss handling.
+
+    Only column 0 (slide) is returned: every leap geom is condim=3, so MuJoCo's
+    torsional/rolling coefficients are inert, and a Pinocchio PointContactConstraint
+    is a 3-D (normal + 2 tangent) contact with a single scalar mu.
+
+    This is the one place this module touches MuJoCo, hence the local import — the
+    module otherwise stays importable on machines without a full MuJoCo/Pinocchio
+    stack. Returns {} if the model cannot be compiled, so callers fall back to the
+    flat PinocchioContactConfig.friction rather than failing the episode."""
+    try:
+        import mujoco
+        mjm = mujoco.MjModel.from_xml_path(str(mjcf_path))
+    except Exception:
+        return {}
+    out = {}
+    for gid in range(mjm.ngeom):
+        name = mujoco.mj_id2name(mjm, mujoco.mjtObj.mjOBJ_GEOM, gid)
+        if name:
+            out[name] = float(mjm.geom_friction[gid, 0])
+    return out
+
+
+def collision_pair_friction(geom_model, friction_map, default):
+    """Per-collision-pair sliding friction, indexed the same way the pairs are
+    (entry k belongs to geom_model.collisionPairs[k], which is also the index
+    GeometryData.collisionResults uses in _detect_contacts).
+
+    Combines the two geoms' coefficients with MuJoCo's own rule for a contact that
+    has no explicit <pair> override: mu = max(mu_a, mu_b) (mj_contactParam takes the
+    element-wise maximum of the two geom_friction rows). The leap scenes declare no
+    <pair>, so this reproduces MuJoCo's effective friction exactly. Geoms missing
+    from the map fall back to `default`.
+
+    Call AFTER build_collision_pairs (the pair list must be final) and after
+    convexify_mesh_geoms (which replaces geometry but preserves names)."""
+    mus = np.empty(len(geom_model.collisionPairs), dtype=float)
+    for k, cp in enumerate(geom_model.collisionPairs):
+        a = geom_model.geometryObjects[cp.first].name
+        b = geom_model.geometryObjects[cp.second].name
+        mus[k] = max(friction_map.get(a, default), friction_map.get(b, default))
+    return mus
+
+
 def parse_body_box_geoms(mjcf_path, body_name):
     """Read the box <geom> children of the named <body> as
     (half_extents[3], local_pos[3], local_quat_wxyz[4], rgba[4]) tuples, so the
@@ -715,6 +777,16 @@ class PinocchioSimulator(EvalSimulator):
             convexify_mesh_geoms(coll)
         excludes = parse_mjcf_excludes(model_path)
         build_collision_pairs(pin, model, coll, self._contact_cfg.use_mesh_geoms, excludes)
+        # Per-pair sliding friction, taken from the scene's own <geom friction> and
+        # combined with MuJoCo's max() rule, so the eval sim uses the SAME coefficients
+        # the MuJoCo rollout does instead of one flat value everywhere. Indexed by
+        # collision-pair index, which is what _detect_contacts iterates over. Built
+        # here, after build_collision_pairs has finalized the pair list.
+        fmap = (mjcf_geom_friction(model_path)
+                if self._contact_cfg.use_mjcf_friction else {})
+        self._pair_friction = collision_pair_friction(
+            coll, fmap, self._contact_cfg.friction
+        )
         self._geom_data = pin.GeometryData(coll)
         # Ask coal to populate the contact manifold (normal + witness points) per
         # pair; without this the collision results carry NaN normals.
@@ -1116,7 +1188,8 @@ class PinocchioSimulator(EvalSimulator):
                 plc1 = data.oMi[j1].inverse() * M_world
                 plc2 = data.oMi[j2].inverse() * M_world
                 cm = pin.PointContactConstraintModel(model, j1, plc1, j2, plc2)
-                cm.setFriction(cfg.friction)
+                # This pair's own mu (all contact points on one pair share it).
+                cm.setFriction(float(self._pair_friction[k]))
                 cm.setBaumgarteCorrectorParameters(baumgarte)
                 cms.append(pin.ConstraintModel(cm))
         cds = [cm.createData() for cm in cms]

@@ -52,7 +52,26 @@ GRASP_SCENE_XML = "leap/env_leap_cube.xml"#"leap_hand/leap_hand_right_w_sites_yo
 _PID_KP = 3.0
 _PID_KI = 0.0
 _PID_KD = 0.01
+# Passive joint damping. MUST track <default><joint damping> in the leap hand MJCFs
+# (scenes/leap/leap_right_hand{,_eval}.xml): MuJoCo brakes with damping + the position
+# actuator's kv (0.3 + 0.01), and Pinocchio — whose aba ignores model.damping — reaches
+# the same 0.31 through _PIN_KD below. Changing one without the other desyncs the sims.
 _JOINT_DAMPING = 0.3#0.1 #this is maybe too low it was 0.1 befor
+# Rotor inertia on the 16 hand joints. MUST equal <default><joint armature> in the
+# leap hand MJCFs, which is where MuJoCo reads its dof_armature from.
+#
+# It has to be injected here as well, rather than inherited from that MJCF, because
+# Pinocchio LOSES it on the way in: buildModelsFromMJCF does parse it correctly (a
+# freshly-parsed hand subtree reads model.armature == 0.001), but pin.appendModel —
+# which merge_models uses to stitch the split single-root subtrees back together —
+# drops model.armature while preserving model.damping. Verified on this scene: the
+# parsed part has armature 0.001, the merged model has 0.0.
+#
+# So: XML feeds MuJoCo, this constant feeds Pinocchio, and the two must be kept equal
+# by hand. If merge_models is ever fixed to carry armature across, set this to 0.0 —
+# PinocchioSimulator.__init__ *adds* (model.armature[ctrl] += pid.armature) and would
+# otherwise double-count. tasks/balance_stick.py and tasks/actuator_test.py carry the
+# same workaround (_PIN_ARMATURE) against the same appendModel behavior.
 _ARMATURE = 0.001
 
 # Pinocchio eval: mirror tests/replay_pinocchio_controls.py's simulation scheme —
@@ -356,16 +375,16 @@ class GraspReorientTask(BaseTask):
             # override rebuilds the array from this dict's key order.
             cost_weights       = {
                 "w_quat": 20.0,#100.0,
-                "w_pos_x": 10.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-                "w_pos_y": 10.0,#80.0,    #Y is across the fingers
+                "w_pos_x": 7.50,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+                "w_pos_y": 15.0,#80.0,    #Y is across the fingers
                 "w_pos_z": 5.0,#15.0,
                 "w_velo": 0.0,
                 "w_contact": 15.0,#12.50,
                 "w_joint": 4.0,
                 "w_joint_velo": 0.0,
                 "w_fallen": 200.0,
-                "w_quat_term": 600,#500.0,
-                "w_pos_term": 1000.0,
+                "w_quat_term": 100.0,#500.0,
+                "w_pos_term": 100.0,
                 "w_fallen_term": 0.0,
             },
             # BaseTask.load() loads this static file directly — no MJCF is

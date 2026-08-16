@@ -74,7 +74,7 @@ def main():
     p.add_argument("--time_horizon", type=float, default=0.352)
     p.add_argument("--step_time", type=float, default=0.064)
     p.add_argument("--temperature", type=float, default=10.0)
-    p.add_argument("--noise_sigma", type=float, default=0.05)
+    p.add_argument("--noise_sigma", type=float, default=0.035)
     # --- episode / diagnostics ----------------------------------------------
     p.add_argument("--settle", type=float, default=1.0,
                     help="Seconds to hold the initial grasp command before planning.")
