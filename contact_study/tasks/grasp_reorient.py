@@ -167,7 +167,7 @@ def _euler_to_quat(euler) -> np.ndarray:
 
 # Goal/target pose for the cube reorientation, defined here rather than read
 # from a mocap body in the scene. pos + intrinsic-xyz Euler (rad).
-_TARGET_POS   = np.array([0.02, 0.035, 0.09], dtype=np.float64)#np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
+_TARGET_POS   = np.array([0.02, 0.03, 0.09], dtype=np.float64)#np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
 _TARGET_EULER = np.array([0.0, 0.0, 0.0], dtype=np.float64)
 _TARGET_QUAT  = _euler_to_quat(_TARGET_EULER)   # wxyz
 
@@ -383,8 +383,8 @@ class GraspReorientTask(BaseTask):
                 "w_joint": 4.0,
                 "w_joint_velo": 0.0,
                 "w_fallen": 200.0,
-                "w_quat_term": 100.0,#500.0,
-                "w_pos_term": 100.0,
+                "w_quat_term": 200.0,#500.0,
+                "w_pos_term": 200.0,
                 "w_fallen_term": 0.0,
             },
             # BaseTask.load() loads this static file directly — no MJCF is

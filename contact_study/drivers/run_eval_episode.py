@@ -363,7 +363,7 @@ def main():
     p.add_argument("--n_iterations", type=int,  default=None,
                    help="Optimizer iterations per plan() call (default: the "
                         "planner's own — 1 for mppi/predictive_sampler, 3 for cem).")
-    p.add_argument("--noise_sigma", type=float, default=0.1,)#0.1 # for M3)
+    p.add_argument("--noise_sigma", type=float, default=0.2,)#0.1 # for M3)
     p.add_argument("--delta",       type=float, default=None,#0.1,
                    help="Per-step delta clip magnitude (action units); "
                         "pass 'none' to disable the delta clamp entirely.")
