@@ -174,9 +174,9 @@ class PinocchioContactConfig:
     # triangulation noise, so the hull reproduces their shape almost exactly. Only
     # affects collision geoms; the visual meshes are untouched.
     use_convex_tips: bool = True
-    baumgarte_kp: float = 100.0 #1000.0
+    baumgarte_kp: float = 10.0 #1000.0
     baumgarte_kd: float = 1.0 #10.0
-    admm_max_iterations: int = 5000 #50000 #500000
+    admm_max_iterations: int = 50000 #50000 #500000
 
 
 # ---------------------------------------------------------------------------
