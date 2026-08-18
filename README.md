@@ -18,13 +18,41 @@ models across manipulation tasks, under two experimental conditions:
 | Axis                    | Lives in                                     | How to vary                                 |
 |-------------------------|----------------------------------------------|---------------------------------------------|
 | Contact model (M1..M4)  | `ContactModelConfig` (`config.py`)           | `ContactModelConfig.M1()` … `.M4()`         |
-| Geometry fidelity       | XML files in `scenes/tasks/*.xml`            | `get_task(name, geometry=GeometryVariant.*)`|
+| Geometry fidelity       | XML files in `scenes/leap/*.xml`             | `get_task(name, geometry="duck_low_high")` |
 | Physics parameter noise | `contact_study.utils.physics_noise`          | `apply_physics_noise(mjm, PhysicsNoiseParams(...))` |
 
 The 4 contact models stay in `ContactModelConfig`. Geometry and physics-parameter
 degradations are **not** fields on that config — they are applied at MjModel load
 time in the benchmark script, so any of the 4 contact models can be paired with
 any geometry and any noise level without touching the core code.
+
+### Scene variants (`--geometry`)
+
+`--geometry` names a **scene variant**: which object is manipulated, and at what
+collision fidelity the planner's hand and the object are modelled.
+
+    --geometry <object>_<hand_acc>_<obj_acc>     e.g. duck_low_high
+    --geometry <object>                          object at default fidelities
+
+Scene files are found by convention (see `contact_study.tasks.config.SceneVariant`):
+
+    rollout:  scenes/leap/env_leap_rollout_{obj}_{hand_acc}_{obj_acc}.xml
+    eval:     scenes/leap/env_leap_eval_{obj}.xml
+
+The eval scene carries no accuracy suffix — it *is* the reference fidelity. Only
+the planner's model is degraded, which is the axis the study varies. Hand rungs
+are an `<include>` swap (`low` -> `leap_right_hand.xml`, `high` ->
+`leap_right_hand_eval.xml`); all hand XMLs are kinematically identical, so
+rollout and eval scenes differ only in collision geometry.
+
+Available today: `cube_low_high` (default), `cube_high_high`, `duck_low_high`,
+`duck_low_low`, `duck_high_high`. Adding an object means dropping in the two
+XMLs plus an entry in `_OBJ_OVERRIDES` (`contact_study/tasks/grasp_reorient.py`)
+for its initial pose and target — no other code changes.
+
+The retired `GeometryVariant` names (`accurate`, `convex_hull`,
+`primitive_union`, `linearized`) are still accepted and map to the default
+variant, so existing SLURM scripts keep working.
 
 ### Contact model variants
 
@@ -42,12 +70,12 @@ benchmark scripts:
 
 | Old ID | New invocation                                                        |
 |--------|-----------------------------------------------------------------------|
-| M5     | `--models M2 --geometry convex_hull`                                  |
-| M6     | `--models M4 --geometry convex_hull`                                  |
+| M5     | `--models M2 --geometry cube_high_high`                                  |
+| M6     | `--models M4 --geometry cube_high_high`                                  |
 | M7     | `--models M2 --friction_sigma 0.2 --mass_sigma 0.1`                   |
 | M8     | `--models M4 --friction_sigma 0.2 --mass_sigma 0.1`                   |
-| M9     | `--models M2 --geometry convex_hull --friction_sigma 0.2 --mass_sigma 0.1` |
-| M10    | `--models M4 --geometry convex_hull --friction_sigma 0.2 --mass_sigma 0.1` |
+| M9     | `--models M2 --geometry cube_high_high --friction_sigma 0.2 --mass_sigma 0.1` |
+| M10    | `--models M4 --geometry cube_high_high --friction_sigma 0.2 --mass_sigma 0.1` |
 
 ## Repository Structure
 
@@ -55,7 +83,7 @@ benchmark scripts:
 contact_study/
 ├── contact_study/
 │   ├── contact_models/
-│   │   ├── config.py           # ContactModelConfig + M1..M4 factories + GeometryVariant enum
+│   │   ├── config.py           # ContactModelConfig + M1..M4 factories
 │   │   ├── api.py              # Unified dispatch surface (put_model/step/forward)
 │   │   ├── xpbd_backend.py     # M4: XPBD-style contact model
 │   │   └── benchmarks.py       # Speed and approximation error measurement
@@ -72,10 +100,10 @@ contact_study/
 │       └── rollout.py          # batch_rollout, fixed_budget_rollout, fixed_sample_rollout
 │
 ├── scenes/
-│   └── tasks/
-│       ├── push_{accurate,convex_hull,primitive_union}.xml
-│       ├── grasp_reorient_{accurate,convex_hull,primitive_union}.xml
-│       └── peg_in_hole_{accurate,convex_hull,primitive_union}.xml
+│   └── leap/                   # scene variants, named by convention
+│       ├── env_leap_eval_{cube,duck}.xml            # reference fidelity
+│       ├── env_leap_rollout_{obj}_{hand}_{obj}.xml  # degraded planner scenes
+│       └── leap_right_hand{,_eval,_capsules}.xml    # hand fidelity rungs
 │
 ├── experiments/
 │   ├── run_experiment.py       # Main study runner (Conditions A & B)
@@ -100,7 +128,7 @@ contact_study/
 
 ## What neesd to be done next
 1. Test the planner for some manipulation task
-2. Implement and test geometry fidelity	and Physics parameter noise
+2. Test physics parameter noise (geometry fidelity is now wired — see Scene variants)
 
 
 ---
@@ -125,13 +153,13 @@ python experiments/benchmark_speed.py \
     --horizon 50
 ```
 
-### 2. Speed benchmark with degraded geometry + noisy physics (old "M10")
+### 2. Speed benchmark with a higher-fidelity rollout hand + noisy physics (old "M10")
 
 ```bash
 python experiments/benchmark_speed.py \
     --task grasp_reorient \
     --models M4 \
-    --geometry convex_hull \
+    --geometry cube_high_high \
     --friction_sigma 0.2 --mass_sigma 0.1
 ```
 
@@ -157,14 +185,14 @@ python experiments/run_experiment.py \
     --n_samples_b 1024
 ```
 
-### 5. Full study cell: convex-hull geometry + friction noise
+### 5. Full study cell: high-fidelity rollout hand + friction noise
 
 ```bash
 python experiments/run_experiment.py \
     --models M1 M2 M3 M4 \
-    --geometry convex_hull \
+    --geometry cube_high_high \
     --friction_sigma 0.2 --mass_sigma 0.1 \
-    --output results/cell_convex_hull_noisy.json
+    --output results/cell_cube_high_high_noisy.json
 ```
 
 To sweep over the full old-M1..M10 grid, wrap this invocation in an outer shell

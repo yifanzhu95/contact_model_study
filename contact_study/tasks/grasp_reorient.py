@@ -43,8 +43,10 @@ _MJ_CTRL_TO_URDF_JOINT = [
 # conaffinity=0 on every geom) to isolate the actuator/PD model from the contact
 # model in the MuJoCo-vs-Pinocchio eval comparison. Swap back to the plain
 # scene for normal grasping runs (the no-contact scene can't grasp the cube).
-GRASP_SCENE_XML = "leap/env_leap_cube.xml"#"leap_hand/leap_hand_right_w_sites_yoke_removed.xml"
-#GRASP_SCENE_XML = "leap_hand/leap_hand_right_w_sites_yoke_removed_capsule.xml"
+# Scenes are selected by scene variant (see contact_study.tasks.config.
+# SceneVariant): the CLI's --geometry string names the object and the hand /
+# object collision fidelity, and the two templates in TaskConfig below resolve
+# it to a rollout scene and an eval scene.
 
 # Drake PidController gains for the eval hand (position control, mirroring the
 # MuJoCo position servos kp=3.0 kv=0.01). Starting points to tune against Drake's
@@ -153,6 +155,31 @@ _TARGET_POS   = np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.02, 0
 _TARGET_EULER = np.array([0.0, 0.0, 0.0], dtype=np.float64)
 _TARGET_QUAT  = _euler_to_quat(_TARGET_EULER)   # wxyz
 
+# Per-object overrides, keyed by the scene variant's object name. _INIT_QPOS's
+# layout is [16 hand joints, obj pos(3), obj quat wxyz(4)] (nq = 23); the hand
+# block and _INIT_CTRL are shared by every object, so only the trailing
+# 7-element free-body block, the reorientation target, and the "fallen" drop
+# height vary. Missing keys fall back to _OBJ_DEFAULTS (the cube's values), so a
+# new object only declares what actually differs.
+_OBJ_DEFAULTS = {
+    "init_obj_qpos": _INIT_QPOS[16:].copy(),   # settled in-palm pose of the cube
+    "target_pos":    _TARGET_POS,
+    "fallen_z":      0.08,                     # cost-kernel drop threshold
+}
+_OBJ_OVERRIDES: dict[str, dict] = {
+    "cube": {},
+    # TODO(retune): settle the hand in the viewer against
+    # env_leap_rollout_duck_low_high.xml and paste qpos[16:23] here. The duck's
+    # bounding half-extents are (0.0325, 0.0466, 0.0512) about a centre offset
+    # of (0, 0.0032, 0.0086) — i.e. ~1.5 cm taller than the 3.5 cm cube, so it
+    # needs to start higher and its target sits higher too.
+    "duck": {
+        "init_obj_qpos": np.array([0.02, 0.05, 0.10, 1.0, 0.0, 0.0, 0.0]),
+        "target_pos":    np.array([0.02, 0.03, 0.09]),
+        "fallen_z":      0.08,
+    },
+}
+
 # Camera: matches the "top" camera in scenes/leap_hand_old/scene_leap_cube.xml:
 #   <camera name="top" pos="0.2 0.02 0.4" xyaxes="0 1 0  -1 0 0.5"/>
 # MuJoCo xyaxes gives the camera's right (+x) and up (+y) axes in the world
@@ -234,8 +261,11 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
         dp = wp.length(p_obj - p_tip)
         c_contact = c_contact + dp
 
+    # Drop threshold lives in the goal array (slot 7 + n_manip, right after the
+    # per-joint home pose) so it can vary per object — a squatter object would
+    # otherwise read as "fallen" while still held. See _OBJ_DEFAULTS.
     fallen = float(0.0)
-    if qpos[obj_qpos_adr + 2] < 0.08:
+    if qpos[obj_qpos_adr + 2] < goal[7 + n_manip]:
         fallen = 1.0
 
     c_velo = wp.dot(v_obj, v_obj) + wp.dot(w_obj, w_obj)
@@ -369,18 +399,22 @@ class GraspReorientTask(BaseTask):
                 "w_pos_term": 20.0,
                 "w_fallen_term": 0.0,
             },
-            # BaseTask.load() loads this static file directly — no MJCF is
-            # built at task-load time.
-            xml_path_template  = "leap/env_leap_cube.xml",
-            rollout_model_path = str(SCENES_DIR / "leap/env_leap_cube.xml"),
+            # Scene variant -> scene files, by convention. BaseTask.load()
+            # picks the template matching this instance's role and fills it
+            # from the parsed --geometry string; the rollout scene degrades
+            # hand/object collision geometry, the eval scene never does.
+            rollout_xml_template = "leap/env_leap_rollout_{obj}_{hand_acc}_{obj_acc}.xml",
+            eval_xml_template    = "leap/env_leap_eval_{obj}.xml",
+            xml_path_template  = None,   # role templates cover both roles
+            rollout_model_path = None,   # published by _publish_eval_model_paths
             rollout_is_urdf    = False,
             eval_sim           = EvalSimulatorKind.PINOCCHIO,
-            # Drake evals the URDF-derived hand; MuJoCo and Pinocchio both eval
-            # the same MJCF scene the rollouts plan with (GRASP_SCENE_XML).
+            # MuJoCo and Pinocchio eval the resolved eval scene, filled in by
+            # BaseTask._publish_eval_model_paths at load time. Drake's hand is a
+            # URDF that predates the scene-variant convention and has no
+            # per-object form, so it stays an explicit path.
             eval_model_paths   = {
-                EvalSimulatorKind.DRAKE:     str(SCENES_DIR / "leap_hand/leap_hand_right.urdf"),
-                EvalSimulatorKind.MUJOCO:    str(SCENES_DIR / "leap/env_leap_cube_eval.xml"),
-                EvalSimulatorKind.PINOCCHIO: str(SCENES_DIR / "leap/env_leap_cube_eval.xml"),#str(SCENES_DIR / GRASP_SCENE_XML),
+                EvalSimulatorKind.DRAKE: str(SCENES_DIR / "leap_hand/leap_hand_right.urdf"),
             },
             cam_pos            = _CAM_POS,
             cam_rotmat         = _CAM_ROTMAT,
@@ -392,7 +426,26 @@ class GraspReorientTask(BaseTask):
             difficulty         = self.goal_difficulty,
         )
 
-    # load() is inherited from BaseTask: it loads GRASP_SCENE_XML directly via
+    @property
+    def obj_params(self) -> dict:
+        """Per-object init pose / target / drop threshold, resolved from the
+        scene variant's object name against _OBJ_DEFAULTS."""
+        return {**_OBJ_DEFAULTS,
+                **_OBJ_OVERRIDES.get(self.scene_variant.obj, {})}
+
+    def _build_goal_vector(self) -> np.ndarray:
+        """[target_pos(3), target_quat(4), home_state(16), fallen_z(1)].
+
+        The trailing drop threshold is read by grasp_reorient_cost_wp as
+        goal[7 + n_manip]; keep the layout in sync with that kernel.
+        """
+        return np.concatenate([
+            self.target_pos, self.target_quat, self.home_state,
+            [float(self.obj_params["fallen_z"])],
+        ]).astype(np.float32)
+
+    # load() is inherited from BaseTask: it resolves the role's scene template
+    # against the scene variant and loads that file via
     # mujoco.MjModel.from_xml_path, no on-the-fly construction.
 
     def initialize_task(self):
@@ -417,8 +470,9 @@ class GraspReorientTask(BaseTask):
         ], dtype=np.int32)
 
         # Goal pose and canonical (initial-face) orientation come from the
-        # header constants, not a mocap body in the scene.
-        self.target_pos          = _TARGET_POS.copy()
+        # per-object table, not a mocap body in the scene.
+        self.target_pos          = np.asarray(
+            self.obj_params["target_pos"], dtype=np.float64).copy()
         self.target_quat         = _TARGET_QUAT.copy()
         self._canonical_quat     = self.target_quat.copy()
         self._face_index         = 0
@@ -427,9 +481,7 @@ class GraspReorientTask(BaseTask):
         # the joint term penalizes drift away from the commanded grasp pose.
         self.home_state = _INIT_CTRL.copy()
 
-        self.goal_vector = np.concatenate([
-            self.target_pos, self.target_quat, self.home_state
-        ]).astype(np.float32)
+        self.goal_vector = self._build_goal_vector()
 
         self.index_vector_wp = wp.array(self.index_vector, dtype=wp.int32, device="cuda")
         self.goal_vector_wp = wp.array(self.goal_vector, dtype=wp.float32, device="cuda")
@@ -444,16 +496,26 @@ class GraspReorientTask(BaseTask):
         self.weights_wp = wp.array(weights_list, dtype=wp.float32, device="cuda")
 
     def get_inital_state(self, rng: np.random.Generator):
-        # Fixed hand+cube initial state and control, applied to BOTH simulators:
-        # the driver resets the eval sim to (q0, v0) and mirrors it into the
-        # planning MjData, and uses ctrl0 as the initial command for both.
+        # Fixed hand+object initial state and control, applied to BOTH
+        # simulators: the driver resets the eval sim to (q0, v0) and mirrors it
+        # into the planning MjData, and uses ctrl0 as the initial command for
+        # both. The hand block is shared across objects; the trailing free-body
+        # block comes from the per-object table.
         mjm = self.mjm
-        if _INIT_QPOS.shape[0] != mjm.nq or _INIT_CTRL.shape[0] != mjm.nu:
+        n_hand = _INIT_CTRL.shape[0]
+        if mjm.nq != n_hand + 7 or mjm.nu != n_hand:
             raise ValueError(
-                f"_INIT_QPOS ({_INIT_QPOS.shape[0]}) / _INIT_CTRL "
-                f"({_INIT_CTRL.shape[0]}) do not match model nq={mjm.nq} / nu={mjm.nu}."
+                f"Scene {self.scene_variant.raw!r} has nq={mjm.nq} nu={mjm.nu}; "
+                f"this task requires nq={n_hand + 7} ({n_hand} hand joints + one "
+                f"free body) and nu={n_hand}."
             )
-        q0 = _INIT_QPOS.copy()
+        obj_qpos = np.asarray(self.obj_params["init_obj_qpos"], dtype=np.float64)
+        if obj_qpos.shape[0] != 7:
+            raise ValueError(
+                f"init_obj_qpos for object {self.scene_variant.obj!r} has "
+                f"{obj_qpos.shape[0]} elements; expected 7 (pos + wxyz quat)."
+            )
+        q0 = np.concatenate([_INIT_QPOS[:n_hand], obj_qpos])
         v0 = np.zeros(mjm.nv, dtype=np.float64)
         ctrl0 = _INIT_CTRL.copy()
         return q0, v0, ctrl0
@@ -685,9 +747,7 @@ class GraspReorientTask(BaseTask):
             sim.set_goal_quat(new_quat)
 
         self.target_quat = new_quat.copy()
-        self.goal_vector = np.concatenate([
-            self.target_pos, self.target_quat, self.home_state
-        ]).astype(np.float32)
+        self.goal_vector = self._build_goal_vector()
 
         if self.goal_vector_wp is not None:
             self.goal_vector_wp.assign(self.goal_vector)

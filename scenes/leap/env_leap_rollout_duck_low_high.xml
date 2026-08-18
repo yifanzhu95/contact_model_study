@@ -1,0 +1,75 @@
+<mujoco model="right_leap_hand scene">
+  <include file="./leap_right_hand.xml"/>
+
+  <statistic center="0 0 0" extent="0.3"/>
+
+  <visual>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <quality shadowsize="8192"/>
+    <global azimuth="130" elevation="-40" offwidth="1280" offheight="960"/>
+  </visual>
+
+  <asset>
+    <!-- NB: <mesh file> resolves against `meshdir`, which the included hand XML
+    sets to ./leap_hand/assets/ — hence the ../../ hop back out to scenes/leap/. -->
+    <mesh name="rubber_duck_mesh" file="../../objects/rubber_duck.stl" maxhullvert="30"/>
+    <!-- Same mesh at the goal-marker scale (0.43x, matching the cube scene's
+    0.015/0.035 goal-to-object ratio). -->
+    <mesh name="rubber_duck_goal" file="../../objects/rubber_duck.stl" scale="0.43 0.43 0.43"/>
+
+    <mesh name="duck_hull_0" file="../../objects/ducks/rubber_duck_8_hulls/rubber_duck_collision_0.obj" maxhullvert="30"/>
+    <mesh name="duck_hull_1" file="../../objects/ducks/rubber_duck_8_hulls/rubber_duck_collision_1.obj" maxhullvert="30"/>
+    <mesh name="duck_hull_2" file="../../objects/ducks/rubber_duck_8_hulls/rubber_duck_collision_2.obj" maxhullvert="30"/>
+    <mesh name="duck_hull_3" file="../../objects/ducks/rubber_duck_8_hulls/rubber_duck_collision_3.obj" maxhullvert="30"/>
+    <mesh name="duck_hull_4" file="../../objects/ducks/rubber_duck_8_hulls/rubber_duck_collision_4.obj" maxhullvert="30"/>
+    <mesh name="duck_hull_5" file="../../objects/ducks/rubber_duck_8_hulls/rubber_duck_collision_5.obj" maxhullvert="30"/>
+    <mesh name="duck_hull_6" file="../../objects/ducks/rubber_duck_8_hulls/rubber_duck_collision_6.obj" maxhullvert="30"/>
+    <mesh name="duck_hull_7" file="../../objects/ducks/rubber_duck_8_hulls/rubber_duck_collision_7.obj" maxhullvert="30"/>
+
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+      markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0."/>
+  </asset>
+
+  <worldbody>
+    <light directional="true" ambient="0.2 0.2 0.2" diffuse="0.8 0.8 0.8"  castshadow="false" pos="0 1 4" dir="0 0 -1" name="light0"/>
+    <camera name="demo-cam" pos="-0.003 -0.393 0.317" xyaxes="1.000 -0.000 0.000 0.000 0.462 0.887"/>
+
+    <geom name="floor" pos="0 0 -0.1" size="0 0 0.05" type="plane" material="groundplane"/>
+
+    <!-- Reorientation target marker. mocap="true" is REQUIRED: the task's
+    _update_goal rewrites mjd.mocap_quat here each time a goal is sampled, and
+    silently does nothing on a non-mocap body (which is why the older
+    env_leap_duck.xml marker never turned). pos matches the cube scene's proven
+    upper-left inset placement for the eval camera. Visual only. -->
+    <body name="goal" pos="0.005 -0.07 0.1353" quat="1 0 0 0" mocap="true">
+      <geom name="goal_visual" type="mesh" mesh="rubber_duck_goal"
+        contype="0" conaffinity="0" density="0" rgba="0.97 0.6 0 0.6"/>
+    </body>
+
+    <body name="obj" pos="0.02 0.05 0.1">
+        <freejoint name="obj_joint"/>
+        <geom name="obj_hull_0" type="mesh" mesh="duck_hull_0" group="3"
+              friction="0.5" density="458" rgba="0.99 0.28 0.17 1"/>
+        <geom name="obj_hull_1" type="mesh" mesh="duck_hull_1" group="3"
+              friction="0.5" density="458" rgba="0.97 0.12 0.11 1"/>
+        <geom name="obj_hull_2" type="mesh" mesh="duck_hull_2" group="3"
+              friction="0.5" density="458" rgba="0.22 0.60 0.44 1"/>
+        <geom name="obj_hull_3" type="mesh" mesh="duck_hull_3" group="3"
+              friction="0.5" density="458" rgba="0.02 0.90 0.79 1"/>
+        <geom name="obj_hull_4" type="mesh" mesh="duck_hull_4" group="3"
+              friction="0.5" density="458" rgba="0.68 0.94 0.39 1"/>
+        <geom name="obj_hull_5" type="mesh" mesh="duck_hull_5" group="3"
+              friction="0.5" density="458" rgba="0.26 0.99 0.90 1"/>
+        <geom name="obj_hull_6" type="mesh" mesh="duck_hull_6" group="3"
+              friction="0.5" density="458" rgba="0.57 0.80 0.96 1"/>
+        <geom name="obj_hull_7" type="mesh" mesh="duck_hull_7" group="3"
+              friction="0.5" density="458" rgba="0.20 0.58 0.46 1"/>
+        <!-- Visual-only duck (contype/conaffinity 0, density 0), so the render
+        shows the real shape while the hulls above carry all contact and mass. -->
+        <geom name="obj_visual" type="mesh" mesh="rubber_duck_mesh"
+              contype="0" conaffinity="0" density="0" rgba="0.97 0.6 0 1.0"/>
+    </body>
+
+  </worldbody>
+</mujoco>

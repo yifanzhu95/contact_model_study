@@ -2,7 +2,7 @@
 stick balanced upright on top of it (an inverted-pendulum-on-a-tray problem).
 
 Rollout and eval both use the same precompiled MJCF (scenes/balance_stick/
-ur5e_balance_stick.xml, GeometryVariant-free — no {geometry} template). There
+ur5e_balance_stick.xml, scene-variant-free — no {obj} template). There
 is no Drake/URDF counterpart, so eval defaults to MuJoCo.
 
 Cost is built from three terms, evaluated against the "center_of_plate" site

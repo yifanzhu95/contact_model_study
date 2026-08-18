@@ -50,6 +50,94 @@ class EvalSimulatorKind(str, enum.Enum):
     PINOCCHIO = "pinocchio"
 
 
+# ---------------------------------------------------------------------------
+# Scene variants
+# ---------------------------------------------------------------------------
+# A scene variant names three things at once: WHICH object is manipulated, at
+# WHAT collision fidelity the planner's hand is modelled, and at what fidelity
+# the object is. Scene files are then found by convention, so adding an object
+# means dropping in XMLs rather than editing code:
+#
+#   rollout:  scenes/leap/env_leap_rollout_{obj}_{hand_acc}_{obj_acc}.xml
+#   eval:     scenes/leap/env_leap_eval_{obj}.xml
+#
+# The eval scene carries no accuracy suffix on purpose — it IS the reference
+# fidelity. Only the planner's model is degraded, which is the axis the study
+# actually varies.
+#
+# Object names may NOT contain "_" (parse() splits on it).
+DEFAULT_OBJECT   = "cube"
+DEFAULT_HAND_ACC = "low"
+DEFAULT_OBJ_ACC  = "high"
+DEFAULT_SCENE_VARIANT = f"{DEFAULT_OBJECT}_{DEFAULT_HAND_ACC}_{DEFAULT_OBJ_ACC}"
+
+# Values the retired GeometryVariant enum accepted. Every one maps to the
+# default variant, which resolves to exactly the scene files that were loaded
+# before scene variants existed. Kept so the experiments/hpc/*.slurm scripts
+# that still pass `--geometry accurate` keep working untouched; delete this
+# table once those are updated.
+_LEGACY_GEOMETRY_ALIASES = frozenset(
+    {"accurate", "convex_hull", "primitive_union", "linearized"}
+)
+
+
+@dataclass(frozen=True)
+class SceneVariant:
+    """Parsed scene-variant selector, built once per task instance from the
+    `geometry` string that flows in from the CLI.
+
+    The string stays a plain `str` everywhere outside the task layer, so every
+    driver/experiment signature that merely forwards it is unaffected.
+    """
+    obj:      str = DEFAULT_OBJECT
+    hand_acc: str = DEFAULT_HAND_ACC
+    obj_acc:  str = DEFAULT_OBJ_ACC
+    raw:      str = DEFAULT_SCENE_VARIANT   # what the caller actually typed
+
+    @classmethod
+    def parse(cls, s: str | None) -> "SceneVariant":
+        """Accepted forms:
+            None / ""            -> defaults
+            a legacy enum name   -> defaults (raw preserved, so output labels
+                                    built from the raw string keep working)
+            "duck"               -> that object at the default fidelities
+            "duck_low_high"      -> object, hand accuracy, object accuracy
+        """
+        if s is None:
+            return cls()
+        s = str(s).strip()
+        if not s or s in _LEGACY_GEOMETRY_ALIASES:
+            return cls(raw=s or DEFAULT_SCENE_VARIANT)
+
+        parts = s.split("_")
+        if len(parts) == 1:
+            return cls(obj=parts[0], raw=s)
+        if len(parts) == 3:
+            return cls(obj=parts[0], hand_acc=parts[1], obj_acc=parts[2], raw=s)
+        raise ValueError(
+            f"Bad scene variant {s!r}. Expected '<object>' (default fidelities), "
+            f"'<object>_<hand_acc>_<obj_acc>' (e.g. duck_low_high), or a legacy "
+            f"geometry name ({sorted(_LEGACY_GEOMETRY_ALIASES)}). "
+            f"Object names may not contain '_'."
+        )
+
+    def format(self, template: str) -> str:
+        """Fill a scene template.
+
+        Supplies every parsed field plus `geometry` (the raw string), so the
+        role-specific templates and the legacy `{geometry}` templates that
+        push/peg_in_hole still use are both served by one call. A template with
+        no placeholders passes through untouched.
+        """
+        return template.format(
+            obj=self.obj, hand_acc=self.hand_acc, obj_acc=self.obj_acc,
+            geometry=self.raw,
+        )
+
+    def __str__(self) -> str:
+        return self.raw
+
+
 @dataclass
 class TaskSpec:
     """Legacy task spec. Retained for the tasks not migrated to TaskConfig
@@ -77,8 +165,18 @@ class TaskConfig:
     max_steps:          int
     cost_weights:       dict = field(default_factory=dict)
     success_thresholds: dict = field(default_factory=dict)
-    # Legacy MuJoCo geometry-variant template (None for URDF-sourced tasks).
+    # Legacy role-agnostic scene template (None for URDF-sourced tasks). Still
+    # the fallback for every single-scene task; see BaseTask.resolve_scene_path.
     xml_path_template:  str | None = None
+
+    # --- scene templates, filled by SceneVariant.format --------------------
+    # Role-specific MJCF templates. When set, they take precedence over
+    # xml_path_template for that role; leave both None on single-scene tasks.
+    #   rollout_xml_template = "leap/env_leap_rollout_{obj}_{hand_acc}_{obj_acc}.xml"
+    #   eval_xml_template    = "leap/env_leap_eval_{obj}.xml"
+    # The eval scene carries no accuracy suffix: it IS the reference fidelity.
+    rollout_xml_template: str | None = None
+    eval_xml_template:    str | None = None
 
     # --- ROLLOUT (planning) model source -----------------------------------
     # Path to the MJCF the GPU rollouts plan with (precompiled, loaded as-is).

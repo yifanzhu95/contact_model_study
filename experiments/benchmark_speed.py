@@ -34,10 +34,11 @@ import numpy as np
 import warp as wp
 
 import contact_study.tasks  # noqa: F401  (register tasks)
-from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
+from contact_study.contact_models.config import ContactModelConfig
 from contact_study.contact_models import api
 from contact_study.tasks.base import get_task
 from contact_study.utils.physics_noise import PhysicsNoiseParams, apply_physics_noise
+from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
 
 RESULTS_DIR = Path(__file__).parent.parent / "results"
 FIGURES_DIR = Path(__file__).parent.parent / "figures"
@@ -126,15 +127,17 @@ def main():
     parser.add_argument("--n_trials",    type=int, default=10)
 
     # Orthogonal ablation axes
-    parser.add_argument("--geometry", type=str, default="accurate",
-                        choices=[g.value for g in GeometryVariant])
+    parser.add_argument("--geometry", type=str, default=DEFAULT_SCENE_VARIANT,
+                        help="Scene variant: '<object>' or "
+                             "'<object>_<hand_acc>_<obj_acc>' (e.g. duck_low_high). "
+                             "Legacy geometry names map to the default scene.")
     parser.add_argument("--mass_sigma",     type=float, default=0.0)
     parser.add_argument("--inertia_sigma",  type=float, default=0.0)
     parser.add_argument("--friction_sigma", type=float, default=0.0)
     parser.add_argument("--com_sigma",      type=float, default=0.0)
     args = parser.parse_args()
 
-    geometry = GeometryVariant(args.geometry)
+    geometry = args.geometry
     noise = PhysicsNoiseParams(
         mass_sigma     = args.mass_sigma,
         inertia_sigma  = args.inertia_sigma,

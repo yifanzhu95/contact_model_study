@@ -44,7 +44,7 @@ import numpy as np
 import warp as wp
 import mediapy as media
 
-from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
+from contact_study.contact_models.config import ContactModelConfig
 from contact_study.planners.mppi import MPPIController, MPPIConfig
 from contact_study.utils.rollout import fixed_budget_rollout
 from contact_study.utils.physics_noise import PhysicsNoiseParams, apply_physics_noise
@@ -52,8 +52,8 @@ from contact_study.utils.physics_noise import PhysicsNoiseParams, apply_physics_
 # Ensure tasks are registered before calling get_task
 import contact_study.tasks  # noqa: F401
 from contact_study.tasks.base import get_task
+from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
 
-#$from contact_study.contact_models.config import GeometryVariant
 #from .base import BaseTask, ContactComplexity, TaskSpec, register
 
 # ---------------------------------------------------------------------------
@@ -140,7 +140,7 @@ def run(
 
     model_key = BACKEND_TO_MODEL[backend]
     cfg       = MODEL_FACTORIES[model_key]()
-    geo       = GeometryVariant(geometry)
+    geo       = geometry
     noise     = PhysicsNoiseParams(
         mass_sigma     = mass_sigma,
         inertia_sigma  = inertia_sigma,
@@ -386,8 +386,10 @@ def main():
     parser.add_argument("--n_samples",      type=int,   default=256)
     parser.add_argument("--horizon",        type=int,   default=48)
     parser.add_argument("--seed",           type=int,   default=None)
-    parser.add_argument("--geometry",       type=str,   default="accurate",
-                        choices=[g.value for g in GeometryVariant])
+    parser.add_argument("--geometry",       type=str,   default=DEFAULT_SCENE_VARIANT,
+                        help="Scene variant: '<object>' or "
+                             "'<object>_<hand_acc>_<obj_acc>' (e.g. duck_low_high). "
+                             "Legacy geometry names map to the default scene.")
     parser.add_argument("--mass_sigma",     type=float, default=0.0)
     parser.add_argument("--inertia_sigma",  type=float, default=0.0)
     parser.add_argument("--friction_sigma", type=float, default=0.0)
