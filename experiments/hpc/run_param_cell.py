@@ -2,19 +2,28 @@
 
 HPC worker for the cost-weight parameter search — one SLURM array task = one cell.
 
-A "cell" is a single (model, weight set) point of the grid. The SLURM script owns
-the grid: it defines the value lists, maps `$SLURM_ARRAY_TASK_ID` to one value per
-axis, and calls this script with the *selected* model and weight values. This
+A "cell" is a single (model, parameter set) point of the grid. The SLURM script
+owns the grid: it defines the value lists, maps `$SLURM_ARRAY_TASK_ID` to one
+value per axis, and calls this script with the *selected* model and values. This
 worker just runs `--n_episodes` episodes for that one cell via `run_eval_episode`,
 aggregates the success rate, and writes ONE JSON file to `--outdir`
 (`cell_<cell_id>.json`). `combine_results.py` merges those per-cell files.
+
+Grid axes come in two flavours:
+  - cost weights, passed as `--weights name=value ...` (any key of the task's
+    config.cost_weights, including the terminal terms w_quat_term / w_pos_term);
+  - non-weight knobs (--temperature, --noise_sigma, ...), passed normally but
+    *named* in `--sweep` so they are recorded as search axes and become grouping
+    columns in the analysis CSVs.
 
 Every parameter is a command-line input:
 
     python run_param_cell.py \
         --cell_id 4 --outdir results/param_search_run \
         --task grasp_reorient --model M2 --n_episodes 5 \
-        --weights w_quat=20 w_pos_x=15 w_pos_y=15 w_pos_z=15 w_contact=10 w_joint=0.05
+        --weights w_quat=20 w_pos_x=15 w_pos_y=15 w_pos_z=15 w_contact=10 \
+                  w_joint=0.05 w_quat_term=600 w_pos_term=1000 \
+        --temperature 1.0 --noise_sigma 0.025 --sweep temperature noise_sigma
 """
 
 from __future__ import annotations
@@ -44,6 +53,15 @@ from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Non-weight knobs that may be named in --sweep, i.e. treated as search axes
+# rather than fixed settings. They are still passed via their own flags; --sweep
+# only records which of them the grid varies.
+SWEEPABLE_KNOBS = (
+    "n_samples", "time_horizon", "step_time", "temperature", "noise_sigma",
+    "delta", "resample_interval", "plan_budget_ms", "eval_substeps", "settle",
+)
+
+
 def parse_overrides(tokens: list[str]) -> dict[str, float]:
     """Parse `name=value` tokens into an ordered {name: value} override dict.
 
@@ -59,9 +77,30 @@ def parse_overrides(tokens: list[str]) -> dict[str, float]:
     return overrides
 
 
-def combo_label(model_key: str, overrides: dict[str, float]) -> str:
-    """Short label encoding model + overridden weight values."""
-    parts = [f"{k.lstrip('w_')}={v:g}" for k, v in overrides.items()]
+def build_axes(overrides: dict[str, float], args) -> dict[str, float]:
+    """All search axes for this cell: weight overrides + the swept knobs.
+
+    Weights first (in --weights order), then the --sweep names in the order
+    given; the analysis scripts use this dict both to group cells into rows and
+    to order the CSV's leading columns."""
+    axes = dict(overrides)
+    for name in args.sweep:
+        if name not in SWEEPABLE_KNOBS:
+            raise ValueError(
+                f"--sweep {name!r} is not a sweepable knob; expected one of "
+                f"{', '.join(SWEEPABLE_KNOBS)}")
+        if name in axes:
+            raise ValueError(f"--sweep {name!r} collides with a --weights key")
+        axes[name] = getattr(args, name)
+    return axes
+
+
+def combo_label(model_key: str, axes: dict[str, float]) -> str:
+    """Short label encoding model + the value of every search axis."""
+    parts = []
+    for k, v in axes.items():
+        short = k[2:] if k.startswith("w_") else k
+        parts.append(f"{short}={v:g}" if isinstance(v, (int, float)) else f"{short}={v}")
     return f"{model_key}__" + "_".join(parts)
 
 
@@ -69,13 +108,13 @@ def combo_label(model_key: str, overrides: dict[str, float]) -> str:
 # Single-cell runner
 # ---------------------------------------------------------------------------
 
-def run_cell(cell_id: int, overrides: dict, args) -> dict:
+def run_cell(cell_id: int, overrides: dict, axes: dict, args) -> dict:
     """Run one grid cell (n_episodes episodes) and return the result dict."""
     geometry = args.geometry
     eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
     cfg      = MODEL_FACTORIES[args.model]()
 
-    label = combo_label(args.model, overrides)
+    label = combo_label(args.model, axes)
 
     # Peek at the rollout task once for default weights + dimensions.
     peek_task       = load_rollout_task(args.task, geometry)
@@ -93,7 +132,10 @@ def run_cell(cell_id: int, overrides: dict, args) -> dict:
     print(f"  task={args.task}  model={args.model}  n_episodes={args.n_episodes}")
     print(f"  rollout_dt={rollout_dt*1e3:.3f}ms  step_time={args.step_time:g}s -> "
           f"{substeps} substeps  time_horizon={args.time_horizon:g}s -> {horizon} steps")
-    print(f"  overrides={overrides}")
+    print(f"  weight overrides={overrides}")
+    swept_knobs = {k: v for k, v in axes.items() if k not in overrides}
+    if swept_knobs:
+        print(f"  swept knobs     ={swept_knobs}")
 
     # Reproducible per-episode seeds derived from the base seed AND the cell id,
     # so different cells never share a seed but a run is repeatable.
@@ -167,6 +209,10 @@ def run_cell(cell_id: int, overrides: dict, args) -> dict:
         "model":                 args.model,
         "label":                 label,
         "overrides":             overrides,
+        # Every grid axis (weights + swept knobs) — what the analysis scripts
+        # group rows by. "overrides" stays weights-only for combine_results.py.
+        "axes":                  axes,
+        "swept_knobs":           list(args.sweep),
         "full_weights":          full_weights,
         "n_episodes":            len(episodes),
         "n_success":             n_success,
@@ -209,7 +255,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model",   type=str, default="M2", choices=list(MODEL_FACTORIES),
                    help="Contact model for this cell.")
     p.add_argument("--weights", nargs="+", default=[],
-                   help="Weight overrides for this cell as name=value tokens.")
+                   help="Weight overrides for this cell as name=value tokens "
+                        "(any key of the task's cost_weights, terminal terms "
+                        "w_quat_term / w_pos_term included).")
+    p.add_argument("--sweep", nargs="*", default=[], choices=SWEEPABLE_KNOBS,
+                   metavar="KNOB",
+                   help="Names of non-weight knobs this grid varies (e.g. "
+                        "--sweep temperature noise_sigma). Their values still come "
+                        "from their own flags; naming them here records them as "
+                        "search axes so the analysis CSVs group by them.")
     p.add_argument("--cell_id", type=int, default=0,
                    help="Cell index (e.g. $SLURM_ARRAY_TASK_ID); names the output file.")
     p.add_argument("--n_episodes", type=int, default=5,
@@ -223,8 +277,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "control steps).")
     p.add_argument("--temperature",   type=float, default=1.0)
     p.add_argument("--noise_sigma",   type=float, default=0.01)
-    p.add_argument("--delta",         type=float, default=0.1,
-                   help="Per-step MPPI delta clip magnitude (action units).")
+    p.add_argument("--delta",         type=float, default=None,
+                   help="Per-step MPPI delta clip magnitude (action units); "
+                        "default disables the clamp, matching run_eval_episode.py.")
     p.add_argument("--step_time",     type=float, default=0.032,
                    help="Control-step duration in SECONDS, i.e. the control-frequency "
                         "knob (quantized down to whole rollout steps).")
@@ -257,12 +312,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main():
     args      = build_parser().parse_args()
     overrides = parse_overrides(args.weights)
+    axes      = build_axes(overrides, args)
 
     wp.init()
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    record   = run_cell(args.cell_id, overrides, args)
+    record   = run_cell(args.cell_id, overrides, axes, args)
     out_path = outdir / f"cell_{args.cell_id:05d}.json"
     with open(out_path, "w") as f:
         json.dump(record, f, indent=2)

@@ -54,7 +54,26 @@ _MJ_CTRL_TO_URDF_JOINT = [
 _PID_KP = 3.0
 _PID_KI = 0.0
 _PID_KD = 0.01
+# Passive joint damping. MUST track <default><joint damping> in the leap hand MJCFs
+# (scenes/leap/leap_right_hand{,_eval}.xml): MuJoCo brakes with damping + the position
+# actuator's kv (0.3 + 0.01), and Pinocchio — whose aba ignores model.damping — reaches
+# the same 0.31 through _PIN_KD below. Changing one without the other desyncs the sims.
 _JOINT_DAMPING = 0.3#0.1 #this is maybe too low it was 0.1 befor
+# Rotor inertia on the 16 hand joints. MUST equal <default><joint armature> in the
+# leap hand MJCFs, which is where MuJoCo reads its dof_armature from.
+#
+# It has to be injected here as well, rather than inherited from that MJCF, because
+# Pinocchio LOSES it on the way in: buildModelsFromMJCF does parse it correctly (a
+# freshly-parsed hand subtree reads model.armature == 0.001), but pin.appendModel —
+# which merge_models uses to stitch the split single-root subtrees back together —
+# drops model.armature while preserving model.damping. Verified on this scene: the
+# parsed part has armature 0.001, the merged model has 0.0.
+#
+# So: XML feeds MuJoCo, this constant feeds Pinocchio, and the two must be kept equal
+# by hand. If merge_models is ever fixed to carry armature across, set this to 0.0 —
+# PinocchioSimulator.__init__ *adds* (model.armature[ctrl] += pid.armature) and would
+# otherwise double-count. tasks/balance_stick.py and tasks/actuator_test.py carry the
+# same workaround (_PIN_ARMATURE) against the same appendModel behavior.
 _ARMATURE = 0.001
 
 # Pinocchio eval: mirror tests/replay_pinocchio_controls.py's simulation scheme —
@@ -114,21 +133,20 @@ _DRAKE_PID_EFFORT = 100.0
 #     0.965926, 0.0, 0.258819, 0.0,
 # ], dtype=np.float64)
 _INIT_QPOS = np.array([
-5.74299632e-01, -5.68530386e-01,  9.13531510e-01,  5.73948062e-01,
- -9.82115272e-03, -8.35144626e-02,  7.03221454e-01,  1.01842742e+00,
-  5.88681352e-01,  6.10758737e-01,  9.26063146e-01,  6.10230013e-01,
-  7.00238917e-01,  1.45217393e+00,  1.33872725e+00,  8.68901913e-01,
-  2.32854961e-02,  3.42861479e-02,  7.92305817e-02,  9.99977455e-01,
- -9.40658784e-04, -4.87316782e-03,  4.52301601e-03
+7.41953443e-01, -5.14095650e-01,  6.97705793e-01,  5.73857360e-01,
+  3.11686592e-01, -2.08901684e-05,  7.04119781e-01,  1.01887562e+00,
+  7.14271347e-01,  2.63610945e-01,  6.97700993e-01,  6.10100133e-01,
+  7.00288255e-01,  1.52604395e+00,  1.33871871e+00,  8.68983906e-01,
+  1.70374863e-02,  3.65435775e-02,  8.36225067e-02 + 0.01,  
+  1, 0, 0, 0
 ], dtype=np.float64)
 
 
 _INIT_CTRL = np.array([
-0.60184  , -0.568012 ,  0.916951 ,  0.573897 , -0.0191225, -0.0837503,
-  0.709056 ,  1.01884  ,  0.61456  ,  0.610365 ,  0.929305 ,  0.610097 ,
-  0.69912  ,  1.45882  ,  1.33179  ,  0.8657
+0.7672  , -0.51303 ,  0.701455,  0.573897,  0.33472 ,  0.      ,
+  0.709056,  1.01884 ,  0.74176 ,  0.26175 ,  0.701455,  0.610097,
+  0.69912 ,  1.53211 ,  1.33179 ,  0.8657
 ], dtype=np.float64)
-
 
 def _axis_angle_quat(axis, angle: float) -> np.ndarray:
     """wxyz quaternion for a rotation of `angle` (rad) about `axis` (unit vector)."""
@@ -151,7 +169,7 @@ def _euler_to_quat(euler) -> np.ndarray:
 
 # Goal/target pose for the cube reorientation, defined here rather than read
 # from a mocap body in the scene. pos + intrinsic-xyz Euler (rad).
-_TARGET_POS   = np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
+_TARGET_POS   = np.array([0.02, 0.03, 0.09], dtype=np.float64)#np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
 _TARGET_EULER = np.array([0.0, 0.0, 0.0], dtype=np.float64)
 _TARGET_QUAT  = _euler_to_quat(_TARGET_EULER)   # wxyz
 
@@ -230,8 +248,8 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
     c_pos_y = wp.abs(pos_diff[1])
     c_pos_z = wp.abs(pos_diff[2])
     
-    c_pos = c_pos_x + c_pos_y + c_pos_z
-    # c_pos = wp.norm_l2(pos_diff) - 0.01
+    #c_pos = c_pos_x + c_pos_y + c_pos_z
+    c_pos = wp.norm_l2(pos_diff) 
     # if c_pos < 0.0:
     #     c_pos = 0.0
 
@@ -380,7 +398,7 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 2000,
+            max_steps          = 4000,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # NOTE: insertion order must match the weights[...] indexing in
             # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI
@@ -389,14 +407,14 @@ class GraspReorientTask(BaseTask):
                 "w_quat": 20.0,#100.0,
                 "w_pos_x": 7.50,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
                 "w_pos_y": 15.0,#80.0,    #Y is across the fingers
-                "w_pos_z": 7.50,#15.0,
+                "w_pos_z": 5.0,#15.0,
                 "w_velo": 0.0,
-                "w_contact": 12.50,#12.50,
-                "w_joint": 0.60,
+                "w_contact": 15.0,#12.50,
+                "w_joint": 4.0,
                 "w_joint_velo": 0.0,
                 "w_fallen": 200.0,
-                "w_quat_term": 10.0,
-                "w_pos_term": 20.0,
+                "w_quat_term": 200.0,#500.0,
+                "w_pos_term": 200.0,
                 "w_fallen_term": 0.0,
             },
             # Scene variant -> scene files, by convention. BaseTask.load()

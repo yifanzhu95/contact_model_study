@@ -231,8 +231,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "sweep); quantized down to whole control steps.")
     p.add_argument("--temperature",   type=float, default=0.01)
     p.add_argument("--noise_sigma",   type=float, default=0.001)
-    p.add_argument("--delta",         type=float, default=0.1,
-                   help="Per-step MPPI delta clip magnitude (action units).")
+    p.add_argument("--delta",         type=float, default=None,
+                   help="Per-step MPPI delta clip magnitude (action units); "
+                        "default disables the clamp, matching run_eval_episode.py.")
     p.add_argument("--eval_substeps", type=int,   default=None,
                    help="Eval steps per rollout step (default: task config).")
     p.add_argument("--eval_sim",      type=str,   default="none",

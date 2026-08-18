@@ -13,7 +13,7 @@ writes ONE JSON to `--outdir` in the exact format the sweep plotters read
     python run_num_rollout_cell.py \
         --outdir results/num_rollout_eval_run \
         --task grasp_reorient --model M2 --n_samples 1024 \
-        --n_episodes 5 --delta 0.1
+        --n_episodes 5
 """
 
 from __future__ import annotations
@@ -147,8 +147,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "control steps).")
     p.add_argument("--temperature",   type=float, default=10.0)
     p.add_argument("--noise_sigma",   type=float, default=0.01)
-    p.add_argument("--delta",         type=float, default=0.1,
-                   help="Per-step MPPI delta clip magnitude (action units).")
+    p.add_argument("--delta",         type=float, default=None,
+                   help="Per-step MPPI delta clip magnitude (action units); "
+                        "default disables the clamp, matching run_eval_episode.py.")
     p.add_argument("--step_time",     type=float, default=0.032,
                    help="Control-step duration in SECONDS, i.e. the control-frequency "
                         "knob (quantized down to whole rollout steps).")
