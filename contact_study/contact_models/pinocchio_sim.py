@@ -48,6 +48,11 @@ from contact_study.sim.base import (
 # and excluded from all collision pairs.
 _FLOOR_HALFEXTENT_THRESH = 0.5
 
+# Debug flag: when True, each substep prints every detected contact's coal
+# penetration depth (m) and whether the ADMM solve converged. Off by default —
+# this fires every substep, so it is a lot of stdout at real step rates.
+PRINT_CONTACT_DEBUG = False
+
 
 # ---------------------------------------------------------------------------
 # Channel / actuation configuration (mirrors drake_sim.py)
@@ -137,7 +142,7 @@ class PinocchioJointConstraintConfig:
         timestep (bound = frictionloss * dt) when the constraint is built; passing
         the raw torque as the bound would lock the joint permanently.
     """
-    enforce_limits: bool = False
+    enforce_limits: bool = False #IDK IF THIS MAKES SENSE TO KEPP ON TBH.
     limit_margin: float = 0.0
     frictionloss: "dict[str, float] | None" = None
 
@@ -149,7 +154,17 @@ class PinocchioContactConfig:
     native Baumgarte corrector: its drift gets a push-back Kp*position_error/dt
     (+ Kd*velocity_error/dt), read straight off the constraint in the solve loop
     (mirroring results/g1-constraint-simulation.py). Kp=0 disables it."""
+    # Fallback sliding-friction coefficient, used for a contact pair whose geoms are
+    # not in the MJCF friction map (see mjcf_geom_friction) and for EVERY pair when
+    # use_mjcf_friction is False. Not the normal path — see below.
     friction: float = 0.5
+    # Take each contact pair's friction from the scene's own <geom friction>, combined
+    # the way MuJoCo combines it (mu = max(mu_a, mu_b)), instead of applying `friction`
+    # uniformly. The LEAP scenes declare friction="0.5" on the 4 fingertips and the
+    # cube only, leaving the palm/phalanx boxes and the floor at MuJoCo's 1.0 default,
+    # so a single global 0.5 made every non-tip contact half as sticky as it is in the
+    # MuJoCo rollout. Set False to go back to the flat `friction` value.
+    use_mjcf_friction: bool = True
     use_mesh_geoms: bool = True
     # Replace each triangle-mesh (BVH) collision geom with its convex hull so coal
     # uses the analytic convex-convex (GJK/EPA) contact path — one stable normal +
@@ -159,9 +174,9 @@ class PinocchioContactConfig:
     # triangulation noise, so the hull reproduces their shape almost exactly. Only
     # affects collision geoms; the visual meshes are untouched.
     use_convex_tips: bool = True
-    baumgarte_kp: float = 100.0
-    baumgarte_kd: float = 0.0
-    admm_max_iterations: int = 1000
+    baumgarte_kp: float = 10.0 #1000.0
+    baumgarte_kd: float = 1.0 #10.0
+    admm_max_iterations: int = 50000 #50000 #500000
 
 
 # ---------------------------------------------------------------------------
@@ -519,6 +534,58 @@ def parse_mjcf_excludes(mjcf_path) -> set[frozenset[str]]:
     }
 
 
+def mjcf_geom_friction(mjcf_path) -> dict[str, float]:
+    """{geom name -> sliding-friction coefficient}, exactly as MuJoCo loads it.
+
+    The values are read by compiling the MJCF with MuJoCo itself and taking
+    mjm.geom_friction[:, 0], rather than walking the XML: friction usually arrives
+    through a <default> class (the LEAP tips get theirs from `class="tip"`) or is
+    left off entirely so MuJoCo's own 1.0 default applies, and re-implementing that
+    resolution over ElementTree is exactly the kind of near-miss this map exists to
+    avoid. Same reasoning as tasks/grasp_reorient.py's frictionloss handling.
+
+    Only column 0 (slide) is returned: every leap geom is condim=3, so MuJoCo's
+    torsional/rolling coefficients are inert, and a Pinocchio PointContactConstraint
+    is a 3-D (normal + 2 tangent) contact with a single scalar mu.
+
+    This is the one place this module touches MuJoCo, hence the local import — the
+    module otherwise stays importable on machines without a full MuJoCo/Pinocchio
+    stack. Returns {} if the model cannot be compiled, so callers fall back to the
+    flat PinocchioContactConfig.friction rather than failing the episode."""
+    try:
+        import mujoco
+        mjm = mujoco.MjModel.from_xml_path(str(mjcf_path))
+    except Exception:
+        return {}
+    out = {}
+    for gid in range(mjm.ngeom):
+        name = mujoco.mj_id2name(mjm, mujoco.mjtObj.mjOBJ_GEOM, gid)
+        if name:
+            out[name] = float(mjm.geom_friction[gid, 0])
+    return out
+
+
+def collision_pair_friction(geom_model, friction_map, default):
+    """Per-collision-pair sliding friction, indexed the same way the pairs are
+    (entry k belongs to geom_model.collisionPairs[k], which is also the index
+    GeometryData.collisionResults uses in _detect_contacts).
+
+    Combines the two geoms' coefficients with MuJoCo's own rule for a contact that
+    has no explicit <pair> override: mu = max(mu_a, mu_b) (mj_contactParam takes the
+    element-wise maximum of the two geom_friction rows). The leap scenes declare no
+    <pair>, so this reproduces MuJoCo's effective friction exactly. Geoms missing
+    from the map fall back to `default`.
+
+    Call AFTER build_collision_pairs (the pair list must be final) and after
+    convexify_mesh_geoms (which replaces geometry but preserves names)."""
+    mus = np.empty(len(geom_model.collisionPairs), dtype=float)
+    for k, cp in enumerate(geom_model.collisionPairs):
+        a = geom_model.geometryObjects[cp.first].name
+        b = geom_model.geometryObjects[cp.second].name
+        mus[k] = max(friction_map.get(a, default), friction_map.get(b, default))
+    return mus
+
+
 def parse_body_box_geoms(mjcf_path, body_name):
     """Read the box <geom> children of the named <body> as
     (half_extents[3], local_pos[3], local_quat_wxyz[4], rgba[4]) tuples, so the
@@ -710,12 +777,22 @@ class PinocchioSimulator(EvalSimulator):
             convexify_mesh_geoms(coll)
         excludes = parse_mjcf_excludes(model_path)
         build_collision_pairs(pin, model, coll, self._contact_cfg.use_mesh_geoms, excludes)
+        # Per-pair sliding friction, taken from the scene's own <geom friction> and
+        # combined with MuJoCo's max() rule, so the eval sim uses the SAME coefficients
+        # the MuJoCo rollout does instead of one flat value everywhere. Indexed by
+        # collision-pair index, which is what _detect_contacts iterates over. Built
+        # here, after build_collision_pairs has finalized the pair list.
+        fmap = (mjcf_geom_friction(model_path)
+                if self._contact_cfg.use_mjcf_friction else {})
+        self._pair_friction = collision_pair_friction(
+            coll, fmap, self._contact_cfg.friction
+        )
         self._geom_data = pin.GeometryData(coll)
         # Ask coal to populate the contact manifold (normal + witness points) per
         # pair; without this the collision results carry NaN normals.
         for req in self._geom_data.collisionRequests:
             req.enable_contact = True
-            req.num_max_contacts = 4
+            req.num_max_contacts = 32
 
         # Resolve channel joint names -> ids.
         self._joint_jid = {ch.pin_name: model.getJointId(ch.pin_name)
@@ -806,7 +883,7 @@ class PinocchioSimulator(EvalSimulator):
         s.absolute_complementarity_tol = 1e-10
         s.relative_complementarity_tol = 1e-12
         s.admm_update_rule = pin.ADMMUpdateRule.SPECTRAL
-        s.anderson_capacity = 10
+        s.anderson_capacity = 100
         s.admm_proximal_rule = pin.ADMMProximalRule.AUTOMATIC
         s.stat_record = False
         s.solve_ncp = True
@@ -818,6 +895,19 @@ class PinocchioSimulator(EvalSimulator):
         self._q = pin.neutral(model)
         self._v = np.zeros(model.nv)
         self._q_des = self._q.copy()
+
+        # Cumulative contact/solver diagnostics, updated every substep regardless
+        # of PRINT_CONTACT_DEBUG (that flag only controls the per-substep print;
+        # this is cheap running bookkeeping for callers that want to inspect it
+        # programmatically, e.g. to detect penetration-driven sticking over an
+        # episode without parsing stdout). See diagnostics().
+        self._diag = {
+            "n_substeps": 0,
+            "n_contact_substeps": 0,
+            "max_n_contacts": 0,
+            "min_penetration_m": 0.0,   # most negative (deepest) seen; 0 = never penetrated
+            "n_nonconverged": 0,
+        }
 
         # Rendering: frames are captured from inside step() on the SIM clock (one
         # per 1/cam_fps of simulated time, at the substep nearest each deadline),
@@ -1051,6 +1141,7 @@ class PinocchioSimulator(EvalSimulator):
 
         baumgarte = pin.BaumgarteCorrectorParameters(cfg.baumgarte_kp, cfg.baumgarte_kd)
         cms = []
+        penetrations = []
         for k in range(len(gm.collisionPairs)):
             cr = gd.collisionResults[k]
             if not cr.isCollision():
@@ -1080,9 +1171,13 @@ class PinocchioSimulator(EvalSimulator):
                 n_contacts = 0
             for i in range(n_contacts):
                 try:
-                    p = np.asarray(cr.getContact(i).pos, dtype=float)
+                    contact_i = cr.getContact(i)
+                    p = np.asarray(contact_i.pos, dtype=float)
                     if np.all(np.isfinite(p)):  # box-box manifolds can return NaN
                         world_points.append(p)
+                        pen = float(contact_i.penetration_depth)
+                        if np.isfinite(pen):
+                            penetrations.append(pen)
                 except Exception:
                     pass
             if not world_points:
@@ -1093,10 +1188,27 @@ class PinocchioSimulator(EvalSimulator):
                 plc1 = data.oMi[j1].inverse() * M_world
                 plc2 = data.oMi[j2].inverse() * M_world
                 cm = pin.PointContactConstraintModel(model, j1, plc1, j2, plc2)
-                cm.setFriction(cfg.friction)
+                # This pair's own mu (all contact points on one pair share it).
+                cm.setFriction(float(self._pair_friction[k]))
                 cm.setBaumgarteCorrectorParameters(baumgarte)
                 cms.append(pin.ConstraintModel(cm))
         cds = [cm.createData() for cm in cms]
+
+        # Diagnostics: penetration_depth is coal's SIGNED depth — negative means
+        # overlapping (more negative = deeper penetration), 0 = exactly touching.
+        # So the "worst" contact this substep is min(), not max().
+        if penetrations:
+            self._diag["n_contact_substeps"] += 1
+            self._diag["max_n_contacts"] = max(self._diag["max_n_contacts"], len(penetrations))
+            self._diag["min_penetration_m"] = min(self._diag["min_penetration_m"], min(penetrations))
+        if PRINT_CONTACT_DEBUG:
+            if penetrations:
+                print(f"[pinocchio_sim] contacts={len(penetrations)} "
+                      f"penetration(m): worst={min(penetrations):.6f} "
+                      f"mean={sum(penetrations) / len(penetrations):.6f} "
+                      f"all={['%.6f' % p for p in penetrations]}")
+            else:
+                print("[pinocchio_sim] contacts=0 penetration(m): n/a")
         return cms, cds
 
     def _joints_at_limit(self, q):
@@ -1179,6 +1291,7 @@ class PinocchioSimulator(EvalSimulator):
         model, data = self._model, self._data
         q, v = self._q, self._v
         dt = self._timestep
+        self._diag["n_substeps"] += 1
         cms, cds = self._detect_contacts()
         # Contacts occupy the leading rows; the Baumgarte pass below relies on it.
         n_contact = len(cms)
@@ -1252,7 +1365,12 @@ class PinocchioSimulator(EvalSimulator):
                 g[idx:idx + size] += kp_b * cd.extract().constraint_position_error / dt
             idx += size
 
-        self._solver.solve(delassus, g, cms, cds, self._settings, self._result)
+        converged = self._solver.solve(delassus, g, cms, cds, self._settings, self._result)
+        if not converged:
+            self._diag["n_nonconverged"] += 1
+        if PRINT_CONTACT_DEBUG:
+            print(f"[pinocchio_sim] ADMM converged={converged} "
+                  f"iterations={self._result.iterations}")
         forces = (1.0 / dt) * np.asarray(self._result.retrieveConstraintImpulses()).ravel()
         v_new = v + dt * pin.aba(model, data, q, v, tau + Jc.T @ forces, self._fext)
         self._q = pin.integrate(model, q, v_new * dt)
@@ -1317,3 +1435,10 @@ class PinocchioSimulator(EvalSimulator):
     @property
     def timestep(self) -> float:
         return self._timestep
+
+    def diagnostics(self) -> dict:
+        """Cumulative contact/ADMM stats since __init__ (see self._diag). Cheap
+        running bookkeeping, always on, independent of PRINT_CONTACT_DEBUG —
+        for callers that want to check e.g. whether penetration/non-convergence
+        occurred over an episode without parsing stdout."""
+        return dict(self._diag)

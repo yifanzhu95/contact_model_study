@@ -108,7 +108,6 @@ import warp as wp
 
 import contact_study.tasks  # noqa: F401 — registers all tasks
 
-from contact_study.contact_models.config import GeometryVariant
 from contact_study.evaluation.metrics import (
     EpisodeResult, aggregate_episodes,
 )
@@ -119,6 +118,7 @@ from contact_study.tasks.config import EvalSimulatorKind, TaskRole
 from contact_study.drivers.run_eval_episode import (
     load_rollout_task, resolve_mppi_schedule, MODEL_FACTORIES,
 )
+from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +399,7 @@ def _stats(v: list[float]) -> dict:
 
 
 def run_cell(args):
-    geometry = GeometryVariant(args.geometry)
+    geometry = args.geometry
     eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
     contact_cfg = MODEL_FACTORIES[args.model]()
 
@@ -431,6 +431,8 @@ def run_cell(args):
           f"shrinkage={args.kl_shrinkage:g}, headline={args.kl_direction}, "
           f"sync_reference_mean={args.sync_reference_mean}, execute={args.execute}")
 
+    delta_range = (-args.delta, args.delta) if args.delta is not None else (None, None)
+
     def make_cfg(n_samples, n_iterations, seed):
         return MPPIConfig(
             n_samples      = n_samples,
@@ -442,7 +444,7 @@ def run_cell(args):
             warm_start     = False,
             resample_interval = 1,
             use_full_graph = args.use_full_graph,
-            delta_range    = (-args.delta, args.delta),
+            delta_range    = delta_range,
             nconmax        = args.nconmax,
             njmax          = args.njmax,
             seed           = seed,
@@ -619,15 +621,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--step_time",    type=float, default=0.032)
     p.add_argument("--temperature",  type=float, default=0.01)
     p.add_argument("--noise_sigma",  type=float, default=0.02)
-    p.add_argument("--delta",        type=float, default=0.1)
+    p.add_argument("--delta",        type=float, default=None,
+                   help="Per-step MPPI delta clip magnitude (action units); "
+                        "default disables the clamp, matching run_eval_episode.py.")
     p.add_argument("--max_steps",    type=int,   default=None,
                    help="Override the task's max_steps (cost control).")
     p.add_argument("--eval_substeps", type=int,  default=None)
     p.add_argument("--eval_sim",     type=str,   default="none",
                    choices=["none", "mujoco", "drake", "pinocchio"])
     p.add_argument("--settle",       type=float, default=1.0)
-    p.add_argument("--geometry",     type=str,   default="accurate",
-                   choices=[g.value for g in GeometryVariant])
+    p.add_argument("--geometry",     type=str,   default=DEFAULT_SCENE_VARIANT,
+                   help="Scene variant: '<object>' or "
+                        "'<object>_<hand_acc>_<obj_acc>' (e.g. duck_low_high). "
+                        "Legacy geometry names map to the default scene.")
     p.add_argument("--nconmax",      type=int,   default=200)
     p.add_argument("--njmax",        type=int,   default=500)
     p.add_argument("--use_full_graph",

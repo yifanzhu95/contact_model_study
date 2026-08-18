@@ -48,12 +48,13 @@ import mediapy as media
 
 import contact_study.tasks  # noqa: F401 — registers all tasks
 
-from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
+from contact_study.contact_models.config import ContactModelConfig
 from contact_study.evaluation.metrics import EpisodeResult
 from contact_study.planners.mppi import MPPIController, MPPIConfig
 from contact_study.tasks.base import get_task
 from contact_study.utils.physics_noise import PhysicsNoiseParams, apply_physics_noise
 from contact_study.utils.rollout import fixed_budget_rollout
+from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
 
 # ---------------------------------------------------------------------------
 # Contact model factory table
@@ -283,7 +284,7 @@ def run_episode(
 
 def load_task(
     task_name: str,
-    geometry:  GeometryVariant,
+    geometry:  str,
     noise:     PhysicsNoiseParams,
     rng:       np.random.Generator,
 ):
@@ -316,8 +317,10 @@ def main():
     parser.add_argument("--temperature",    type=float, default=0.05)
     parser.add_argument("--noise_sigma",    type=float, default=0.01)
     parser.add_argument("--seed",           type=int,   default=None)
-    parser.add_argument("--geometry",       type=str,   default="accurate",
-                        choices=[g.value for g in GeometryVariant])
+    parser.add_argument("--geometry",       type=str,   default=DEFAULT_SCENE_VARIANT,
+                        help="Scene variant: '<object>' or "
+                             "'<object>_<hand_acc>_<obj_acc>' (e.g. duck_low_high). "
+                             "Legacy geometry names map to the default scene.")
     parser.add_argument("--mass_sigma",     type=float, default=0.0)
     parser.add_argument("--inertia_sigma",  type=float, default=0.0)
     parser.add_argument("--friction_sigma", type=float, default=0.0)
@@ -341,7 +344,7 @@ def main():
         friction_sigma = args.friction_sigma,
         com_sigma      = args.com_sigma,
     )
-    geometry = GeometryVariant(args.geometry)
+    geometry = args.geometry
 
     backends = (
         ["mjwarp", "mjwarp_hard", "comfree", "xpbd"]

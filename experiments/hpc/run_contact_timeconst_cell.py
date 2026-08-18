@@ -64,7 +64,6 @@ import warp as wp
 
 import contact_study.tasks  # noqa: F401 — registers all tasks
 
-from contact_study.contact_models.config import GeometryVariant
 from contact_study.evaluation.metrics import aggregate_episodes, save_results
 from contact_study.planners.mppi import MPPIConfig
 from contact_study.tasks.config import EvalSimulatorKind
@@ -72,6 +71,7 @@ from contact_study.tasks.config import EvalSimulatorKind
 from contact_study.drivers.run_eval_episode import (
     run_eval_episode, load_rollout_task, resolve_mppi_schedule, MODEL_FACTORIES,
 )
+from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ from contact_study.drivers.run_eval_episode import (
 # ---------------------------------------------------------------------------
 def run_cell(args):
     """Run one (model, timeconst) cell -> (AggregatedResult, label, schedule dict)."""
-    geometry = GeometryVariant(args.geometry)
+    geometry = args.geometry
     eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
 
     # Stamp the swept contact stiffness onto the config once; put_model re-reads
@@ -139,6 +139,7 @@ def run_cell(args):
         ep_seed = int(episode_seeds[ep].generate_state(1)[0])
         rng     = np.random.default_rng(episode_seeds[ep])
 
+        delta_range = (-args.delta, args.delta) if args.delta is not None else (None, None)
         mppi_cfg = MPPIConfig(
             n_samples      = args.n_samples,
             time_horizon   = args.time_horizon,
@@ -148,7 +149,7 @@ def run_cell(args):
             warm_start     = False,
             resample_interval = 1,
             use_full_graph = args.use_full_graph,
-            delta_range    = (-args.delta, args.delta),
+            delta_range    = delta_range,
             nconmax        = args.nconmax,
             njmax          = args.njmax,
             seed           = ep_seed,
@@ -229,15 +230,18 @@ def build_parser() -> argparse.ArgumentParser:
                         "the sweep; the nominal period used by the other sweeps).")
     p.add_argument("--temperature",   type=float, default=0.01)
     p.add_argument("--noise_sigma",   type=float, default=0.001)
-    p.add_argument("--delta",         type=float, default=0.1,
-                   help="Per-step MPPI delta clip magnitude (action units).")
+    p.add_argument("--delta",         type=float, default=None,
+                   help="Per-step MPPI delta clip magnitude (action units); "
+                        "default disables the clamp, matching run_eval_episode.py.")
     p.add_argument("--eval_substeps", type=int,   default=None,
                    help="Eval steps per rollout step (default: task config).")
     p.add_argument("--eval_sim",      type=str,   default="none",
                    choices=["none", "mujoco", "drake", "pinocchio"])
     p.add_argument("--settle",        type=float, default=10.0)
-    p.add_argument("--geometry",      type=str,   default="accurate",
-                   choices=[g.value for g in GeometryVariant])
+    p.add_argument("--geometry",      type=str,   default=DEFAULT_SCENE_VARIANT,
+                   help="Scene variant: '<object>' or "
+                        "'<object>_<hand_acc>_<obj_acc>' (e.g. duck_low_high). "
+                        "Legacy geometry names map to the default scene.")
     p.add_argument("--nconmax",       type=int,   default=200)
     p.add_argument("--njmax",         type=int,   default=500)
     p.add_argument("--use_full_graph",

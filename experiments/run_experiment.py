@@ -4,16 +4,16 @@ Master experiment runner. Executes the full study grid:
 
   tasks × contact_models × conditions × n_episodes
 
-for ONE choice of (geometry variant, physics noise level). To sweep
+for ONE choice of (scene variant, physics noise level). To sweep
 over geometry or noise, invoke this script multiple times with different
 --geometry / --friction_sigma / --mass_sigma flags, or wrap it in an
 outer loop. Geometry and physics noise are deliberately NOT part of
 ContactModelConfig — they live on orthogonal axes and are applied here
 at load time.
 
-NOTE: Geometry variants (--geometry) are accepted and recorded in output
-labels but are not yet implemented — the simulation always uses the
-'accurate' variant regardless of the flag value.
+--geometry names a scene variant (object + hand/object collision fidelity);
+see contact_study.tasks.config.SceneVariant. Non-default variants are also
+recorded in the output cell tag.
 
 Usage:
     # Clean baseline (condition B, warm-started MPPI)
@@ -48,7 +48,7 @@ import warp as wp
 # Ensure tasks are registered
 import contact_study.tasks  # noqa: F401
 
-from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
+from contact_study.contact_models.config import ContactModelConfig
 from contact_study.contact_models.benchmarks import (
     measure_rollout_speed,
     measure_approximation_error,
@@ -66,6 +66,7 @@ from contact_study.utils.physics_noise import (
     apply_physics_noise,
 )
 from contact_study.utils.rollout import fixed_budget_rollout, fixed_sample_rollout
+from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
 
 RESULTS_DIR = "results"#Path(__file__).parent.parent / "results"
 
@@ -89,7 +90,7 @@ MODEL_FACTORIES = {
 
 def load_mjm_for_study(
     task_name: str,
-    geometry:  GeometryVariant,
+    geometry:  str,
     noise:     PhysicsNoiseParams,
     rng:       np.random.Generator,
 ) -> tuple[mujoco.MjModel, object]:
@@ -241,7 +242,7 @@ def run_study(
     n_samples:      int,
     horizon:        int,
     seed:           int,
-    geometry:       GeometryVariant,
+    geometry:       str,
     noise:          PhysicsNoiseParams,
     settle_seconds: float = 1.0,
     use_full_graph: bool  = True,
@@ -254,14 +255,9 @@ def run_study(
     aggregated: list[AggregatedResult] = []
     all_cfgs = {name: MODEL_FACTORIES[name]() for name in model_names}
 
-    # Geometry variants not yet implemented — always simulate with ACCURATE.
-    # The requested geometry value is still recorded in cell_tag so output
-    # labels remain self-describing for when it is added.
-    active_geometry = GeometryVariant.ACCURATE
-
     cell_tag_parts = []
-    if geometry != GeometryVariant.ACCURATE:
-        cell_tag_parts.append(geometry.value)
+    if geometry != DEFAULT_SCENE_VARIANT:
+        cell_tag_parts.append(geometry)
     if any(getattr(noise, f) > 0.0
            for f in ("mass_sigma", "inertia_sigma", "friction_sigma", "com_sigma")):
         cell_tag_parts.append(
@@ -275,7 +271,7 @@ def run_study(
     error_cache: dict[str, float] = {}
 
     for task_name in task_names:
-        mjm, task = load_mjm_for_study(task_name, active_geometry, noise, rng)
+        mjm, task = load_mjm_for_study(task_name, geometry, noise, rng)
 
         baseline_cfg  = all_cfgs[baseline_model]
         baseline_r    = measure_rollout_speed(mjm, baseline_cfg, nconmax=nconmax, njmax=njmax)
@@ -301,7 +297,7 @@ def run_study(
 
     print("\n=== Running episodes ===")
     for task_name in task_names:
-        mjm, task = load_mjm_for_study(task_name, active_geometry, noise, rng)
+        mjm, task = load_mjm_for_study(task_name, geometry, noise, rng)
 
         for model_name in model_names:
             cfg = all_cfgs[model_name]
@@ -375,13 +371,10 @@ def main():
                         help="Path for results JSON (auto-timestamped if omitted)")
 
     # --- Orthogonal ablation axes ---
-    # NOTE: geometry variants are not yet implemented.
-    # --geometry is accepted and recorded in output labels but the simulation
-    # always uses 'accurate'. This argument will be wired up when geometry
-    # loading is added to the task XML paths.
-    parser.add_argument("--geometry", type=str, default="accurate",
-                        choices=[g.value for g in GeometryVariant],
-                        help="(not yet implemented) Geometry variant — recorded in output labels only")
+    parser.add_argument("--geometry", type=str, default=DEFAULT_SCENE_VARIANT,
+                        help="Scene variant: '<object>' or "
+                             "'<object>_<hand_acc>_<obj_acc>' (e.g. duck_low_high). "
+                             "Legacy geometry names map to the default scene.")
     parser.add_argument("--mass_sigma",     type=float, default=0.0)
     parser.add_argument("--inertia_sigma",  type=float, default=0.0)
     parser.add_argument("--friction_sigma", type=float, default=0.0)
@@ -395,11 +388,7 @@ def main():
         friction_sigma = args.friction_sigma,
         com_sigma      = args.com_sigma,
     )
-    geometry = GeometryVariant(args.geometry)
-
-    if geometry != GeometryVariant.ACCURATE:
-        print(f"[WARNING] --geometry={geometry.value} requested but geometry variants "
-              f"are not yet implemented. Falling back to 'accurate'.")
+    geometry = args.geometry
 
     results = run_study(
         task_names     = args.tasks,

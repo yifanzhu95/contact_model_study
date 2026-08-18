@@ -90,10 +90,11 @@ import warp as wp
 
 import contact_study.tasks  # noqa: F401 — registers all tasks
 
-from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
+from contact_study.contact_models.config import ContactModelConfig
 from contact_study.planners.mppi import MPPIController, MPPIConfig
 from contact_study.tasks.base import get_task
 from contact_study.tasks.config import TaskRole, EvalSimulatorKind
+from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
 
 MODEL_FACTORIES = {
     "M1": ContactModelConfig.M1,
@@ -180,7 +181,7 @@ def run_compare(
     mppi_cfg: MPPIConfig,
     rng: np.random.Generator,
     control_mode: str = "mppi",
-    geometry: GeometryVariant = GeometryVariant.ACCURATE,
+    geometry: str = DEFAULT_SCENE_VARIANT,
     settle_seconds: float = 1.0,
     eval_substeps: int | None = None,
     max_steps: int | None = None,

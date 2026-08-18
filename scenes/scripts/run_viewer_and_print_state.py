@@ -38,7 +38,7 @@ _INIT_CTRL = np.array([
 
 
 # Load a built-in sample model (Humanoid) that contains pre-saved keyframes
-model = mujoco.MjModel.from_xml_path("scenes/leap/env_leap_cube_eval.xml")#"scenes/leap_hand/scene_leap_cube.xml")
+model = mujoco.MjModel.from_xml_path("scenes/leap/env_leap_eval_cube.xml")#"scenes/leap_hand/scene_leap_cube.xml")
 
 if _MIMIC_EVAL_SIM:
     # Mirror MujocoSimulator.__init__: set the fine eval timestep FIRST (the

@@ -18,7 +18,6 @@ import mujoco
 import numpy as np
 import warp as wp
 
-from contact_study.contact_models.config import GeometryVariant
 # ContactComplexity / TaskSpec now live in config.py (to avoid a base<->config
 # import cycle) and are re-exported here for backward compatibility.
 from contact_study.tasks.config import (
@@ -27,6 +26,8 @@ from contact_study.tasks.config import (
     TaskConfig,
     TaskRole,
     EvalSimulatorKind,
+    SceneVariant,
+    DEFAULT_SCENE_VARIANT,
 )
 
 SCENES_DIR = Path(__file__).parents[2] / "scenes"
@@ -37,10 +38,14 @@ class BaseTask(abc.ABC):
 
     def __init__(
         self,
-        geometry: GeometryVariant = GeometryVariant.ACCURATE,
+        geometry: str = DEFAULT_SCENE_VARIANT,
         role: TaskRole = TaskRole.ROLLOUT,
     ):
+        # `geometry` stays the raw string the CLI passed (so callers that label
+        # output with it are unaffected); scene_variant is the parsed form that
+        # resolve_scene_path fills templates from.
         self.geometry = geometry
+        self.scene_variant = SceneVariant.parse(geometry)
         self.role = role
         self._mjm: mujoco.MjModel | None = None
         self._mjd: mujoco.MjData  | None = None
@@ -57,18 +62,85 @@ class BaseTask(abc.ABC):
         self.index_vector_wp: wp.array | None = None
         self.weights_wp: wp.array | None = None
 
+    def resolve_scene_path(self) -> Path:
+        """Resolve which MJCF this instance loads, honouring self.role.
+
+        Precedence:
+          1. the role-specific template — eval_xml_template for EVAL,
+             rollout_xml_template for ROLLOUT — when the task defines one;
+          2. xml_path_template, the role-agnostic fallback that keeps every
+             single-scene task (balance_stick, actuator_test, and the legacy
+             push/peg_in_hole templates) working unchanged;
+          3. error.
+
+        Templates are filled by SceneVariant.format, so one with no
+        placeholders passes through untouched.
+        """
+        cfg = self.config
+        if cfg is None:
+            raise ValueError(
+                f"{type(self).__name__} has no TaskConfig; override load()."
+            )
+
+        tmpl = None
+        if self.role is TaskRole.EVAL:
+            tmpl = cfg.eval_xml_template
+        elif self.role is TaskRole.ROLLOUT:
+            tmpl = cfg.rollout_xml_template
+        if tmpl is None:
+            tmpl = cfg.xml_path_template
+        if tmpl is None:
+            raise ValueError(
+                f"{type(self).__name__} defines no scene template for "
+                f"role={self.role.value} (set rollout_xml_template / "
+                f"eval_xml_template, or xml_path_template for a single scene)."
+            )
+
+        path = SCENES_DIR / self.scene_variant.format(tmpl)
+        if not path.exists():
+            siblings = sorted(p.name for p in path.parent.glob("*.xml"))
+            raise FileNotFoundError(
+                f"No scene for variant {self.scene_variant.raw!r} "
+                f"role={self.role.value}: {path}\n"
+                f"  template: {tmpl}\n"
+                f"  present:  {siblings}"
+            )
+        return path
+
+    def _publish_eval_model_paths(self) -> None:
+        """Record the resolved eval scene as the model path for the eval
+        simulators that re-parse the MJCF from disk.
+
+        setdefault, so a task that pins an explicit path keeps it, and DRAKE is
+        never touched — its hand is a URDF that predates the scene-variant
+        naming convention and has no per-object form.
+        """
+        cfg = self.config
+        if cfg is None or not cfg.eval_xml_template:
+            return
+        eval_path = str(SCENES_DIR / self.scene_variant.format(cfg.eval_xml_template))
+        for kind in (EvalSimulatorKind.MUJOCO, EvalSimulatorKind.PINOCCHIO):
+            cfg.eval_model_paths.setdefault(kind, eval_path)
+        if cfg.rollout_model_path is None and cfg.rollout_xml_template:
+            cfg.rollout_model_path = str(
+                SCENES_DIR / self.scene_variant.format(cfg.rollout_xml_template)
+            )
+
     def load(self, full_path: str | None = None) -> tuple[mujoco.MjModel, mujoco.MjData]:
-        """Load the MuJoCo model for this task and geometry variant.
+        """Load the MuJoCo model for this task's role and scene variant.
 
         Tasks that set self.config (TaskConfig) use it directly here. Legacy
         tasks (push, peg_in_hole) leave self.config None and override `load()`
         or `spec` themselves — see those modules.
         """
         if full_path is None:
-            xml_path = self.config.xml_path_template.format(geometry=self.geometry.value)
-            full_path = SCENES_DIR / xml_path
+            full_path = self.resolve_scene_path()
         self._mjm = mujoco.MjModel.from_xml_path(str(full_path))
         self._mjd = mujoco.MjData(self._mjm)
+
+        # Must run before initialize_task / make_eval_simulator: the eval-sim
+        # builders read config.eval_model_paths immediately after load().
+        self._publish_eval_model_paths()
 
         # Post-load initialization to extract task-specific indices/goals
         self.initialize_task()
@@ -216,7 +288,7 @@ def register(name: str):
 
 def get_task(
     name: str,
-    geometry: GeometryVariant = GeometryVariant.ACCURATE,
+    geometry: str = DEFAULT_SCENE_VARIANT,
     role: TaskRole = TaskRole.ROLLOUT,
 ) -> BaseTask:
     if name not in _REGISTRY:

@@ -35,7 +35,6 @@ import warp as wp
 
 import contact_study.tasks  # noqa: F401 — registers all tasks
 
-from contact_study.contact_models.config import GeometryVariant
 from contact_study.evaluation.metrics import aggregate_episodes, save_results
 from contact_study.planners.mppi import MPPIConfig
 from contact_study.tasks.config import EvalSimulatorKind
@@ -43,6 +42,7 @@ from contact_study.tasks.config import EvalSimulatorKind
 from contact_study.drivers.run_eval_episode import (
     run_eval_episode, load_rollout_task, resolve_mppi_schedule, MODEL_FACTORIES,
 )
+from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +50,7 @@ from contact_study.drivers.run_eval_episode import (
 # ---------------------------------------------------------------------------
 def run_cell(args):
     """Run one (model, time_horizon) cell (n_episodes episodes) -> AggregatedResult."""
-    geometry = GeometryVariant(args.geometry)
+    geometry = args.geometry
     eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
     cfg      = MODEL_FACTORIES[args.model]()
 
@@ -158,8 +158,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Fixed MPPI sample count (held constant across the sweep).")
     p.add_argument("--temperature",   type=float, default=10.0)
     p.add_argument("--noise_sigma",   type=float, default=0.01)
-    p.add_argument("--delta",         type=float, default=0.1,
-                   help="Per-step MPPI delta clip magnitude (action units).")
+    p.add_argument("--delta",         type=float, default=None,
+                   help="Per-step MPPI delta clip magnitude (action units); "
+                        "default disables the clamp, matching run_eval_episode.py.")
     p.add_argument("--step_time",     type=float, default=0.032,
                    help="Control-step duration in SECONDS (held constant across the "
                         "sweep); quantized down to whole rollout steps.")
@@ -168,8 +169,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--eval_sim",      type=str,   default="none",
                    choices=["none", "mujoco", "drake", "pinocchio"])
     p.add_argument("--settle",        type=float, default=1.0)
-    p.add_argument("--geometry",      type=str,   default="accurate",
-                   choices=[g.value for g in GeometryVariant])
+    p.add_argument("--geometry",      type=str,   default=DEFAULT_SCENE_VARIANT,
+                   help="Scene variant: '<object>' or "
+                        "'<object>_<hand_acc>_<obj_acc>' (e.g. duck_low_high). "
+                        "Legacy geometry names map to the default scene.")
     p.add_argument("--nconmax",       type=int,   default=50)
     p.add_argument("--njmax",         type=int,   default=300)
     p.add_argument("--use_full_graph",

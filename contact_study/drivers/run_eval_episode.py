@@ -53,7 +53,7 @@ import warp as wp
 
 import contact_study.tasks  # noqa: F401 — registers all tasks
 
-from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
+from contact_study.contact_models.config import ContactModelConfig
 from contact_study.evaluation.metrics import EpisodeResult
 from contact_study.planners import (
     PLANNER_NAMES, PlannerConfig, make_planner, make_planner_config,
@@ -62,6 +62,7 @@ from contact_study.planners import (
 from contact_study.planners.mppi import MPPIController, MPPIConfig  # noqa: F401 — re-export
 from contact_study.tasks.base import get_task
 from contact_study.tasks.config import TaskRole, EvalSimulatorKind
+from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
 
 #wp.init()
 
@@ -76,7 +77,7 @@ VIDEOS_DIR  = Path(__file__).parents[2] / "videos"
 RESULTS_DIR = Path(__file__).parents[2] / "results"
 
 
-def load_rollout_task(task_name: str, geometry: GeometryVariant = GeometryVariant.ACCURATE):
+def load_rollout_task(task_name: str, geometry: str = DEFAULT_SCENE_VARIANT):
     """Load a task's ROLLOUT instance — handy for peeking nq/nv/nu/cost_weights
     before a sweep (the episode runner builds its own rollout + eval tasks)."""
     task = get_task(task_name, geometry=geometry, role=TaskRole.ROLLOUT)
@@ -121,7 +122,7 @@ def run_eval_episode(
     contact_cfg: ContactModelConfig,
     planner_cfg: PlannerConfig | None = None,
     rng:         np.random.Generator | None = None,
-    geometry:    GeometryVariant = GeometryVariant.ACCURATE,
+    geometry:    str = DEFAULT_SCENE_VARIANT,
     planner:     str | None = None,
     cost_weight_overrides: dict | None = None,
     settle_seconds: float = 0.0,
@@ -346,6 +347,10 @@ def run_eval_episode(
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--task",        type=str,   default="cart_pole")
+    p.add_argument("--geometry",    type=str,   default=DEFAULT_SCENE_VARIANT,
+                   help="Scene variant: '<object>' or "
+                        "'<object>_<hand_acc>_<obj_acc>' (e.g. duck_low_high). "
+                        "Legacy geometry names map to the default scene.")
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
     p.add_argument("--planner",     type=str,   default="mppi", choices=PLANNER_NAMES,
                    help="Sampling planner: mppi (softmax-weighted mean), cem (elite "
@@ -363,7 +368,7 @@ def main():
     p.add_argument("--n_iterations", type=int,  default=None,
                    help="Optimizer iterations per plan() call (default: the "
                         "planner's own — 1 for mppi/predictive_sampler, 3 for cem).")
-    p.add_argument("--noise_sigma", type=float, default=0.025,)#0.01)
+    p.add_argument("--noise_sigma", type=float, default=0.1,)#0.1 # for M3)
     p.add_argument("--delta",       type=float, default=None,#0.1,
                    help="Per-step delta clip magnitude (action units); "
                         "pass 'none' to disable the delta clamp entirely.")
@@ -379,7 +384,7 @@ def main():
                    help="Plan steps between noise resamples (1=every step; "
                         "omit=sample once and reuse, the default).")
     # --- MPPI-only ---------------------------------------------------------
-    p.add_argument("--temperature", type=float, default=0.250)#0.00008)
+    p.add_argument("--temperature", type=float, default=20.0)
     # --- CEM-only ----------------------------------------------------------
     p.add_argument("--n_elites",    type=int,   default=None,
                    help="CEM elite-set size; overrides --elite_frac when set.")
@@ -404,7 +409,7 @@ def main():
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
-    p.add_argument("--seed",        type=int,   default=None)
+    p.add_argument("--seed",        type=int,   default=42)
     p.add_argument("--n_episodes",  type=int,   default=1,
                    help="Number of episodes to run; reports the aggregate success rate.")
     p.add_argument("--weights",     nargs="+", default=[],
@@ -503,6 +508,7 @@ def main():
 
         result = run_eval_episode(
             task_name   = args.task,
+            geometry    = args.geometry,
             contact_cfg = contact_cfg,
             planner     = planner,
             planner_cfg = planner_cfg,

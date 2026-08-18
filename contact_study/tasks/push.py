@@ -49,7 +49,7 @@ class PushTask(BaseTask):
     # TaskSpec-only task doesn't set; load straight from `spec` instead.
     def load(self, full_path: str | None = None):
         if full_path is None:
-            xml_path = self.spec.xml_path_template.format(geometry=self.geometry.value)
+            xml_path = self.scene_variant.format(self.spec.xml_path_template)
             full_path = SCENES_DIR / xml_path
         self._mjm = mujoco.MjModel.from_xml_path(str(full_path))
         self._mjd = mujoco.MjData(self._mjm)

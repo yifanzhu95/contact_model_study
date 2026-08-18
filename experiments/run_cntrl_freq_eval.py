@@ -38,7 +38,6 @@ import warp as wp
 
 import contact_study.tasks  # noqa: F401
 
-from contact_study.contact_models.config import GeometryVariant
 from contact_study.evaluation.metrics import aggregate_episodes, save_results
 from contact_study.planners.mppi import MPPIConfig
 from contact_study.tasks.config import EvalSimulatorKind
@@ -46,6 +45,7 @@ from contact_study.tasks.config import EvalSimulatorKind
 from contact_study.drivers.run_eval_episode import (
     run_eval_episode, load_rollout_task, MODEL_FACTORIES,
 )
+from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
 
 RESULTS_DIR = Path(__file__).parent.parent / "results"
 
@@ -74,8 +74,10 @@ def main():
     parser.add_argument("--temperature",    type=float, default=0.01)
     parser.add_argument("--noise_sigma",    type=float, default=0.001)
     parser.add_argument("--seed",           type=int,   default=None)
-    parser.add_argument("--geometry",       type=str,   default="accurate",
-                        choices=[g.value for g in GeometryVariant])
+    parser.add_argument("--geometry",       type=str,   default=DEFAULT_SCENE_VARIANT,
+                        help="Scene variant: '<object>' or "
+                             "'<object>_<hand_acc>_<obj_acc>' (e.g. duck_low_high). "
+                             "Legacy geometry names map to the default scene.")
     parser.add_argument("--eval_sim",       type=str,   default="none",
                         choices=["none", "mujoco", "drake"],
                         help="Eval simulator: 'none' uses the task default, else override it.")
@@ -89,7 +91,7 @@ def main():
     args = parser.parse_args()
 
     rng      = np.random.default_rng(args.seed)
-    geometry = GeometryVariant(args.geometry)
+    geometry = args.geometry
     eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
 
     print(f"\n{'='*65}")

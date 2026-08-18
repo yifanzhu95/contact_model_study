@@ -9,8 +9,9 @@ This config describes ONLY the contact model (M1..M4). Orthogonal study
 axes — geometry fidelity and physics parameter noise — are handled OUTSIDE
 this object:
 
-  * Geometry variants live in XML files; pick one at task-load time via
-    contact_study.tasks.base.BaseTask(geometry=GeometryVariant.CONVEX_HULL).
+  * Geometry fidelity lives in XML files, selected by scene variant at
+    task-load time — see contact_study.tasks.config.SceneVariant and
+    BaseTask(geometry="duck_low_high").
   * Physics noise is applied by contact_study.utils.physics_noise.apply_physics_noise
     to an MjModel before put_model is called.
 """
@@ -28,18 +29,6 @@ class Backend(str, enum.Enum):
     MUJOCO_SOFT      = "mujoco_soft"       # M2: MJWarp default soft contact
     COMFREE          = "comfree"           # M3: Jin 2024 complementarity-free
     XPBD             = "xpbd"              # M4: XPBD-style penalty model
-
-
-class GeometryVariant(str, enum.Enum):
-    """Geometry fidelity level (selects which XML scene file is loaded).
-
-    NOT part of ContactModelConfig. Pair any geometry variant with any Mk
-    by passing it to BaseTask(geometry=...) before calling api.put_model.
-    """
-    ACCURATE         = "accurate"
-    CONVEX_HULL      = "convex_hull"
-    PRIMITIVE_UNION  = "primitive_union"
-    LINEARIZED       = "linearized"
 
 
 @dataclasses.dataclass

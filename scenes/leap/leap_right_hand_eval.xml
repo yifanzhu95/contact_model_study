@@ -95,7 +95,18 @@ Naming Conventions
 
     <!-- actuator defaults -->
     <position kp="3.0" kv="0.01" />
-    <joint damping="0.03"/>
+    <!-- Joint damping + rotor inertia, MIRRORED by _JOINT_DAMPING / _ARMATURE in
+    contact_study/tasks/grasp_reorient.py — keep the two in sync.
+      damping: Pinocchio's aba ignores model.damping entirely, so its PD applies
+        kd = _JOINT_DAMPING + _PID_KD = 0.31 directly. MuJoCo reaches the same 0.31 as
+        this damping (0.3) plus the position actuator's kv (0.01) above.
+      armature: feeds MuJoCo's dof_armature. Pinocchio does NOT pick it up from here —
+        buildModelsFromMJCF parses it fine, but pin.appendModel (used by
+        pinocchio_sim.merge_models to stitch the split subtrees together) drops
+        model.armature while keeping model.damping. Pinocchio therefore gets the same
+        value injected in code via _ARMATURE; change the two together.
+    <freejoint> ignores class defaults, so the "obj" cube is untouched by both. -->
+    <joint damping="0.3" armature="0.001"/>
 
     <!-- geom class defaults -->
     <default class="visual">

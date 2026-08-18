@@ -29,13 +29,14 @@ import warp as wp
 
 import contact_study.tasks  # noqa: F401 — registers all tasks
 
-from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
+from contact_study.contact_models.config import ContactModelConfig
 from contact_study.evaluation.metrics import EpisodeResult
 from contact_study.planners.mppi import MPPIController, MPPIConfig
 from contact_study.tasks.base import get_task
 from contact_study.tasks.config import TaskRole, EvalSimulatorKind
 
 from contact_study.drivers.run_eval_episode import apply_cost_weight_overrides
+from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
 
 MODEL_FACTORIES = {
     "M1": ContactModelConfig.M1,
@@ -54,7 +55,7 @@ def run_eval_episode_record_controls(
     contact_cfg: ContactModelConfig,
     mppi_cfg:    MPPIConfig,
     rng:         np.random.Generator,
-    geometry:    GeometryVariant = GeometryVariant.ACCURATE,
+    geometry:    str = DEFAULT_SCENE_VARIANT,
     cost_weight_overrides: dict | None = None,
     settle_seconds: float = 0.0,
     eval_substeps: int | None = None,
@@ -253,6 +254,10 @@ def run_eval_episode_record_controls(
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--task",        type=str,   default="grasp_reorient")
+    p.add_argument("--geometry",    type=str,   default=DEFAULT_SCENE_VARIANT,
+                   help="Scene variant: '<object>' or "
+                        "'<object>_<hand_acc>_<obj_acc>' (e.g. duck_low_high). "
+                        "Legacy geometry names map to the default scene.")
     p.add_argument("--model",       type=str,   default="M2", choices=list(MODEL_FACTORIES))
     p.add_argument("--n_samples",   type=int,   default=256)
     p.add_argument("--horizon",     type=int,   default=48)
@@ -315,6 +320,7 @@ def main():
 
     result, controls = run_eval_episode_record_controls(
         task_name     = args.task,
+        geometry      = args.geometry,
         contact_cfg   = contact_cfg,
         mppi_cfg      = mppi_cfg,
         rng           = rng,

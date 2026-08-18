@@ -37,9 +37,10 @@ import numpy as np
 
 import contact_study.tasks  # noqa: F401
 from contact_study.contact_models.benchmarks import measure_approximation_error
-from contact_study.contact_models.config import ContactModelConfig, GeometryVariant
+from contact_study.contact_models.config import ContactModelConfig
 from contact_study.tasks.base import get_task
 from contact_study.utils.physics_noise import PhysicsNoiseParams, apply_physics_noise
+from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
 
 RESULTS_DIR = Path(__file__).parent.parent / "results"
 FIGURES_DIR = Path(__file__).parent.parent / "figures"
@@ -137,8 +138,10 @@ def main():
     parser.add_argument("--n_states", type=int, default=50)
 
     # Orthogonal ablation axes
-    parser.add_argument("--geometry", type=str, default="accurate",
-                        choices=[g.value for g in GeometryVariant])
+    parser.add_argument("--geometry", type=str, default=DEFAULT_SCENE_VARIANT,
+                        help="Scene variant: '<object>' or "
+                             "'<object>_<hand_acc>_<obj_acc>' (e.g. duck_low_high). "
+                             "Legacy geometry names map to the default scene.")
     parser.add_argument("--mass_sigma",     type=float, default=0.0)
     parser.add_argument("--inertia_sigma",  type=float, default=0.0)
     parser.add_argument("--friction_sigma", type=float, default=0.0)
@@ -149,7 +152,7 @@ def main():
     records = []
     cfg_gt  = ContactModelConfig.M1() #Use Anitescu's model as the ground truth?
 
-    geometry = GeometryVariant(args.geometry)
+    geometry = args.geometry
     noise = PhysicsNoiseParams(
         mass_sigma     = args.mass_sigma,
         inertia_sigma  = args.inertia_sigma,
@@ -184,7 +187,7 @@ def main():
                     "horizon":  H,
                     "mean_err": mean_err,
                     "std_err":  std_err,
-                    "geometry": geometry.value,
+                    "geometry": geometry,
                     "noise":    dataclasses_asdict_lite(noise),
                 })
 
