@@ -400,6 +400,7 @@ def main():
     p.add_argument("--include_nominal", action=argparse.BooleanOptionalAction, default=True,
                    help="Predictive sampler: keep sample 0 unperturbed so the greedy "
                         "update can never pick a sequence worse than the nominal.")
+    # ----------------------------------------------------------------------
     p.add_argument("--time_constrained", action=argparse.BooleanOptionalAction, default=False,
                    help="Stop rollouts once --plan_budget_ms elapses (capped at the horizon).")
     p.add_argument("--plan_budget_ms", type=float, default=None,
