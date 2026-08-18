@@ -192,8 +192,11 @@ _OBJ_OVERRIDES: dict[str, dict] = {
     # of (0, 0.0032, 0.0086) — i.e. ~1.5 cm taller than the 3.5 cm cube, so it
     # needs to start higher and its target sits higher too.
     "duck": {
-        "init_obj_qpos": np.array([0.02, 0.05, 0.10, 1.0, 0.0, 0.0, 0.0]),
-        "target_pos":    np.array([0.02, 0.03, 0.09]),
+        "init_obj_qpos": np.array([
+            1.37863074e-02,  2.68674345e-02 + 0.02,  9.00480655e-02 + 0.01,
+            0.7071068, 0, 0, 0.7071068
+        ]),
+        "target_pos":    np.array([0.015, 0.045, 0.10]),
         "fallen_z":      0.08,
     },
 }

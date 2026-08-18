@@ -21,12 +21,12 @@ _MIMIC_EVAL_SIM = False
 _EVAL_TIMESTEP = 0.001
 
 _INIT_QPOS = np.array([
-7.41953443e-01, -5.14095650e-01,  6.97705793e-01,  5.73857360e-01,
+7.42640295e-01, -5.14097318e-01,  6.97705251e-01,  5.73856389e-01,
   3.11686592e-01, -2.08901684e-05,  7.04119781e-01,  1.01887562e+00,
-  7.14271347e-01,  2.63610945e-01,  6.97700993e-01,  6.10100133e-01,
+  7.15262245e-01,  2.61882225e-01,  6.97722036e-01,  6.10104888e-01,
   7.00288255e-01,  1.52604395e+00,  1.33871871e+00,  8.68983906e-01,
-  1.70374863e-02,  3.65435775e-02,  8.36225067e-02 + 0.01,  
-  1, 0, 0, 0
+  1.37863074e-02,  2.68674345e-02 + 0.02,  9.00480655e-02 + 0.01,  
+  0.7071068, 0, 0, 0.7071068
 ], dtype=np.float64)
 
 
@@ -38,7 +38,7 @@ _INIT_CTRL = np.array([
 
 
 # Load a built-in sample model (Humanoid) that contains pre-saved keyframes
-model = mujoco.MjModel.from_xml_path("scenes/leap/env_leap_eval_cube.xml")#"scenes/leap_hand/scene_leap_cube.xml")
+model = mujoco.MjModel.from_xml_path("scenes/leap/env_leap_eval_duck.xml")#"scenes/leap_hand/scene_leap_cube.xml")
 
 if _MIMIC_EVAL_SIM:
     # Mirror MujocoSimulator.__init__: set the fine eval timestep FIRST (the
