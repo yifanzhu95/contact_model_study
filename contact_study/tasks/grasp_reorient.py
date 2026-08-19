@@ -31,8 +31,8 @@ _MJ_CTRL_TO_URDF_JOINT = [
 # The rollout (MuJoCo) model: the bare hand asset carrying the floor, the free
 # "obj" cube, and the fingertip sites (if_tip/mf_tip/rf_tip/th_tip) the cost
 # kernel reads. The initial hand+cube state, the joint cost target, and the goal
-# pose are all defined in this file (see _INIT_QPOS / _INIT_CTRL / _TARGET_*), so
-# the scene needs no keyframe or obj_target mocap body.
+# pose are all defined in this file (see _OBJ_PARAMS / _TARGET_QUAT), so the
+# scene needs no keyframe or obj_target mocap body.
 #
 # Both rollout and eval load from the same URDF-derived geometry, so they share
 # one world frame already (the URDF's fixed base->palm_lower transform): welding
@@ -89,10 +89,10 @@ _PIN_LIMIT_MARGIN         = 0.0    # rad; >0 engages a bound before it is crosse
 _PIN_JOINT_FRICTION       = False   # honor the scene's <joint frictionloss>
 # Pinocchio render only: overlay a translucent copy of the goal cube (same colors
 # and shape as the manipulated "obj" cube, cloned from its <geom> shell) at the
-# target reorientation pose (_TARGET_POS/_TARGET_QUAT), so the video shows where
-# and how the cube should end up. Visual-only — it never enters the contact solve.
+# target reorientation pose (this object's "target_pos" + _TARGET_QUAT), so the
+# video shows where and how the cube should end up. Visual-only — it never enters the contact solve.
 # _PIN_GOAL_OPACITY scales every goal-geom alpha (0 = invisible, 1 = opaque).
-# OFF by default: _TARGET_POS sits where the cube is held, so this overlay drew a
+# OFF by default: the target position sits where the cube is held, so this drew a
 # translucent "shadow" cube right on top of the real one in the palm. The scene's
 # <body name="goal"> marker (upper-right of frame, textured like the cube, spun by
 # _update_goal) shows the target orientation instead — see _GOAL_MARKER_BODY.
@@ -106,47 +106,27 @@ _GOAL_MARKER_BODY = "goal"
 
 _DRAKE_PID_EFFORT = 100.0
 
-# Fixed initial state + control for the hand and cube, used to initialize BOTH
-# the rollout and eval simulators (overrides the scene keyframe). Layout:
+# Fixed initial state + control for the hand and object, used to initialize
+# BOTH the rollout and eval simulators (overrides the scene keyframe). Layout:
 #   qpos = [16 hand joints, obj pos(3), obj quat(wxyz)(4)]  (nq = 23)
 #   ctrl = [16 hand joint position targets]                  (nu = 16)
-# Initial velocity is zero (hand + cube start at rest).
-# _INIT_QPOS = np.array([
-#     0.74346777,  -0.56903687,  0.91440081,   0.5741493,
-#     -0.010605284, -0.08351411, 0.70321997,   1.0184264,
-#     0.80782262,   0.61122899,  0.92718954,   0.61047876,
-#     0.69887738,   1.438706,    1.3375555,    0.19482527,
-
-#     0.018495468,  0.033628956, 0.083264539,
-#     0.93823638, 0.12995374, 0.31377877,  0.066086313,
-# ], dtype=np.float64)
-
-# Hand at its old tuned pose + cube at the scene XML's default "obj" body
-# pos/quat, so the cube starts resting in the center of the palm.
-# _INIT_QPOS = np.array([
-#     0.74346777,  -0.56903687,  0.91440081,   0.5741493,
-#     -0.010605284, -0.08351411, 0.70321997,   1.0184264,
-#     0.80782262,   0.61122899,  0.92718954,   0.61047876,
-#     0.69887738,   1.438706,    1.3375555,    0.19482527,
-
-#     0.01, 0.0258, 0.08,
-#     0.965926, 0.0, 0.258819, 0.0,
-# ], dtype=np.float64)
-_INIT_QPOS = np.array([
-7.41953443e-01, -5.14095650e-01,  6.97705793e-01,  5.73857360e-01,
-  3.11686592e-01, -2.08901684e-05,  7.04119781e-01,  1.01887562e+00,
-  7.14271347e-01,  2.63610945e-01,  6.97700993e-01,  6.10100133e-01,
-  7.00288255e-01,  1.52604395e+00,  1.33871871e+00,  8.68983906e-01,
-  1.70374863e-02,  3.65435775e-02,  8.36225067e-02 + 0.01,  
-  1, 0, 0, 0
-], dtype=np.float64)
-
-
-_INIT_CTRL = np.array([
-0.7672  , -0.51303 ,  0.701455,  0.573897,  0.33472 ,  0.      ,
-  0.709056,  1.01884 ,  0.74176 ,  0.26175 ,  0.701455,  0.610097,
-  0.69912 ,  1.53211 ,  1.33179 ,  0.8657
-], dtype=np.float64)
+# Initial velocity is zero (hand + object start at rest).
+#
+# Both are PER OBJECT and live in the _OBJ_PARAMS table below, as "init_qpos"
+# and "init_ctrl": a taller or rounder object generally wants its own pre-grasp
+# hand pose and grasp command, not just its own free-body pose. init_qpos is one
+# 23-element array — the whole qpos, exactly as the viewer prints it — so a pose
+# settled in the viewer pastes in as a single block.
+#
+# Historical cube poses, kept for reference:
+#   hand = [ 0.74346777,  -0.56903687, 0.91440081, 0.5741493,
+#           -0.010605284, -0.08351411, 0.70321997, 1.0184264,
+#            0.80782262,   0.61122899, 0.92718954, 0.61047876,
+#            0.69887738,   1.438706,   1.3375555,  0.19482527]
+#   cube = [0.018495468, 0.033628956, 0.083264539,
+#           0.93823638,  0.12995374,  0.31377877,  0.066086313]
+#   cube, at the scene XML's default "obj" body pos/quat (resting in the centre
+#   of the palm) = [0.01, 0.0258, 0.08,  0.965926, 0.0, 0.258819, 0.0]
 
 def _axis_angle_quat(axis, angle: float) -> np.ndarray:
     """wxyz quaternion for a rotation of `angle` (rad) about `axis` (unit vector)."""
@@ -167,39 +147,132 @@ def _euler_to_quat(euler) -> np.ndarray:
     return q
 
 
-# Goal/target pose for the cube reorientation, defined here rather than read
-# from a mocap body in the scene. pos + intrinsic-xyz Euler (rad).
-_TARGET_POS   = np.array([0.02, 0.03, 0.09], dtype=np.float64)#np.array([0.02, 0.03, 0.08], dtype=np.float64)#np.array([0.012, 0.04, 0.085], dtype=np.float64)
+# Goal orientation for the reorientation, defined here rather than read from a
+# mocap body in the scene: intrinsic-xyz Euler (rad) -> wxyz quaternion. Shared
+# by every object; the goal POSITION is per-object ("target_pos" below), since
+# it depends on how tall the object sits in the palm.
 _TARGET_EULER = np.array([0.0, 0.0, 0.0], dtype=np.float64)
 _TARGET_QUAT  = _euler_to_quat(_TARGET_EULER)   # wxyz
 
-# Per-object overrides, keyed by the scene variant's object name. _INIT_QPOS's
-# layout is [16 hand joints, obj pos(3), obj quat wxyz(4)] (nq = 23); the hand
-# block and _INIT_CTRL are shared by every object, so only the trailing
-# 7-element free-body block, the reorientation target, and the "fallen" drop
-# height vary. Missing keys fall back to _OBJ_DEFAULTS (the cube's values), so a
-# new object only declares what actually differs.
-_OBJ_DEFAULTS = {
-    "init_obj_qpos": _INIT_QPOS[16:].copy(),   # settled in-palm pose of the cube
-    "target_pos":    _TARGET_POS,
-    "fallen_z":      0.08,                     # cost-kernel drop threshold
-}
-_OBJ_OVERRIDES: dict[str, dict] = {
-    "cube": {},
-    # TODO(retune): settle the hand in the viewer against
-    # env_leap_rollout_duck_low_high.xml and paste qpos[16:23] here. The duck's
-    # bounding half-extents are (0.0325, 0.0466, 0.0512) about a centre offset
-    # of (0, 0.0032, 0.0086) — i.e. ~1.5 cm taller than the 3.5 cm cube, so it
-    # needs to start higher and its target sits higher too.
+# Canonical cost-weight names, in the order the cost kernel indexes them. THE
+# ORDER IS LOAD-BEARING: it must match the weights[...] indexing in
+# grasp_reorient_cost_wp and the weights_list built in initialize_task, because
+# --weights and the param sweeps rebuild the array by iterating the resolved
+# cost_weights dict's keys. Every object spells out every one of these keys in
+# _OBJ_PARAMS and obj_params re-emits them in THIS order, so however they happen
+# to be typed in the table below they can never desync from the kernel.
+_COST_WEIGHT_KEYS = (
+    "w_quat", "w_pos_x", "w_pos_y", "w_pos_z", "w_velo", "w_contact",
+    "w_joint", "w_joint_velo", "w_fallen",
+    "w_quat_term", "w_pos_term", "w_fallen_term",
+)
+
+# Everything that varies per manipulated object, keyed by the scene variant's
+# object name (the "duck" in `--geometry duck_low_high`). Each entry is
+# SELF-CONTAINED: nothing is inherited from another object, so every parameter
+# for an object reads in one place and retuning one object can never perturb
+# another. A new object copies a full entry and edits it.
+#
+# Required keys — obj_params rejects a missing or an unknown one:
+#   init_qpos      (23) full qpos at reset, exactly as the viewer prints it:
+#                       [16 hand joints, obj pos(3), obj quat wxyz(4)]
+#   init_ctrl      (16) hand joint position targets at reset -> ctrl[:16]. Also
+#                       the cost's joint "home" target, so the joint term
+#                       penalizes drift away from this commanded grasp pose.
+#   target_pos     (3)  goal position (goal orientation is _TARGET_QUAT above)
+#   fallen_z            cost-kernel drop threshold; a squatter object would
+#                       otherwise read as "fallen" while still held
+#   cost_weights        exactly the keys of _COST_WEIGHT_KEYS
+_OBJ_PARAMS: dict[str, dict] = {
+    "cube": {
+        # 16 hand joints, then the cube's settled in-palm pos(3) + quat(4).
+        "init_qpos": np.array([
+            7.41953443e-01, -5.14095650e-01,  6.97705793e-01,  5.73857360e-01,
+            3.11686592e-01, -2.08901684e-05,  7.04119781e-01,  1.01887562e+00,
+            7.14271347e-01,  2.63610945e-01,  6.97700993e-01,  6.10100133e-01,
+            7.00288255e-01,  1.52604395e+00,  1.33871871e+00,  8.68983906e-01,
+
+            1.70374863e-02,  3.65435775e-02,  8.36225067e-02 + 0.01,
+            1, 0, 0, 0
+        ]),
+        "init_ctrl": np.array([
+            0.7672  , -0.51303 ,  0.701455,  0.573897,  0.33472 ,  0.      ,
+            0.709056,  1.01884 ,  0.74176 ,  0.26175 ,  0.701455,  0.610097,
+            0.69912 ,  1.53211 ,  1.33179 ,  0.8657
+        ]),
+        "target_pos":    np.array([0.02, 0.03, 0.09]),#np.array([0.02, 0.03, 0.08])#np.array([0.012, 0.04, 0.085])
+        "fallen_z":      0.08,
+        "cost_weights": {
+            "w_quat": 20.0,#100.0,
+            "w_pos_x": 7.50,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+            "w_pos_y": 15.0,#80.0,    #Y is across the fingers
+            "w_pos_z": 5.0,#15.0,
+            "w_velo": 0.0,
+            "w_contact": 15.0,#12.50,
+            "w_joint": 4.0,
+            "w_joint_velo": 0.0,
+            "w_fallen": 200.0,
+            "w_quat_term": 200.0,#500.0,
+            "w_pos_term": 200.0,
+            "w_fallen_term": 0.0,
+        },
+    },
+    # TODO(retune): the hand block of init_qpos, and init_ctrl, are still the
+    # cube's — only the trailing free-body block was settled against the duck.
+    # Settle the hand in the viewer against env_leap_rollout_duck_low_high.xml
+    # and paste the whole qpos here, plus the held ctrl. The duck's bounding
+    # half-extents are (0.0325, 0.0466, 0.0512) about a centre
+    # offset of (0, 0.0032, 0.0086) — i.e. ~1.5 cm taller than the 3.5 cm cube,
+    # so it needs to start higher and its target sits higher too.
     "duck": {
-        "init_obj_qpos": np.array([
-            1.37863074e-02,  2.68674345e-02 + 0.02,  9.00480655e-02 + 0.01,
+        "init_qpos": np.array([
+            7.41953443e-01, -5.14095650e-01,  6.97705793e-01,  5.73857360e-01,
+            3.11686592e-01, -2.08901684e-05,  7.04119781e-01,  1.01887562e+00,
+            7.14271347e-01,  2.63610945e-01,  6.97700993e-01,  6.10100133e-01,
+            7.00288255e-01,  1.52604395e+00,  1.33871871e+00,  8.68983906e-01,
+
+            1.37863074e-02 + 0.01,  2.68674345e-02 + 0.02,  9.00480655e-02 + 0.01,
             0.7071068, 0, 0, 0.7071068
         ]),
-        "target_pos":    np.array([0.015, 0.045, 0.10]),
+        "init_ctrl": np.array([
+            0.7672  , -0.51303 ,  0.701455,  0.573897,  0.33472 ,  0.      ,
+            0.709056,  1.01884 ,  0.74176 ,  0.26175 ,  0.701455,  0.610097,
+            0.69912 ,  1.53211 ,  1.33179 ,  0.8657
+        ]),
+        "target_pos":    np.array([0.015, 0.045, 0.11]),
         "fallen_z":      0.08,
+        # Retuned weights for the duck. It is lighter (0.05 kg vs 0.14) and
+        # rounder than the cube, so the terms most likely to want retuning are
+        # w_contact and w_quat.
+        "cost_weights": {
+            "w_quat": 20.0,#100.0,
+            "w_pos_x": 20.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+            "w_pos_y": 15.0,#80.0,    #Y is across the fingers
+            "w_pos_z": 5.0,#15.0,
+            "w_velo": 0.0,
+            "w_contact": 5.0,#12.50,
+            "w_joint": 0.50,
+            "w_joint_velo": 0.0,
+            "w_fallen": 200.0,
+            "w_quat_term": 200.0,#500.0,
+            "w_pos_term": 200.0,
+            "w_fallen_term": 0.0,
+        },
     },
 }
+
+# Array-valued _OBJ_PARAMS entries and their required lengths. obj_params
+# checks these once per resolve, so a mis-sized paste from the viewer fails at
+# task construction with the key named, not as a downstream shape error.
+_OBJ_ARRAY_KEYS = {
+    "init_qpos":  23,   # 16 hand joints + obj pos(3) + obj quat wxyz(4)
+    "init_ctrl":  16,
+    "target_pos": 3,
+}
+# Hand joints occupy the leading qpos slots; the object's free joint is the
+# 7-element tail. get_inital_state cross-checks this split against the scene.
+_N_HAND_JOINTS = _OBJ_ARRAY_KEYS["init_ctrl"]
+_OBJ_PARAM_KEYS = frozenset(_OBJ_ARRAY_KEYS) | {"fallen_z", "cost_weights"}
 
 # Camera: matches the "top" camera in scenes/leap_hand_old/scene_leap_cube.xml:
 #   <camera name="top" pos="0.2 0.02 0.4" xyaxes="0 1 0  -1 0 0.5"/>
@@ -284,7 +357,7 @@ def grasp_reorient_cost_wp(qpos: wp.array(dtype=float),
 
     # Drop threshold lives in the goal array (slot 7 + n_manip, right after the
     # per-joint home pose) so it can vary per object — a squatter object would
-    # otherwise read as "fallen" while still held. See _OBJ_DEFAULTS.
+    # otherwise read as "fallen" while still held. See _OBJ_PARAMS.
     fallen = float(0.0)
     if qpos[obj_qpos_adr + 2] < goal[7 + n_manip]:
         fallen = 1.0
@@ -401,25 +474,14 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 4000,
+            max_steps          = 2000,#4000,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
-            # NOTE: insertion order must match the weights[...] indexing in
-            # grasp_reorient_cost_wp AND the weights_list below — the --weights CLI
-            # override rebuilds the array from this dict's key order.
-            cost_weights       = {
-                "w_quat": 20.0,#100.0,
-                "w_pos_x": 7.50,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-                "w_pos_y": 15.0,#80.0,    #Y is across the fingers
-                "w_pos_z": 5.0,#15.0,
-                "w_velo": 0.0,
-                "w_contact": 15.0,#12.50,
-                "w_joint": 4.0,
-                "w_joint_velo": 0.0,
-                "w_fallen": 200.0,
-                "w_quat_term": 200.0,#500.0,
-                "w_pos_term": 200.0,
-                "w_fallen_term": 0.0,
-            },
+            # This object's weights from _OBJ_PARAMS, emitted in
+            # _COST_WEIGHT_KEYS order — which must match the weights[...]
+            # indexing in grasp_reorient_cost_wp AND the weights_list below,
+            # because the --weights CLI override and the param sweeps rebuild
+            # the array from this dict's key order.
+            cost_weights       = self.obj_params["cost_weights"],
             # Scene variant -> scene files, by convention. BaseTask.load()
             # picks the template matching this instance's role and fills it
             # from the parsed --geometry string; the rollout scene degrades
@@ -449,10 +511,58 @@ class GraspReorientTask(BaseTask):
 
     @property
     def obj_params(self) -> dict:
-        """Per-object init pose / target / drop threshold, resolved from the
-        scene variant's object name against _OBJ_DEFAULTS."""
-        return {**_OBJ_DEFAULTS,
-                **_OBJ_OVERRIDES.get(self.scene_variant.obj, {})}
+        """This object's entry in _OBJ_PARAMS, resolved from the scene
+        variant's object name and validated.
+
+        Returns a fresh dict of fresh arrays every access, so callers can never
+        mutate the table. cost_weights is re-emitted in _COST_WEIGHT_KEYS order
+        regardless of how it is typed in the table, because the kernel indexes
+        it positionally; a missing or unknown weight is an error rather than a
+        silent shift of every weight after it.
+        """
+        obj = self.scene_variant.obj
+        try:
+            entry = _OBJ_PARAMS[obj]
+        except KeyError:
+            raise KeyError(
+                f"No parameters for object {obj!r} (from scene variant "
+                f"{self.scene_variant.raw!r}); known objects are "
+                f"{sorted(_OBJ_PARAMS)}. Add a full entry to _OBJ_PARAMS in "
+                f"{__name__}."
+            ) from None
+
+        missing = _OBJ_PARAM_KEYS - set(entry)
+        unknown = set(entry) - _OBJ_PARAM_KEYS
+        if missing or unknown:
+            raise KeyError(
+                f"_OBJ_PARAMS[{obj!r}] is malformed: "
+                f"missing {sorted(missing)}, unknown {sorted(unknown)}. Each "
+                f"entry is self-contained and must declare exactly "
+                f"{sorted(_OBJ_PARAM_KEYS)}."
+            )
+
+        params = {"fallen_z": float(entry["fallen_z"])}
+        for key, n in _OBJ_ARRAY_KEYS.items():
+            arr = np.asarray(entry[key], dtype=np.float64).ravel().copy()
+            if arr.shape[0] != n:
+                raise ValueError(
+                    f"_OBJ_PARAMS[{obj!r}][{key!r}] has {arr.shape[0]} "
+                    f"elements; expected {n}."
+                )
+            params[key] = arr
+
+        w = entry["cost_weights"]
+        missing_w = set(_COST_WEIGHT_KEYS) - set(w)
+        unknown_w = set(w) - set(_COST_WEIGHT_KEYS)
+        if missing_w or unknown_w:
+            raise KeyError(
+                f"cost_weights for object {obj!r}: missing "
+                f"{sorted(missing_w)}, unknown {sorted(unknown_w)}. Each object "
+                f"declares exactly the weights {list(_COST_WEIGHT_KEYS)}, since "
+                f"the cost kernel indexes them positionally."
+            )
+        params["cost_weights"] = {k: float(w[k]) for k in _COST_WEIGHT_KEYS}
+        return params
 
     def _build_goal_vector(self) -> np.ndarray:
         """[target_pos(3), target_quat(4), home_state(16), fallen_z(1)].
@@ -490,17 +600,19 @@ class GraspReorientTask(BaseTask):
             *tip_ids
         ], dtype=np.int32)
 
+        params = self.obj_params
+
         # Goal pose and canonical (initial-face) orientation come from the
         # per-object table, not a mocap body in the scene.
-        self.target_pos          = np.asarray(
-            self.obj_params["target_pos"], dtype=np.float64).copy()
+        self.target_pos          = params["target_pos"]
         self.target_quat         = _TARGET_QUAT.copy()
         self._canonical_quat     = self.target_quat.copy()
         self._face_index         = 0
 
-        # The cost's joint target is the initial grasp command (_INIT_CTRL), so
-        # the joint term penalizes drift away from the commanded grasp pose.
-        self.home_state = _INIT_CTRL.copy()
+        # The cost's joint target is this object's initial grasp command, so the
+        # joint term penalizes drift away from the commanded grasp pose. It is
+        # per-object because the home pose is (see _OBJ_PARAMS "init_ctrl").
+        self.home_state = params["init_ctrl"]
 
         self.goal_vector = self._build_goal_vector()
 
@@ -520,25 +632,21 @@ class GraspReorientTask(BaseTask):
         # Fixed hand+object initial state and control, applied to BOTH
         # simulators: the driver resets the eval sim to (q0, v0) and mirrors it
         # into the planning MjData, and uses ctrl0 as the initial command for
-        # both. The hand block is shared across objects; the trailing free-body
-        # block comes from the per-object table.
-        mjm = self.mjm
-        n_hand = _INIT_CTRL.shape[0]
-        if mjm.nq != n_hand + 7 or mjm.nu != n_hand:
+        # both. All three blocks come from this object's _OBJ_PARAMS entry, so
+        # the hand's home pose and grasp command can differ per object.
+        mjm    = self.mjm
+        params = self.obj_params
+        q0     = params["init_qpos"]
+        ctrl0  = params["init_ctrl"]
+
+        n_hand = _N_HAND_JOINTS
+        if mjm.nq != q0.shape[0] or mjm.nu != n_hand:
             raise ValueError(
                 f"Scene {self.scene_variant.raw!r} has nq={mjm.nq} nu={mjm.nu}; "
-                f"this task requires nq={n_hand + 7} ({n_hand} hand joints + one "
+                f"this task requires nq={q0.shape[0]} ({n_hand} hand joints + one "
                 f"free body) and nu={n_hand}."
             )
-        obj_qpos = np.asarray(self.obj_params["init_obj_qpos"], dtype=np.float64)
-        if obj_qpos.shape[0] != 7:
-            raise ValueError(
-                f"init_obj_qpos for object {self.scene_variant.obj!r} has "
-                f"{obj_qpos.shape[0]} elements; expected 7 (pos + wxyz quat)."
-            )
-        q0 = np.concatenate([_INIT_QPOS[:n_hand], obj_qpos])
         v0 = np.zeros(mjm.nv, dtype=np.float64)
-        ctrl0 = _INIT_CTRL.copy()
         return q0, v0, ctrl0
 
     @property
@@ -937,6 +1045,7 @@ class GraspReorientTask(BaseTask):
             render         = render,
             use_mp4        = use_mp4,
             # Translucent goal-cube overlay at the reorientation target (render only).
-            goal_pose      = (_TARGET_POS, _TARGET_QUAT) if _PIN_SHOW_GOAL else None,
+            goal_pose      = ((self.obj_params["target_pos"], _TARGET_QUAT)
+                              if _PIN_SHOW_GOAL else None),
             goal_opacity   = _PIN_GOAL_OPACITY,
         )

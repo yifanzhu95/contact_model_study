@@ -49,6 +49,15 @@
 
     <body name="obj" pos="0.02 0.05 0.1">
         <freejoint name="obj_joint"/>
+        <!-- Explicit inertia. MuJoCo's compiler defaults to inertiafromgeom="auto",
+        so this block wins over whatever the density="458" hulls below would have
+        produced (0.1002 kg). pos/quat are that solve's COM and principal axes,
+        held fixed; mass and diaginertia are both scaled by 0.4998 so the duck
+        stays a uniform-density solid, just at 229 kg/m^3 instead of 458. Edit
+        `mass` and rescale `diaginertia` by the same factor to reweight. -->
+        <inertial pos="-0.0088857 -0.0000003 -0.0152658"
+                  quat="0.6896432 0.1561964 0.1561924 0.6896367"
+                  mass="0.05" diaginertia="4.695783e-05 3.827842e-05 2.721782e-05"/>
         <geom name="obj_hull_0" type="mesh" mesh="duck_hull_0" group="3"
               friction="0.5" density="458" rgba="0.99 0.28 0.17 1"/>
         <geom name="obj_hull_1" type="mesh" mesh="duck_hull_1" group="3"
@@ -66,7 +75,8 @@
         <geom name="obj_hull_7" type="mesh" mesh="duck_hull_7" group="3"
               friction="0.5" density="458" rgba="0.20 0.58 0.46 1"/>
         <!-- Visual-only duck (contype/conaffinity 0, density 0), so the render
-        shows the real shape while the hulls above carry all contact and mass. -->
+        shows the real shape while the hulls above carry all contact. Mass and
+        inertia come from the <inertial> block, not from the hull densities. -->
         <geom name="obj_visual" type="mesh" mesh="rubber_duck_mesh"
               contype="0" conaffinity="0" density="0" rgba="0.97 0.6 0 1.0"/>
     </body>

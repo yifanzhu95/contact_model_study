@@ -34,6 +34,12 @@
     
     <body name="obj" pos="0.02 0.05 0.1">
         <freejoint name="obj_joint"/>
+        <!-- Explicit inertia, overriding the geom's mass="0.1". pos/quat are the
+        convex hull's COM and principal axes; mass and diaginertia are both
+        halved so the duck stays a uniform-density solid at half the weight. -->
+        <inertial pos="-0.0088373 -0.0000005 -0.0151651"
+                  quat="0.6887911 0.1598961 0.1598961 0.6887911"
+                  mass="0.05" diaginertia="4.594933e-05 3.722781e-05 2.626221e-05"/>
         <geom name="obj" type="mesh" mesh="rubber_duck_mesh" 
               friction="0.5" mass="0.1" rgba="0.97 0.6 0 1.0"/>
     </body>
