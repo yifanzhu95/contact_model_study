@@ -226,32 +226,31 @@ _OBJ_PARAMS: dict[str, dict] = {
     # so it needs to start higher and its target sits higher too.
     "duck": {
         "init_qpos": np.array([
-            7.41953443e-01, -5.14095650e-01,  6.97705793e-01,  5.73857360e-01,
-            3.11686592e-01, -2.08901684e-05,  7.04119781e-01,  1.01887562e+00,
-            7.14271347e-01,  2.63610945e-01,  6.97700993e-01,  6.10100133e-01,
-            7.00288255e-01,  1.52604395e+00,  1.33871871e+00,  8.68983906e-01,
-
-            1.37863074e-02 + 0.01,  2.68674345e-02 + 0.02,  9.00480655e-02 + 0.01,
-            0.7071068, 0, 0, 0.7071068
+            5.80133129e-01, -4.60958413e-01,  1.09418637e+00,  9.71266356e-01,
+            3.87067056e-01, -1.10720217e-05,  7.04410644e-01,  1.01898257e+00,
+            5.78416867e-01,  2.09485721e-01,  9.62013335e-01,  1.01933662e+00,
+            7.02147885e-01,  1.02252864e+00,  1.38686441e+00,  1.07747429e+00,
+            2.83537029e-02,  5.03107001e-02,  8.85532452e-02 + 0.01,  
+            7.03799028e-01, 2.78103031e-02, -3.49187465e-02,  7.08995202e-01
         ]),
         "init_ctrl": np.array([
-            0.7672  , -0.51303 ,  0.701455,  0.573897,  0.33472 ,  0.      ,
-            0.709056,  1.01884 ,  0.74176 ,  0.26175 ,  0.701455,  0.610097,
-            0.69912 ,  1.53211 ,  1.33179 ,  0.8657
+            0.60184 , -0.46068 ,  1.09597 ,  0.97044 ,  0.41104 ,  0.      ,
+            0.709056,  1.01884 ,  0.60184 ,  0.2094  ,  0.964465,  1.0186  ,
+            0.70149 ,  1.031295,  1.379755,  1.075   
         ]),
-        "target_pos":    np.array([0.015, 0.045, 0.11]),
+        "target_pos":    np.array([0.015, 0.045, 0.09]),
         "fallen_z":      0.08,
         # Retuned weights for the duck. It is lighter (0.05 kg vs 0.14) and
         # rounder than the cube, so the terms most likely to want retuning are
         # w_contact and w_quat.
         "cost_weights": {
             "w_quat": 20.0,#100.0,
-            "w_pos_x": 20.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-            "w_pos_y": 15.0,#80.0,    #Y is across the fingers
+            "w_pos_x": 7.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+            "w_pos_y": 7.0,#80.0,    #Y is across the fingers
             "w_pos_z": 5.0,#15.0,
             "w_velo": 0.0,
-            "w_contact": 5.0,#12.50,
-            "w_joint": 0.50,
+            "w_contact": 7.50,#12.50,
+            "w_joint": 2.0,
             "w_joint_velo": 0.0,
             "w_fallen": 200.0,
             "w_quat_term": 200.0,#500.0,
