@@ -384,7 +384,7 @@ def main():
                    help="Plan steps between noise resamples (1=every step; "
                         "omit=sample once and reuse, the default).")
     # --- MPPI-only ---------------------------------------------------------
-    p.add_argument("--temperature", type=float, default=20.0)#30.0 <-duck #20.0 <- cube
+    p.add_argument("--temperature", type=float, default=20.0)#20.0 <- cube
     # --- CEM-only ----------------------------------------------------------
     p.add_argument("--n_elites",    type=int,   default=None,
                    help="CEM elite-set size; overrides --elite_frac when set.")
