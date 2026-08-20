@@ -29,14 +29,24 @@ time_horizon), which the controller quantizes against rollout_dt.
 The contact model (M1..M4) used for rollouts is orthogonal to the eval simulator
 (set by the task's TaskConfig.eval_sim).
 
-Run on a CUDA machine (warp arrays live on the device). For Drake eval, its VTK
-renderer needs a display, so run headless under xvfb:
+Run on a CUDA machine (warp arrays live on the device). Rendering is headless:
+when a video is requested, main() puts the process in the EGL environment
+Panda3D's offscreen pipe needs, re-execing once to do it (see
+contact_study/utils/headless_gl.py), so a bare
+
+    python -m contact_study.drivers.run_eval_episode --task grasp_reorient
+
+records video on an HPC GPU node with no xvfb and no exported env. Drake eval is
+the exception — its VTK renderer needs a real display, so run that under xvfb:
     xvfb-run -a python -m contact_study.drivers.run_eval_episode --task cart_pole
 """
 
 from __future__ import annotations
 
 import os
+# Whatever the caller asked for, captured before the default below hides it:
+# main() has to tell "the user picked a GL backend" from "we defaulted to one".
+_USER_MUJOCO_GL = os.environ.get("MUJOCO_GL")
 # For Drake eval, MuJoCo must not grab a GL backend (it shadows Drake's VTK GLX
 # context). Default to "disable"; override to "egl" for MuJoCo-eval rendering.
 os.environ.setdefault("MUJOCO_GL", "egl")
@@ -63,6 +73,7 @@ from contact_study.planners.mppi import MPPIController, MPPIConfig  # noqa: F401
 from contact_study.tasks.base import get_task
 from contact_study.tasks.config import TaskRole, EvalSimulatorKind
 from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
+from contact_study.utils.headless_gl import configure_headless_gl
 
 #wp.init()
 
@@ -83,6 +94,11 @@ def load_rollout_task(task_name: str, geometry: str = DEFAULT_SCENE_VARIANT):
     task = get_task(task_name, geometry=geometry, role=TaskRole.ROLLOUT)
     task.load()
     return task
+
+
+def default_eval_sim(task_name: str, geometry: str = DEFAULT_SCENE_VARIANT) -> EvalSimulatorKind:
+    """The eval sim a task uses when --eval_sim is 'none' (config only, no load())."""
+    return get_task(task_name, geometry=geometry, role=TaskRole.EVAL).config.eval_sim
 
 
 def rollout_dt_for(task_config, eval_substeps: int | None = None) -> float:
@@ -426,7 +442,6 @@ def main():
                    help="Verbose per-step diagnostics (also enables planner debug).")
     args = p.parse_args()
 
-    wp.init()
     planner = resolve_planner_name(args.planner)
     seed_seq = np.random.SeedSequence(args.seed)
     episode_seeds = seed_seq.spawn(args.n_episodes)
@@ -443,6 +458,23 @@ def main():
 
     contact_cfg = MODEL_FACTORIES[args.model]()
     eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
+
+    # Offscreen rendering needs an EGL context bound to the GPU, which on a
+    # cluster node means unsetting DISPLAY and putting the driver's libEGL ahead
+    # of conda's Mesa. The dynamic loader reads that env at exec time, so this may
+    # restart the process — hence before wp.init(), and only when there is
+    # actually a video to render. Drake is excluded: its VTK renderer wants the
+    # real (xvfb) display this would take away.
+    if want_video:
+        kind = eval_sim if eval_sim is not None else default_eval_sim(args.task, args.geometry)
+        if kind is not EvalSimulatorKind.DRAKE:
+            # MuJoCo eval renders through MuJoCo's own EGL context; under every
+            # other eval sim MuJoCo must keep its hands off the GL device.
+            configure_headless_gl(
+                _USER_MUJOCO_GL or ("egl" if kind is EvalSimulatorKind.MUJOCO else "disable")
+            )
+
+    wp.init()
 
     # Parse `name=value` weight overrides (order must match config.cost_weights).
     overrides: dict = {}
