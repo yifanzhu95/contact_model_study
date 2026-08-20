@@ -8,7 +8,7 @@
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=05:00:00
+#SBATCH --time=40:00:00
 
 set -euo pipefail
 
@@ -51,17 +51,17 @@ cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 #    their lengths above).
 # ---------------------------------------------------------------------------
 TASK="grasp_reorient"
-N_EPISODES=30                                # episodes per (model, horizon) cell
+N_EPISODES=15                                # episodes per (model, horizon) cell
 
 MODELS=("M1" "M2" "M3" "M4")
 # The swept planning horizons, in SECONDS (nominal 0.256 s = 8 control steps).
-TIME_HORIZONS=("0.064" "0.128" "0.256" "0.512" "1.024")
+TIME_HORIZONS=("0.088" "0.176" "0.352" "0.704" "1.408")
 
 # Shared MPPI / eval knobs (single values, not swept), matching run_eval_episode.py's
 # CLI defaults.
 N_SAMPLES=256
-TEMPERATURE=1.0
-NOISE_SIGMA=0.025
+TEMPERATURE=20.0
+NOISE_SIGMA=0.1
 STEP_TIME=0.064                 # control-step duration in seconds (nominal)
 EVAL_SIM="none"                 # "none" uses the task default; "mujoco" is faster
 SETTLE=1.0

@@ -56,8 +56,8 @@ N_SAMPLES=("16" "64" "256" "1024" "4096")    # the swept rollout counts
 # (0.320s realized).
 TIME_HORIZON=0.352              # planning horizon in seconds
 STEP_TIME=0.064                 # control-step duration in seconds
-TEMPERATURE=10.0
-NOISE_SIGMA=0.035
+TEMPERATURE=20.0
+NOISE_SIGMA=0.1
 EVAL_SIM="none"                 # "none" uses the task default; "mujoco" is faster
 SETTLE=1.0
 GEOMETRY="accurate"
