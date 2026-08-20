@@ -175,8 +175,8 @@ class PinocchioContactConfig:
     # affects collision geoms; the visual meshes are untouched.
     use_convex_tips: bool = True
     baumgarte_kp: float = 10.0 #1000.0
-    baumgarte_kd: float = 1.0 #10.0
-    admm_max_iterations: int = 50000 #50000 #500000
+    baumgarte_kd: float = 0.50 #10.0
+    admm_max_iterations: int = 1000 #50000 #500000
 
 
 # ---------------------------------------------------------------------------
@@ -883,7 +883,7 @@ class PinocchioSimulator(EvalSimulator):
         s.absolute_complementarity_tol = 1e-10
         s.relative_complementarity_tol = 1e-12
         s.admm_update_rule = pin.ADMMUpdateRule.SPECTRAL
-        s.anderson_capacity = 100
+        s.anderson_capacity = 20
         s.admm_proximal_rule = pin.ADMMProximalRule.AUTOMATIC
         s.stat_record = False
         s.solve_ncp = True

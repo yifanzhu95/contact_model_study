@@ -190,9 +190,9 @@ _OBJ_PARAMS: dict[str, dict] = {
             7.41953443e-01, -5.14095650e-01,  6.97705793e-01,  5.73857360e-01,
             3.11686592e-01, -2.08901684e-05,  7.04119781e-01,  1.01887562e+00,
             7.14271347e-01,  2.63610945e-01,  6.97700993e-01,  6.10100133e-01,
-            7.00288255e-01,  1.52604395e+00,  1.33871871e+00,  8.68983906e-01,
+            7.00288255e-01,  1.52604395e+00 + 1.0,  1.33871871e+00,  8.68983906e-01,
 
-            1.70374863e-02,  3.65435775e-02,  8.36225067e-02 + 0.01,
+            1.70374863e-02,  3.65435775e-02,  8.36225067e-02 + 0.02,
             1, 0, 0, 0
         ]),
         "init_ctrl": np.array([
@@ -200,7 +200,7 @@ _OBJ_PARAMS: dict[str, dict] = {
             0.709056,  1.01884 ,  0.74176 ,  0.26175 ,  0.701455,  0.610097,
             0.69912 ,  1.53211 ,  1.33179 ,  0.8657
         ]),
-        "target_pos":    np.array([0.02, 0.03, 0.09]),#np.array([0.02, 0.03, 0.08])#np.array([0.012, 0.04, 0.085])
+        "target_pos":    np.array([0.02, 0.035, 0.09]),#np.array([0.02, 0.03, 0.08])#np.array([0.012, 0.04, 0.085])
         "fallen_z":      0.08,
         "cost_weights": {
             "w_quat": 20.0,#100.0,
@@ -238,23 +238,23 @@ _OBJ_PARAMS: dict[str, dict] = {
             0.709056,  1.01884 ,  0.60184 ,  0.2094  ,  0.964465,  1.0186  ,
             0.70149 ,  1.031295,  1.379755,  1.075   
         ]),
-        "target_pos":    np.array([0.015, 0.045, 0.09]),
+        "target_pos":    np.array([0.03, 0.03, 0.095]),
         "fallen_z":      0.08,
         # Retuned weights for the duck. It is lighter (0.05 kg vs 0.14) and
         # rounder than the cube, so the terms most likely to want retuning are
         # w_contact and w_quat.
         "cost_weights": {
             "w_quat": 20.0,#100.0,
-            "w_pos_x": 7.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-            "w_pos_y": 7.0,#80.0,    #Y is across the fingers
-            "w_pos_z": 5.0,#15.0,
+            "w_pos_x": 15.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+            "w_pos_y": 15.0,#80.0,    #Y is across the fingers
+            "w_pos_z": 15.0,#15.0,
             "w_velo": 0.0,
-            "w_contact": 7.50,#12.50,
-            "w_joint": 2.0,
+            "w_contact": 10.0,#12.50,
+            "w_joint": 4.0,
             "w_joint_velo": 0.0,
             "w_fallen": 200.0,
-            "w_quat_term": 200.0,#500.0,
-            "w_pos_term": 200.0,
+            "w_quat_term": 400.0,#500.0,
+            "w_pos_term": 400.0,
             "w_fallen_term": 0.0,
         },
     },
@@ -473,7 +473,7 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 2000,#4000,
+            max_steps          = 1000,#4000,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # This object's weights from _OBJ_PARAMS, emitted in
             # _COST_WEIGHT_KEYS order — which must match the weights[...]
