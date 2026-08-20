@@ -473,7 +473,7 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 1000,#4000,
+            max_steps          = 2500,#4000,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # This object's weights from _OBJ_PARAMS, emitted in
             # _COST_WEIGHT_KEYS order — which must match the weights[...]
