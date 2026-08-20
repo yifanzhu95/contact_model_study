@@ -368,7 +368,7 @@ def main():
     p.add_argument("--n_iterations", type=int,  default=None,
                    help="Optimizer iterations per plan() call (default: the "
                         "planner's own — 1 for mppi/predictive_sampler, 3 for cem).")
-    p.add_argument("--noise_sigma", type=float, default=0.1,)#0.1 # for M3)
+    p.add_argument("--noise_sigma", type=float, default=0.2,)#0.1 # for M3)
     p.add_argument("--delta",       type=float, default=None,#0.1,
                    help="Per-step delta clip magnitude (action units); "
                         "pass 'none' to disable the delta clamp entirely.")
@@ -384,7 +384,7 @@ def main():
                    help="Plan steps between noise resamples (1=every step; "
                         "omit=sample once and reuse, the default).")
     # --- MPPI-only ---------------------------------------------------------
-    p.add_argument("--temperature", type=float, default=10.0)#20.0 <- cube
+    p.add_argument("--temperature", type=float, default=20.0)#30.0 <-duck #20.0 <- cube
     # --- CEM-only ----------------------------------------------------------
     p.add_argument("--n_elites",    type=int,   default=None,
                    help="CEM elite-set size; overrides --elite_frac when set.")
@@ -410,7 +410,7 @@ def main():
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
-    p.add_argument("--seed",        type=int,   default=42)
+    p.add_argument("--seed",        type=int,   default=1)
     p.add_argument("--n_episodes",  type=int,   default=1,
                    help="Number of episodes to run; reports the aggregate success rate.")
     p.add_argument("--weights",     nargs="+", default=[],

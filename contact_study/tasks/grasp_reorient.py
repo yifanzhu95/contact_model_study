@@ -238,23 +238,23 @@ _OBJ_PARAMS: dict[str, dict] = {
             0.709056,  1.01884 ,  0.60184 ,  0.2094  ,  0.964465,  1.0186  ,
             0.70149 ,  1.031295,  1.379755,  1.075   
         ]),
-        "target_pos":    np.array([0.015, 0.045, 0.09]),
+        "target_pos":    np.array([0.03, 0.03, 0.095]),
         "fallen_z":      0.08,
         # Retuned weights for the duck. It is lighter (0.05 kg vs 0.14) and
         # rounder than the cube, so the terms most likely to want retuning are
         # w_contact and w_quat.
         "cost_weights": {
             "w_quat": 20.0,#100.0,
-            "w_pos_x": 7.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-            "w_pos_y": 7.0,#80.0,    #Y is across the fingers
-            "w_pos_z": 5.0,#15.0,
+            "w_pos_x": 15.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+            "w_pos_y": 15.0,#80.0,    #Y is across the fingers
+            "w_pos_z": 15.0,#15.0,
             "w_velo": 0.0,
-            "w_contact": 7.50,#12.50,
-            "w_joint": 2.0,
+            "w_contact": 10.0,#12.50,
+            "w_joint": 4.0,
             "w_joint_velo": 0.0,
             "w_fallen": 200.0,
-            "w_quat_term": 200.0,#500.0,
-            "w_pos_term": 200.0,
+            "w_quat_term": 400.0,#500.0,
+            "w_pos_term": 400.0,
             "w_fallen_term": 0.0,
         },
     },
@@ -473,7 +473,7 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 2000,#4000,
+            max_steps          = 1000,#4000,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # This object's weights from _OBJ_PARAMS, emitted in
             # _COST_WEIGHT_KEYS order — which must match the weights[...]
