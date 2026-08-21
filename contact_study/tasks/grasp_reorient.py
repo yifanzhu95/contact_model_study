@@ -208,8 +208,8 @@ _OBJ_PARAMS: dict[str, dict] = {
             "w_pos_y": 15.0,#80.0,    #Y is across the fingers
             "w_pos_z": 5.0,#15.0,
             "w_velo": 0.0,
-            "w_contact": 15.0,#12.50,
-            "w_joint": 4.0,
+            "w_contact": 15.0,#15.0,#12.50,
+            "w_joint": 4.0,#4.0,
             "w_joint_velo": 0.0,
             "w_fallen": 200.0,
             "w_quat_term": 200.0,#500.0,
@@ -473,7 +473,7 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 2500,#4000,
+            max_steps          = 500,#4000,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # This object's weights from _OBJ_PARAMS, emitted in
             # _COST_WEIGHT_KEYS order — which must match the weights[...]
@@ -652,7 +652,12 @@ class GraspReorientTask(BaseTask):
     def cost_fn_wp(self) -> wp.func:
         return grasp_reorient_cost_wp
 
-    def is_success(self, mjd: mujoco.MjData) -> bool:
+    def goal_errors(self, mjd: mujoco.MjData) -> dict[str, float]:
+        """Distance to the reorientation goal, keyed like success_thresholds.
+
+        The three terms are exactly the ones is_success thresholds, so the two
+        can never drift apart, and a hyperparameter search can scalarize them by
+        dividing each by its own threshold (see run_bayes_opt.py)."""
         obj_qpos_adr = int(self.index_vector[0])
         obj_qvel_adr = int(self.index_vector[1])
 
@@ -660,19 +665,16 @@ class GraspReorientTask(BaseTask):
         quat = mjd.qpos[obj_qpos_adr + 3 : obj_qpos_adr + 7]
         vel  = mjd.qvel[obj_qvel_adr     : obj_qvel_adr + 6]
 
-        pos_err  = np.linalg.norm(pos - self.target_pos)
-        quat_err = 1.0 - np.dot(quat, self.target_quat) ** 2
+        return {
+            "pos":  float(np.linalg.norm(pos - self.target_pos)),
+            "quat": float(1.0 - np.dot(quat, self.target_quat) ** 2),
+            "vel":  float(np.linalg.norm(vel)),
+        }
 
-        #print(pos,self.target_pos)
-        #print(quat, self.target_quat)
-        #print(pos_err,quat_err)
-
-        thr     = self.config.success_thresholds
-        pose_ok = pos_err < thr["pos"] and quat_err < thr["quat"]
-        if not pose_ok:
-            return False
-
-        return bool(np.linalg.norm(vel) < thr["vel"])
+    def is_success(self, mjd: mujoco.MjData) -> bool:
+        err = self.goal_errors(mjd)
+        thr = self.config.success_thresholds
+        return all(err[k] < thr[k] for k in thr)
 
     def has_failed(self, mjd: mujoco.MjData) -> bool:
         mjm = self.mjm
