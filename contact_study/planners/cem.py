@@ -259,15 +259,16 @@ class CEMController(SamplingPlanner):
         """Read mu[0], then roll the whole distribution forward if warm-starting.
 
         The base shifts mu (and zeros its last row); sigma is shifted alongside
-        it, with the new last row re-opened to the initial noise_sigma — a
-        freshly-appended step has no elite evidence behind it."""
+        it by the same shift_steps, with the newly-appended rows re-opened to the
+        initial noise_sigma — a freshly-appended step has no elite evidence
+        behind it."""
         action_np = super()._extract_action()
         if self.pc.warm_start:
             wp.launch(
                 _shift_2d_kernel,
                 dim=(self.horizon, self.nu),
                 inputs=[self.sigma_wp, self.sigma_shift_wp, self.horizon,
-                        self.pc.noise_sigma],
+                        self.shift_steps, self.pc.noise_sigma],
             )
             self.sigma_wp, self.sigma_shift_wp = self.sigma_shift_wp, self.sigma_wp
         return action_np

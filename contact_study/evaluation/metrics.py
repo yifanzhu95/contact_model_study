@@ -41,6 +41,32 @@ class EpisodeResult:
     # became selectable still load via EpisodeResult(**json_dict).
     planner:           str   = "mppi"
 
+    # --- asynchronous driver telemetry ------------------------------------
+    # Filled only by contact_study/drivers/run_async_eval_episode.py, where the
+    # eval sim keeps running while the planner solves. All defaulted so results
+    # from the synchronous driver (and every result written before this driver
+    # existed) still load via EpisodeResult(**json_dict).
+    #   n_plans              plan() calls completed during the episode
+    #   mean/std_latency_ms  realized planning latency AS CHARGED (after any
+    #                        --plan_latency_ms override / --latency_scale),
+    #                        i.e. the sim time the loop actually spent planning.
+    #                        mean_step_ms keeps holding the raw measured cost.
+    #   mean_staleness_ms    mean age of a tape row at the moment it is applied,
+    #                        measured from the start of the solve that made it
+    #   missed_ticks         executor ticks that replayed an already-consumed
+    #                        tape row because no fresh plan had landed
+    #   tape_exhausted_ticks executor ticks that ran off the end of the tape and
+    #                        clamped to its last row (planner slower than its
+    #                        own horizon)
+    #   sim_seconds          simulated duration of the episode
+    n_plans:              int   = 0
+    mean_latency_ms:      float = 0.0
+    std_latency_ms:       float = 0.0
+    mean_staleness_ms:    float = 0.0
+    missed_ticks:         int   = 0
+    tape_exhausted_ticks: int   = 0
+    sim_seconds:          float = 0.0
+
 
 @dataclass
 class AggregatedResult:

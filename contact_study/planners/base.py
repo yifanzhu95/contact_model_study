@@ -311,18 +311,24 @@ def _find_min_kernel(
 
 @wp.kernel
 def _shift_2d_kernel(
-    src:  wp.array2d(dtype=float),  # (H, nu)
-    dst:  wp.array2d(dtype=float),  # (H, nu)  [out]
-    H:    int,
-    fill: float,                    # value written into the last row
+    src:   wp.array2d(dtype=float),  # (H, nu)
+    dst:   wp.array2d(dtype=float),  # (H, nu)  [out]
+    H:     int,
+    shift: int,                      # rows to roll forward (1 = classic warm start)
+    fill:  float,                    # value written into the rows that fall off the end
 ):
-    """Warm-start shift: dst[h] = src[h+1], with the last row set to `fill`.
+    """Warm-start shift: dst[h] = src[h+shift], with the tail set to `fill`.
+
+    shift=1 is the classic one-step warm start. The async driver passes the
+    number of control steps that elapsed during the solve, so the mean carried
+    into the next plan() is aligned with that plan's t0 rather than with a t0
+    that is already in the past.
 
     Written into a separate buffer (not in place) so adjacent rows can't race
     on the read-before-write; the caller swaps src/dst afterward."""
     h, u = wp.tid()
-    if h < H - 1:
-        dst[h, u] = src[h + 1, u]
+    if h + shift < H:
+        dst[h, u] = src[h + shift, u]
     else:
         dst[h, u] = fill
 
@@ -403,6 +409,16 @@ class SamplingPlanner(abc.ABC):
         # Rollout steps actually taken by the last plan() — < horizon only when
         # the time-constrained path truncated.
         self.last_n_steps    = self.horizon
+
+        # The full (H, nu) mean action sequence produced by the last plan(),
+        # captured BEFORE the warm-start shift. Synchronous drivers only need
+        # row 0 (which plan() returns); the async driver plays the whole tape
+        # out over the latency window. None until the first plan().
+        self.last_action_seq: np.ndarray | None = None
+        # Rows the warm-start shift rolls forward per plan(). 1 is the classic
+        # one-step warm start; the async driver raises it to the number of
+        # control steps the solve actually consumed.
+        self.shift_steps     = 1
 
         self._setup_warp_arrays()
         self._setup_warp_backend()
@@ -687,15 +703,22 @@ class SamplingPlanner(abc.ABC):
     # -- action extraction --------------------------------------------------
 
     def _extract_action(self) -> np.ndarray:
-        # Only the first action crosses device→host; the warm-start shift stays
-        # on the GPU (no full (H,nu) round-trip). U_wp is never baked into a
-        # captured graph, so swapping the buffer reference is safe.
-        action_np = self.U_wp[0].numpy().copy()
+        # The whole (H, nu) mean crosses device→host — a few hundred bytes, and
+        # no more expensive than the row-0 copy it replaces, since both pay one
+        # transfer. Stash it pre-shift so async drivers can play the tape out;
+        # the warm-start shift itself stays on the GPU. U_wp is never baked into
+        # a captured graph, so swapping the buffer reference is safe.
+        seq = self.U_wp.numpy().copy()
+        self.last_action_seq = seq
+        # An owned copy, not a view into seq: callers have always been free to
+        # mutate the returned action, and must not reach the published tape.
+        action_np = seq[0].copy()
         if self.pc.warm_start:
             wp.launch(
                 _shift_2d_kernel,
                 dim=(self.horizon, self.nu),
-                inputs=[self.U_wp, self.U_shift_wp, self.horizon, 0.0],
+                inputs=[self.U_wp, self.U_shift_wp, self.horizon,
+                        self.shift_steps, 0.0],
             )
             self.U_wp, self.U_shift_wp = self.U_shift_wp, self.U_wp
         return action_np
@@ -705,6 +728,7 @@ class SamplingPlanner(abc.ABC):
     def reset(self):
         """Clear the action sequence (call at the start of a new episode/goal)."""
         self.U_wp.zero_()
+        self.last_action_seq = None
         # Restart the resample cadence so a fresh goal begins on fresh noise.
         # _resample_count deliberately keeps advancing (it keys the seed).
         self._plan_count = 0
@@ -731,8 +755,11 @@ class SamplingPlanner(abc.ABC):
             n_eff = self._rollout()           # J^(i) <- J(U^(i), x0)
             if not self._update_params(n_eff):
                 # Every rollout produced a NaN cost; the update may have written
-                # NaN into theta — reset it so the next call starts clean.
+                # NaN into theta — reset it so the next call starts clean. The
+                # published tape is zeroed alongside it: a driver replaying the
+                # previous tape here would be acting on a solve that failed.
                 self.U_wp.zero_()
+                self.last_action_seq = np.zeros((self.horizon, self.nu), dtype=np.float32)
                 return np.zeros(self.nu, dtype=np.float32)
 
         return self._extract_action()         # u(t) <- get_action(theta, t)
