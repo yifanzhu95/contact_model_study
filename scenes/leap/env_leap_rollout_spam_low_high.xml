@@ -1,5 +1,5 @@
 <mujoco model="right_allegro_hand scene">
-  <include file="./leap_right_hand.xml"/>
+  <include file="./leap_right_hand_low.xml"/>
 
   <statistic center="0 0 0" extent="0.3"/>
 
@@ -26,8 +26,12 @@
 
     <geom name="floor" pos="0 0 -0.1" size="0 0 0.05" type="plane" material="groundplane"/>
 
-    <body name="goal" pos="-0.01 -0.1 0.2" quat="1 0 0 0">
-      <geom name="goal-visual-above" type="mesh" mesh="object"  conaffinity="0" contype="0" material="obj_material"
+    <!-- Reorientation target marker. mocap="true" is REQUIRED: the task's
+    _update_goal rewrites mjd.mocap_quat here each time a goal is sampled, and
+    silently does nothing on a non-mocap body. Visual only, so density="0"
+    keeps the marker mesh out of the mass properties. -->
+    <body name="goal" pos="-0.01 -0.1 0.2" quat="1 0 0 0" mocap="true">
+      <geom name="goal-visual-above" type="mesh" mesh="object"  conaffinity="0" contype="0" density="0" material="obj_material"
         pos="0 0 0" quat="1 0 0 0" rgba="1.0 1.0 0 0.3" fitscale="0.5"/>
     </body>
     

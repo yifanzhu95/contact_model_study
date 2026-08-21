@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+
 import numpy as np
 import mujoco
 import warp as wp
@@ -259,6 +261,18 @@ _OBJ_PARAMS: dict[str, dict] = {
         },
     },
 }
+
+# The two YCB tins reuse the duck's entry verbatim (deep-copied, so retuning one
+# never touches the other two) -- they are PLACEHOLDERS, not settled values.
+# Nothing here was measured against spamTin/tomatoSoupTin: the hand block of
+# init_qpos and init_ctrl is still the cube's, the free-body tail and
+# target_pos are the duck's, and the weights were tuned for a 0.05 kg duck while
+# both tins are 0.14 kg in their scenes. To settle one, open its rollout scene
+# (scenes/leap/env_leap_rollout_{obj}_low_high.xml) in the viewer, paste the
+# whole qpos plus the held ctrl, and promote it to a literal entry above.
+for _placeholder_obj in ("spam", "tomato"):
+    _OBJ_PARAMS[_placeholder_obj] = copy.deepcopy(_OBJ_PARAMS["duck"])
+del _placeholder_obj
 
 # Array-valued _OBJ_PARAMS entries and their required lengths. obj_params
 # checks these once per resolve, so a mis-sized paste from the viewer fails at
