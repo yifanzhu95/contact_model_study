@@ -6,7 +6,7 @@
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=01:00:00
+#SBATCH --time=05:00:00
 
 set -euo pipefail
 
@@ -23,7 +23,7 @@ cd "$PROJ_DIR" #cd "$PROJ_DIR/experiments/hpc"
 TASK="grasp_reorient"
 MODEL="M3"
 PLANNER="mppi"         # mppi | cem | predictive_sampler
-N_EPISODES=30          # episodes to run for this one weight set
+N_EPISODES=10          # episodes to run for this one weight set
 
 # Shared planner / eval knobs, matching run_eval_episode.py's CLI defaults. The
 # rollout schedule is specified in SECONDS and quantized against the task's
@@ -32,13 +32,13 @@ N_EPISODES=30          # episodes to run for this one weight set
 N_SAMPLES=256
 TIME_HORIZON=0.352              # planning horizon in seconds
 STEP_TIME=0.064                 # control-step duration in seconds
-NOISE_SIGMA=0.025
+NOISE_SIGMA=0.25
 EVAL_SIM="none"
 SETTLE=1.0
 SEED=0
 
 # Planner-specific knobs, appended below by the case block.
-TEMPERATURE=1.0                 # mppi: softmax temperature
+TEMPERATURE=20.0                 # mppi: softmax temperature
 ELITE_FRAC=0.1                  # cem:  elite fraction of N_SAMPLES
 CEM_ALPHA=0.1                   # cem:  refit smoothing
 
