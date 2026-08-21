@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import copy
-
 import numpy as np
 import mujoco
 import warp as wp
@@ -260,19 +258,94 @@ _OBJ_PARAMS: dict[str, dict] = {
             "w_fallen_term": 0.0,
         },
     },
+    # TODO(tune): UNSETTLED. Every number below is the duck's, written out here
+    # so spam can be retuned in place without touching the duck. Nothing was
+    # measured against spamTin: the hand block of init_qpos and init_ctrl trace
+    # back to the cube, the free-body tail and target_pos to the duck, and the
+    # weights were tuned for a 0.05 kg duck while this tin is 0.14 kg.
+    # spamTin's bounding half-extents are (0.0513, 0.0448, 0.0298) about a
+    # centre offset of (0.0006, 0, 0.0003) -- a flat slab, ~2 cm shorter than
+    # the duck and much wider, so it likely wants to start LOWER (and with a
+    # lower target_pos / fallen_z) than these duck values.
+    # The scene rests it at pos "0.01 0.04 0.08" quat "1 0 0 0"
+    # (scenes/leap/env_leap_rollout_spam_low_high.xml); settle the hand around
+    # it in the viewer and paste the whole qpos plus the held ctrl here.
+    "spam": {
+        "init_qpos": np.array([
+            5.80133129e-01, -4.60958413e-01,  1.09418637e+00,  9.71266356e-01,
+            3.87067056e-01, -1.10720217e-05,  7.04410644e-01,  1.01898257e+00,
+            5.78416867e-01,  2.09485721e-01,  9.62013335e-01,  1.01933662e+00,
+            7.02147885e-01,  1.02252864e+00,  1.38686441e+00,  1.07747429e+00,
+
+            2.83537029e-02,  5.03107001e-02,  8.85532452e-02 + 0.01,
+            7.03799028e-01, 2.78103031e-02, -3.49187465e-02,  7.08995202e-01
+        ]),
+        "init_ctrl": np.array([
+            0.60184 , -0.46068 ,  1.09597 ,  0.97044 ,  0.41104 ,  0.      ,
+            0.709056,  1.01884 ,  0.60184 ,  0.2094  ,  0.964465,  1.0186  ,
+            0.70149 ,  1.031295,  1.379755,  1.075
+        ]),
+        "target_pos":    np.array([0.03, 0.03, 0.095]),
+        "fallen_z":      0.08,
+        "cost_weights": {
+            "w_quat": 20.0,
+            "w_pos_x": 15.0,   # X is down the fingers
+            "w_pos_y": 15.0,   # Y is across the fingers
+            "w_pos_z": 15.0,
+            "w_velo": 0.0,
+            "w_contact": 10.0,
+            "w_joint": 4.0,
+            "w_joint_velo": 0.0,
+            "w_fallen": 200.0,
+            "w_quat_term": 400.0,
+            "w_pos_term": 400.0,
+            "w_fallen_term": 0.0,
+        },
+    },
+    # TODO(tune): UNSETTLED, same story as "spam" above -- these are the duck's
+    # numbers written out so the tomato tin can be retuned in place. Nothing was
+    # measured against tomatoSoupTin, whose mass is 0.14 kg (vs the 0.05 kg duck
+    # the weights were tuned for).
+    # tomatoSoupTin's bounding half-extents are (0.054, 0.037, 0.0367) about a
+    # centre offset of (-0.0005, -0.0001, -0.0006) -- a cylinder lying on its
+    # side, ~1.5 cm shorter than the duck and longer along X.
+    # The scene rests it at pos "-0.00 0.05 0.07" quat "1 0 0 0"
+    # (scenes/leap/env_leap_rollout_tomato_low_high.xml) -- 1 cm lower than the
+    # spam tin, so this one especially wants its own settled qpos.
+    "tomato": {
+        "init_qpos": np.array([
+            5.80133129e-01, -4.60958413e-01,  1.09418637e+00,  9.71266356e-01,
+            3.87067056e-01, -1.10720217e-05,  7.04410644e-01,  1.01898257e+00,
+            5.78416867e-01,  2.09485721e-01,  9.62013335e-01,  1.01933662e+00,
+            7.02147885e-01,  1.02252864e+00,  1.38686441e+00,  1.07747429e+00,
+
+            2.83537029e-02,  5.03107001e-02,  8.85532452e-02 + 0.01,
+            7.03799028e-01, 2.78103031e-02, -3.49187465e-02,  7.08995202e-01
+        ]),
+        "init_ctrl": np.array([
+            0.60184 , -0.46068 ,  1.09597 ,  0.97044 ,  0.41104 ,  0.      ,
+            0.709056,  1.01884 ,  0.60184 ,  0.2094  ,  0.964465,  1.0186  ,
+            0.70149 ,  1.031295,  1.379755,  1.075
+        ]),
+        "target_pos":    np.array([0.03, 0.03, 0.095]),
+        "fallen_z":      0.08,
+        "cost_weights": {
+            "w_quat": 20.0,
+            "w_pos_x": 15.0,   # X is down the fingers
+            "w_pos_y": 15.0,   # Y is across the fingers
+            "w_pos_z": 15.0,
+            "w_velo": 0.0,
+            "w_contact": 10.0,
+            "w_joint": 4.0,
+            "w_joint_velo": 0.0,
+            "w_fallen": 200.0,
+            "w_quat_term": 400.0,
+            "w_pos_term": 400.0,
+            "w_fallen_term": 0.0,
+        },
+    },
 }
 
-# The two YCB tins reuse the duck's entry verbatim (deep-copied, so retuning one
-# never touches the other two) -- they are PLACEHOLDERS, not settled values.
-# Nothing here was measured against spamTin/tomatoSoupTin: the hand block of
-# init_qpos and init_ctrl is still the cube's, the free-body tail and
-# target_pos are the duck's, and the weights were tuned for a 0.05 kg duck while
-# both tins are 0.14 kg in their scenes. To settle one, open its rollout scene
-# (scenes/leap/env_leap_rollout_{obj}_low_high.xml) in the viewer, paste the
-# whole qpos plus the held ctrl, and promote it to a literal entry above.
-for _placeholder_obj in ("spam", "tomato"):
-    _OBJ_PARAMS[_placeholder_obj] = copy.deepcopy(_OBJ_PARAMS["duck"])
-del _placeholder_obj
 
 # Array-valued _OBJ_PARAMS entries and their required lengths. obj_params
 # checks these once per resolve, so a mis-sized paste from the viewer fails at
