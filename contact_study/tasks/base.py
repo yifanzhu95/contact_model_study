@@ -197,6 +197,17 @@ class BaseTask(abc.ABC):
         """Check whether the current state satisfies the task goal."""
         ...
 
+    def goal_errors(self, mjd: mujoco.MjData) -> dict[str, float]:
+        """Per-criterion distance to the goal, keyed like config.success_thresholds.
+
+        The keys must match success_thresholds, so a criterion is satisfied iff
+        err[k] < thr[k] — that is exactly the is_success test, and it lets a
+        search scalarize the error by normalizing each term against its own
+        threshold. Returns {} for tasks with no meaningful continuous goal
+        metric (callers must treat an empty dict as "not available").
+        """
+        return {}
+
     def has_failed(self, mjd: mujoco.MjData) -> bool:
         """Check whether the episode has failed (e.g. object fell). Override per task."""
         return False

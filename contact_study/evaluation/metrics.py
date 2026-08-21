@@ -40,6 +40,13 @@ class EpisodeResult:
     # "predictive_sampler"). Defaulted so results written before the planner
     # became selectable still load via EpisodeResult(**json_dict).
     planner:           str   = "mppi"
+    # BaseTask.goal_errors() evaluated on the episode's final state: the actual
+    # per-criterion distance to the task goal ({"pos": .., "quat": .., "vel": ..}
+    # for grasp_reorient), keyed like TaskConfig.success_thresholds. None when
+    # the task has no continuous goal metric. Distinct from final_cost, which is
+    # ||q_final - q_0|| — displacement from the START pose, not goal error.
+    # Defaulted so older result JSON still loads via EpisodeResult(**json_dict).
+    final_goal_errs:   dict[str, float] | None = None
 
     # --- asynchronous driver telemetry ------------------------------------
     # Filled only by contact_study/drivers/run_async_eval_episode.py, where the
