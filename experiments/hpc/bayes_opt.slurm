@@ -40,7 +40,7 @@ MODELS=("M1" "M2" "M3" "M4")
 
 # Collision fidelity halves of the scene variant. The full --geometry string is
 # assembled below as "<obj>_<HAND_ACC>_<OBJ_ACC>".
-HAND_ACC="low"
+HAND_ACC="high"
 OBJ_ACC="high"
 
 # ---------------------------------------------------------------------------
@@ -48,13 +48,13 @@ OBJ_ACC="high"
 #    trial replays by pasting them into that driver).
 # ---------------------------------------------------------------------------
 PLANNER="mppi"                  # mppi | cem | predictive_sampler
-N_EPISODES=2                    # episodes per trial; more averages out episode
+N_EPISODES=5                    # episodes per trial; more averages out episode
                                 # luck at a proportional cost in wall time
 SEED=42                         # THE constant episode seed (same episodes every trial)
 N_SAMPLES=256
 TIME_HORIZON=0.352              # planning horizon in SECONDS (quantized to control steps)
 STEP_TIME=0.064                 # control-step duration in SECONDS (quantized to rollout steps)
-EVAL_SIM="none"                 # none | mujoco | drake | pinocchio
+EVAL_SIM="mujoco"                 # none | mujoco | drake | pinocchio
 SETTLE=1.0
 NCONMAX=50
 NJMAX=300
@@ -97,7 +97,7 @@ ERR_CLIP=10.0                   # goal error clipped here, then divided by it
 # ---------------------------------------------------------------------------
 # 5. Optimizer (gp_minimize).
 # ---------------------------------------------------------------------------
-N_CALLS=60                      # total trial budget per cell, INCLUDING resumed trials
+N_CALLS=500                      # total trial budget per cell, INCLUDING resumed trials
 N_INITIAL_POINTS=10             # random trials before the GP takes over
 ACQ_FUNC="gp_hedge"             # EI | LCB | PI | gp_hedge
 GP_NOISE="gaussian"             # "gaussian" or a float
