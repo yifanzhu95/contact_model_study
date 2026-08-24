@@ -34,6 +34,7 @@ import contact_study.tasks  # noqa: F401 — registers all tasks
 from contact_study.contact_models.config import ContactModelConfig
 from contact_study.drivers import run_async_eval_episode as async_mod
 from contact_study.drivers import run_eval_episode as sync_mod
+from contact_study.evaluation.trajectory import TrajectoryConfig
 from contact_study.planners import make_planner_config
 from contact_study.tasks.config import EvalSimulatorKind
 
@@ -81,9 +82,12 @@ def _planner_cfg():
 
 
 def main() -> int:
+    # precision=0: the recorded ctrl must compare bit-exactly against the
+    # commands captured at apply_control(), with no rounding in between.
     common = dict(task_name=TASK, contact_cfg=ContactModelConfig.M2(), planner="mppi",
                   settle_seconds=0.0, eval_sim=EVAL_SIM, verbose=False,
-                  fin_ep_on_success=False)
+                  fin_ep_on_success=False,
+                  record=TrajectoryConfig(precision=0))
 
     sync_log: list[np.ndarray] = []
     orig = _instrument(sync_mod, sync_log)
@@ -128,7 +132,39 @@ def main() -> int:
         print(f"FAIL  final_cost differs: {r_sync.final_cost!r} vs {r_async.final_cost!r}")
         return 1
     print(f"ok    final_cost identical ({r_sync.final_cost!r})")
-    print("\n1/1 passed")
+
+    # --- the recorders saw exactly what the simulator did -------------------
+    # Both hook sites sit after the clip and before apply_control(), so the
+    # recorded ctrl column must equal the captured command tape row for row.
+    sync_ctrl = np.asarray(r_sync.trajectory["steps"]["ctrl"], dtype=float)
+    if not np.array_equal(sync_ctrl, A):
+        print(f"FAIL  sync trajectory ctrl != applied commands "
+              f"(max|d|={np.abs(sync_ctrl - A).max():.3e})")
+        return 1
+    print("ok    sync trajectory ctrl == applied commands")
+
+    # The async driver also records missed ticks, which apply nothing; only the
+    # applied ones correspond to an apply_control() call.
+    applied     = np.asarray(r_async.trajectory["steps"]["applied"], dtype=bool)
+    async_ctrl  = np.asarray(r_async.trajectory["steps"]["ctrl"], dtype=float)[applied]
+    if not np.array_equal(async_ctrl, B):
+        print(f"FAIL  async trajectory ctrl != applied commands "
+              f"({async_ctrl.shape} vs {B.shape})")
+        return 1
+    print(f"ok    async trajectory ctrl == applied commands "
+          f"({int((~applied).sum())} missed tick(s) excluded)")
+
+    # fin_ep_on_success=False with a max_steps cap: both drivers run the full
+    # length, so both must report a timeout over exactly MAX_STEPS steps.
+    for name, r in (("sync", r_sync), ("async", r_async)):
+        if (r.end_reason, r.time_out, r.n_steps_taken) != ("timeout", True, MAX_STEPS):
+            print(f"FAIL  {name} end state: end_reason={r.end_reason!r} "
+                  f"time_out={r.time_out} n_steps_taken={r.n_steps_taken} "
+                  f"(expected 'timeout', True, {MAX_STEPS})")
+            return 1
+    print(f"ok    both drivers report end_reason='timeout' over {MAX_STEPS} steps")
+
+    print("\n5/5 passed")
     return 0
 
 

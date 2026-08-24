@@ -70,10 +70,10 @@ def main():
 
         # Rebuild EpisodeResult objects so we can reuse the shared aggregator,
         # keeping the _agg.json schema identical to the other experiment scripts.
-        episodes = [EpisodeResult(**e) for e in c.get("episodes", [])]
+        episodes = [EpisodeResult.from_dict(e, drop_trajectory=True) for e in c.get("episodes", [])]
         if episodes:
             aggregated.append(
-                aggregate_episodes(episodes, c["task"], c["label"], "B"))
+                aggregate_episodes(episodes, c["task"], c["label"]))
 
     rich_path = f"{prefix}_rich.json"
     agg_path  = f"{prefix}_agg.json"

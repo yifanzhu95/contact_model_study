@@ -39,6 +39,7 @@ import warp as wp
 import contact_study.tasks  # noqa: F401
 
 from contact_study.evaluation.metrics import aggregate_episodes, save_results
+from contact_study.evaluation.trajectory import TrajectoryConfig
 from contact_study.planners.mppi import MPPIConfig
 from contact_study.tasks.config import EvalSimulatorKind
 
@@ -56,6 +57,15 @@ SUBSTEPS_SWEEP = [1, 3, 5, 7, 9, 11, 13, 15]
 
 wp.init()
 
+
+
+# These multi-cell local sweeps persist only the AGGREGATE rows (save_results) —
+# the per-episode records, and with them any recorded trajectory, are dropped at
+# the end of each cell. Recording is therefore switched off explicitly rather
+# than left at its default: paying the per-step GPU readback for data that is
+# then discarded would be pure waste. Use the HPC cell workers (which write an
+# episodes[] array) when the trajectories are wanted.
+NO_RECORDING = TrajectoryConfig(record_trajectory=False, record_planner_dist=False)
 
 def main():
     parser = argparse.ArgumentParser(
@@ -145,6 +155,7 @@ def main():
                     ep_idx         = ep,
                     debug          = args.debug,
                     verbose        = False,
+                    record         = NO_RECORDING,
                 )
                 episodes.append(result)
                 tick = "✓" if result.success else "✗"
@@ -152,7 +163,7 @@ def main():
                 print(f"    ep {ep:02d}  {tick}  success_step={sstr:<8}  "
                       f"step={result.mean_step_ms:.3f}±{result.std_step_ms:.3f} ms")
 
-            agg = aggregate_episodes(episodes, args.task, label, "B")
+            agg = aggregate_episodes(episodes, args.task, label)
             aggregated.append(agg)
 
             succ_steps = [e.steps_to_success for e in episodes if e.steps_to_success is not None]

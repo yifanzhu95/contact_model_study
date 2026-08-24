@@ -175,6 +175,11 @@ class CEMController(SamplingPlanner):
         # can be uploaded without reallocating; the kernel reads only the first k.
         self.elite_idx_wp = wp.zeros(N, dtype=wp.int32, device="cuda")
         self._elite_idx_np = np.zeros(N, dtype=np.int32)
+        # Elites the LAST refit actually used. Rows [k:] of elite_idx_wp are
+        # padded with elite 0, so k cannot be recovered from the array — and a
+        # reader that took the whole thing would double-count elite 0 (N-k)
+        # times. Read by evaluation/distributions.py.
+        self.last_n_elites = self.n_elites
 
     @property
     def mu_wp(self):
@@ -230,6 +235,7 @@ class CEMController(SamplingPlanner):
         self._elite_idx_np[:k] = elites.astype(np.int32)
         self._elite_idx_np[k:] = self._elite_idx_np[0]
         self.elite_idx_wp.assign(self._elite_idx_np)
+        self.last_n_elites = k
 
         # Rows beyond n_eff never influenced a cost (time-constrained path), so
         # the refit leaves them untouched.

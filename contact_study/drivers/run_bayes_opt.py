@@ -53,7 +53,6 @@ import os
 os.environ.setdefault("MUJOCO_GL", "egl")
 
 import argparse
-import dataclasses
 import gc
 import json
 import time
@@ -68,6 +67,10 @@ from skopt.space import Real
 
 import contact_study.tasks  # noqa: F401 — registers all tasks
 
+from contact_study.evaluation import json_io
+from contact_study.evaluation.trajectory import (
+    TrajectoryConfig, add_cli_flags as add_record_flags,
+)
 from contact_study.drivers.run_eval_episode import (
     MODEL_FACTORIES, load_rollout_task, resolve_mppi_schedule, run_eval_episode,
 )
@@ -254,7 +257,12 @@ class BOObjective:
         # THE constant seed. Spawned once and reused by every trial, so the
         # objective is a function of the hyperparameters alone.
         self.episode_seeds = np.random.SeedSequence(args.seed).spawn(args.n_episodes)
+        self.record_cfg    = TrajectoryConfig.from_args(args)
 
+        # Kept for the whole run (the winner is looked up in here at the end), so
+        # the per-episode trajectories are stripped before appending: at
+        # --n_calls 500 with recording on they would be tens of GB of live heap.
+        # The on-disk cell_*.json keeps the full record.
         self.records: list[dict] = []
         self._warned_no_goal_err = False
 
@@ -325,6 +333,7 @@ class BOObjective:
                 fin_ep_on_success     = True,
                 debug                 = args.debug,
                 verbose               = args.debug,
+                record                = self.record_cfg,
             )
             episodes.append(result)
 
@@ -399,12 +408,12 @@ class BOObjective:
             "objective":          objective,
             "mean_norm_goal_err": mean_err,
             "x":                  [float(v) for v in x],
-            "episodes": [dataclasses.asdict(r) for r in episodes],
+            "episodes": [r.to_dict() for r in episodes],
         }
-        self.records.append(record)
+        self.records.append({**record, "episodes": None})
         # Written inside the objective so a killed job keeps every finished trial.
-        with open(self.outdir / f"cell_{trial:05d}.json", "w") as f:
-            json.dump(record, f, indent=2)
+        json_io.dump(record, self.outdir / f"cell_{trial:05d}.json",
+                     precision=self.record_cfg.precision)
 
         # Each trial builds a fresh rollout task, planner (with CUDA graphs) and
         # eval sim. Drop the references promptly and report free device memory so
@@ -550,6 +559,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Trial directory (auto-named under results/ if omitted).")
     p.add_argument("--resume",     type=str, default=None,
                    help="A bo_state.json to seed the optimizer with prior trials.")
+    add_record_flags(p)
     p.add_argument("--debug",      action="store_true",
                    help="Verbose per-step diagnostics (also enables planner debug).")
     return p

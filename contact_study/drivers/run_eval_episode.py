@@ -52,8 +52,6 @@ _USER_MUJOCO_GL = os.environ.get("MUJOCO_GL")
 os.environ.setdefault("MUJOCO_GL", "egl")
 
 import argparse
-import dataclasses
-import json
 import time
 from pathlib import Path
 
@@ -64,7 +62,11 @@ import warp as wp
 import contact_study.tasks  # noqa: F401 — registers all tasks
 
 from contact_study.contact_models.config import ContactModelConfig
+from contact_study.evaluation import json_io
 from contact_study.evaluation.metrics import EpisodeResult
+from contact_study.evaluation.trajectory import (
+    TrajectoryConfig, TrajectoryRecorder, add_cli_flags as add_record_flags,
+)
 from contact_study.planners import (
     PLANNER_NAMES, PlannerConfig, make_planner, make_planner_config,
     planner_name_for_config, resolve_planner_name,
@@ -144,7 +146,6 @@ def run_eval_episode(
     settle_seconds: float = 0.0,
     eval_substeps: int | None = None,
     eval_sim:    EvalSimulatorKind | None = None,
-    condition:   str  = "B",
     video_path:  str | None = None,
     use_mp4:     bool = True,
     ep_idx:      int  = 0,
@@ -152,15 +153,14 @@ def run_eval_episode(
     debug:       bool = False,
     verbose:     bool = True,
     mppi_cfg:    PlannerConfig | None = None,
+    record:      TrajectoryConfig | None = None,
 ) -> EpisodeResult:
     """Run one closed-loop eval episode and return an EpisodeResult.
 
     Drop-in replacement for the legacy experiments/run_episode.py `run_episode`,
     but built on the eval/rollout split: a ROLLOUT task (planning MuJoCo model +
     cost arrays for the planner) and an EVAL task (the pluggable "real"
-    EvalSimulator, MuJoCo or Drake). condition is a label only — only the
-    warm-started planner ("B") path exists; the legacy fixed-budget rollout
-    ("A") path is gone.
+    EvalSimulator, MuJoCo or Drake).
 
     planner_cfg picks the planner: an MPPIConfig runs MPPI, a CEMConfig runs CEM,
     a PredictiveSamplerConfig runs the predictive sampler. `planner` may name it
@@ -176,6 +176,9 @@ def run_eval_episode(
         task's cost weights before planning (used by the weight grid search).
     fin_ep_on_success: stop at first success (default); if False, resample a new
         goal on each success and keep going (multi-goal mode).
+    record: what to log per control step (state, applied control, planner
+        distribution) into EpisodeResult.trajectory. None means the
+        TrajectoryConfig defaults, i.e. everything on.
     """
     planner_cfg = planner_cfg if planner_cfg is not None else mppi_cfg
     if planner_cfg is None:
@@ -266,6 +269,29 @@ def run_eval_episode(
     n_steps         = cfg.max_steps
     steps_to_success: int | None = None
 
+    rec = TrajectoryRecorder(
+        record, controller, driver="sync",
+        control_dt=control_dt, rollout_dt=rollout_dt, eval_dt=eval_dt,
+        eval_substeps=eval_substeps, max_steps=n_steps,
+        clip=(clip_lo, clip_hi), settle_seconds=settle_seconds,
+        extra_context={
+            "task":        task_name,
+            "geometry":    geometry,
+            "planner":     planner,
+            "model_label": contact_cfg.label,
+            "eval_sim":    getattr(eval_task.config.eval_sim, "value", None),
+            "nq":          int(mjm.nq),
+            "nv":          int(mjm.nv),
+            "q0":          np.asarray(q0, dtype=float),
+            "v0":          np.asarray(v0, dtype=float),
+            "u0":          np.asarray(u0, dtype=float),
+        },
+    )
+    # Which of the loop's three exits was taken. Overwritten by either break;
+    # falling off the end of range(n_steps) leaves the initial values.
+    end_reason    = "timeout"
+    n_steps_taken = n_steps
+
     if verbose:
         print(f"  task={task_name}  planner={planner}  "
               f"eval_sim={eval_task.config.eval_sim.value}  "
@@ -294,6 +320,7 @@ def run_eval_episode(
                 if debug:
                     print(f"  [ep {ep_idx:02d}] first success at step {t}")
             if fin_ep_on_success:
+                end_reason, n_steps_taken = "success", t
                 break
             elif hasattr(rollout_task, "sample_new_goal"):
                 # Multi-goal mode: target a fresh goal and keep going. reset()
@@ -301,16 +328,19 @@ def run_eval_episode(
                 # (MPPI's temperature, CEM's sigma).
                 rollout_task.sample_new_goal(mjd, rng)
                 controller.reset()
+                rec.goal_switch(t)
         if rollout_task.has_failed(mjd):
             if verbose:
                 print(f"  step {t:4d}: task failed")
+            end_reason, n_steps_taken = "failed", t
             break
 
         # 2. Plan on the GPU and turn the planned delta into the absolute command.
         # step_times measures only this plan() call, not the eval-sim advance below.
         plan_start = time.perf_counter()
         action = controller.plan(mjd)
-        step_times.append((time.perf_counter() - plan_start) * 1e3)
+        plan_ms = (time.perf_counter() - plan_start) * 1e3
+        step_times.append(plan_ms)
         if controller.pc.ctrl_relative_to_qpos:
             # Servo parameterization (mirrors the rollout): command the current
             # measured robot joint qpos plus the planned delta, re-read each step,
@@ -321,6 +351,12 @@ def run_eval_episode(
             u = u + action
         if clip_lo is not None:
             u = np.clip(u, clip_lo, clip_hi)
+
+        # Record AFTER the clip (so ctrl is exactly what the sim gets) and
+        # outside the plan() timing above, so recording cannot inflate
+        # mean_step_ms. len(trajectory["steps"]["step"]) == n_steps_taken.
+        rec.step(step=t, t=t * control_dt, qpos=st.qpos, qvel=st.qvel,
+                 action=action, ctrl=u, plan_ms=plan_ms)
 
         # 3. Apply and advance the eval sim (finer steps over the same control_dt).
         #    Video frames are captured inside step(), on the sim clock at cam_fps,
@@ -354,11 +390,16 @@ def run_eval_episode(
     mujoco.mj_forward(mjm, mjd)
     final_goal_errs = rollout_task.goal_errors(mjd) or None
 
+    # Multi-goal mode (fin_ep_on_success=False) never breaks on success, so it
+    # always exits by exhaustion: time_out stays True, but the episode succeeded.
+    time_out = end_reason == "timeout"
+    if time_out and steps_to_success is not None:
+        end_reason = "success"
+
     step_arr = np.asarray(step_times)
     return EpisodeResult(
         task_name        = cfg.name,
         model_label      = contact_cfg.label,
-        condition        = condition,
         success          = steps_to_success is not None,
         steps_to_success = steps_to_success,
         final_cost       = float(np.linalg.norm(final_qpos - np.asarray(q0, dtype=float))),
@@ -368,6 +409,10 @@ def run_eval_episode(
         mean_step_ms     = float(step_arr.mean()) if len(step_arr) else 0.0,
         std_step_ms      = float(step_arr.std())  if len(step_arr) else 0.0,
         final_goal_errs  = final_goal_errs,
+        time_out         = time_out,
+        end_reason       = end_reason,
+        n_steps_taken    = n_steps_taken,
+        trajectory       = rec.finish(),
     )
 
 
@@ -395,7 +440,7 @@ def main():
     p.add_argument("--n_iterations", type=int,  default=None,
                    help="Optimizer iterations per plan() call (default: the "
                         "planner's own — 1 for mppi/predictive_sampler, 3 for cem).")
-    p.add_argument("--noise_sigma", type=float, default=0.1)#0.2,)#0.1 # for M3)
+    p.add_argument("--noise_sigma", type=float, default=0.5)#0.2,)#0.1 # for M3)
     p.add_argument("--delta",       type=float, default=None,#0.1,
                    help="Per-step delta clip magnitude (action units); "
                         "pass 'none' to disable the delta clamp entirely.")
@@ -411,7 +456,7 @@ def main():
                    help="Plan steps between noise resamples (1=every step; "
                         "omit=sample once and reuse, the default).")
     # --- MPPI-only ---------------------------------------------------------
-    p.add_argument("--temperature", type=float, default=14.70)#30.0)#20.0 <- cube
+    p.add_argument("--temperature", type=float, default=50.0)#30.0)#20.0 <- cube
     # --- CEM-only ----------------------------------------------------------
     p.add_argument("--n_elites",    type=int,   default=None,
                    help="CEM elite-set size; overrides --elite_frac when set.")
@@ -437,7 +482,7 @@ def main():
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
-    p.add_argument("--seed",        type=int,   default=42)
+    p.add_argument("--seed",        type=int,   default=64)#42)
     p.add_argument("--n_episodes",  type=int,   default=1,
                    help="Number of episodes to run; reports the aggregate success rate.")
     p.add_argument("--weights",     nargs="+", default=[],
@@ -449,9 +494,11 @@ def main():
                    help="Video container; overrides --video's extension.")
     p.add_argument("--results",     type=str,   default=None,
                    help="JSON path for the episode result(s) (auto-named if omitted).")
+    add_record_flags(p)
     p.add_argument("--debug",       action="store_true",
                    help="Verbose per-step diagnostics (also enables planner debug).")
     args = p.parse_args()
+    record_cfg = TrajectoryConfig.from_args(args)
 
     planner = resolve_planner_name(args.planner)
     seed_seq = np.random.SeedSequence(args.seed)
@@ -567,6 +614,7 @@ def main():
             debug          = args.debug,
             verbose        = args.debug or args.n_episodes == 1,
             fin_ep_on_success = True,
+            record         = record_cfg,
         )
         results.append(result)
 
@@ -592,16 +640,15 @@ def main():
     if results_path is None:
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         results_path = str(RESULTS_DIR / f"{args.task}_{args.model}_{planner}_eval.json")
-    with open(results_path, "w") as f:
-        json.dump({
-            "task":          args.task,
-            "model":         args.model,
-            "planner":       planner,
-            "n_episodes":    args.n_episodes,
-            "success_rate":  success_rate,
-            "mean_step_ms":  mean_step_ms,
-            "episodes":      [dataclasses.asdict(r) for r in results],
-        }, f, indent=2)
+    json_io.dump({
+        "task":          args.task,
+        "model":         args.model,
+        "planner":       planner,
+        "n_episodes":    args.n_episodes,
+        "success_rate":  success_rate,
+        "mean_step_ms":  mean_step_ms,
+        "episodes":      [r.to_dict() for r in results],
+    }, results_path, precision=record_cfg.precision)
     print(f"  Saved result(s) -> {results_path}")
 
     return results

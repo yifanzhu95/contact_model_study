@@ -415,6 +415,13 @@ class SamplingPlanner(abc.ABC):
         # row 0 (which plan() returns); the async driver plays the whole tape
         # out over the latency window. None until the first plan().
         self.last_action_seq: np.ndarray | None = None
+        # Whether the last plan() completed a real parameter update. False after
+        # an all-NaN solve, which zeroes U_wp/last_action_seq but leaves the
+        # planner-specific particle state (MPPI's w_wp, CEM's elite_idx_wp)
+        # holding the PREVIOUS call's values — so anything reading that state
+        # (evaluation/distributions.py) must check this first or it will log a
+        # stale distribution as if it were this step's.
+        self.last_plan_ok:    bool = False
         # Rows the warm-start shift rolls forward per plan(). 1 is the classic
         # one-step warm start; the async driver raises it to the number of
         # control steps the solve actually consumed.
@@ -750,6 +757,7 @@ class SamplingPlanner(abc.ABC):
         self.ctrl_reset.assign(mjd.ctrl)
 
         self._begin_plan()
+        self.last_plan_ok = False
         for _ in range(self.pc.n_iterations):
             self._build_samples()             # U^(i) ~ pi_theta(U)
             n_eff = self._rollout()           # J^(i) <- J(U^(i), x0)
@@ -762,6 +770,7 @@ class SamplingPlanner(abc.ABC):
                 self.last_action_seq = np.zeros((self.horizon, self.nu), dtype=np.float32)
                 return np.zeros(self.nu, dtype=np.float32)
 
+        self.last_plan_ok = True
         return self._extract_action()         # u(t) <- get_action(theta, t)
 
     # -- planner-specific hooks --------------------------------------------

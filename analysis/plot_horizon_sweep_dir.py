@@ -29,6 +29,7 @@ import argparse
 import json
 import math
 import re
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -63,6 +64,10 @@ def _latest_dir() -> Path:
     return dirs[-1]
 
 
+sys.path.insert(0, str(Path(__file__).parent))
+import sweep_io  # noqa: E402
+
+
 def load(path: Path) -> list[dict]:
     with open(path) as f:
         return json.load(f)
@@ -72,7 +77,7 @@ def merge_dir(directory: Path) -> tuple[list[dict], list[Path]]:
     """Pool every *.json in *directory* into one record per model_label.
 
     Returns records with the fields parse_records reads: model_label,
-    task_name, condition, n_episodes, success_rate, success_rate_se,
+    task_name, n_episodes, success_rate, success_rate_se,
     mean_step_ms, std_step_ms.
     """
     files = sorted(directory.glob("*.json"))
@@ -82,7 +87,7 @@ def merge_dir(directory: Path) -> tuple[list[dict], list[Path]]:
     # label -> episode-weighted accumulators
     acc: dict[str, dict] = {}
     for path in files:
-        for r in load(path):
+        for r in sweep_io.load_aggregates(path):
             label = r.get("model_label")
             if label is None:
                 continue
@@ -90,7 +95,6 @@ def merge_dir(directory: Path) -> tuple[list[dict], list[Path]]:
             a = acc.setdefault(label, {
                 "n": 0, "sr": 0.0, "ms": 0.0, "sd": 0.0,
                 "task_name": r.get("task_name", "unknown"),
-                "condition": r.get("condition", ""),
             })
             a["n"]  += n
             a["sr"] += float(r.get("success_rate", 0.0)) * n
@@ -106,7 +110,6 @@ def merge_dir(directory: Path) -> tuple[list[dict], list[Path]]:
         merged.append({
             "model_label":     label,
             "task_name":       a["task_name"],
-            "condition":       a["condition"],
             "n_episodes":      n_tot,
             "success_rate":    sr,
             "success_rate_se": se,
@@ -239,10 +242,7 @@ def main():
     print(f"  Horizons : {horizon_values}")
 
     task_name = records[0].get("task_name", "unknown") if records else "unknown"
-    condition = records[0].get("condition", "")
     title     = f"Success rate vs. planning horizon — {task_name}"
-    if condition:
-        title += f"  (condition {condition})"
 
     out_path = directory / f"{directory.name}_plot.pdf"
     plot(models, horizon_values, data, title, out_path)

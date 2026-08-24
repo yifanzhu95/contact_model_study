@@ -1,7 +1,7 @@
 """test_mppi.py
 
 Closed-loop MPPI debugger for contact_study.
-Runs an MPPI controller (via MPPIController or fixed_budget_rollout) against
+Runs an MPPI controller (via MPPIController) against
 any registered task or raw XML scene, with an optional MuJoCo viewer.
 
 Mirrors the episode logic in run_experiment.py but is structured like
@@ -15,9 +15,8 @@ Usage:
     # With viewer, comfree backend
     python test_mppi.py --viewer --backend comfree
 
-    # Different task, more episodes, budget-based planning (Condition A)
-    python test_mppi.py --task peg_in_hole --n_episodes 10 \
-                        --condition A --budget_seconds 0.2
+    # Different task, more episodes
+    python test_mppi.py --task peg_in_hole --n_episodes 10
 
     # All backends, headless comparison
     python test_mppi.py --backend all --n_episodes 5
@@ -46,7 +45,6 @@ import mediapy as media
 
 from contact_study.contact_models.config import ContactModelConfig
 from contact_study.planners.mppi import MPPIController, MPPIConfig
-from contact_study.utils.rollout import fixed_budget_rollout
 from contact_study.utils.physics_noise import PhysicsNoiseParams, apply_physics_noise
 
 # Ensure tasks are registered before calling get_task
@@ -101,9 +99,7 @@ def _fallback_cost_func(
 def run(
     task_name:         str | None = "grasp_reorient",
     backend:           str   = "comfree",      # "mjwarp" | "comfree" | "mjwarp_hard"
-    condition:         str        = "B",        # "A" = fixed_budget_rollout, "B" = MPPIController
     n_episodes:        int        = 3,
-    budget_seconds:    float      = 0.1,
     n_samples:         int        = 256,
     horizon:           int        = 30,
     seed:              int        = 42,
@@ -131,9 +127,6 @@ def run(
         is None.
     backend:
         One of mjwarp | mjwarp_hard | comfree | xpbd.
-    condition:
-        "A" = fixed_budget_rollout (open-loop sample, pick best action),
-        "B" = MPPIController warm-started across steps.
     render_mode:
         "none", "viewer" (live window), or "video" (save mp4).
     """
@@ -152,11 +145,8 @@ def run(
     print(f"\n{'='*60}")
     print(f"  backend   : {backend}  ({model_key})")
     print(f"  task      : {task_name or '(raw xml)'}")
-    print(f"  condition : {condition}")
     print(f"  n_episodes: {n_episodes}")
     print(f"  horizon   : {horizon}    n_samples: {n_samples}")
-    if condition == "A":
-        print(f"  budget    : {budget_seconds*1e3:.1f} ms")
     print(f"{'='*60}")
 
     task = get_task(task_name, geometry=geo)
@@ -245,25 +235,8 @@ def run(
             for t in range(max_steps):
                 step_start = time.perf_counter()
 
-                # --- Plan ---
-                if condition == "A":
-                    # Fixed-budget open-loop: run as many samples as
-                    # possible within budget_seconds, pick best first action.
-                    result   = fixed_budget_rollout(
-                        mjm            = mjm,
-                        cfg            = cfg,
-                        budget_seconds = budget_seconds,
-                        horizon        = horizon,
-                        #cost_fn        = cost_fn,
-                        initial_qpos   = mjd.qpos,
-                        initial_qvel   = mjd.qvel,
-                        rng            = rng,
-                    )
-                    best_idx = int(np.argmin(result["costs"]))
-                    ctrl     = result["final_qpos"][best_idx][:mjm.nu]  # first action
-                else:
-                    # Condition B: warm-started MPPI
-                    ctrl = controller.plan(mjd)
+                # --- Plan (warm-started MPPI) ---
+                ctrl = controller.plan(mjd)
 
                 mjd.ctrl[:] += ctrl
 
@@ -315,7 +288,7 @@ def run(
             ep_elapsed = time.perf_counter() - ep_start
 
             if render_mode == "video" and frames and media is not None:
-                video_path = f"videos/video_{task_name or 'raw'}_{backend}_{condition}_ep{ep}.mp4"
+                video_path = f"videos/video_{task_name or 'raw'}_{backend}_ep{ep}.mp4"
                 media.write_video(video_path, frames, fps=int(1.0/mjm.opt.timestep))
                 print(f"  Saved video to {video_path}")
 
@@ -345,7 +318,6 @@ def run(
         "backend":               backend,
         "model_key":             model_key,
         "task":                  task_name or "(raw xml)",
-        "condition":             condition,
         "n_episodes_measured":   len(ep_arr),
         "success_rate":          float(succ_arr.mean()),
         "mean_steps_to_success": float(np.mean(steps_to_succ)) if steps_to_succ else float("nan"),
@@ -378,11 +350,7 @@ def main():
     #                     help="Override / standalone XML scene path.")
     parser.add_argument("--backend", type=str, default="mjwarp",
                         choices=["mjwarp", "mjwarp_hard", "comfree", "xpbd", "all"])
-    parser.add_argument("--condition", type=str, default="B", choices=["A", "B"],
-                        help="A=fixed_budget_rollout  B=warm-started MPPIController")
     parser.add_argument("--n_episodes",     type=int,   default=1)
-    parser.add_argument("--budget_seconds", type=float, default=0.1,
-                        help="Per-step time budget for Condition A")
     parser.add_argument("--n_samples",      type=int,   default=256)
     parser.add_argument("--horizon",        type=int,   default=48)
     parser.add_argument("--seed",           type=int,   default=None)
@@ -424,9 +392,7 @@ def main():
         stats = run(
             task_name         = task_name,
             backend           = backend,
-            condition         = args.condition,
             n_episodes        = args.n_episodes,
-            budget_seconds    = args.budget_seconds,
             n_samples         = args.n_samples,
             horizon           = args.horizon,
             seed              = args.seed,
@@ -445,7 +411,7 @@ def main():
 
     if len(all_stats) > 1:
         print(f"\n{'='*60}")
-        print(f"  Summary  (task={task_name or 'raw xml'}  condition={args.condition})")
+        print(f"  Summary  (task={task_name or 'raw xml'})")
         print(f"{'='*60}")
         print(f"  {'backend':<16}  {'succ%':>6}  {'step_ms':>9}  {'ep_ms':>9}")
         print(f"  {'-'*16}  {'-'*6}  {'-'*9}  {'-'*9}")

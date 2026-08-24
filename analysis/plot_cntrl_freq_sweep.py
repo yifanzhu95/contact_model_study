@@ -221,10 +221,7 @@ def main():
     print(f"  Ctrl freqs  : {[_freq_label(f) + ' Hz' for f in freq_values]}")
 
     task_name = records[0].get("task_name", "unknown") if records else "unknown"
-    condition = records[0].get("condition", "")
     title     = f"Success rate vs. control frequency — {task_name}"
-    if condition:
-        title += f"  (condition {condition})"
 
     out_path = path.parent / (path.stem + "_plot.pdf")
     plot(models, freq_values, substep_map, data, title, args.dt, out_path)

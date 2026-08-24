@@ -127,7 +127,14 @@ echo "cell ${SLURM_ARRAY_TASK_ID}/$(( TOTAL - 1 )):${CELL_DESC} -> $OUTDIR"
 # The first task queues the combine job to run once the whole array finishes
 # ok, so a single `sbatch param_search.slurm` produces the merged results too.
 
+# Per-control-step trajectory + planner-distribution recording (see
+# contact_study/evaluation/trajectory.py). OFF for sweeps: at grasp_reorient's
+# max_steps it is megabytes per episode, which this many cells cannot carry.
+# Drop the --no- prefixes (or raise --planner_dist_every) to record a cell.
+RECORD_ARGS=(--no-record_trajectory --no-record_planner_dist)
+
 python experiments/hpc/run_param_cell.py \
+    "${RECORD_ARGS[@]}" \
     --cell_id     "$SLURM_ARRAY_TASK_ID" \
     --outdir      "$OUTDIR" \
     --task        "$TASK" \

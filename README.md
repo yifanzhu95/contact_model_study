@@ -8,10 +8,8 @@
 ## Overview
 
 This repo implements (in progress) the experimental study that evaluates different contact
-models across manipulation tasks, under two experimental conditions:
-
-- **Condition A** — fixed computation budget (models with lower cost get more samples)
-- **Condition B** — fixed sample count (isolates approximation error from sample count)
+models across manipulation tasks at a fixed sample count, which isolates
+approximation error from sample count.
 
 ### Study axes (kept orthogonal in code)
 
@@ -94,10 +92,12 @@ contact_study/
 │   │   ├── base.py             # BaseTask, TaskSpec, task registry
 │   │   └── tasks.py            # PushTask, GraspReorientTask, PegInHoleTask
 │   ├── evaluation/
-│   │   └── metrics.py          # EpisodeResult, AggregatedResult, serialization
+│   │   ├── metrics.py          # EpisodeResult, AggregatedResult, serialization
+│   │   ├── trajectory.py       # per-control-step state / control / planner-belief recording
+│   │   ├── distributions.py    # first-action moments of a planner, Gaussian KL
+│   │   └── json_io.py          # JSON writer that keeps bulk arrays on one line
 │   └── utils/
-│       ├── physics_noise.py    # PhysicsNoiseParams + apply_physics_noise
-│       └── rollout.py          # batch_rollout, fixed_budget_rollout, fixed_sample_rollout
+│       └── physics_noise.py    # PhysicsNoiseParams + apply_physics_noise
 │
 ├── scenes/
 │   └── leap/                   # scene variants, named by convention
@@ -106,7 +106,7 @@ contact_study/
 │       └── leap_right_hand{,_eval,_capsules}.xml    # hand fidelity rungs
 │
 ├── experiments/
-│   ├── run_experiment.py       # Main study runner (Conditions A & B)
+│   ├── run_experiment.py       # Main study runner (tasks × models)
 │   ├── benchmark_speed.py      # Throughput benchmark vs batch size
 │   └── measure_approx_error.py # Approximation error vs horizon
 │
@@ -179,10 +179,8 @@ python experiments/measure_approx_error.py \
 python experiments/run_experiment.py \
     --tasks push grasp_reorient peg_in_hole \
     --models M1 M2 M3 M4 \
-    --conditions A B \
     --n_episodes 20 \
-    --budget_seconds 0.1 \
-    --n_samples_b 1024
+    --n_samples 1024
 ```
 
 ### 5. Full study cell: high-fidelity rollout hand + friction noise

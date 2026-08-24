@@ -190,7 +190,14 @@ conda activate contact_modeling
 echo "cell ${SLURM_ARRAY_TASK_ID:-0}/$(( TOTAL - 1 )): task=$TASK obj=$OBJ model=$MODEL"\
      "planner=$PLANNER geometry=$GEOMETRY n_calls=$N_CALLS n_episodes=$N_EPISODES -> $OUTDIR"
 
+# Per-control-step trajectory + planner-distribution recording (see
+# contact_study/evaluation/trajectory.py). OFF for sweeps: at grasp_reorient's
+# max_steps it is megabytes per episode, which this many cells cannot carry.
+# Drop the --no- prefixes (or raise --planner_dist_every) to record a cell.
+RECORD_ARGS=(--no-record_trajectory --no-record_planner_dist)
+
 python -u -m contact_study.drivers.run_bayes_opt \
+    "${RECORD_ARGS[@]}" \
     --task              "$TASK" \
     --geometry          "$GEOMETRY" \
     --model             "$MODEL" \
