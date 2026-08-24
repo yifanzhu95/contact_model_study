@@ -2,7 +2,7 @@
 #SBATCH --job-name=cont_modeling_bayes_opt
 #SBATCH --output=logs/cont_modeling_bayes_opt_%A_%a.out
 #SBATCH --error=logs/cont_modeling_bayes_opt_%A_%a.err
-#SBATCH --array=0-15%8       # (#OBJECTS * #MODELS) - 1; the %N suffix caps how many
+#SBATCH --array=0-3%8       # (#OBJECTS * #MODELS) - 1; the %N suffix caps how many
                              # cells hold a GPU at once. Each task prints the grid
                              # total, and an id past the end errors out instead of
                              # silently rerunning cell 0.
@@ -33,7 +33,8 @@ TASK="grasp_reorient"
 # Objects: the keys of _OBJ_PARAMS in contact_study/tasks/grasp_reorient.py.
 # Each needs scenes/leap/env_leap_rollout_{obj}_{HAND_ACC}_{OBJ_ACC}.xml (and
 # env_leap_eval_{obj}.xml when EVAL_SIM is not "none").
-OBJECTS=("cube" "duck" "spam" "tomato")
+# OBJECTS=("cube" "duck" "spam" "tomato")
+OBJECTS=("duck")
 
 # Contact models: the keys of MODEL_FACTORIES in run_eval_episode.py.
 MODELS=("M1" "M2" "M3" "M4")
@@ -48,7 +49,7 @@ OBJ_ACC="high"
 #    trial replays by pasting them into that driver).
 # ---------------------------------------------------------------------------
 PLANNER="mppi"                  # mppi | cem | predictive_sampler
-N_EPISODES=5                    # episodes per trial; more averages out episode
+N_EPISODES=3                    # episodes per trial; more averages out episode
                                 # luck at a proportional cost in wall time
 SEED=42                         # THE constant episode seed (same episodes every trial)
 N_SAMPLES=256
@@ -77,12 +78,12 @@ DELTA=""                        # per-step delta clip magnitude; empty disables 
 #    object) or 'name:lo:hi' for an explicit bracket. Leave the array empty to
 #    accept the driver's DEFAULT_OPT_WEIGHTS.
 # ---------------------------------------------------------------------------
-OPT_WEIGHTS=("w_quat" "w_pos_x" "w_pos_y" "w_pos_z" "w_contact" "w_joint")
+OPT_WEIGHTS=("w_quat:0.1:50.0" "w_pos_x:0.1:50.0" "w_pos_y:0.1:50.0" "w_pos_z:0.1:50.0" "w_contact:0.1:50.0" "w_joint:0.1:50.0" "w_fallen:100.0:500.0" "w_quat_term:100.0:500.0" "w_pos_term:100.0:500.0")
 
 OPT_NOISE_SIGMA=1               # 1 -> search noise_sigma, 0 -> pin it to NOISE_SIGMA
 OPT_TEMPERATURE=1               # 1 -> search temperature, 0 -> pin it to TEMPERATURE
 NOISE_SIGMA_RANGE=(0.001 1.0)   # LO HI, log-uniform
-TEMPERATURE_RANGE=(0.01 50.0)   # LO HI, log-uniform
+TEMPERATURE_RANGE=(0.001 100.0)   # LO HI, log-uniform
 NOISE_SIGMA=0.2                 # fixed value when OPT_NOISE_SIGMA=0
 TEMPERATURE=30.0                # fixed value when OPT_TEMPERATURE=0
 
