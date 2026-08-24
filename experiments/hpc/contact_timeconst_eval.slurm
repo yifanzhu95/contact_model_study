@@ -137,7 +137,14 @@ echo "cell ${SLURM_ARRAY_TASK_ID:-0}: model=$SEL_MODEL "\
      "solref_timeconst=${SEL_TIMECONST}s step_time=${STEP_TIME}s "\
      "time_horizon=${TIME_HORIZON}s n_episodes=$N_EPISODES -> $OUTDIR"
 
+# Per-control-step trajectory + planner-distribution recording (see
+# contact_study/evaluation/trajectory.py). OFF for sweeps: at grasp_reorient's
+# max_steps it is megabytes per episode, which this many cells cannot carry.
+# Drop the --no- prefixes (or raise --planner_dist_every) to record a cell.
+RECORD_ARGS=(--no-record_trajectory --no-record_planner_dist)
+
 python experiments/hpc/run_contact_timeconst_cell.py \
+    "${RECORD_ARGS[@]}" \
     --outdir           "$OUTDIR" \
     --task             "$TASK" \
     --model            "$SEL_MODEL" \

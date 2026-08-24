@@ -203,13 +203,13 @@ _OBJ_PARAMS: dict[str, dict] = {
         "target_pos":    np.array([0.02, 0.035, 0.09]),#np.array([0.02, 0.03, 0.08])#np.array([0.012, 0.04, 0.085])
         "fallen_z":      0.08,
         "cost_weights": {
-            "w_quat": 20.0,#100.0,
-            "w_pos_x": 7.50,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-            "w_pos_y": 15.0,#80.0,    #Y is across the fingers
-            "w_pos_z": 5.0,#15.0,
+            "w_quat": 80.0,#100.0,
+            "w_pos_x": 1.875,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+            "w_pos_y": 3.750,#80.0,    #Y is across the fingers
+            "w_pos_z": 19.3,#15.0,
             "w_velo": 0.0,
-            "w_contact": 15.0,#15.0,#12.50,
-            "w_joint": 4.0,#4.0,
+            "w_contact": 60.0,#15.0,#12.50,
+            "w_joint": 16.0,#4.0,
             "w_joint_velo": 0.0,
             "w_fallen": 200.0,
             "w_quat_term": 200.0,#500.0,
@@ -244,13 +244,13 @@ _OBJ_PARAMS: dict[str, dict] = {
         # rounder than the cube, so the terms most likely to want retuning are
         # w_contact and w_quat.
         "cost_weights": {
-            "w_quat": 20.0,#100.0,
-            "w_pos_x": 15.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-            "w_pos_y": 15.0,#80.0,    #Y is across the fingers
-            "w_pos_z": 15.0,#15.0,
+            "w_quat": 25.87,#100.0,
+            "w_pos_x": 39.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+            "w_pos_y": 40.5,#80.0,    #Y is across the fingers
+            "w_pos_z": 39.3,#15.0,
             "w_velo": 0.0,
-            "w_contact": 10.0,#12.50,
-            "w_joint": 4.0,
+            "w_contact": 14.0,#12.50,
+            "w_joint": 3.0,
             "w_joint_velo": 0.0,
             "w_fallen": 200.0,
             "w_quat_term": 200.0,#500.0,
@@ -558,7 +558,7 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 500,#4000,
+            max_steps          = 2000,#4000,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # This object's weights from _OBJ_PARAMS, emitted in
             # _COST_WEIGHT_KEYS order — which must match the weights[...]

@@ -7,28 +7,36 @@ Primary metrics:
 
 Secondary metrics (for the study's main figures):
   - accuracy_speed_frontier: (approx_err, speedup) pairs for Pareto analysis
-  - condition_a_vs_b:        performance delta between fixed-budget and
-                             fixed-sample conditions for each Mk
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import dataclasses
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
 import json
 import numpy as np
 
-from contact_study.contact_models.config import ContactModelConfig
-from contact_study.tasks.base import ContactComplexity
+
+def _from_dict(cls, d: dict, *, drop: Sequence[str] = ()):
+    """Build a dataclass from a JSON dict, ignoring keys it no longer declares.
+
+    Result files on disk predate several schema changes -- most recently the
+    removal of `condition` -- so a bare cls(**d) raises TypeError on anything
+    written before that. Unknown keys are dropped and missing keys fall back to
+    the dataclass defaults, which is why every field added since the original
+    schema carries one.
+    """
+    names = {f.name for f in dataclasses.fields(cls)} - set(drop)
+    return cls(**{k: v for k, v in d.items() if k in names})
 
 
 @dataclass
 class EpisodeResult:
     task_name:         str
     model_label:       str
-    condition:         str        # "A" (fixed budget) | "B" (fixed sample)
     success:           bool
     steps_to_success:  int | None
     final_cost:        float
@@ -38,21 +46,44 @@ class EpisodeResult:
     std_step_ms:       float = 0.0
     # Which sampling planner produced the episode ("mppi" | "cem" |
     # "predictive_sampler"). Defaulted so results written before the planner
-    # became selectable still load via EpisodeResult(**json_dict).
+    # became selectable still load via EpisodeResult.from_dict.
     planner:           str   = "mppi"
     # BaseTask.goal_errors() evaluated on the episode's final state: the actual
     # per-criterion distance to the task goal ({"pos": .., "quat": .., "vel": ..}
     # for grasp_reorient), keyed like TaskConfig.success_thresholds. None when
     # the task has no continuous goal metric. Distinct from final_cost, which is
     # ||q_final - q_0|| — displacement from the START pose, not goal error.
-    # Defaulted so older result JSON still loads via EpisodeResult(**json_dict).
     final_goal_errs:   dict[str, float] | None = None
+
+    # --- how the episode ended ---------------------------------------------
+    # The control loop leaves by exactly one of three doors, and `success` alone
+    # cannot tell them apart: a False success is "ran out of time" on one task
+    # and "dropped the object through the floor" on another (grasp_reorient's
+    # has_failed). end_reason names the door:
+    #   "success"  is_success() fired and the loop broke out — or, in multi-goal
+    #              mode, at least one success was recorded before the episode
+    #              length ran out
+    #   "failed"   has_failed() fired: the task hit a terminal bad state
+    #   "timeout"  reached cfg.max_steps having never succeeded
+    #   "unknown"  the record predates these fields
+    # time_out is orthogonal, and answers only "did the loop run to max_steps":
+    # in multi-goal mode (fin_ep_on_success=False) the episode always runs the
+    # full length even after successes, so time_out stays True there while
+    # end_reason reads "success".
+    # n_steps_taken counts the control steps that actually executed (executor
+    # TICKS in the async driver, missed ticks included). It equals
+    # len(trajectory["steps"]["step"]) whenever a trajectory was recorded, and is
+    # NOT steps_to_success, which is the index of the FIRST success. 0 on an old
+    # record means "not recorded", not "failed immediately".
+    time_out:          bool  = False
+    end_reason:        str   = "unknown"
+    n_steps_taken:     int   = 0
 
     # --- asynchronous driver telemetry ------------------------------------
     # Filled only by contact_study/drivers/run_async_eval_episode.py, where the
     # eval sim keeps running while the planner solves. All defaulted so results
     # from the synchronous driver (and every result written before this driver
-    # existed) still load via EpisodeResult(**json_dict).
+    # existed) still load.
     #   n_plans              plan() calls completed during the episode
     #   mean/std_latency_ms  realized planning latency AS CHARGED (after any
     #                        --plan_latency_ms override / --latency_scale),
@@ -74,13 +105,36 @@ class EpisodeResult:
     tape_exhausted_ticks: int   = 0
     sim_seconds:          float = 0.0
 
+    # --- per-control-step recording ---------------------------------------
+    # The trajectory + planner-distribution block built by
+    # contact_study/evaluation/trajectory.py: enough to replay the applied
+    # controls and to compute a KL divergence to a reference planner offline.
+    # None when recording was disabled (--no-record_trajectory /
+    # --no-record_planner_dist) or the record predates it. Megabytes when
+    # populated — see evaluation/json_io.py, which is what keeps it from
+    # exploding the file.
+    trajectory:        dict | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict, *, drop_trajectory: bool = False) -> "EpisodeResult":
+        """Build from a JSON dict, ignoring keys this dataclass no longer declares.
+
+        drop_trajectory skips the (large) trajectory block for callers that only
+        want the summary statistics.
+        """
+        return _from_dict(cls, d, drop=("trajectory",) if drop_trajectory else ())
+
+    def to_dict(self) -> dict:
+        """Shallow field dict for JSON. Deliberately NOT dataclasses.asdict:
+        that deep-copies, and `trajectory` is megabytes."""
+        return {f.name: getattr(self, f.name) for f in dataclasses.fields(self)}
+
 
 @dataclass
 class AggregatedResult:
-    """Summary statistics over multiple episodes for one (task, Mk, condition) cell."""
+    """Summary statistics over multiple episodes for one (task, Mk) cell."""
     task_name:              str
     model_label:            str
-    condition:              str
     n_episodes:             int
 
     success_rate:           float
@@ -90,7 +144,7 @@ class AggregatedResult:
     mean_final_cost:        float
     std_final_cost:         float
 
-    mean_n_samples:         float    # avg samples per planning cycle (Condition A varies)
+    mean_n_samples:         float    # avg samples per planning cycle
     mean_elapsed:           float    # avg wall-clock per episode
     mean_step_ms:           float = 0.0   # avg per-control-step planning time
     std_step_ms:            float = 0.0
@@ -99,18 +153,19 @@ class AggregatedResult:
     speedup_vs_baseline:    float = 1.0
     approx_err_vs_baseline: float = 0.0
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "AggregatedResult":
+        """Build from a JSON dict, ignoring keys this dataclass no longer declares."""
+        return _from_dict(cls, d)
+
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
-
-
-import dataclasses
 
 
 def aggregate_episodes(
     episodes: list[EpisodeResult],
     task_name: str,
     model_label: str,
-    condition: str,
 ) -> AggregatedResult:
     """Compute summary statistics from a list of EpisodeResult."""
     n = len(episodes)
@@ -131,7 +186,6 @@ def aggregate_episodes(
     return AggregatedResult(
         task_name             = task_name,
         model_label           = model_label,
-        condition             = condition,
         n_episodes            = n,
         success_rate          = sr,
         success_rate_se       = se,
@@ -143,6 +197,32 @@ def aggregate_episodes(
         mean_step_ms          = float(np.mean(step_ms)),
         std_step_ms           = float(np.mean(all_step_sd)),
     )
+
+
+CELL_SCHEMA = 2
+
+
+def cell_record(*, label: str, task: str, model: str,
+                aggregate: AggregatedResult, episodes: list[EpisodeResult],
+                config: dict | None = None, **extra) -> dict:
+    """The standard per-cell result file: the aggregate row AND the episodes behind it.
+
+    The sweep workers used to write a bare JSON list of AggregatedResult dicts via
+    save_results, which discarded every per-episode field — including end_reason
+    and the recorded trajectory. This is the shape run_kl_divergence_cell already
+    writes, so every cell file in the repo now agrees on one layout.
+    analysis/sweep_io.load_aggregates reads both this and the old list.
+    """
+    return {
+        "schema":    CELL_SCHEMA,
+        "label":     label,
+        "task":      task,
+        "model":     model,
+        "config":    config or {},
+        **extra,
+        "aggregate": aggregate.to_dict(),
+        "episodes":  [e.to_dict() for e in episodes],
+    }
 
 
 def save_results(results: list[AggregatedResult], path: str | Path):
@@ -158,14 +238,13 @@ def load_results(path: str | Path) -> list[AggregatedResult]:
     """Deserialize results from JSON."""
     with open(path) as f:
         data = json.load(f)
-    return [AggregatedResult(**d) for d in data]
+    return [AggregatedResult.from_dict(d) for d in data]
 
 
 def build_results_table(
     results: list[AggregatedResult],
     tasks: list[str],
     models: list[str],
-    condition: str = "A",
     metric: str = "success_rate",
 ) -> np.ndarray:
     """Build a (len(models), len(tasks)) matrix for a given metric.
@@ -173,7 +252,7 @@ def build_results_table(
     Useful for generating the main results table in the paper.
     """
     mat = np.full((len(models), len(tasks)), np.nan)
-    idx = {(r.model_label, r.task_name): r for r in results if r.condition == condition}
+    idx = {(r.model_label, r.task_name): r for r in results}
     for i, m in enumerate(models):
         for j, t in enumerate(tasks):
             key = (m, t)
@@ -185,10 +264,9 @@ def build_results_table(
 def accuracy_speed_frontier(
     results:    list[AggregatedResult],
     task_name:  str,
-    condition:  str = "A",
 ) -> tuple[np.ndarray, np.ndarray, list[str]]:
     """Extract (approx_err, speedup, label) for Pareto frontier plot."""
-    subset = [r for r in results if r.task_name == task_name and r.condition == condition]
+    subset = [r for r in results if r.task_name == task_name]
     errs     = np.array([r.approx_err_vs_baseline for r in subset])
     speedups = np.array([r.speedup_vs_baseline    for r in subset])
     labels   = [r.model_label for r in subset]

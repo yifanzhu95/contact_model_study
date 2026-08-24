@@ -46,6 +46,7 @@ import numpy as np
 # Reuse the loader + drawing helpers from the control-frequency plotter (same dir).
 sys.path.insert(0, str(Path(__file__).parent))
 import plot_cntrl_freq_sweep as base  # noqa: E402
+import sweep_io  # noqa: E402
 
 RESULTS_DIR = Path(__file__).parent.parent / "results"
 
@@ -87,7 +88,7 @@ def merge_dir(directory: Path) -> tuple[list[dict], list[Path]]:
     per model_label.
 
     Returns records with the fields parse_records reads: model_label,
-    task_name, condition, n_episodes, success_rate, success_rate_se,
+    task_name, n_episodes, success_rate, success_rate_se,
     mean_step_ms, std_step_ms.
     """
     files = sorted(p for p in directory.glob("*.json") if p.name != "meta.json")
@@ -97,7 +98,7 @@ def merge_dir(directory: Path) -> tuple[list[dict], list[Path]]:
     # label -> episode-weighted accumulators
     acc: dict[str, dict] = {}
     for path in files:
-        for r in base.load(path):
+        for r in sweep_io.load_aggregates(path):
             label = r.get("model_label")
             if label is None:
                 continue
@@ -105,7 +106,6 @@ def merge_dir(directory: Path) -> tuple[list[dict], list[Path]]:
             a = acc.setdefault(label, {
                 "n": 0, "sr": 0.0, "ms": 0.0, "sd": 0.0,
                 "task_name": r.get("task_name", "unknown"),
-                "condition": r.get("condition", ""),
             })
             a["n"]  += n
             a["sr"] += float(r.get("success_rate", 0.0)) * n
@@ -121,7 +121,6 @@ def merge_dir(directory: Path) -> tuple[list[dict], list[Path]]:
         merged.append({
             "model_label":     label,
             "task_name":       a["task_name"],
-            "condition":       a["condition"],
             "n_episodes":      n_tot,
             "success_rate":    sr,
             "success_rate_se": se,
@@ -316,10 +315,7 @@ def main():
               f"(stability floor {2*rollout_dt*1e3:.3g} ms)")
 
     task_name = records[0].get("task_name", "unknown") if records else "unknown"
-    condition = records[0].get("condition", "")
     title     = f"Success rate vs. contact time constant — {task_name}"
-    if condition:
-        title += f"  (condition {condition})"
 
     out_path = directory / f"{directory.name}_plot.pdf"
     plot(models, tc_values, data, title, rollout_dt, out_path)

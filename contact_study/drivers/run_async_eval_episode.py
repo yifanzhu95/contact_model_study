@@ -106,8 +106,6 @@ _USER_MUJOCO_GL = os.environ.get("MUJOCO_GL")
 os.environ.setdefault("MUJOCO_GL", "egl")
 
 import argparse
-import dataclasses
-import json
 import time
 
 import numpy as np
@@ -117,7 +115,11 @@ import warp as wp
 import contact_study.tasks  # noqa: F401 — registers all tasks
 
 from contact_study.contact_models.config import ContactModelConfig
+from contact_study.evaluation import json_io
 from contact_study.evaluation.metrics import EpisodeResult
+from contact_study.evaluation.trajectory import (
+    TrajectoryConfig, TrajectoryRecorder, add_cli_flags as add_record_flags,
+)
 from contact_study.planners import (
     PLANNER_NAMES, PlannerConfig, make_planner, make_planner_config,
     planner_name_for_config, resolve_planner_name,
@@ -149,7 +151,6 @@ def run_async_eval_episode(
     settle_seconds: float = 0.0,
     eval_substeps: int | None = None,
     eval_sim:    EvalSimulatorKind | None = None,
-    condition:   str  = "B",
     video_path:  str | None = None,
     use_mp4:     bool = True,
     ep_idx:      int  = 0,
@@ -162,6 +163,7 @@ def run_async_eval_episode(
     async_shift:     bool  = True,
     debug:       bool = False,
     verbose:     bool = True,
+    record:      TrajectoryConfig | None = None,
 ) -> EpisodeResult:
     """Run one asynchronous closed-loop eval episode and return an EpisodeResult.
 
@@ -265,6 +267,34 @@ def run_async_eval_episode(
     relative_ctrl = controller.pc.ctrl_relative_to_qpos
     adr           = controller.robot_qpos_adr
     nu            = controller.nu
+
+    rec = TrajectoryRecorder(
+        record, controller, driver="async",
+        control_dt=control_dt, rollout_dt=rollout_dt, eval_dt=eval_dt,
+        eval_substeps=eval_substeps, max_steps=cfg.max_steps,
+        clip=(clip_lo, clip_hi), settle_seconds=settle_seconds,
+        extra_context={
+            "task":            task_name,
+            "geometry":        geometry,
+            "planner":         planner,
+            "model_label":     contact_cfg.label,
+            "eval_sim":        getattr(eval_task.config.eval_sim, "value", None),
+            "nq":              int(mjm.nq),
+            "nv":              int(mjm.nv),
+            "q0":              np.asarray(q0, dtype=float),
+            "v0":              np.asarray(v0, dtype=float),
+            "u0":              np.asarray(u0, dtype=float),
+            "executor":        executor,
+            "plan_latency_ms": plan_latency_ms,
+            "latency_scale":   latency_scale,
+            "async_shift":     async_shift,
+            "plan_warmup":     plan_warmup,
+        },
+    )
+    # Which of the loop's three exits was taken. Overwritten by either break in
+    # the tick block; running out of episode length leaves the initial values.
+    end_reason    = "timeout"
+    n_steps_taken = cfg.max_steps
 
     # Fixed synthetic latency (in whole eval steps), or None to measure.
     fixed_lat_steps = None
@@ -388,6 +418,12 @@ def run_async_eval_episode(
             step_times.append(measured_ms)
             latency_ms.append(lat_steps * eval_dt * 1e3)
             deadline = t + lat_steps
+            # OUTSIDE timed_plan(): this loop spends the measured plan_ms as
+            # simulated seconds, so recorder work inside that region would change
+            # the episode's dynamics, not merely its cost.
+            rec.plan_event(plan_idx=n_plans, t_start=t * eval_dt,
+                           t_visible=deadline * eval_dt, plan_ms=measured_ms,
+                           latency_ms=lat_steps * eval_dt * 1e3)
             n_plans += 1
 
             # 3. Zero-latency plans land at the instant they started.
@@ -404,6 +440,7 @@ def run_async_eval_episode(
                     if debug:
                         print(f"  [ep {ep_idx:02d}] first success at tick {tick_idx}")
                 if fin_ep_on_success:
+                    end_reason, n_steps_taken = "success", tick_idx
                     break
                 elif hasattr(rollout_task, "sample_new_goal"):
                     # Multi-goal mode. Any plan built for the old goal is now
@@ -413,15 +450,20 @@ def run_async_eval_episode(
                     rollout_task.sample_new_goal(mjd, rng)
                     controller.reset()
                     tape = pending = None
+                    rec.goal_switch(tick_idx)
             if rollout_task.has_failed(mjd):
                 if verbose:
                     print(f"  tick {tick_idx:4d}: task failed")
+                end_reason, n_steps_taken = "failed", tick_idx
                 break
 
             if tape is None:
                 # Nothing to execute yet (startup, or a goal switch just voided
                 # the plan): hold the last command.
                 missed_ticks += 1
+                rec.tick(step=tick_idx, t=t * eval_dt, qpos=st.qpos, qvel=st.qvel,
+                         action=None, ctrl=u, tape_id=-1, tape_row=-1,
+                         staleness_ms=None, applied=False)
             else:
                 age_steps = t - tape_t0
                 if executor == "zoh":
@@ -441,6 +483,12 @@ def run_async_eval_episode(
                 u = (st.qpos[adr : adr + nu] + row) if relative_ctrl else (u + row)
                 if clip_lo is not None:
                     u = np.clip(u, clip_lo, clip_hi)
+                # After the clip, before the apply: ctrl is exactly what the sim
+                # gets, and action is the tape row it was built from — tape_id
+                # indexes trajectory["plans"]["plan_idx"].
+                rec.tick(step=tick_idx, t=t * eval_dt, qpos=st.qpos, qvel=st.qvel,
+                         action=row, ctrl=u, tape_id=tape_id, tape_row=k,
+                         staleness_ms=age_steps * eval_dt * 1e3, applied=True)
                 sim.apply_control(u)
                 staleness.append(age_steps * eval_dt * 1e3)
                 if tape_id == prev_tape_id:
@@ -469,6 +517,10 @@ def run_async_eval_episode(
             )
         sim.step(t_next - t)
         t = t_next
+    else:
+        # Ran out of episode length rather than breaking: tick_idx is the number
+        # of ticks completed. (Missed ticks count as ticks.)
+        n_steps_taken = tick_idx
 
     elapsed = time.perf_counter() - ep_start
 
@@ -480,10 +532,15 @@ def run_async_eval_episode(
     final_qpos = sim.get_state().qpos
     step_arr = np.asarray(step_times)
     lat_arr  = np.asarray(latency_ms)
+    # Multi-goal mode (fin_ep_on_success=False) never breaks on success, so it
+    # always exits by exhaustion: time_out stays True, but the episode succeeded.
+    time_out = end_reason == "timeout"
+    if time_out and steps_to_success is not None:
+        end_reason = "success"
+
     return EpisodeResult(
         task_name        = cfg.name,
         model_label      = contact_cfg.label,
-        condition        = condition,
         success          = steps_to_success is not None,
         steps_to_success = steps_to_success,
         final_cost       = float(np.linalg.norm(final_qpos - np.asarray(q0, dtype=float))),
@@ -499,6 +556,10 @@ def run_async_eval_episode(
         missed_ticks         = missed_ticks,
         tape_exhausted_ticks = tape_exhausted_ticks,
         sim_seconds          = t * eval_dt,
+        time_out             = time_out,
+        end_reason           = end_reason,
+        n_steps_taken        = n_steps_taken,
+        trajectory           = rec.finish(),
     )
 
 
@@ -604,9 +665,11 @@ def main():
                    help="Video container; overrides --video's extension.")
     p.add_argument("--results",     type=str,   default=None,
                    help="JSON path for the episode result(s) (auto-named if omitted).")
+    add_record_flags(p)
     p.add_argument("--debug",       action="store_true",
                    help="Verbose per-tick diagnostics (also enables planner debug).")
     args = p.parse_args()
+    record_cfg = TrajectoryConfig.from_args(args)
 
     planner = resolve_planner_name(args.planner)
     seed_seq = np.random.SeedSequence(args.seed)
@@ -714,6 +777,7 @@ def main():
             debug          = args.debug,
             verbose        = args.debug or args.n_episodes == 1,
             fin_ep_on_success = True,
+            record         = record_cfg,
         )
         results.append(result)
 
@@ -752,28 +816,27 @@ def main():
         results_path = str(
             RESULTS_DIR / f"{args.task}_{args.model}_{planner}_async.json"
         )
-    with open(results_path, "w") as f:
-        json.dump({
-            "task":            args.task,
-            "model":           args.model,
-            "planner":         planner,
-            "driver":          "async",
-            "n_episodes":      args.n_episodes,
-            "success_rate":    success_rate,
-            "mean_step_ms":    mean_step_ms,
-            "mean_latency_ms": mean_latency,
-            "mean_staleness_ms": mean_staleness,
-            "missed_ticks":    total_missed,
-            "tape_exhausted_ticks": total_exhausted,
-            "async_config": {
-                "plan_latency_ms": args.plan_latency_ms,
-                "latency_scale":   args.latency_scale,
-                "plan_warmup":     args.plan_warmup,
-                "executor":        args.executor,
-                "async_shift":     args.async_shift,
-            },
-            "episodes":        [dataclasses.asdict(r) for r in results],
-        }, f, indent=2)
+    json_io.dump({
+        "task":            args.task,
+        "model":           args.model,
+        "planner":         planner,
+        "driver":          "async",
+        "n_episodes":      args.n_episodes,
+        "success_rate":    success_rate,
+        "mean_step_ms":    mean_step_ms,
+        "mean_latency_ms": mean_latency,
+        "mean_staleness_ms": mean_staleness,
+        "missed_ticks":    total_missed,
+        "tape_exhausted_ticks": total_exhausted,
+        "async_config": {
+            "plan_latency_ms": args.plan_latency_ms,
+            "latency_scale":   args.latency_scale,
+            "plan_warmup":     args.plan_warmup,
+            "executor":        args.executor,
+            "async_shift":     args.async_shift,
+        },
+        "episodes":        [r.to_dict() for r in results],
+    }, results_path, precision=record_cfg.precision)
     print(f"  Saved result(s) -> {results_path}")
 
     return results

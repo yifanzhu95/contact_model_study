@@ -2,7 +2,7 @@
 
 Master experiment runner. Executes the full study grid:
 
-  tasks × contact_models × conditions × n_episodes
+  tasks × contact_models × n_episodes
 
 for ONE choice of (scene variant, physics noise level). To sweep
 over geometry or noise, invoke this script multiple times with different
@@ -16,16 +16,14 @@ see contact_study.tasks.config.SceneVariant. Non-default variants are also
 recorded in the output cell tag.
 
 Usage:
-    # Clean baseline (condition B, warm-started MPPI)
+    # Clean baseline (warm-started MPPI)
     python experiments/run_experiment.py \
         --tasks push grasp_reorient peg_in_hole \
         --models M1 M2 M3 M4 \
-        --conditions B \
         --n_episodes 20
 
-    # Both conditions, all models
+    # More samples, longer horizon
     python experiments/run_experiment.py \
-        --conditions A B \
         --n_samples 1024 --horizon 50
 
     # Physics noise ablation
@@ -65,7 +63,6 @@ from contact_study.utils.physics_noise import (
     PhysicsNoiseParams,
     apply_physics_noise,
 )
-from contact_study.utils.rollout import fixed_budget_rollout, fixed_sample_rollout
 from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
 
 RESULTS_DIR = "results"#Path(__file__).parent.parent / "results"
@@ -128,8 +125,6 @@ def run_one_episode(
     mjm:            mujoco.MjModel,
     cfg:            ContactModelConfig,
     task,
-    condition:      str,
-    budget_seconds: float,
     n_samples:      int,
     horizon:        int,
     seed:           int,
@@ -140,7 +135,7 @@ def run_one_episode(
     njmax:          int   = 500,
     debug:          bool  = True,
 ) -> EpisodeResult:
-    """Run one closed-loop episode under Condition A or B."""
+    """Run one closed-loop episode with the warm-started MPPI controller."""
     task_cfg = task.config or task.spec
 
     mppi_cfg = MPPIConfig(
@@ -184,23 +179,12 @@ def run_one_episode(
     episode_start    = time.perf_counter()
     substeps         = controller.substeps
     n_used           = n_samples
+    # Which of the loop's three exits was taken; see EpisodeResult.end_reason.
+    end_reason       = "timeout"
+    n_steps_taken    = task_cfg.max_steps
 
     for t in range(task_cfg.max_steps):
-        if condition == "A":
-            result = fixed_budget_rollout(
-                mjm            = mjm,
-                cfg            = cfg,
-                budget_seconds = budget_seconds,
-                horizon        = horizon,
-                initial_qpos   = mjd.qpos,
-                initial_qvel   = mjd.qvel,
-                rng            = rng,
-            )
-            best_idx = int(np.argmin(result["costs"]))
-            ctrl     = result["final_qpos"][best_idx][:mjm.nu]
-            n_used   = result["n_samples"]
-        else:
-            ctrl = controller.plan(mjd)
+        ctrl = controller.plan(mjd)
 
         mjd.ctrl[:] += ctrl
         for _ in range(substeps):
@@ -209,10 +193,12 @@ def run_one_episode(
         if task.is_success(mjd) and steps_to_success is None:
             steps_to_success = t + 1
             print("Episode Success!")
+            end_reason, n_steps_taken = "success", t + 1
             break
 
         if task.has_failed(mjd):
             print("Episode Failed!")
+            end_reason, n_steps_taken = "failed", t + 1
             break
 
     elapsed = time.perf_counter() - episode_start
@@ -220,12 +206,14 @@ def run_one_episode(
     return EpisodeResult(
         task_name        = task_cfg.name,
         model_label      = cfg.label,
-        condition        = condition,
         success          = steps_to_success is not None,
         steps_to_success = steps_to_success,
         final_cost       = float(np.linalg.norm(mjd.qpos - q0)), # THIS IS WRONG
         n_samples_used   = n_used,
         elapsed_seconds  = elapsed,
+        time_out         = end_reason == "timeout",
+        end_reason       = end_reason,
+        n_steps_taken    = n_steps_taken,
     )
 
 
@@ -236,9 +224,7 @@ def run_one_episode(
 def run_study(
     task_names:     list[str],
     model_names:    list[str],
-    conditions:     list[str],
     n_episodes:     int,
-    budget_seconds: float,
     n_samples:      int,
     horizon:        int,
     seed:           int,
@@ -303,35 +289,30 @@ def run_study(
             cfg = all_cfgs[model_name]
             key = f"{task_name}/{model_name}"
 
-            for condition in conditions:
-                print(f"  {task_name} | {model_name}{cell_tag} | Cond {condition} | {n_episodes} eps")
-                episodes = []
-                for ep in range(n_episodes):
-                    print("Starting New Episode")
-                    result = run_one_episode(
-                        mjm            = mjm,
-                        cfg            = cfg,
-                        task           = task,
-                        condition      = condition,
-                        budget_seconds = budget_seconds,
-                        n_samples      = n_samples,
-                        horizon        = horizon,
-                        seed           = seed,
-                        rng            = rng,
-                        settle_seconds = settle_seconds,
-                        use_full_graph = use_full_graph,
-                        nconmax        = nconmax,
-                        njmax          = njmax,
-                    )
-                    result.model_label = cfg.label + cell_tag
-                    episodes.append(result)
-
-                agg = aggregate_episodes(
-                    episodes, task_name, cfg.label + cell_tag, condition
+            print(f"  {task_name} | {model_name}{cell_tag} | {n_episodes} eps")
+            episodes = []
+            for ep in range(n_episodes):
+                print("Starting New Episode")
+                result = run_one_episode(
+                    mjm            = mjm,
+                    cfg            = cfg,
+                    task           = task,
+                    n_samples      = n_samples,
+                    horizon        = horizon,
+                    seed           = seed,
+                    rng            = rng,
+                    settle_seconds = settle_seconds,
+                    use_full_graph = use_full_graph,
+                    nconmax        = nconmax,
+                    njmax          = njmax,
                 )
-                agg.speedup_vs_baseline    = speed_cache.get(key, 1.0)
-                agg.approx_err_vs_baseline = error_cache.get(key, 0.0)
-                aggregated.append(agg)
+                result.model_label = cfg.label + cell_tag
+                episodes.append(result)
+
+            agg = aggregate_episodes(episodes, task_name, cfg.label + cell_tag)
+            agg.speedup_vs_baseline    = speed_cache.get(key, 1.0)
+            agg.approx_err_vs_baseline = error_cache.get(key, 0.0)
+            aggregated.append(agg)
 
     return aggregated
 
@@ -342,7 +323,7 @@ def run_study(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Master MPPI experiment runner — tasks × models × conditions."
+        description="Master MPPI experiment runner — tasks × models."
     )
     parser.add_argument("--tasks",    nargs="+",
                         default=["grasp_reorient"],
@@ -350,12 +331,7 @@ def main():
     parser.add_argument("--models",   nargs="+",
                         default=["M1", "M2", "M3", "M4"],
                         choices=list(MODEL_FACTORIES.keys()))
-    parser.add_argument("--conditions", nargs="+", default=["B"],
-                        choices=["A", "B"],
-                        help="A=fixed_budget_rollout  B=warm-started MPPI")
     parser.add_argument("--n_episodes",     type=int,   default=40)
-    parser.add_argument("--budget_seconds", type=float, default=0.1,
-                        help="Per-step time budget for Condition A")
     parser.add_argument("--n_samples",      type=int,   default=1024)
     parser.add_argument("--horizon",        type=int,   default=50)
     parser.add_argument("--seed",           type=int,   default=42)
@@ -393,9 +369,7 @@ def main():
     results = run_study(
         task_names     = args.tasks,
         model_names    = args.models,
-        conditions     = args.conditions,
         n_episodes     = args.n_episodes,
-        budget_seconds = args.budget_seconds,
         n_samples      = args.n_samples,
         horizon        = args.horizon,
         seed           = args.seed,

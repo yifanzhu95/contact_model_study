@@ -19,8 +19,8 @@ Usage:
     # Save video, peg_in_hole task
     python experiments/run_episode.py --task peg_in_hole --render video
 
-    # More episodes, fixed-budget planner (Condition A)
-    python experiments/run_episode.py --n_episodes 5 --condition A --budget_seconds 0.2
+    # More episodes
+    python experiments/run_episode.py --n_episodes 5
 
     # All backends, headless comparison
     python experiments/run_episode.py --backend all --n_episodes 3
@@ -53,7 +53,6 @@ from contact_study.evaluation.metrics import EpisodeResult
 from contact_study.planners.mppi import MPPIController, MPPIConfig
 from contact_study.tasks.base import get_task
 from contact_study.utils.physics_noise import PhysicsNoiseParams, apply_physics_noise
-from contact_study.utils.rollout import fixed_budget_rollout
 from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
 
 # ---------------------------------------------------------------------------
@@ -87,8 +86,6 @@ def run_episode(
     cfg:            ContactModelConfig,
     mppi_cfg:       MPPIConfig,
     rng:            np.random.Generator,
-    condition:      str   = "B",
-    budget_seconds: float = 0.1,
     settle_seconds: float = 1.0,
     render_mode:    str   = "none",
     video_path:     str | None = None,
@@ -113,11 +110,6 @@ def run_episode(
         Full MPPI hyperparameter config.
     rng:
         Numpy random generator (shared across episodes for reproducibility).
-    condition:
-        "A" = fixed_budget_rollout (open-loop, best-of-N),
-        "B" = warm-started MPPIController.
-    budget_seconds:
-        Per-step wall-time budget for Condition A.
     settle_seconds:
         Seconds to simulate before planning starts (objects fall to rest).
     render_mode:
@@ -194,24 +186,13 @@ def run_episode(
         n_samples_used = mppi_cfg.n_samples
         step_times: list[float] = []
         ep_start = time.perf_counter()
+        # Which of the loop's three exits was taken; see EpisodeResult.end_reason.
+        end_reason    = "timeout"
+        n_steps_taken = task_cfg.max_steps
 
         for t in range(task_cfg.max_steps):
             step_start = time.perf_counter()
-            if condition == "A":
-                result   = fixed_budget_rollout(
-                    mjm            = mjm,
-                    cfg            = cfg,
-                    budget_seconds = budget_seconds,
-                    horizon        = controller.horizon,
-                    initial_qpos   = mjd.qpos,
-                    initial_qvel   = mjd.qvel,
-                    rng            = rng,
-                )
-                best_idx     = int(np.argmin(result["costs"]))
-                ctrl         = result["final_qpos"][best_idx][:mjm.nu]
-                n_samples_used = result["n_samples"]
-            else:
-                ctrl = controller.plan(mjd)
+            ctrl = controller.plan(mjd)
 
             mjd.ctrl[:] += ctrl
 
@@ -234,6 +215,7 @@ def run_episode(
                         print(f"  [ep {ep_idx:02d}] First success at step {steps_to_success}")
 
                 if fin_ep_on_success:
+                    end_reason, n_steps_taken = "success", t + 1
                     break
 
                 if hasattr(task, "sample_new_goal"):
@@ -245,6 +227,7 @@ def run_episode(
             if task.has_failed(mjd):
                 if debug:
                     print(f"  [ep {ep_idx:02d}] Task failed at step {t}")
+                end_reason, n_steps_taken = "failed", t + 1
                 break
 
         elapsed = time.perf_counter() - ep_start
@@ -263,11 +246,16 @@ def run_episode(
         if viewer is not None:
             viewer.close()
 
+    # Multi-goal mode (fin_ep_on_success=False) never breaks on success, so it
+    # always exits by exhaustion: time_out stays True, but the episode succeeded.
+    time_out = end_reason == "timeout"
+    if time_out and steps_to_success is not None:
+        end_reason = "success"
+
     step_arr = np.asarray(step_times)
     return EpisodeResult(
         task_name        = task_cfg.name,
         model_label      = cfg.label,
-        condition        = condition,
         success          = steps_to_success is not None,
         steps_to_success = steps_to_success,
         final_cost       = float(np.linalg.norm(mjd.qpos - q0)),
@@ -275,6 +263,9 @@ def run_episode(
         elapsed_seconds  = elapsed,
         mean_step_ms     = float(step_arr.mean()) if len(step_arr) else 0.0,
         std_step_ms      = float(step_arr.std())  if len(step_arr) else 0.0,
+        time_out         = time_out,
+        end_reason       = end_reason,
+        n_steps_taken    = n_steps_taken,
     )
 
 
@@ -307,11 +298,7 @@ def main():
                         help="Registered task name.")
     parser.add_argument("--backend", type=str, default="mjwarp",
                         choices=["mjwarp", "mjwarp_hard", "comfree", "xpbd", "all"])
-    parser.add_argument("--condition", type=str, default="B", choices=["A", "B"],
-                        help="A=fixed_budget_rollout  B=warm-started MPPIController")
     parser.add_argument("--n_episodes",     type=int,   default=1)
-    parser.add_argument("--budget_seconds", type=float, default=0.1,
-                        help="Per-step time budget for Condition A")
     parser.add_argument("--n_samples",      type=int,   default=256)
     parser.add_argument("--horizon",        type=int,   default=128)
     parser.add_argument("--temperature",    type=float, default=0.05)
@@ -374,11 +361,8 @@ def main():
         print(f"\n{'='*60}")
         print(f"  backend   : {backend}  ({model_key})")
         print(f"  task      : {args.task}")
-        print(f"  condition : {args.condition}")
         print(f"  n_episodes: {args.n_episodes}")
         print(f"  horizon   : {args.horizon}    n_samples: {args.n_samples}")
-        if args.condition == "A":
-            print(f"  budget    : {args.budget_seconds*1e3:.1f} ms")
         print(f"{'='*60}")
         print(f"  nq={mjm.nq}  nv={mjm.nv}  nu={mjm.nu}  "
               f"max_steps={(task.config or task.spec).max_steps}")
@@ -394,8 +378,6 @@ def main():
                 cfg            = cfg,
                 mppi_cfg       = mppi_cfg,
                 rng            = rng,
-                condition      = args.condition,
-                budget_seconds = args.budget_seconds,
                 settle_seconds = args.settle,
                 render_mode    = render_mode,
                 debug          = args.debug,
@@ -423,7 +405,7 @@ def main():
 
     if len(backends) > 0:
         print(f"\n{'='*60}")
-        print(f"  Summary  (task={args.task}  condition={args.condition})")
+        print(f"  Summary  (task={args.task})")
         print(f"{'='*60}")
         print(f"  {'backend':<16}  {'succ%':>6}  {'ep_ms':>9}  {'step_ms':>10}  {'step_std':>9}")
         print(f"  {'-'*16}  {'-'*6}  {'-'*9}  {'-'*10}  {'-'*9}")

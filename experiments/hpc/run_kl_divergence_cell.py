@@ -119,74 +119,11 @@ from contact_study.drivers.run_eval_episode import (
     load_rollout_task, resolve_mppi_schedule, MODEL_FACTORIES,
 )
 from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
-
-
-# ---------------------------------------------------------------------------
-# KL machinery
-# ---------------------------------------------------------------------------
-def weighted_moments(controller, shrinkage: float, sigma: float):
-    """First-action weighted mean and covariance of a planner's induced q*.
-
-    Reads the state the controller already leaves on the GPU after plan():
-    w_wp holds the NORMALIZED weights of the final MPPI iteration and V_wp the
-    clamped samples those weights scored, so (V, w) is a consistent particle
-    representation whose weighted mean equals the planner's returned U[0].
-
-    Returns (mu, Sigma, ess). Sigma is already shrunk toward sigma^2 I.
-    """
-    w  = controller.w_wp.numpy().astype(np.float64)          # (N,) sums to 1
-    V0 = controller.V_wp.numpy()[:, 0, :].astype(np.float64)  # (N, nu)
-
-    # Guard against a degenerate weight vector (all-NaN rollouts zero U and can
-    # leave w unnormalized); fall back to uniform so the cell keeps running.
-    s = w.sum()
-    if not np.isfinite(s) or s <= 0.0:
-        w = np.full(w.shape, 1.0 / w.size, dtype=np.float64)
-    else:
-        w = w / s
-
-    mu = w @ V0                                   # (nu,)
-    D  = V0 - mu                                  # (N, nu)
-    Sigma = (w[:, None] * D).T @ D                # (nu, nu)
-
-    # Symmetrize (guards against float asymmetry before Cholesky) and shrink
-    # toward the proposal covariance.
-    Sigma = 0.5 * (Sigma + Sigma.T)
-    d = mu.size
-    Sigma = (1.0 - shrinkage) * Sigma + shrinkage * (sigma ** 2) * np.eye(d)
-
-    ess = 1.0 / float(np.sum(w ** 2))
-    return mu, Sigma, ess
-
-
-def gaussian_kl(mu0, S0, mu1, S1) -> float:
-    """KL( N(mu0,S0) || N(mu1,S1) ), computed via Cholesky for stability.
-
-        KL = 0.5 [ tr(S1^-1 S0) + (mu1-mu0)^T S1^-1 (mu1-mu0)
-                   - d + ln(det S1 / det S0) ]
-
-    Returns +inf if S1 is not positive definite (should not happen with
-    shrinkage on, but a NaN cost can still poison a covariance).
-    """
-    d = mu0.size
-    try:
-        L1 = np.linalg.cholesky(S1)
-    except np.linalg.LinAlgError:
-        return float("inf")
-
-    # S1^-1 S0 and S1^-1 dmu without forming an explicit inverse.
-    Z    = np.linalg.solve(L1, S0)                 # L1^-1 S0
-    tr   = float(np.trace(np.linalg.solve(L1.T, Z)))
-    dmu  = mu1 - mu0
-    y    = np.linalg.solve(L1, dmu)
-    maha = float(y @ y)
-
-    sign0, logdet0 = np.linalg.slogdet(S0)
-    if sign0 <= 0:
-        return float("inf")
-    logdet1 = 2.0 * float(np.sum(np.log(np.diag(L1))))
-
-    return 0.5 * (tr + maha - d + logdet1 - logdet0)
+from contact_study.evaluation import json_io
+from contact_study.evaluation.distributions import gaussian_kl, weighted_moments
+from contact_study.evaluation.trajectory import (
+    TrajectoryConfig, TrajectoryRecorder, add_cli_flags as add_record_flags,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -200,9 +137,7 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
     Forked from contact_study.drivers.run_eval_episode — same eval/rollout
     split, same control parameterization and clipping — with a second
     controller and the KL bookkeeping added. Kept here rather than in
-    drivers/ so this experimental path cannot destabilize the shared driver
-    (run_eval_episode_record_controls.py is the existing precedent for a
-    forked variant).
+    drivers/ so this experimental path cannot destabilize the shared driver.
     """
     # ---- ROLLOUT task + both planners -------------------------------------
     rollout_task = get_task(args.task, geometry=geometry, role=TaskRole.ROLLOUT)
@@ -266,6 +201,32 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
     steps_to_success: int | None = None
     sigma = float(deg_cfg.noise_sigma)
 
+    # Records the DEGRADED planner — the one that actually controls. The
+    # reference planner's shadow solve is not part of the episode.
+    rec = TrajectoryRecorder(
+        TrajectoryConfig.from_args(args), deg, driver="sync",
+        control_dt=deg.control_dt, rollout_dt=rollout_dt, eval_dt=eval_dt,
+        eval_substeps=eval_substeps, max_steps=n_steps,
+        clip=(clip_lo, clip_hi), settle_seconds=args.settle,
+        extra_context={
+            "task":            args.task,
+            "geometry":        geometry,
+            "planner":         "mppi",
+            "model_label":     contact_cfg.label,
+            "nq":              int(mjm.nq),
+            "nv":              int(mjm.nv),
+            "q0":              np.asarray(q0, dtype=float),
+            "v0":              np.asarray(v0, dtype=float),
+            "u0":              np.asarray(u0, dtype=float),
+            "kl_every":        int(args.kl_every),
+            "kl_shrinkage":    float(args.kl_shrinkage),
+            "ref_n_samples":   int(ref_cfg.n_samples),
+        },
+    )
+    # Which of the loop's three exits was taken; see EpisodeResult.end_reason.
+    end_reason    = "timeout"
+    n_steps_taken = n_steps
+
     kl_fwd, kl_rev, ess_ref, ess_deg, mu_dist, kl_steps = [], [], [], [], [], []
     step_times: list[float] = []
     ep_start = time.perf_counter()
@@ -282,8 +243,10 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
                 steps_to_success = t
                 if args.debug:
                     print(f"  [ep {ep_idx:02d}] first success at step {t}")
+            end_reason, n_steps_taken = "success", t
             break
         if rollout_task.has_failed(mjd):
+            end_reason, n_steps_taken = "failed", t
             break
 
         measure = (t % args.kl_every == 0)
@@ -296,7 +259,8 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
         # --- degraded planner: this is the one that controls ---------------
         plan_start = time.perf_counter()
         action = deg.plan(mjd)
-        step_times.append((time.perf_counter() - plan_start) * 1e3)
+        plan_ms = (time.perf_counter() - plan_start) * 1e3
+        step_times.append(plan_ms)
 
         if measure:
             mu_d, S_d, e_d = weighted_moments(deg, args.kl_shrinkage, sigma)
@@ -338,6 +302,13 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
         if clip_lo is not None:
             u = np.clip(u, clip_lo, clip_hi)
 
+        # `action` is whatever built `u` — under --execute sample that is the
+        # drawn particle, not the planner's mean, so the replay identity holds
+        # either way. action_source records which.
+        rec.step(step=t, t=t * deg.control_dt, qpos=st.qpos, qvel=st.qvel,
+                 action=action, ctrl=u, plan_ms=plan_ms,
+                 action_source=args.execute)
+
         sim.apply_control(u)
         sim.step(eval_steps_per_control)
 
@@ -356,7 +327,6 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
     result = EpisodeResult(
         task_name        = cfg.name,
         model_label      = contact_cfg.label,
-        condition        = "B",
         success          = steps_to_success is not None,
         steps_to_success = steps_to_success,
         final_cost       = float(np.linalg.norm(final_qpos - np.asarray(q0, dtype=float))),
@@ -364,6 +334,10 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
         elapsed_seconds  = elapsed,
         mean_step_ms     = float(step_arr.mean()) if len(step_arr) else 0.0,
         std_step_ms      = float(step_arr.std())  if len(step_arr) else 0.0,
+        time_out         = end_reason == "timeout",
+        end_reason       = end_reason,
+        n_steps_taken    = n_steps_taken,
+        trajectory       = rec.finish(),
     )
     record = {
         "steps":     kl_steps,
@@ -482,7 +456,7 @@ def run_cell(args):
               f"KL_rev={kr['mean'] if kr['mean'] is not None else float('nan'):9.4f}  "
               f"n_kl={kf['n']:4d}  step={result.mean_step_ms:.1f}ms")
 
-    agg = aggregate_episodes(episodes, args.task, label, "B")
+    agg = aggregate_episodes(episodes, args.task, label)
 
     # Pool every measured step across all episodes for the cell-level KL. The
     # scatter point uses this; per-episode and per-step values are kept below.
@@ -539,13 +513,13 @@ def run_cell(args):
             "ess_deg": _stats(all_ed),
             "mu_dist": _stats(all_md),
         },
+        # The full EpisodeResult (end_reason / time_out / trajectory included),
+        # with this cell's KL summary folded in beside it.
         "episodes": [
             {
-                "success":          e.success,
-                "steps_to_success": e.steps_to_success,
-                "mean_step_ms":     e.mean_step_ms,
-                "kl_forward":       _stats(r["kl_forward"]),
-                "kl_reverse":       _stats(r["kl_reverse"]),
+                **e.to_dict(),
+                "kl_forward": _stats(r["kl_forward"]),
+                "kl_reverse": _stats(r["kl_reverse"]),
             }
             for e, r in zip(episodes, records)
         ],
@@ -639,6 +613,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--use_full_graph",
                    action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--seed",  type=int, default=None)
+    add_record_flags(p)
     p.add_argument("--debug", action="store_true")
     return p
 
@@ -651,8 +626,8 @@ def main():
     outdir.mkdir(parents=True, exist_ok=True)
 
     out, label = run_cell(args)
-    with open(outdir / f"{label}.json", "w") as f:
-        json.dump(out, f, indent=2)
+    json_io.dump(out, outdir / f"{label}.json",
+                 precision=TrajectoryConfig.from_args(args).precision)
 
     meta_path = outdir / "meta.json"
     with open(meta_path, "w") as f:

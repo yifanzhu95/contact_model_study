@@ -28,7 +28,12 @@ import warp as wp
 
 import contact_study.tasks  # noqa: F401 — registers all tasks
 
-from contact_study.evaluation.metrics import aggregate_episodes, save_results
+from contact_study.evaluation.metrics import aggregate_episodes
+from contact_study.evaluation import json_io
+from contact_study.evaluation.metrics import cell_record
+from contact_study.evaluation.trajectory import (
+    TrajectoryConfig, add_cli_flags as add_record_flags,
+)
 from contact_study.planners.mppi import MPPIConfig
 from contact_study.tasks.config import EvalSimulatorKind
 
@@ -112,6 +117,7 @@ def run_cell(args):
             fin_ep_on_success = True,
             debug             = args.debug,
             verbose           = True,
+            record            = TrajectoryConfig.from_args(args),
         )
         episodes.append(result)
         tick = "✓" if result.success else "✗"
@@ -119,12 +125,12 @@ def run_cell(args):
         print(f"    ep {ep:02d}  {tick}  success_step={sstr:<8}  "
               f"step={result.mean_step_ms:.3f}±{result.std_step_ms:.3f} ms")
 
-    agg = aggregate_episodes(episodes, args.task, label, "B")
+    agg = aggregate_episodes(episodes, args.task, label)
     succ = [e.steps_to_success for e in episodes if e.steps_to_success is not None]
     print(f"  → success={agg.success_rate*100:.1f}%  "
           f"step_ms={agg.mean_step_ms:.3f}±{agg.std_step_ms:.3f}  "
           + (f"mean_steps={agg.mean_steps_to_success:.1f}" if succ else ""))
-    return agg
+    return agg, episodes
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--use_full_graph",
                    action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--seed",          type=int,   default=None)
+    add_record_flags(p)
     p.add_argument("--debug",         action="store_true")
     return p
 
@@ -178,12 +185,16 @@ def main():
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    agg      = run_cell(args)
+    agg, episodes = run_cell(args)
     label    = f"{args.model}_n{args.n_samples}"
+    # Every CLI knob, verbatim, so a cell file records exactly what produced it.
+    cfg_dict = {k: v for k, v in vars(args).items() if k not in ("outdir", "debug")}
     out_path = outdir / f"{label}.json"
-    # save_results writes a JSON *list* of AggregatedResult dicts (one here), which
-    # is exactly what the directory plotter merges across every cell file.
-    save_results([agg], out_path)
+    record   = cell_record(label=label, task=args.task, model=args.model,
+                           aggregate=agg, episodes=episodes, config=cfg_dict)
+    json_io.dump(record, out_path,
+                 precision=TrajectoryConfig.from_args(args).precision)
+    print(f"  saved -> {out_path}")
 
 
 if __name__ == "__main__":

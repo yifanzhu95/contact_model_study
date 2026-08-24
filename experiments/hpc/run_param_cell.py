@@ -31,8 +31,6 @@ import os
 os.environ.setdefault("MUJOCO_GL", "egl")
 
 import argparse
-import dataclasses
-import json
 from pathlib import Path
 
 import numpy as np
@@ -43,6 +41,10 @@ import contact_study.tasks  # noqa: F401 — registers all tasks
 from contact_study.planners.mppi import MPPIConfig
 from contact_study.tasks.config import EvalSimulatorKind
 
+from contact_study.evaluation import json_io
+from contact_study.evaluation.trajectory import (
+    TrajectoryConfig, add_cli_flags as add_record_flags,
+)
 from contact_study.drivers.run_eval_episode import (
     run_eval_episode, load_rollout_task, resolve_mppi_schedule, MODEL_FACTORIES,
 )
@@ -185,6 +187,7 @@ def run_cell(cell_id: int, overrides: dict, axes: dict, args) -> dict:
             fin_ep_on_success     = True,
             debug                 = args.debug,
             verbose               = args.debug,
+            record                = TrajectoryConfig.from_args(args),
         )
         episodes.append(result)
         tick = "✓" if result.success else "✗"
@@ -240,7 +243,7 @@ def run_cell(cell_id: int, overrides: dict, axes: dict, args) -> dict:
         "eval_sim": args.eval_sim,
         "geometry": args.geometry,
         "settle":   args.settle,
-        "episodes": [dataclasses.asdict(r) for r in episodes],
+        "episodes": [r.to_dict() for r in episodes],
     }
 
 
@@ -305,6 +308,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Wall-clock rollout budget per plan() in ms; required with "
                         "--time_constrained.")
     p.add_argument("--seed",          type=int,   default=None)
+    add_record_flags(p)
     p.add_argument("--debug",         action="store_true")
     return p
 
@@ -320,8 +324,8 @@ def main():
 
     record   = run_cell(args.cell_id, overrides, axes, args)
     out_path = outdir / f"cell_{args.cell_id:05d}.json"
-    with open(out_path, "w") as f:
-        json.dump(record, f, indent=2)
+    json_io.dump(record, out_path,
+                 precision=TrajectoryConfig.from_args(args).precision)
     print(f"  saved -> {out_path}")
 
 
