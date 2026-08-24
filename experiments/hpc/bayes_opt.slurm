@@ -49,9 +49,9 @@ OBJ_ACC="high"
 #    trial replays by pasting them into that driver).
 # ---------------------------------------------------------------------------
 PLANNER="mppi"                  # mppi | cem | predictive_sampler
-N_EPISODES=3                    # episodes per trial; more averages out episode
+N_EPISODES=4                    # episodes per trial; more averages out episode
                                 # luck at a proportional cost in wall time
-SEED=42                         # THE constant episode seed (same episodes every trial)
+SEED=64                         # THE constant episode seed (same episodes every trial)
 N_SAMPLES=256
 TIME_HORIZON=0.352              # planning horizon in SECONDS (quantized to control steps)
 STEP_TIME=0.064                 # control-step duration in SECONDS (quantized to rollout steps)
