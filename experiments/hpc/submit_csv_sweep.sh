@@ -40,4 +40,4 @@ echo "submitting $N cells from $CSV"
 # needs inside the job.
 sbatch --array="0-$((N - 1))" \
        --export=ALL,CSV="$CSV",TASK_LABEL="$TASK_LABEL" \
-       run_csv_sweep.slurm
+       experiments/hpc/run_csv_sweep.slurm

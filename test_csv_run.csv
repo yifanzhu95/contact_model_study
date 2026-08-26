@@ -1,0 +1,5 @@
+task,geometry,hand_acc,obj_acc,model,planner,n_episodes,seed,n_samples,time_horizon,step_time,noise_sigma,temperature,w_quat,w_pos_x,w_pos_y,w_pos_z,w_contact,w_joint,w_fallen,w_quat_term,w_pos_term,record_trajectory,record_planner_dist,planner_dist_every
+grasp_reorient,cube,high,high,M4,mppi,5,0,256,0.352,0.064,0.281809,100,50,0.1,50,50,50,15.7075,500,224.284,100,FALSE,FALSE,10
+grasp_reorient,cube,high,high,M1,mppi,5,0,256,0.352,0.064,0.280642,17.3731,50,50,50,0.109749,50,2.13755,500,100,500,FALSE,FALSE,10
+grasp_reorient,cube,high,high,M3,mppi,5,0,256,0.352,0.064,0.276108,18.169,50,0.210972,50,50,0.149257,7.48929,100,100,168.221,FALSE,FALSE,10
+grasp_reorient,cube,high,high,M2,mppi,5,0,256,0.352,0.064,0.0932189,100,50,0.1,5.07341,0.141247,0.1,50,500,500,500,FALSE,FALSE,10
