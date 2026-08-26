@@ -174,6 +174,11 @@ class PinocchioContactConfig:
     # triangulation noise, so the hull reproduces their shape almost exactly. Only
     # affects collision geoms; the visual meshes are untouched.
     use_convex_tips: bool = True
+    # Slack (m) added to the bounding-sphere test of the broadphase prefilter in
+    # _detect_contacts. The spheres already fully enclose their geoms, so the
+    # filter is conservative at 0 and this is pure safety margin; it costs only a
+    # few extra narrowphase queries per substep.
+    broadphase_margin: float = 0.01
     baumgarte_kp: float = 10.0 #1000.0
     baumgarte_kd: float = 0.50 #10.0
     admm_max_iterations: int = 1000 #50000 #500000
@@ -684,8 +689,15 @@ def _rotation_from_normal(n):
     a = np.array([1.0, 0.0, 0.0]) if abs(z[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
     x = a - z * (a @ z)
     x /= np.linalg.norm(x)
-    y = np.cross(z, x)
-    return np.column_stack([x, y, z])
+    # np.cross carries enough dispatch overhead to show up in the substep
+    # profile at this call rate; for two 3-vectors the explicit form is ~10x
+    # cheaper and identical.
+    y = np.array([z[1] * x[2] - z[2] * x[1],
+                  z[2] * x[0] - z[0] * x[2],
+                  z[0] * x[1] - z[1] * x[0]])
+    R = np.empty((3, 3))
+    R[:, 0], R[:, 1], R[:, 2] = x, y, z
+    return R
 
 
 # Panda3D's ShowBase is a per-process singleton — constructing a second one
@@ -693,6 +705,11 @@ def _rotation_from_normal(n):
 # spawn multiple ShowBase instances!". We build the offscreen viewer once and
 # reattach every simulator's visualizer to it (see _setup_viewer).
 _PANDA_VIEWER = None
+
+
+# Collision-pair count below which PinocchioSimulator._detect_contacts skips its
+# bounding-sphere broadphase and narrowphases everything (see __init__).
+_BROADPHASE_MIN_PAIRS = 64
 
 
 class PinocchioSimulator(EvalSimulator):
@@ -793,6 +810,67 @@ class PinocchioSimulator(EvalSimulator):
         for req in self._geom_data.collisionRequests:
             req.enable_contact = True
             req.num_max_contacts = 32
+
+        # --- broadphase prefilter ---------------------------------------------
+        # build_collision_pairs enumerates every non-adjacent geom pair, which is
+        # O(n_geom^2) (~1.7k pairs for the LEAP scene). Narrowphasing all of them
+        # every substep, and re-scanning all of their CollisionResults from
+        # Python, together dominated the substep cost while only a handful of
+        # pairs are ever anywhere near each other. So each substep we first cull
+        # with a vectorized bounding-sphere test and activate ONLY the surviving
+        # pairs, so coal narrowphases just those and the result scan below walks
+        # just those (see _detect_contacts).
+        n_pair = len(coll.collisionPairs)
+        for go in coll.geometryObjects:
+            go.geometry.computeLocalAABB()   # aabb_radius is -1 until this runs
+        # coal's bounding sphere is centred on aabb_center, NOT on the geom
+        # origin, and for the convex-hull fingertips that offset is ~5cm - far
+        # bigger than any margin. So carry the offset explicitly: the sphere
+        # centre lives at placement * aabb_center in the parent joint's frame.
+        # (The floor's radius/centre are infinite; it is filtered out of the pair
+        # list by build_collision_pairs, but zero it here so it cannot poison the
+        # vectorized math.)
+        radius = np.zeros(len(coll.geometryObjects))
+        aabb_centers = np.zeros((len(coll.geometryObjects), 3))
+        for gid, go in enumerate(coll.geometryObjects):
+            r = float(go.geometry.aabb_radius)
+            c = np.asarray(go.geometry.aabb_center, dtype=float)
+            if np.isfinite(r) and np.all(np.isfinite(c)):
+                radius[gid] = r
+                aabb_centers[gid] = c
+        # Geom bounding-sphere centres are rebuilt from data.oMi rather than read
+        # out of gd.oMg: one Python attribute fetch per JOINT (18) beats one per
+        # GEOM (73), and the placement composition then vectorizes.
+        self._geom_parent_joint = np.array(
+            [go.parentJoint for go in coll.geometryObjects], dtype=int
+        )
+        self._geom_local_pos = np.array(
+            [go.placement.rotation @ aabb_centers[gid] + go.placement.translation
+             for gid, go in enumerate(coll.geometryObjects)], dtype=float
+        )
+        self._joint_ids = range(model.njoints)
+        self._pair_first = np.array(
+            [coll.collisionPairs[k].first for k in range(n_pair)], dtype=int
+        )
+        self._pair_second = np.array(
+            [coll.collisionPairs[k].second for k in range(n_pair)], dtype=int
+        )
+        thresh = (radius[self._pair_first] + radius[self._pair_second]
+                  + float(self._contact_cfg.broadphase_margin))
+        self._pair_thresh_sq = thresh * thresh
+        # Live handle on GeometryData's active-pair flags (in-place writes stick).
+        # Start with everything off; _detect_contacts turns on its candidates and
+        # remembers them so the next substep only has to clear those again.
+        #
+        # Below _BROADPHASE_MIN_PAIRS the filter's own fixed cost (a handful of
+        # numpy calls) outweighs the narrowphase it saves, so small scenes
+        # (balance_stick: 35 pairs) keep every pair active and skip it.
+        self._active_pairs = self._geom_data.activeCollisionPairs
+        self._use_broadphase = n_pair >= _BROADPHASE_MIN_PAIRS
+        for k in range(n_pair):
+            self._active_pairs[k] = not self._use_broadphase
+        self._all_pairs = list(range(n_pair))
+        self._prev_active: list[int] = []
 
         # Resolve channel joint names -> ids.
         self._joint_jid = {ch.pin_name: model.getJointId(ch.pin_name)
@@ -1137,12 +1215,35 @@ class PinocchioSimulator(EvalSimulator):
         q = self._q
         pin.forwardKinematics(model, data, q)
         pin.updateGeometryPlacements(model, data, gm, gd, q)
-        pin.computeCollisions(model, data, gm, gd, q, False)
+        # Bounding-sphere broadphase (see __init__): keep only the pairs whose
+        # spheres overlap, flip GeometryData's active flags to match, and scan
+        # only those results below. computeCollisions gets its geometry-only
+        # overload -- the (model, data, ..., q) one would redo the two kinematics
+        # passes above.
+        if self._use_broadphase:
+            oMj = np.array([data.oMi[j].homogeneous for j in self._joint_ids])
+            oMj = oMj[self._geom_parent_joint]
+            centers = oMj[:, :3, 3] + np.einsum(
+                "nij,nj->ni", oMj[:, :3, :3], self._geom_local_pos
+            )
+            delta = centers[self._pair_first] - centers[self._pair_second]
+            candidates = np.flatnonzero(
+                np.einsum("ij,ij->i", delta, delta) < self._pair_thresh_sq
+            ).tolist()
+            active = self._active_pairs
+            for k in self._prev_active:
+                active[k] = False
+            for k in candidates:
+                active[k] = True
+            self._prev_active = candidates
+        else:
+            candidates = self._all_pairs
+        pin.computeCollisions(gm, gd, False)
 
         baumgarte = pin.BaumgarteCorrectorParameters(cfg.baumgarte_kp, cfg.baumgarte_kd)
         cms = []
         penetrations = []
-        for k in range(len(gm.collisionPairs)):
+        for k in candidates:
             cr = gd.collisionResults[k]
             if not cr.isCollision():
                 continue
