@@ -41,9 +41,15 @@ conda activate contact_modeling
 echo "row ${T} of $CSV -> $OUTDIR"
 
 # Per-control-step trajectory + planner-distribution recording (see
-# contact_study/evaluation/trajectory.py). OFF for sweeps: at a task's
-# max_steps it is megabytes per episode, which this many rows cannot carry.
-# Drop the --no- prefixes (or raise --planner_dist_every) to record a row.
+# contact_study/evaluation/trajectory.py). OFF by default for sweeps: at a
+# task's max_steps it is megabytes per episode, which this many rows cannot
+# carry.
+#
+# These are only the FALLBACK for rows that leave the recording columns blank.
+# A row's record_trajectory / record_planner_dist / planner_dist_every cell
+# overrides them, so to record one interesting cell set `true` in that row
+# rather than editing here — changing these flags does nothing for any row
+# that fills those columns in.
 RECORD_ARGS=(--no-record_trajectory --no-record_planner_dist)
 
 python experiments/hpc/run_csv_cell.py \

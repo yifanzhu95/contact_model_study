@@ -128,12 +128,16 @@ what lets one CSV mix planners, but would otherwise let a misspelled
 
 ### Usage
 
+Run from the **repo root** — `submit_csv_sweep.sh` passes
+`experiments/hpc/run_csv_sweep.slurm` to `sbatch` as a root-relative path, and
+the job's `#SBATCH --output=logs/...` resolves against the submission dir, so
+the logs land in `<repo-root>/logs` alongside the combine job's.
+
 ```bash
-cd experiments/hpc
 mkdir -p logs
-./submit_csv_sweep.sh example_params.csv   # sizes --array to the CSV and submits
-# or, with your own file:
-./submit_csv_sweep.sh path/to/params.csv my_run_label
+./experiments/hpc/submit_csv_sweep.sh experiments/hpc/example_params.csv
+# or, with your own file (the CSV path may be relative or absolute):
+./experiments/hpc/submit_csv_sweep.sh path/to/params.csv my_run_label
 ```
 
 Results land in `results/csv_sweep_<arrayjobid>/`, same layout as the grid
@@ -143,5 +147,6 @@ writes the same per-cell schema `run_param_cell.py` does.
 
 To run a single row locally (e.g. to sanity-check a CSV before submitting):
 ```bash
-python run_csv_cell.py --csv example_params.csv --row 0 --outdir /tmp/csv_test
+python experiments/hpc/run_csv_cell.py \
+    --csv experiments/hpc/example_params.csv --row 0 --outdir /tmp/csv_test
 ```
