@@ -115,6 +115,15 @@ class EpisodeResult:
     # exploding the file.
     trajectory:        dict | None = None
 
+    # --- worker-process failure -------------------------------------------
+    # Set only when the episode raised inside a pool worker (see
+    # contact_study/drivers/episode_pool.py): "<ExcType>: <message>". The result
+    # is otherwise a plain failure — success=False, final_goal_errs=None — so a
+    # crashed episode costs its trial a point instead of killing the run.
+    # end_reason reads "error" in that case, the fourth door alongside the three
+    # documented above.
+    error:             str | None = None
+
     @classmethod
     def from_dict(cls, d: dict, *, drop_trajectory: bool = False) -> "EpisodeResult":
         """Build from a JSON dict, ignoring keys this dataclass no longer declares.

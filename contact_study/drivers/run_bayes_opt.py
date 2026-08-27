@@ -71,8 +71,11 @@ from contact_study.evaluation import json_io
 from contact_study.evaluation.trajectory import (
     TrajectoryConfig, add_cli_flags as add_record_flags,
 )
+from contact_study.drivers.episode_pool import (
+    EpisodePool, default_worker_count, run_episodes_serially,
+)
 from contact_study.drivers.run_eval_episode import (
-    MODEL_FACTORIES, load_rollout_task, resolve_mppi_schedule, run_eval_episode,
+    MODEL_FACTORIES, load_rollout_task, resolve_mppi_schedule,
 )
 from contact_study.planners import (
     PLANNER_NAMES, make_planner_config, resolve_planner_name,
@@ -94,6 +97,11 @@ DEFAULT_OPT_WEIGHTS = (
 # own default d — a multiplicative bracket, which is what a log-uniform prior
 # wants and what makes the space transfer between objects with different scales.
 BOUND_SCALE = 4.0
+
+# Rough floor for one worker's share of VRAM: a CUDA context plus an MJWarp
+# Model/Data at nworld=n_samples plus the (N, H, nu) sample block. Only used to
+# warn — the real cost depends on --n_samples/--nconmax/--njmax.
+MIN_VRAM_PER_WORKER_GB = 1.5
 
 
 # ---------------------------------------------------------------------------
@@ -240,8 +248,12 @@ class BOObjective:
 
     def __init__(self, args, dim_names: list[str], default_weights: dict[str, float],
                  thresholds: dict[str, float], schedule: tuple[int, int, float],
-                 outdir: Path, start_trial: int = 0):
+                 outdir: Path, start_trial: int = 0,
+                 pool: EpisodePool | None = None):
         self.args            = args
+        # None means run the episodes in this process (--n_workers 1). Owned by
+        # main(), which shuts it down, so the objective can stay a pure callable.
+        self.pool            = pool
         self.dim_names       = dim_names
         self.default_weights = default_weights
         self.thresholds      = thresholds
@@ -266,6 +278,59 @@ class BOObjective:
         self.records: list[dict] = []
         self._warned_no_goal_err = False
 
+    # -- one episode's job description --------------------------------------
+
+    def _episode_job(self, ep: int, overrides: dict, noise_sigma: float,
+                     temperature: float) -> dict:
+        """run_eval_episode's kwargs for episode `ep`, as picklable plain data.
+
+        `rng` is replaced by `seed_seq`: the worker rebuilds the Generator with
+        np.random.default_rng(seed_seq). SeedSequence is stateless, so deriving
+        the planner seed here and the Generator there yields exactly what the
+        old in-process `np.random.default_rng(self.episode_seeds[ep])` did.
+        """
+        args = self.args
+        planner_kwargs = dict(
+            n_samples         = args.n_samples,
+            step_horizon      = args.horizon,
+            time_horizon      = args.time_horizon,
+            step_time         = args.step_time,
+            noise_sigma       = noise_sigma,
+            step_substeps     = args.substeps,
+            warm_start        = args.warm_start,
+            use_full_graph    = args.use_full_graph,
+            delta_range       = self.delta,
+            nconmax           = args.nconmax,
+            njmax             = args.njmax,
+            seed              = int(self.episode_seeds[ep].generate_state(1)[0]),
+            debug             = args.debug,
+            resample_interval = args.resample_interval,
+            temperature       = temperature,
+        )
+        # No CLI default: omitting it lets each planner's own default stand
+        # (1 for mppi/predictive_sampler, 3 for cem).
+        if args.n_iterations is not None:
+            planner_kwargs["n_iterations"] = args.n_iterations
+
+        return dict(
+            task_name             = args.task,
+            geometry              = args.geometry,
+            contact_cfg           = self.contact_cfg,
+            planner               = self.planner,
+            planner_cfg           = make_planner_config(self.planner, **planner_kwargs),
+            seed_seq              = self.episode_seeds[ep],
+            video_path            = None,
+            cost_weight_overrides = overrides or None,
+            settle_seconds        = args.settle,
+            eval_substeps         = args.eval_substeps,
+            eval_sim              = self.eval_sim,
+            ep_idx                = ep,
+            fin_ep_on_success     = True,
+            debug                 = args.debug,
+            verbose               = args.debug,
+            record                = self.record_cfg,
+        )
+
     # -- one trial ----------------------------------------------------------
 
     def __call__(self, x: list[float]) -> float:
@@ -289,54 +354,14 @@ class BOObjective:
         print(f"  noise_sigma={noise_sigma:.5g}  temperature={temperature:.5g}  "
               f"n_episodes={args.n_episodes}")
 
-        episodes = []
-        t0 = time.perf_counter()
-        for ep in range(args.n_episodes):
-            ep_seed = int(self.episode_seeds[ep].generate_state(1)[0])
-            rng     = np.random.default_rng(self.episode_seeds[ep])
+        # One job per episode. These are plain picklable data (dataclasses,
+        # dicts, a SeedSequence), which is what lets an episode cross into a
+        # worker process untouched — see drivers/episode_pool.py.
+        jobs = [self._episode_job(ep, overrides, noise_sigma, temperature)
+                for ep in range(args.n_episodes)]
 
-            planner_kwargs = dict(
-                n_samples         = args.n_samples,
-                step_horizon      = args.horizon,
-                time_horizon      = args.time_horizon,
-                step_time         = args.step_time,
-                noise_sigma       = noise_sigma,
-                step_substeps     = args.substeps,
-                warm_start        = args.warm_start,
-                use_full_graph    = args.use_full_graph,
-                delta_range       = self.delta,
-                nconmax           = args.nconmax,
-                njmax             = args.njmax,
-                seed              = ep_seed,
-                debug             = args.debug,
-                resample_interval = args.resample_interval,
-                temperature       = temperature,
-            )
-            # No CLI default: omitting it lets each planner's own default stand
-            # (1 for mppi/predictive_sampler, 3 for cem).
-            if args.n_iterations is not None:
-                planner_kwargs["n_iterations"] = args.n_iterations
-
-            result = run_eval_episode(
-                task_name             = args.task,
-                geometry              = args.geometry,
-                contact_cfg           = self.contact_cfg,
-                planner               = self.planner,
-                planner_cfg           = make_planner_config(self.planner, **planner_kwargs),
-                rng                   = rng,
-                video_path            = None,
-                cost_weight_overrides = overrides or None,
-                settle_seconds        = args.settle,
-                eval_substeps         = args.eval_substeps,
-                eval_sim              = self.eval_sim,
-                ep_idx                = ep,
-                fin_ep_on_success     = True,
-                debug                 = args.debug,
-                verbose               = args.debug,
-                record                = self.record_cfg,
-            )
-            episodes.append(result)
-
+        def report(ep: int, result) -> None:
+            """Print an episode as it lands. Out of order when workers race."""
             tick = "✓" if result.success else "✗"
             sstr = f"step {result.steps_to_success}" if result.steps_to_success is not None else "—"
             gerr = normalized_goal_error(result.final_goal_errs, self.thresholds,
@@ -344,6 +369,12 @@ class BOObjective:
             gstr = f"{gerr:.4f}" if gerr is not None else "n/a"
             print(f"    ep {ep:02d}  {tick}  success_step={sstr:<9}  goal_err={gstr}  "
                   f"step={result.mean_step_ms:.3f}±{result.std_step_ms:.3f} ms")
+
+        t0 = time.perf_counter()
+        if self.pool is None:
+            episodes = run_episodes_serially(jobs, on_result=report)
+        else:
+            episodes = self.pool.map_episodes(jobs, on_result=report)
 
         # -- scalarize ------------------------------------------------------
         n_success    = sum(r.success for r in episodes)
@@ -501,20 +532,41 @@ def build_parser() -> argparse.ArgumentParser:
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
-    p.add_argument("--n_episodes",  type=int, default=2,
+    p.add_argument("--n_episodes",  type=int, default=4,
                    help="Episodes per objective evaluation. More episodes average out "
                         "episode-specific luck at a proportional cost in wall time.")
-    p.add_argument("--seed",        type=int, default=42,
+    p.add_argument("--seed",        type=int, default=64,
                    help="THE constant episode seed: the same episodes are replayed for "
                         "every trial, so trials differ only in their hyperparameters.")
+    p.add_argument("--n_workers",   type=int, default=None,
+                   help="Episodes to run concurrently, each in its own process with "
+                        "its own planner and eval sim (default: --n_episodes capped "
+                        "by the cores this process may use). The objective is "
+                        "unchanged either way — episodes are pure functions of their "
+                        "seed. 1 runs them in-process. Worth ~n_workers-fold on a "
+                        "CPU-bound eval sim (pinocchio) and ~nothing on a GPU-bound "
+                        "one (mujoco), where planning is already 89%% of wall time.")
 
     # --- search space -------------------------------------------------------
-    p.add_argument("--opt_weights", nargs="*", default=None,
+    p.add_argument("--opt_weights", nargs="*", default=[
+                                                    "w_quat:1.0:50.0",
+                                                    "w_pos_x:1.0:50.0",
+                                                    "w_pos_y:1.0:50.0",
+                                                    "w_pos_z:1.0:50.0",
+                                                    "w_contact:0.1:20.0",
+                                                    "w_joint:0.1:20.0",
+                                                    "w_fallen:100.0:300.0",
+                                                    "w_quat_term:100.0:300.0",
+                                                    "w_pos_term:100.0:300.0"],
                    help="Cost weights to optimize, as 'name' (bounds bracketed "
                         f"multiplicatively at x{BOUND_SCALE:g} around the task's default) "
-                        "or 'name:lo:hi'. Default: the subset of "
-                        f"{' '.join(DEFAULT_OPT_WEIGHTS)} the task declares.")
-    p.add_argument("--opt_noise_sigma", action=argparse.BooleanOptionalAction, default=True,
+                        "or 'name:lo:hi'. The default above is grasp_reorient's "
+                        "weight set with explicit brackets, so ANOTHER TASK NEEDS "
+                        "THIS FLAG PASSED EXPLICITLY — an unknown name is a hard "
+                        "error. Pass a bare 'name' to fall back to the "
+                        f"multiplicative bracket, or the {' '.join(DEFAULT_OPT_WEIGHTS)} "
+                        "subset for the old behavior.")
+    p.add_argument("--opt_noise_sigma", action=argparse.BooleanOptionalAction, default=False,
                    help="Search over noise_sigma; --no-opt_noise_sigma pins it to "
                         "--noise_sigma instead.")
     p.add_argument("--opt_temperature", action=argparse.BooleanOptionalAction, default=True,
@@ -522,9 +574,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "--temperature instead.")
     p.add_argument("--noise_sigma_range", type=float, nargs=2, default=(1e-3, 1.0),
                    metavar=("LO", "HI"))
-    p.add_argument("--temperature_range", type=float, nargs=2, default=(0.01, 50.0),
+    p.add_argument("--temperature_range", type=float, nargs=2, default=(0.001, 100.0),
                    metavar=("LO", "HI"))
-    p.add_argument("--noise_sigma", type=float, default=0.2,
+    p.add_argument("--noise_sigma", type=float, default=0.1,
                    help="Fixed noise_sigma when --no-opt_noise_sigma.")
     p.add_argument("--temperature", type=float, default=30.0,
                    help="Fixed temperature when --no-opt_temperature.")
@@ -540,7 +592,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "catastrophic episode.")
 
     # --- optimizer ----------------------------------------------------------
-    p.add_argument("--n_calls",    type=int, default=500,
+    p.add_argument("--n_calls",    type=int, default=100,
                    help="Total trial budget, INCLUDING any trials restored by --resume.")
     p.add_argument("--n_initial_points", type=int, default=10,
                    help="Random trials before the GP takes over (reduced by the number "
@@ -642,8 +694,28 @@ def main():
     print(f"  outdir: {outdir}")
     print(f"{'='*70}")
 
+    # --- episode fan-out ---------------------------------------------------
+    # Each worker stands up its own planner (own MJWarp Data at nworld=n_samples
+    # and its own captured CUDA graphs) plus its own eval sim, so VRAM scales
+    # with the worker count. Report the headroom rather than discovering it as
+    # an OOM forty trials in.
+    n_workers = (args.n_workers if args.n_workers is not None
+                 else default_worker_count(args.n_episodes))
+    n_workers = max(1, min(n_workers, args.n_episodes))
+    free_gb   = _device_free_gb()
+    if free_gb is not None:
+        per = free_gb / n_workers
+        print(f"  workers: {n_workers} (of {args.n_episodes} episodes)  "
+              f"free VRAM {free_gb:.1f} GiB -> {per:.1f} GiB/worker")
+        if per < MIN_VRAM_PER_WORKER_GB:
+            print(f"  ! under {MIN_VRAM_PER_WORKER_GB:g} GiB per worker; lower "
+                  f"--n_workers or --n_samples if a worker dies with an OOM")
+    else:
+        print(f"  workers: {n_workers} (of {args.n_episodes} episodes)")
+
+    pool        = EpisodePool(n_workers) if n_workers > 1 else None
     objective   = BOObjective(args, names, default_weights, thresholds,
-                              schedule, outdir, start_trial=n_prior)
+                              schedule, outdir, start_trial=n_prior, pool=pool)
     state_path  = outdir / "bo_state.json"
 
     def on_step(res):
@@ -653,19 +725,25 @@ def main():
               f"at trial {best_i:03d}")
 
     t0 = time.perf_counter()
-    res = gp_minimize(
-        func             = objective,
-        dimensions       = dims,
-        n_calls          = n_calls_eff,
-        n_initial_points = n_init_eff,
-        acq_func         = args.acq_func,
-        random_state     = args.bo_seed,
-        noise            = gp_noise,
-        x0               = x0,
-        y0               = y0,
-        callback         = [on_step],
-        verbose          = False,
-    )
+    try:
+        res = gp_minimize(
+            func             = objective,
+            dimensions       = dims,
+            n_calls          = n_calls_eff,
+            n_initial_points = n_init_eff,
+            acq_func         = args.acq_func,
+            random_state     = args.bo_seed,
+            noise            = gp_noise,
+            x0               = x0,
+            y0               = y0,
+            callback         = [on_step],
+            verbose          = False,
+        )
+    finally:
+        # Workers hold CUDA contexts; a Ctrl-C or a raised trial must not leave
+        # them parked on the GPU.
+        if pool is not None:
+            pool.shutdown()
     elapsed = time.perf_counter() - t0
 
     # --- summary -----------------------------------------------------------

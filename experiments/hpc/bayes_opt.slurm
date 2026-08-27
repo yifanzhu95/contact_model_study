@@ -8,10 +8,15 @@
                              # silently rerunning cell 0.
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=16G
-#SBATCH --time=24:00:00      # one cell = N_CALLS trials x N_EPISODES episodes,
-                             # each episode ~2 min for grasp_reorient. Budget
+#SBATCH --cpus-per-task=4    # >= N_WORKERS below: each worker drives one eval
+                             # sim on its own core.
+#SBATCH --mem=32G            # 4 SPAWNED interpreters, each re-importing warp +
+                             # mujoco + pinocchio/coal and carrying a CUDA
+                             # context's host allocations. 16G OOM-kills a worker.
+#SBATCH --time=24:00:00      # one cell = N_CALLS trials x N_EPISODES episodes.
+                             # Episodes within a trial now run CONCURRENTLY (see
+                             # N_WORKERS), so a trial costs about as long as its
+                             # SLOWEST episode rather than their sum. Budget
                              # accordingly; --resume (below) picks a killed cell up.
 
 set -euo pipefail
@@ -51,6 +56,15 @@ OBJ_ACC="high"
 PLANNER="mppi"                  # mppi | cem | predictive_sampler
 N_EPISODES=4                    # episodes per trial; more averages out episode
                                 # luck at a proportional cost in wall time
+N_WORKERS=""                    # episodes to run CONCURRENTLY, one process each
+                                # (own planner + own eval sim). Empty = N_EPISODES
+                                # capped by --cpus-per-task. 1 = serial, the old
+                                # behavior. Keep <= --cpus-per-task, and raise
+                                # --mem with it. The objective is unchanged either
+                                # way; this is a pure throughput knob.
+                                # Worth ~N_WORKERS-fold with EVAL_SIM below
+                                # resolving to pinocchio (CPU-bound, GPU idle 98%
+                                # of the time) and ~1.5x on mujoco (GPU-bound).
 SEED=64                         # THE constant episode seed (same episodes every trial)
 N_SAMPLES=256
 TIME_HORIZON=0.352              # planning horizon in SECONDS (quantized to control steps)
@@ -158,6 +172,7 @@ if [[ -n "$SUBSTEPS"      ]]; then EXTRA_ARGS+=(--substeps      "$SUBSTEPS");   
 if [[ -n "$EVAL_SUBSTEPS" ]]; then EXTRA_ARGS+=(--eval_substeps "$EVAL_SUBSTEPS"); fi
 if [[ -n "$N_ITERATIONS"  ]]; then EXTRA_ARGS+=(--n_iterations  "$N_ITERATIONS");  fi
 if [[ -n "$DELTA"         ]]; then EXTRA_ARGS+=(--delta         "$DELTA");         fi
+if [[ -n "$N_WORKERS"     ]]; then EXTRA_ARGS+=(--n_workers     "$N_WORKERS");     fi
 
 if (( WARM_START ));      then EXTRA_ARGS+=(--warm_start);       else EXTRA_ARGS+=(--no-warm_start);       fi
 if (( USE_FULL_GRAPH ));  then EXTRA_ARGS+=(--use_full_graph);   else EXTRA_ARGS+=(--no-use_full_graph);   fi
