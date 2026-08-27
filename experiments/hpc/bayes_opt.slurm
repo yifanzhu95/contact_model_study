@@ -2,7 +2,7 @@
 #SBATCH --job-name=cont_modeling_bayes_opt
 #SBATCH --output=logs/cont_modeling_bayes_opt_%A_%a.out
 #SBATCH --error=logs/cont_modeling_bayes_opt_%A_%a.err
-#SBATCH --array=0-15       # (#OBJECTS * #MODELS) - 1; the %N suffix caps how many
+#SBATCH --array=0-7       # (#OBJECTS * #MODELS) - 1; the %N suffix caps how many
                              # cells hold a GPU at once. Each task prints the grid
                              # total, and an id past the end errors out instead of
                              # silently rerunning cell 0.
@@ -33,7 +33,8 @@ TASK="grasp_reorient"
 # Objects: the keys of _OBJ_PARAMS in contact_study/tasks/grasp_reorient.py.
 # Each needs scenes/leap/env_leap_rollout_{obj}_{HAND_ACC}_{OBJ_ACC}.xml (and
 # env_leap_eval_{obj}.xml when EVAL_SIM is not "none").
-OBJECTS=("cube" "duck" "spam" "tomato")
+# OBJECTS=("cube" "duck" "spam" "tomato")
+OBJECTS=("cube" "duck")
 
 # Contact models: the keys of MODEL_FACTORIES in run_eval_episode.py.
 MODELS=("M1" "M2" "M3" "M4")
@@ -54,7 +55,7 @@ SEED=64                         # THE constant episode seed (same episodes every
 N_SAMPLES=256
 TIME_HORIZON=0.352              # planning horizon in SECONDS (quantized to control steps)
 STEP_TIME=0.064                 # control-step duration in SECONDS (quantized to rollout steps)
-EVAL_SIM="mujoco"                 # none | mujoco | drake | pinocchio
+EVAL_SIM="none"                 # none | mujoco | drake | pinocchio
 SETTLE=1.0
 NCONMAX=50
 NJMAX=300
@@ -97,8 +98,8 @@ ERR_CLIP=10.0                   # goal error clipped here, then divided by it
 # ---------------------------------------------------------------------------
 # 5. Optimizer (gp_minimize).
 # ---------------------------------------------------------------------------
-N_CALLS=500                      # total trial budget per cell, INCLUDING resumed trials
-N_INITIAL_POINTS=10             # random trials before the GP takes over
+N_CALLS=75                      # total trial budget per cell, INCLUDING resumed trials
+N_INITIAL_POINTS=5             # random trials before the GP takes over
 ACQ_FUNC="gp_hedge"             # EI | LCB | PI | gp_hedge
 GP_NOISE="gaussian"             # "gaussian" or a float
 BO_SEED=0                       # random_state for gp_minimize itself (not SEED)
