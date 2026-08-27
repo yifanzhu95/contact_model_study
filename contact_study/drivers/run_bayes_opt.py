@@ -42,7 +42,14 @@ Runs headless on a CUDA machine and never records video (a GL context per
 episode is exactly what sweeps avoid):
 
     python -m contact_study.drivers.run_bayes_opt --task grasp_reorient \
-        --model M2 --n_calls 60 --n_episodes 1
+        --models M2 --n_calls 60 --n_episodes 1
+
+Pass several models to search for one weight set that holds across all of them.
+Each trial then runs n_models x --n_episodes episodes at identical seeds, up to
+--n_workers of them at once:
+
+    python -m contact_study.drivers.run_bayes_opt --task grasp_reorient \
+        --models M1 M2 M3 M4 --model_agg worst --n_episodes 4 --n_workers 8
 """
 
 from __future__ import annotations
@@ -262,7 +269,10 @@ class BOObjective:
         self.trial           = start_trial
 
         self.planner     = resolve_planner_name(args.planner)
-        self.contact_cfg = MODEL_FACTORIES[args.model]()
+        # One config per model. Every trial runs its weight vector against all of
+        # them; the per-model scores are folded by --model_agg.
+        self.contact_cfgs = {k: MODEL_FACTORIES[k]() for k in args.models}
+        self.model_tag    = "+".join(args.models)
         self.eval_sim    = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
         self.delta       = (-args.delta, args.delta) if args.delta is not None else (None, None)
 
@@ -280,14 +290,18 @@ class BOObjective:
 
     # -- one episode's job description --------------------------------------
 
-    def _episode_job(self, ep: int, overrides: dict, noise_sigma: float,
-                     temperature: float) -> dict:
+    def _episode_job(self, model_key: str, ep: int, overrides: dict,
+                     noise_sigma: float, temperature: float) -> dict:
         """run_eval_episode's kwargs for episode `ep`, as picklable plain data.
 
         `rng` is replaced by `seed_seq`: the worker rebuilds the Generator with
         np.random.default_rng(seed_seq). SeedSequence is stateless, so deriving
         the planner seed here and the Generator there yields exactly what the
         old in-process `np.random.default_rng(self.episode_seeds[ep])` did.
+
+        The seed is keyed by EPISODE ONLY, never by model: every model must be
+        handed the identical initial states, goals and planner noise, or a
+        per-model score difference could not be attributed to the contact model.
         """
         args = self.args
         planner_kwargs = dict(
@@ -315,7 +329,7 @@ class BOObjective:
         return dict(
             task_name             = args.task,
             geometry              = args.geometry,
-            contact_cfg           = self.contact_cfg,
+            contact_cfg           = self.contact_cfgs[model_key],
             planner               = self.planner,
             planner_cfg           = make_planner_config(self.planner, **planner_kwargs),
             seed_seq              = self.episode_seeds[ep],
@@ -331,6 +345,35 @@ class BOObjective:
             record                = self.record_cfg,
         )
 
+    # -- scoring ------------------------------------------------------------
+
+    def _score(self, results: list) -> dict:
+        """One model's episodes -> its success rate, goal error and objective.
+
+        Same scalarization the single-model driver always used; it is applied
+        per model now so the models can be compared and folded.
+        """
+        args = self.args
+        n_success    = sum(r.success for r in results)
+        success_rate = n_success / len(results) if results else 0.0
+
+        errs = [normalized_goal_error(r.final_goal_errs, self.thresholds, args.err_clip)
+                for r in results]
+        errs = [e for e in errs if e is not None]
+        mean_err = float(np.mean(errs)) if errs else None
+
+        objective = -(args.w_success * success_rate)
+        if mean_err is not None:
+            objective += args.w_cost * mean_err
+
+        return {
+            "n_episodes":         len(results),
+            "n_success":          n_success,
+            "success_rate":       success_rate,
+            "mean_norm_goal_err": mean_err,
+            "objective":          objective,
+        }
+
     # -- one trial ----------------------------------------------------------
 
     def __call__(self, x: list[float]) -> float:
@@ -345,7 +388,7 @@ class BOObjective:
         overrides = {k: params[k] for k in self.default_weights if k in params}
         knobs     = {k: v for k, v in params.items() if k not in self.default_weights}
         axes      = {**overrides, **knobs}
-        label     = combo_label(args.model, axes)
+        label     = combo_label(self.model_tag, axes)
 
         noise_sigma = params.get("noise_sigma", args.noise_sigma)
         temperature = params.get("temperature", args.temperature)
@@ -354,20 +397,26 @@ class BOObjective:
         print(f"  noise_sigma={noise_sigma:.5g}  temperature={temperature:.5g}  "
               f"n_episodes={args.n_episodes}")
 
-        # One job per episode. These are plain picklable data (dataclasses,
-        # dicts, a SeedSequence), which is what lets an episode cross into a
-        # worker process untouched — see drivers/episode_pool.py.
-        jobs = [self._episode_job(ep, overrides, noise_sigma, temperature)
-                for ep in range(args.n_episodes)]
+        # The trial's full workload: this weight vector against every model, on
+        # every episode seed. Flat, because they are all independent and a flat
+        # list keeps every worker busy — a per-model batch would idle workers
+        # whenever one model finished its episodes early.
+        specs = [(m, ep) for m in args.models for ep in range(args.n_episodes)]
+        # Plain picklable data (dataclasses, dicts, a SeedSequence), which is
+        # what lets an episode cross into a worker — see drivers/episode_pool.py.
+        jobs  = [self._episode_job(m, ep, overrides, noise_sigma, temperature)
+                 for m, ep in specs]
 
-        def report(ep: int, result) -> None:
+        def report(i: int, result) -> None:
             """Print an episode as it lands. Out of order when workers race."""
+            model, ep = specs[i]
             tick = "✓" if result.success else "✗"
             sstr = f"step {result.steps_to_success}" if result.steps_to_success is not None else "—"
             gerr = normalized_goal_error(result.final_goal_errs, self.thresholds,
                                          args.err_clip)
             gstr = f"{gerr:.4f}" if gerr is not None else "n/a"
-            print(f"    ep {ep:02d}  {tick}  success_step={sstr:<9}  goal_err={gstr}  "
+            print(f"    {model:<3} ep {ep:02d}  {tick}  success_step={sstr:<9}  "
+                  f"goal_err={gstr}  "
                   f"step={result.mean_step_ms:.3f}±{result.std_step_ms:.3f} ms")
 
         t0 = time.perf_counter()
@@ -377,41 +426,68 @@ class BOObjective:
             episodes = self.pool.map_episodes(jobs, on_result=report)
 
         # -- scalarize ------------------------------------------------------
-        n_success    = sum(r.success for r in episodes)
-        success_rate = n_success / len(episodes)
+        # Score each model on its own episodes first, then fold. Scoring the
+        # pooled episodes instead would let a model that fails every episode be
+        # hidden by one that succeeds on all of them — the opposite of looking
+        # for weights that hold across models.
+        by_model  = {m: [] for m in args.models}
+        for (m, _), r in zip(specs, episodes):
+            by_model[m].append(r)
 
-        errs = [normalized_goal_error(r.final_goal_errs, self.thresholds, args.err_clip)
-                for r in episodes]
-        errs = [e for e in errs if e is not None]
-        mean_err = float(np.mean(errs)) if errs else None
+        per_model = {m: self._score(rs) for m, rs in by_model.items()}
 
-        objective = -(args.w_success * success_rate)
-        if mean_err is not None:
-            objective += args.w_cost * mean_err
-        elif not self._warned_no_goal_err:
+        if any(v["mean_norm_goal_err"] is None for v in per_model.values()) \
+                and not self._warned_no_goal_err:
             self._warned_no_goal_err = True
             print(f"  ! task {args.task!r} has no goal_errors(); optimizing pure "
                   f"success rate (the --w_cost term is inactive)")
 
+        scores = [v["objective"] for v in per_model.values()]
+        # 'worst' is a max because the objective is MINIMIZED: the largest
+        # per-model objective is the model doing worst under these weights.
+        objective = float(np.mean(scores)) if args.model_agg == "mean" else float(max(scores))
+
+        # Reported (and written to the cell record) pooled over every episode of
+        # every model, so the CSV columns keep their old meaning. The objective
+        # above is what the GP actually sees.
+        n_success    = sum(r.success for r in episodes)
+        success_rate = n_success / len(episodes)
+        errs         = [v["mean_norm_goal_err"] for v in per_model.values()
+                        if v["mean_norm_goal_err"] is not None]
+        mean_err     = float(np.mean(errs)) if errs else None
+
         succ_steps = [r.steps_to_success for r in episodes if r.steps_to_success is not None]
         step_ms    = [r.mean_step_ms for r in episodes]
 
-        print(f"  → objective={objective:+.5f}  success={success_rate*100:.1f}% "
-              f"({n_success}/{len(episodes)})  goal_err="
+        print(f"  → objective={objective:+.5f} ({args.model_agg} of {len(args.models)} "
+              f"model{'s' if len(args.models) > 1 else ''})  "
+              f"success={success_rate*100:.1f}% ({n_success}/{len(episodes)})  goal_err="
               f"{mean_err if mean_err is None else round(mean_err, 4)}  "
               f"[{time.perf_counter() - t0:.1f}s]")
+        if len(args.models) > 1:
+            for m, v in per_model.items():
+                gstr = ("n/a" if v["mean_norm_goal_err"] is None
+                        else f"{v['mean_norm_goal_err']:.4f}")
+                print(f"        {m:<3} objective={v['objective']:+.5f}  "
+                      f"success={v['success_rate']*100:5.1f}%  goal_err={gstr}")
 
         record = {
             # -- run_param_cell.py schema, so param_search_to_csv_dir.py works --
             "combo_index":           trial,
             "task":                  args.task,
-            "model":                 args.model,
+            # A joined tag ("M1+M2") so analysis/bayes_opt_to_csv_dir.py keeps a
+            # scalar model column; `models` and `per_model` carry the detail.
+            "model":                 self.model_tag,
+            "models":                list(args.models),
+            "model_agg":             args.model_agg,
+            "per_model":             per_model,
             "label":                 label,
             "overrides":             overrides,
             "axes":                  axes,
             "swept_knobs":           list(knobs),
             "full_weights":          {**self.default_weights, **overrides},
             "n_episodes":            len(episodes),
+            "n_episodes_per_model":  args.n_episodes,
             "n_success":             n_success,
             "success_rate":          success_rate,
             "mean_steps_to_success": float(np.mean(succ_steps)) if succ_steps else None,
@@ -463,13 +539,18 @@ class BOObjective:
 # ---------------------------------------------------------------------------
 
 def save_state(path: Path, dim_names, dims, x_iters, func_vals, args) -> None:
+    # `model` is no longer an argparse dest (it is an alias of `models`), but
+    # analysis/bayes_opt_to_csv_dir.py reads args["model"] for its CSV column.
+    # Emit the joined tag under the old key so the tooling keeps working.
+    saved_args = dict(vars(args))
+    saved_args.setdefault("model", "+".join(saved_args.get("models", [])))
     with open(path, "w") as f:
         json.dump({
             "dim_names":  list(dim_names),
             "dim_bounds": [[float(d.low), float(d.high), d.prior] for d in dims],
             "x_iters":    [[float(v) for v in x] for x in x_iters],
             "func_vals":  [float(v) for v in func_vals],
-            "args":       vars(args),
+            "args":       saved_args,
         }, f, indent=2)
 
 
@@ -501,9 +582,24 @@ def build_parser() -> argparse.ArgumentParser:
     # --- episode settings: names mirror run_eval_episode.py exactly, so a
     #     winning trial replays by copy-pasting the flags into that driver ---
     p.add_argument("--task",        type=str, default="grasp_reorient")
-    p.add_argument("--geometry",    type=str, default=DEFAULT_SCENE_VARIANT,
+    p.add_argument("--geometry",    type=str, default="cube_high_high",#DEFAULT_SCENE_VARIANT,
                    help="Scene variant: '<object>' or '<object>_<hand_acc>_<obj_acc>'.")
-    p.add_argument("--model",       type=str, default="M2", choices=list(MODEL_FACTORIES))
+    p.add_argument("--models", "--model", dest="models", nargs="+", default=["M1","M2","M3","M4"],
+                   choices=list(MODEL_FACTORIES), metavar="MODEL",
+                   help="Contact model(s) to optimize over. With more than one, EVERY "
+                        "trial evaluates the SAME weight vector on EVERY model, at the "
+                        "same episode seeds, and --model_agg folds the per-model scores "
+                        "into the one number the GP sees. The result is a weight set "
+                        "that has to work across the models rather than one tuned to a "
+                        "single contact model. Cost is proportional: a trial is "
+                        "n_models x --n_episodes episodes, which --n_workers runs "
+                        "concurrently.")
+    p.add_argument("--model_agg",   type=str, default="worst", choices=["mean", "worst"],
+                   help="How per-model objectives become the trial's score. 'mean' "
+                        "optimizes average performance and lets a good model carry a "
+                        "bad one; 'worst' (minimax) optimizes the worst model, which "
+                        "is the stricter reading of 'weights that work for all of "
+                        "them'. Ignored with a single --models entry.")
     p.add_argument("--planner",     type=str, default="mppi", choices=PLANNER_NAMES)
     p.add_argument("--n_samples",   type=int, default=256)
     p.add_argument("--horizon",     type=int, default=None,
@@ -540,8 +636,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "every trial, so trials differ only in their hyperparameters.")
     p.add_argument("--n_workers",   type=int, default=None,
                    help="Episodes to run concurrently, each in its own process with "
-                        "its own planner and eval sim (default: --n_episodes capped "
-                        "by the cores this process may use). The objective is "
+                        "its own planner and eval sim. THIS IS THE VRAM KNOB: every "
+                        "worker holds its own CUDA context, MJWarp Data at "
+                        "--n_samples worlds and captured graphs, so lower it if a "
+                        "worker dies with an OOM. Default: n_models x --n_episodes, "
+                        "capped by the cores this process may use. The objective is "
                         "unchanged either way — episodes are pure functions of their "
                         "seed. 1 runs them in-process. Worth ~n_workers-fold on a "
                         "CPU-bound eval sim (pinocchio) and ~nothing on a GPU-bound "
@@ -586,7 +685,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Weight on the success rate (maximized).")
     p.add_argument("--w_cost",     type=float, default=0.1,
                    help="Weight on the normalized final goal error (minimized).")
-    p.add_argument("--err_clip",   type=float, default=10.0,
+    p.add_argument("--err_clip",   type=float, default=25.0,
                    help="Goal error is clipped here then divided by it, mapping the "
                         "cost term into [0, 1] so it cannot be dominated by one "
                         "catastrophic episode.")
@@ -640,8 +739,9 @@ def main():
     )
     horizon, substeps, rollout_dt = schedule
 
+    model_tag = "+".join(args.models)
     outdir = Path(args.outdir) if args.outdir else (
-        RESULTS_DIR / f"bayes_opt_{args.task}_{args.model}_{planner}_"
+        RESULTS_DIR / f"bayes_opt_{args.task}_{model_tag}_{planner}_"
                       f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
     outdir.mkdir(parents=True, exist_ok=True)
@@ -672,8 +772,11 @@ def main():
         gp_noise = float(gp_noise)
 
     print(f"{'='*70}")
-    print(f"  Bayesian optimization — task={args.task}  model={args.model}  "
-          f"planner={planner}")
+    print(f"  Bayesian optimization — task={args.task}  "
+          f"model{'s' if len(args.models) > 1 else ''}={model_tag}  planner={planner}")
+    if len(args.models) > 1:
+        print(f"  one weight vector scored on all {len(args.models)} models at the "
+              f"same episode seeds; folded by --model_agg {args.model_agg}")
     print(f"  eval_sim={args.eval_sim}  geometry={args.geometry}  "
           f"n_episodes={args.n_episodes}  seed={args.seed} (constant)")
     print(f"  rollout_dt={rollout_dt*1e3:.3f}ms  step_time={args.step_time:g}s -> "
@@ -699,19 +802,23 @@ def main():
     # and its own captured CUDA graphs) plus its own eval sim, so VRAM scales
     # with the worker count. Report the headroom rather than discovering it as
     # an OOM forty trials in.
+    # A trial is n_models x n_episodes independent episodes; that product is the
+    # most concurrency that could ever be used.
+    jobs_per_trial = len(args.models) * args.n_episodes
     n_workers = (args.n_workers if args.n_workers is not None
-                 else default_worker_count(args.n_episodes))
-    n_workers = max(1, min(n_workers, args.n_episodes))
+                 else default_worker_count(jobs_per_trial))
+    n_workers = max(1, min(n_workers, jobs_per_trial))
     free_gb   = _device_free_gb()
     if free_gb is not None:
         per = free_gb / n_workers
-        print(f"  workers: {n_workers} (of {args.n_episodes} episodes)  "
+        print(f"  workers: {n_workers} (of {jobs_per_trial} episodes/trial = "
+              f"{len(args.models)} models x {args.n_episodes})  "
               f"free VRAM {free_gb:.1f} GiB -> {per:.1f} GiB/worker")
         if per < MIN_VRAM_PER_WORKER_GB:
             print(f"  ! under {MIN_VRAM_PER_WORKER_GB:g} GiB per worker; lower "
                   f"--n_workers or --n_samples if a worker dies with an OOM")
     else:
-        print(f"  workers: {n_workers} (of {args.n_episodes} episodes)")
+        print(f"  workers: {n_workers} (of {jobs_per_trial} episodes/trial)")
 
     pool        = EpisodePool(n_workers) if n_workers > 1 else None
     objective   = BOObjective(args, names, default_weights, thresholds,
@@ -770,7 +877,9 @@ def main():
 
     summary = {
         "task":         args.task,
-        "model":        args.model,
+        "model":        model_tag,
+        "models":       list(args.models),
+        "model_agg":    args.model_agg,
         "planner":      planner,
         "geometry":     args.geometry,
         "eval_sim":     args.eval_sim,
@@ -810,7 +919,8 @@ def main():
         print(f"        {name:<16} {best_params[name]:.6g}")
     print(f"\n  Replay it with:")
     print(f"    python -m contact_study.drivers.run_eval_episode \\")
-    print(f"        --task {args.task} --geometry {args.geometry} --model {args.model} \\")
+    print(f"        --task {args.task} --geometry {args.geometry} "
+          f"--models {' '.join(args.models)} \\")
     print(f"        --planner {planner} --n_samples {args.n_samples} \\")
     print(f"        --time_horizon {args.time_horizon:g} --step_time {args.step_time:g} \\")
     print(f"        --noise_sigma {best_params.get('noise_sigma', args.noise_sigma):g} \\")

@@ -44,8 +44,13 @@ from contact_study.drivers.run_bayes_opt import (          # noqa: E402
 from contact_study.planners.mppi import MPPIConfig         # noqa: E402
 
 
+def cart_pole_argv(*models: str) -> list[str]:
+    """The shared cart_pole setup, over whichever contact models are named."""
+    return ["--models", *(models or ("M2",))] + CART_POLE_ARGV
+
+
 CART_POLE_ARGV = [
-    "--task", "cart_pole", "--model", "M2", "--eval_sim", "mujoco",
+    "--task", "cart_pole", "--eval_sim", "mujoco",
     "--no-record_trajectory", "--no-record_planner_dist",
     # The driver's default --opt_weights names grasp_reorient's weights.
     "--opt_weights", "angle:10:200", "pos:10:200",
@@ -54,8 +59,8 @@ CART_POLE_ARGV = [
 ]
 
 
-def _objective(outdir: Path, pool, argv=CART_POLE_ARGV) -> BOObjective:
-    args = build_parser().parse_args(argv)
+def _objective(outdir: Path, pool, argv=None) -> BOObjective:
+    args = build_parser().parse_args(argv if argv is not None else cart_pole_argv())
     task = load_rollout_task(args.task, args.geometry)
     schedule = resolve_mppi_schedule(
         MPPIConfig(time_horizon=args.time_horizon, step_time=args.step_time),
@@ -81,7 +86,8 @@ def test_job_is_picklable_and_carries_the_right_seed() -> None:
 
     with tempfile.TemporaryDirectory() as td:
         obj = _objective(Path(td), pool=None)
-        job = obj._episode_job(1, {"angle": 50.0}, noise_sigma=0.1, temperature=3.0)
+        job = obj._episode_job("M2", 1, {"angle": 50.0},
+                               noise_sigma=0.1, temperature=3.0)
 
         # Everything crossing the process boundary must pickle.
         job2 = pickle.loads(pickle.dumps(job))
@@ -168,9 +174,63 @@ def test_parallel_matches_serial() -> None:
     print(f"ok  serial and 2-worker agree bit-exactly (objective={j_serial:+.6f})")
 
 
+def test_every_model_gets_the_identical_episodes() -> None:
+    """A multi-model trial must seed by episode, never by (model, episode).
+
+    If the models saw different initial states, a per-model score gap could not
+    be attributed to the contact model — which is the whole point of scoring one
+    weight vector across several. No GPU needed: this is job bookkeeping.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        obj = _objective(Path(td), pool=None, argv=cart_pole_argv("M1", "M2", "M3"))
+        assert list(obj.contact_cfgs) == ["M1", "M2", "M3"]
+
+        for ep in (0, 1):
+            jobs = [obj._episode_job(m, ep, {}, 0.1, 3.0) for m in obj.contact_cfgs]
+            seeds = {j["planner_cfg"].seed for j in jobs}
+            draws = {np.random.default_rng(j["seed_seq"]).random(4).tobytes()
+                     for j in jobs}
+            assert len(seeds) == 1, f"ep {ep}: models got different planner seeds"
+            assert len(draws) == 1, f"ep {ep}: models got different episode RNGs"
+
+            # ...but the contact model itself must differ.
+            labels = [j["contact_cfg"].label for j in jobs]
+            assert len(set(labels)) == 3, f"models share a contact cfg: {labels}"
+
+        # Episodes still differ from each other.
+        a = obj._episode_job("M1", 0, {}, 0.1, 3.0)["planner_cfg"].seed
+        b = obj._episode_job("M1", 1, {}, 0.1, 3.0)["planner_cfg"].seed
+        assert a != b, "distinct episodes must not share a seed"
+    print("ok  every model sees identical episodes; only the contact model varies")
+
+
+def test_model_aggregation() -> None:
+    """mean averages the per-model objectives; worst takes the max (minimized)."""
+    from contact_study.evaluation.metrics import EpisodeResult
+
+    def ep(success: bool):
+        return EpisodeResult(task_name="t", model_label="m", success=success,
+                             steps_to_success=None, final_cost=0.0,
+                             n_samples_used=1, elapsed_seconds=0.0)
+
+    with tempfile.TemporaryDirectory() as td:
+        obj = _objective(Path(td), pool=None)
+        good = obj._score([ep(True), ep(True)])      # objective -1.0
+        bad  = obj._score([ep(False), ep(False)])    # objective  0.0
+        assert good["objective"] == -1.0 and good["success_rate"] == 1.0
+        assert bad["objective"] == 0.0 and bad["success_rate"] == 0.0
+
+        scores = [good["objective"], bad["objective"]]
+        assert float(np.mean(scores)) == -0.5, "mean should average the models"
+        assert float(max(scores)) == 0.0, "worst should surface the failing model"
+    print("ok  --model_agg mean averages, worst surfaces the failing model")
+
+
 if __name__ == "__main__":
     test_job_is_picklable_and_carries_the_right_seed()
     test_worker_count_respects_the_cgroup()
     test_a_crashed_episode_scores_as_a_failure()
+    test_every_model_gets_the_identical_episodes()
+    test_model_aggregation()
     test_parallel_matches_serial()
     print("\nall checks passed")

@@ -44,6 +44,24 @@ OBJECTS=("cube" "duck")
 # Contact models: the keys of MODEL_FACTORIES in run_eval_episode.py.
 MODELS=("M1" "M2" "M3" "M4")
 
+# 0 -> MODELS is a GRID AXIS: one independent BO per (object, model), each
+#      tuning weights for that contact model alone. This is the original layout.
+# 1 -> MODELS is ONE SEARCH: a single BO per object scores every trial's weight
+#      vector on ALL of MODELS at the same episode seeds and folds them with
+#      MODEL_AGG, yielding one weight set that has to hold across the models.
+#      The grid collapses to the objects, so set --array=0-$((#OBJECTS - 1)),
+#      and each trial costs #MODELS x N_EPISODES episodes instead of N_EPISODES.
+#      BUDGET FOR IT: with the defaults that is 16 episodes/trial against 4
+#      --cpus-per-task, i.e. 4 sequential batches per trial where the split grid
+#      needed 1. Either raise --cpus-per-task (and --mem, and N_WORKERS with
+#      them) toward #MODELS x N_EPISODES, or roughly quadruple --time. The
+#      trade is real: 2 joint cells replace 8 split ones, so the TOTAL GPU-hours
+#      are similar — it is the per-cell wall time that grows.
+JOINT_MODELS=1
+MODEL_AGG="mean"                # mean | worst. 'worst' (minimax) tunes the
+                                # weakest model; 'mean' lets a strong model
+                                # carry a weak one. JOINT_MODELS=1 only.
+
 # Collision fidelity halves of the scene variant. The full --geometry string is
 # assembled below as "<obj>_<HAND_ACC>_<OBJ_ACC>".
 HAND_ACC="high"
@@ -56,12 +74,15 @@ OBJ_ACC="high"
 PLANNER="mppi"                  # mppi | cem | predictive_sampler
 N_EPISODES=4                    # episodes per trial; more averages out episode
                                 # luck at a proportional cost in wall time
-N_WORKERS=""                    # episodes to run CONCURRENTLY, one process each
-                                # (own planner + own eval sim). Empty = N_EPISODES
+N_WORKERS="4"                    # episodes to run CONCURRENTLY, one process each
+                                # (own planner + own eval sim). Empty = one per
+                                # episode in the trial (#CELL_MODELS x N_EPISODES),
                                 # capped by --cpus-per-task. 1 = serial, the old
-                                # behavior. Keep <= --cpus-per-task, and raise
-                                # --mem with it. The objective is unchanged either
-                                # way; this is a pure throughput knob.
+                                # behavior. THIS IS THE VRAM KNOB: each worker
+                                # holds its own CUDA context + MJWarp Data at
+                                # N_SAMPLES worlds. Keep <= --cpus-per-task and
+                                # raise --mem with it. The objective is unchanged
+                                # either way; this is a pure throughput knob.
                                 # Worth ~N_WORKERS-fold with EVAL_SIM below
                                 # resolving to pinocchio (CPU-bound, GPU idle 98%
                                 # of the time) and ~1.5x on mujoco (GPU-bound).
@@ -132,7 +153,11 @@ OUTDIR_ROOT="${OUTDIR_ROOT:-$ROOT_DIR/results/bayes_opt_${SLURM_ARRAY_JOB_ID:-ma
 # 6. Map this task's ID to one value per axis (mixed-radix decode, lowest-
 #    varying axis first -- consecutive task ids walk the objects).
 # ===========================================================================
-AXES=(OBJECTS MODELS)
+if (( JOINT_MODELS )); then
+    AXES=(OBJECTS)              # every model runs inside each cell
+else
+    AXES=(OBJECTS MODELS)       # one cell per (object, model)
+fi
 
 TOTAL=1
 for AX in "${AXES[@]}"; do
@@ -155,8 +180,15 @@ for AX in "${AXES[@]}"; do
 done
 
 OBJ="${SEL[OBJECTS]}"
-MODEL="${SEL[MODELS]}"
 GEOMETRY="${OBJ}_${HAND_ACC}_${OBJ_ACC}"
+
+if (( JOINT_MODELS )); then
+    CELL_MODELS=("${MODELS[@]}")
+    MODEL=$(IFS=+; echo "${MODELS[*]}")     # "M1+M2+M3+M4", for the dir name
+else
+    CELL_MODELS=("${SEL[MODELS]}")
+    MODEL="${SEL[MODELS]}"
+fi
 
 # One directory per cell, named by what it contains rather than by task id, so
 # the winners are readable without cross-referencing the array indices.
@@ -173,6 +205,7 @@ if [[ -n "$EVAL_SUBSTEPS" ]]; then EXTRA_ARGS+=(--eval_substeps "$EVAL_SUBSTEPS"
 if [[ -n "$N_ITERATIONS"  ]]; then EXTRA_ARGS+=(--n_iterations  "$N_ITERATIONS");  fi
 if [[ -n "$DELTA"         ]]; then EXTRA_ARGS+=(--delta         "$DELTA");         fi
 if [[ -n "$N_WORKERS"     ]]; then EXTRA_ARGS+=(--n_workers     "$N_WORKERS");     fi
+if (( JOINT_MODELS ));      then EXTRA_ARGS+=(--model_agg     "$MODEL_AGG");      fi
 
 if (( WARM_START ));      then EXTRA_ARGS+=(--warm_start);       else EXTRA_ARGS+=(--no-warm_start);       fi
 if (( USE_FULL_GRAPH ));  then EXTRA_ARGS+=(--use_full_graph);   else EXTRA_ARGS+=(--no-use_full_graph);   fi
@@ -204,7 +237,8 @@ eval "$(conda shell.bash hook)"
 conda activate contact_modeling
 
 echo "cell ${SLURM_ARRAY_TASK_ID:-0}/$(( TOTAL - 1 )): task=$TASK obj=$OBJ model=$MODEL"\
-     "planner=$PLANNER geometry=$GEOMETRY n_calls=$N_CALLS n_episodes=$N_EPISODES -> $OUTDIR"
+     "planner=$PLANNER geometry=$GEOMETRY n_calls=$N_CALLS n_episodes=$N_EPISODES"\
+     "episodes/trial=$(( ${#CELL_MODELS[@]} * N_EPISODES )) -> $OUTDIR"
 
 # Per-control-step trajectory + planner-distribution recording (see
 # contact_study/evaluation/trajectory.py). OFF for sweeps: at grasp_reorient's
@@ -216,7 +250,7 @@ python -u -m contact_study.drivers.run_bayes_opt \
     "${RECORD_ARGS[@]}" \
     --task              "$TASK" \
     --geometry          "$GEOMETRY" \
-    --model             "$MODEL" \
+    --models            "${CELL_MODELS[@]}" \
     --planner           "$PLANNER" \
     --n_episodes        "$N_EPISODES" \
     --seed              "$SEED" \
