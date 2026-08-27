@@ -203,17 +203,17 @@ _OBJ_PARAMS: dict[str, dict] = {
         "target_pos":    np.array([0.02, 0.035, 0.09]),#np.array([0.02, 0.03, 0.08])#np.array([0.012, 0.04, 0.085])
         "fallen_z":      0.08,
         "cost_weights": {
-            "w_quat": 11.188,#100.0,
-            "w_pos_x": 1.875,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-            "w_pos_y": 3.750,#80.0,    #Y is across the fingers
-            "w_pos_z": 20.0,#15.0,
+            "w_quat": 5.310811341977094,#11.188,#100.0,
+            "w_pos_x": 14.446613713633406,#1.875,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+            "w_pos_y": 12.661653862665824,#3.750,#80.0,    #Y is across the fingers
+            "w_pos_z": 4.632749861005826,#20.0,#15.0,
             "w_velo": 0.0,
-            "w_contact": 50.0,#15.0,#12.50,
-            "w_joint": 5.18,#4.0,
+            "w_contact": 0.941675310597537,#50.0,#15.0,#12.50,
+            "w_joint": 0.4681301292986175,#5.18,#4.0,
             "w_joint_velo": 0.0,
-            "w_fallen": 200.0,
-            "w_quat_term": 200.0,#500.0,
-            "w_pos_term": 200.0,
+            "w_fallen": 451.36759643017524,#200.0,
+            "w_quat_term": 163.4321908506317,#200.0,#500.0,
+            "w_pos_term": 295.3041280805193,#200.0,
             "w_fallen_term": 0.0,
         },
     },

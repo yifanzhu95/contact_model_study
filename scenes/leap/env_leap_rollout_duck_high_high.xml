@@ -43,7 +43,7 @@
     env_leap_duck.xml marker never turned). pos matches the cube scene's proven
     upper-left inset placement for the eval camera. Visual only. -->
     <body name="goal" pos="0.005 -0.07 0.1353" quat="1 0 0 0" mocap="true">
-      <geom name="goal_visual" type="mesh" mesh="rubber_duck_goal"
+      <geom name="goal_visual" type="mesh" mesh="rubber_duck_goal" pos="0.0129 0 0.00516"
         contype="0" conaffinity="0" density="0" rgba="0.97 0.6 0 0.6"/>
     </body>
 
@@ -55,29 +55,35 @@
         held fixed; mass and diaginertia are both scaled by 0.4998 so the duck
         stays a uniform-density solid, just at 229 kg/m^3 instead of 458. Edit
         `mass` and rescale `diaginertia` by the same factor to reweight. -->
-        <inertial pos="-0.0088857 -0.0000003 -0.0152658"
+        <inertial pos="0.0211143 -0.0000003 -0.0032658"
                   quat="0.6896432 0.1561964 0.1561924 0.6896367"
                   mass="0.05" diaginertia="4.695783e-05 3.827842e-05 2.721782e-05"/>
-        <geom name="obj_hull_0" type="mesh" mesh="duck_hull_0" group="3"
+        <!-- Every duck geom is offset by pos="0.03 0 0.012" so the body frame
+        origin (the point the freejoint/goal quats rotate about) sits at mesh
+        point (-0.03, 0, -0.012): inside the main body, just under the back
+        surface behind the neck, instead of at the raw mesh origin up in the
+        neck. The goal marker carries the same offset scaled by 0.43. The
+        <inertial> pos below is the same COM expressed in this shifted frame. -->
+        <geom name="obj_hull_0" type="mesh" mesh="duck_hull_0" group="3" pos="0.03 0 0.012"
               friction="0.5" density="458" rgba="0.99 0.28 0.17 1"/>
-        <geom name="obj_hull_1" type="mesh" mesh="duck_hull_1" group="3"
+        <geom name="obj_hull_1" type="mesh" mesh="duck_hull_1" group="3" pos="0.03 0 0.012"
               friction="0.5" density="458" rgba="0.97 0.12 0.11 1"/>
-        <geom name="obj_hull_2" type="mesh" mesh="duck_hull_2" group="3"
+        <geom name="obj_hull_2" type="mesh" mesh="duck_hull_2" group="3" pos="0.03 0 0.012"
               friction="0.5" density="458" rgba="0.22 0.60 0.44 1"/>
-        <geom name="obj_hull_3" type="mesh" mesh="duck_hull_3" group="3"
+        <geom name="obj_hull_3" type="mesh" mesh="duck_hull_3" group="3" pos="0.03 0 0.012"
               friction="0.5" density="458" rgba="0.02 0.90 0.79 1"/>
-        <geom name="obj_hull_4" type="mesh" mesh="duck_hull_4" group="3"
+        <geom name="obj_hull_4" type="mesh" mesh="duck_hull_4" group="3" pos="0.03 0 0.012"
               friction="0.5" density="458" rgba="0.68 0.94 0.39 1"/>
-        <geom name="obj_hull_5" type="mesh" mesh="duck_hull_5" group="3"
+        <geom name="obj_hull_5" type="mesh" mesh="duck_hull_5" group="3" pos="0.03 0 0.012"
               friction="0.5" density="458" rgba="0.26 0.99 0.90 1"/>
-        <geom name="obj_hull_6" type="mesh" mesh="duck_hull_6" group="3"
+        <geom name="obj_hull_6" type="mesh" mesh="duck_hull_6" group="3" pos="0.03 0 0.012"
               friction="0.5" density="458" rgba="0.57 0.80 0.96 1"/>
-        <geom name="obj_hull_7" type="mesh" mesh="duck_hull_7" group="3"
+        <geom name="obj_hull_7" type="mesh" mesh="duck_hull_7" group="3" pos="0.03 0 0.012"
               friction="0.5" density="458" rgba="0.20 0.58 0.46 1"/>
         <!-- Visual-only duck (contype/conaffinity 0, density 0), so the render
         shows the real shape while the hulls above carry all contact. Mass and
         inertia come from the <inertial> block, not from the hull densities. -->
-        <geom name="obj_visual" type="mesh" mesh="rubber_duck_mesh"
+        <geom name="obj_visual" type="mesh" mesh="rubber_duck_mesh" pos="0.03 0 0.012"
               contype="0" conaffinity="0" density="0" rgba="0.97 0.6 0 1.0"/>
     </body>
 

@@ -440,7 +440,7 @@ def main():
     p.add_argument("--n_iterations", type=int,  default=None,
                    help="Optimizer iterations per plan() call (default: the "
                         "planner's own — 1 for mppi/predictive_sampler, 3 for cem).")
-    p.add_argument("--noise_sigma", type=float, default=0.123)#0.2,)#0.1 # for M3)
+    p.add_argument("--noise_sigma", type=float, default=0.23248210744804804)#0.2,)#0.1 # for M3)
     p.add_argument("--delta",       type=float, default=None,#0.1,
                    help="Per-step delta clip magnitude (action units); "
                         "pass 'none' to disable the delta clamp entirely.")
@@ -456,7 +456,7 @@ def main():
                    help="Plan steps between noise resamples (1=every step; "
                         "omit=sample once and reuse, the default).")
     # --- MPPI-only ---------------------------------------------------------
-    p.add_argument("--temperature", type=float, default=9.812)#30.0)#20.0 <- cube
+    p.add_argument("--temperature", type=float, default=7.1877620343399595)#30.0)#20.0 <- cube
     # --- CEM-only ----------------------------------------------------------
     p.add_argument("--n_elites",    type=int,   default=None,
                    help="CEM elite-set size; overrides --elite_frac when set.")
