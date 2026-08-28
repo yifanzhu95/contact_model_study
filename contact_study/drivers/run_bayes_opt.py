@@ -14,6 +14,10 @@ Search space (all log-uniform by default):
   * noise_sigma, the sampling planner's action-noise standard deviation;
   * temperature, MPPI's softmax sharpness (dropped for planners that have no
     such field — make_planner_config filters by the config's declared fields).
+    With several --models, --per_model_temperature splits this one dimension
+    into temperature_<model>, one per contact model over the same range, so a
+    model whose costs live on a different scale can get its own sharpness while
+    the cost weights stay shared.
 
 Objective (minimized):
 
@@ -50,6 +54,9 @@ Each trial then runs n_models x --n_episodes episodes at identical seeds, up to
 
     python -m contact_study.drivers.run_bayes_opt --task grasp_reorient \
         --models M1 M2 M3 M4 --model_agg worst --n_episodes 4 --n_workers 8
+
+Add --per_model_temperature to let each of those models tune its own MPPI
+temperature (same bounds, one dimension each) while sharing the weight vector.
 """
 
 from __future__ import annotations
@@ -200,10 +207,31 @@ def build_space(specs: list[tuple[str, float, float]],
         names.append("noise_sigma")
     if args.opt_temperature:
         lo, hi = args.temperature_range
-        dims.append(_real(lo, hi, "temperature"))
-        names.append("temperature")
+        if args.per_model_temperature and len(args.models) > 1:
+            # One dimension per contact model, all sharing --temperature_range.
+            # The weights still have to hold across the models; only MPPI's
+            # softmax sharpness is allowed to differ, since a temperature that
+            # suits one model's cost scale can be badly wrong for another's.
+            # Costs the GP len(models) - 1 extra dimensions, not extra episodes.
+            for m in args.models:
+                dims.append(_real(lo, hi, f"temperature_{m}"))
+                names.append(f"temperature_{m}")
+        else:
+            dims.append(_real(lo, hi, "temperature"))
+            names.append("temperature")
 
     return dims, names
+
+
+def model_temperatures(params: dict[str, float], models: list[str],
+                       fixed: float) -> dict[str, float]:
+    """Each model's temperature: its own dimension, the shared one, or --temperature.
+
+    Single lookup order for every caller, so the per-model and shared layouts
+    stay interchangeable everywhere downstream.
+    """
+    shared = params.get("temperature", fixed)
+    return {m: params.get(f"temperature_{m}", shared) for m in models}
 
 
 # ---------------------------------------------------------------------------
@@ -391,10 +419,15 @@ class BOObjective:
         label     = combo_label(self.model_tag, axes)
 
         noise_sigma = params.get("noise_sigma", args.noise_sigma)
-        temperature = params.get("temperature", args.temperature)
+        temps       = model_temperatures(params, list(args.models), args.temperature)
+        # A single value unless --per_model_temperature split the dimension.
+        shared_temp = (next(iter(temps.values()))
+                       if len(set(temps.values())) == 1 else None)
 
         print(f"\n[trial {trial:03d}]  {label}")
-        print(f"  noise_sigma={noise_sigma:.5g}  temperature={temperature:.5g}  "
+        tstr = (f"{shared_temp:.5g}" if shared_temp is not None else
+                "  ".join(f"{m}={t:.5g}" for m, t in temps.items()))
+        print(f"  noise_sigma={noise_sigma:.5g}  temperature={tstr}  "
               f"n_episodes={args.n_episodes}")
 
         # The trial's full workload: this weight vector against every model, on
@@ -404,7 +437,7 @@ class BOObjective:
         specs = [(m, ep) for m in args.models for ep in range(args.n_episodes)]
         # Plain picklable data (dataclasses, dicts, a SeedSequence), which is
         # what lets an episode cross into a worker — see drivers/episode_pool.py.
-        jobs  = [self._episode_job(m, ep, overrides, noise_sigma, temperature)
+        jobs  = [self._episode_job(m, ep, overrides, noise_sigma, temps[m])
                  for m, ep in specs]
 
         def report(i: int, result) -> None:
@@ -497,7 +530,10 @@ class BOObjective:
             "mppi": {
                 "n_samples":         args.n_samples,
                 "time_horizon":      args.time_horizon,
-                "temperature":       temperature,
+                # Scalar as it always was, and None when the models were given
+                # their own; `temperature_per_model` always carries the detail.
+                "temperature":       shared_temp,
+                "temperature_per_model": dict(temps),
                 "noise_sigma":       noise_sigma,
                 "step_time":         args.step_time,
                 "step_horizon":      self.horizon,
@@ -695,6 +731,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--opt_temperature", action=argparse.BooleanOptionalAction, default=True,
                    help="Search over MPPI's temperature; --no-opt_temperature pins it to "
                         "--temperature instead.")
+    p.add_argument("--per_model_temperature", action=argparse.BooleanOptionalAction,
+                   default=False,
+                   help="With several --models, give each its OWN temperature "
+                        "dimension (temperature_<model>) instead of one shared "
+                        "value; all of them use --temperature_range. The cost "
+                        "weights stay shared, so the search still looks for one "
+                        "weight set that holds across the models — only MPPI's "
+                        "softmax sharpness is allowed to differ. Adds "
+                        "n_models - 1 dimensions and no extra episodes. Requires "
+                        "--opt_temperature; ignored for a single model.")
     p.add_argument("--noise_sigma_range", type=float, nargs=2, default=(1e-3, 1.0),
                    metavar=("LO", "HI"))
     p.add_argument("--temperature_range", type=float, nargs=2, default=(0.001, 100.0),
@@ -751,6 +797,12 @@ def main():
     peek_task       = load_rollout_task(args.task, args.geometry)
     default_weights = dict(peek_task.config.cost_weights)
     thresholds      = dict(peek_task.config.success_thresholds)
+
+    if args.per_model_temperature and not args.opt_temperature:
+        raise ValueError(
+            "--per_model_temperature has nothing to split: temperature is "
+            "pinned to --temperature by --no-opt_temperature"
+        )
 
     specs      = parse_weight_specs(args.opt_weights, default_weights)
     dims, names = build_space(specs, args)
@@ -899,6 +951,10 @@ def main():
                 best_record = rec
                 break
 
+    best_temps = model_temperatures(best_params, list(args.models), args.temperature)
+    best_shared_temp = (next(iter(best_temps.values()))
+                        if len(set(best_temps.values())) == 1 else None)
+
     summary = {
         "task":         args.task,
         "model":        model_tag,
@@ -921,7 +977,9 @@ def main():
         "best_params":     best_params,
         "best_weights":    best_weights,
         "best_noise_sigma": best_params.get("noise_sigma", args.noise_sigma),
-        "best_temperature": best_params.get("temperature", args.temperature),
+        # Scalar as it always was, and None once the models carry their own.
+        "best_temperature": best_shared_temp,
+        "best_temperature_per_model": dict(best_temps),
         "best_success_rate":   best_record["success_rate"] if best_record else None,
         "best_norm_goal_err":  best_record["mean_norm_goal_err"] if best_record else None,
         "trace":        [float(v) for v in res.func_vals],
@@ -941,16 +999,21 @@ def main():
               f"norm_goal_err={best_record['mean_norm_goal_err']}")
     for name in names:
         print(f"        {name:<16} {best_params[name]:.6g}")
+    # run_eval_episode takes ONE --temperature, so a per-model winner replays as
+    # one command per model rather than a single multi-model one.
+    replays = ([(list(args.models), best_shared_temp)] if best_shared_temp is not None
+               else [([m], t) for m, t in best_temps.items()])
     print(f"\n  Replay it with:")
-    print(f"    python -m contact_study.drivers.run_eval_episode \\")
-    print(f"        --task {args.task} --geometry {args.geometry} "
-          f"--models {' '.join(args.models)} \\")
-    print(f"        --planner {planner} --n_samples {args.n_samples} \\")
-    print(f"        --time_horizon {args.time_horizon:g} --step_time {args.step_time:g} \\")
-    print(f"        --noise_sigma {best_params.get('noise_sigma', args.noise_sigma):g} \\")
-    print(f"        --temperature {best_params.get('temperature', args.temperature):g} \\")
-    print(f"        --seed {args.seed} --settle {args.settle:g} \\")
-    print(f"        --weights {weight_flags}")
+    for models, temp in replays:
+        print(f"    python -m contact_study.drivers.run_eval_episode \\")
+        print(f"        --task {args.task} --geometry {args.geometry} "
+              f"--models {' '.join(models)} \\")
+        print(f"        --planner {planner} --n_samples {args.n_samples} \\")
+        print(f"        --time_horizon {args.time_horizon:g} --step_time {args.step_time:g} \\")
+        print(f"        --noise_sigma {best_params.get('noise_sigma', args.noise_sigma):g} \\")
+        print(f"        --temperature {temp:g} \\")
+        print(f"        --seed {args.seed} --settle {args.settle:g} \\")
+        print(f"        --weights {weight_flags}")
     print(f"\n  Saved -> {outdir}")
     print(f"{'='*70}")
 

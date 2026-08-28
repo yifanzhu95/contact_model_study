@@ -117,8 +117,20 @@ OPT_WEIGHTS=("w_quat:1.0:50.0" "w_pos_x:1.0:50.0" "w_pos_y:1.0:50.0" "w_pos_z:1.
 
 OPT_NOISE_SIGMA=0               # 1 -> search noise_sigma, 0 -> pin it to NOISE_SIGMA
 OPT_TEMPERATURE=1               # 1 -> search temperature, 0 -> pin it to TEMPERATURE
+
+# JOINT_MODELS=1 only. 0 -> the models share ONE searched temperature.
+# 1 -> each model gets its OWN temperature dimension over the same
+# TEMPERATURE_RANGE, so a model whose cost scale differs can run a different
+# MPPI softmax sharpness while the COST WEIGHTS stay shared -- the search is
+# still looking for one weight set that holds across the models. Costs
+# (#MODELS - 1) extra search dimensions and NO extra episodes, so wall time per
+# trial is unchanged; give the GP more N_CALLS for the bigger space. Needs
+# OPT_TEMPERATURE=1. NOTE: this renames the search dimensions (temperature ->
+# temperature_M1, ...), so flipping it makes any existing bo_state.json
+# unresumable -- start such a cell in a fresh directory.
+PER_MODEL_TEMPERATURE=1
 NOISE_SIGMA_RANGE=(0.001 1.0)   # LO HI, log-uniform
-TEMPERATURE_RANGE=(0.01 20.0)   # LO HI, log-uniform
+TEMPERATURE_RANGE=(0.001 1000.0)   # LO HI, log-uniform
 NOISE_SIGMA=0.1                 # fixed value when OPT_NOISE_SIGMA=0
 TEMPERATURE=30.0                # fixed value when OPT_TEMPERATURE=0
 
@@ -245,6 +257,14 @@ if (( WARM_START ));      then EXTRA_ARGS+=(--warm_start);       else EXTRA_ARGS
 if (( USE_FULL_GRAPH ));  then EXTRA_ARGS+=(--use_full_graph);   else EXTRA_ARGS+=(--no-use_full_graph);   fi
 if (( OPT_NOISE_SIGMA )); then EXTRA_ARGS+=(--opt_noise_sigma);  else EXTRA_ARGS+=(--no-opt_noise_sigma);  fi
 if (( OPT_TEMPERATURE )); then EXTRA_ARGS+=(--opt_temperature);  else EXTRA_ARGS+=(--no-opt_temperature);  fi
+
+# Only meaningful for a joint-models cell with a searched temperature; the
+# driver rejects --per_model_temperature alongside --no-opt_temperature.
+if (( PER_MODEL_TEMPERATURE && JOINT_MODELS && OPT_TEMPERATURE )); then
+    EXTRA_ARGS+=(--per_model_temperature)
+else
+    EXTRA_ARGS+=(--no-per_model_temperature)
+fi
 if (( DEBUG ));           then EXTRA_ARGS+=(--debug);            fi
 
 # Keeping the flag inside the array means an empty OPT_WEIGHTS expands to
