@@ -691,7 +691,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "catastrophic episode.")
 
     # --- optimizer ----------------------------------------------------------
-    p.add_argument("--n_calls",    type=int, default=100,
+    p.add_argument("--n_calls",    type=int, default=500,
                    help="Total trial budget, INCLUDING any trials restored by --resume.")
     p.add_argument("--n_initial_points", type=int, default=10,
                    help="Random trials before the GP takes over (reduced by the number "
