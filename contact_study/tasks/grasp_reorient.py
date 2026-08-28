@@ -342,6 +342,62 @@ _OBJ_PARAMS: dict[str, dict] = {
             "w_fallen_term": 0.0,
         },
     },
+    # TODO(tune): UNSETTLED. Every number below is the CUBE's, written out here
+    # so the ball can be retuned in place without touching the cube. The cube is
+    # the right donor on mass (env_leap_eval_ball.xml gives the ball the cube's
+    # 0.14 kg) and its weights are the most tuned in this table, but nothing was
+    # measured against the ball.
+    # The ball is a 0.0485 m sphere -- 9.7 cm across, vs the cube's 7 cm -- so it
+    # is 1.35 cm wider on EVERY side. The hand block below closes on a 3.5 cm
+    # half-extent and will therefore drive the fingers ~1.35 cm into the ball at
+    # reset; open the grasp before trusting a run. Resting in the palm the ball
+    # centres 1.35 cm higher than the cube, which is where the +0.0135 shifts in
+    # the free-body tail, target_pos and fallen_z come from -- geometry, not a
+    # settled measurement.
+    # Settle the hand in the viewer against env_leap_rollout_ball_low_high.xml
+    # (the scene rests it at pos "0 0.05 0.0835" quat "1 0 0 0") and paste the
+    # whole qpos here, plus the held ctrl.
+    # A sphere is orientation-symmetric in contact, so the reorientation goal is
+    # legible only through the ball's cube-mapped texture -- the contact solve
+    # cannot distinguish faces the way it can on the cube.
+    "ball": {
+        # 16 hand joints, then the ball's in-palm pos(3) + quat(4). The trailing
+        # +0.02 is the cube's start-above-the-palm lift, kept as-is; the
+        # +0.0135 ahead of it is the radius difference (0.0485 - 0.035).
+        "init_qpos": np.array([
+            5.74644705e-01, -4.67896711e-01,  1.06154201e+00,  9.49754192e-01,
+            3.39887676e-01, -7.54712363e-04,  6.93497978e-01,  1.01159852e+00,
+            5.37995866e-01,  2.37394401e-01,  8.84233738e-01,  9.67669103e-01,
+            6.78255227e-01,  1.35324943e+00 + 1.0,  1.21785619e+00,  6.34822484e-01,
+            2.58181221e-02 - 0.02,  4.08290136e-02,  8.46989861e-02 + 0.05,  
+            6.19413091e-01,  3.59257657e-01, -1.30919532e-01,  6.85654019e-01
+        ]),
+        "init_ctrl": np.array([
+            0.60184 , -0.46068 ,  1.09597 ,  0.97044 ,  0.41104 ,  0.      ,
+            0.709056,  1.01884 ,  0.60184 ,  0.2094  ,  0.964465,  1.0186  ,
+            0.738135,  1.251165,  1.2778  ,  0.6564
+        ]),
+        # Cube's (0.02, 0.035, 0.09) and 0.08, both raised by the 0.0135 radius
+        # difference so the ball is not judged "fallen" at its resting height.
+        "target_pos":    np.array([0.025, 0.04, 0.085]),
+        "fallen_z":      0.08,
+        # Cube's tuned weights, unchanged. Same mass, but the ball is round and
+        # bigger, so w_contact and w_quat are the likeliest to want retuning.
+        "cost_weights": {
+            "w_quat": 23.624,
+            "w_pos_x": 8.831,   # X is down the fingers
+            "w_pos_y": 41.98,   # Y is across the fingers
+            "w_pos_z": 3.609,
+            "w_velo": 0.0,
+            "w_contact": 15.34,
+            "w_joint": 10.72,
+            "w_joint_velo": 0.0,
+            "w_fallen": 169.75,
+            "w_quat_term": 173.23,
+            "w_pos_term": 210.51,
+            "w_fallen_term": 0.0,
+        },
+    },
 }
 
 
