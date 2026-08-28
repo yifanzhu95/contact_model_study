@@ -233,5 +233,7 @@ results/*
 figures/
 logs/*
 
+_tmp_pin_sim_split_*.xml
+
 # uv
 uv.lock
