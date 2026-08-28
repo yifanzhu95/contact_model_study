@@ -2,7 +2,7 @@
 #SBATCH --job-name=cont_modeling_bayes_opt
 #SBATCH --output=logs/cont_modeling_bayes_opt_%A_%a.out
 #SBATCH --error=logs/cont_modeling_bayes_opt_%A_%a.err
-#SBATCH --array=0-1       # (#OBJECTS * #MODELS) - 1; the %N suffix caps how many
+#SBATCH --array=0-2       # (#OBJECTS * #MODELS) - 1; the %N suffix caps how many
                              # cells hold a GPU at once. Each task prints the grid
                              # total, and an id past the end errors out instead of
                              # silently rerunning cell 0.
@@ -39,7 +39,7 @@ TASK="grasp_reorient"
 # Each needs scenes/leap/env_leap_rollout_{obj}_{HAND_ACC}_{OBJ_ACC}.xml (and
 # env_leap_eval_{obj}.xml when EVAL_SIM is not "none").
 # OBJECTS=("cube" "duck" "spam" "tomato")
-OBJECTS=("cube" "duck")
+OBJECTS=("cube" "duck" "ball")
 
 # Contact models: the keys of MODEL_FACTORIES in run_eval_episode.py.
 MODELS=("M1" "M2" "M3" "M4")
