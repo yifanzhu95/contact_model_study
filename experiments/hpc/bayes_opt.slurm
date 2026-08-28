@@ -13,7 +13,7 @@
 #SBATCH --mem=32G            # 4 SPAWNED interpreters, each re-importing warp +
                              # mujoco + pinocchio/coal and carrying a CUDA
                              # context's host allocations. 16G OOM-kills a worker.
-#SBATCH --time=24:00:00      # one cell = N_CALLS trials x N_EPISODES episodes.
+#SBATCH --time=48:00:00      # one cell = N_CALLS trials x N_EPISODES episodes.
                              # Episodes within a trial now run CONCURRENTLY (see
                              # N_WORKERS), so a trial costs about as long as its
                              # SLOWEST episode rather than their sum. Budget
@@ -146,7 +146,7 @@ ERR_CLIP=10.0                   # goal error clipped here, then divided by it
 # 5. Optimizer (gp_minimize).
 # ---------------------------------------------------------------------------
 N_CALLS=500                      # total trial budget per cell, INCLUDING resumed trials
-N_INITIAL_POINTS=5             # random trials before the GP takes over
+N_INITIAL_POINTS=25             # random trials before the GP takes over
 ACQ_FUNC="gp_hedge"             # EI | LCB | PI | gp_hedge
 GP_NOISE="gaussian"             # "gaussian" or a float
 BO_SEED=0                       # random_state for gp_minimize itself (not SEED)
