@@ -2,13 +2,13 @@
 #SBATCH --job-name=cont_modeling_bayes_opt
 #SBATCH --output=logs/cont_modeling_bayes_opt_%A_%a.out
 #SBATCH --error=logs/cont_modeling_bayes_opt_%A_%a.err
-#SBATCH --array=0-7       # (#OBJECTS * #MODELS) - 1; the %N suffix caps how many
+#SBATCH --array=0-1       # (#OBJECTS * #MODELS) - 1; the %N suffix caps how many
                              # cells hold a GPU at once. Each task prints the grid
                              # total, and an id past the end errors out instead of
                              # silently rerunning cell 0.
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
-#SBATCH --cpus-per-task=4    # >= N_WORKERS below: each worker drives one eval
+#SBATCH --cpus-per-task=20    # >= N_WORKERS below: each worker drives one eval
                              # sim on its own core.
 #SBATCH --mem=32G            # 4 SPAWNED interpreters, each re-importing warp +
                              # mujoco + pinocchio/coal and carrying a CUDA
@@ -58,7 +58,7 @@ MODELS=("M1" "M2" "M3" "M4")
 #      trade is real: 2 joint cells replace 8 split ones, so the TOTAL GPU-hours
 #      are similar — it is the per-cell wall time that grows.
 JOINT_MODELS=1
-MODEL_AGG="mean"                # mean | worst. 'worst' (minimax) tunes the
+MODEL_AGG="worst"                # mean | worst. 'worst' (minimax) tunes the
                                 # weakest model; 'mean' lets a strong model
                                 # carry a weak one. JOINT_MODELS=1 only.
 
@@ -74,7 +74,7 @@ OBJ_ACC="high"
 PLANNER="mppi"                  # mppi | cem | predictive_sampler
 N_EPISODES=4                    # episodes per trial; more averages out episode
                                 # luck at a proportional cost in wall time
-N_WORKERS="4"                    # episodes to run CONCURRENTLY, one process each
+N_WORKERS="16"                    # episodes to run CONCURRENTLY, one process each
                                 # (own planner + own eval sim). Empty = one per
                                 # episode in the trial (#CELL_MODELS x N_EPISODES),
                                 # capped by --cpus-per-task. 1 = serial, the old
@@ -113,13 +113,13 @@ DELTA=""                        # per-step delta clip magnitude; empty disables 
 #    object) or 'name:lo:hi' for an explicit bracket. Leave the array empty to
 #    accept the driver's DEFAULT_OPT_WEIGHTS.
 # ---------------------------------------------------------------------------
-OPT_WEIGHTS=("w_quat:0.1:50.0" "w_pos_x:0.1:50.0" "w_pos_y:0.1:50.0" "w_pos_z:0.1:50.0" "w_contact:0.1:50.0" "w_joint:0.1:50.0" "w_fallen:100.0:500.0" "w_quat_term:100.0:500.0" "w_pos_term:100.0:500.0")
+OPT_WEIGHTS=("w_quat:1.0:50.0" "w_pos_x:1.0:50.0" "w_pos_y:1.0:50.0" "w_pos_z:1.0:50.0" "w_contact:0.1:20.0" "w_joint:0.1:20.0" "w_fallen:100.0:300.0" "w_quat_term:100.0:300.0" "w_pos_term:100.0:300.0")
 
-OPT_NOISE_SIGMA=1               # 1 -> search noise_sigma, 0 -> pin it to NOISE_SIGMA
+OPT_NOISE_SIGMA=0               # 1 -> search noise_sigma, 0 -> pin it to NOISE_SIGMA
 OPT_TEMPERATURE=1               # 1 -> search temperature, 0 -> pin it to TEMPERATURE
 NOISE_SIGMA_RANGE=(0.001 1.0)   # LO HI, log-uniform
-TEMPERATURE_RANGE=(0.001 100.0)   # LO HI, log-uniform
-NOISE_SIGMA=0.2                 # fixed value when OPT_NOISE_SIGMA=0
+TEMPERATURE_RANGE=(0.01 20.0)   # LO HI, log-uniform
+NOISE_SIGMA=0.1                 # fixed value when OPT_NOISE_SIGMA=0
 TEMPERATURE=30.0                # fixed value when OPT_TEMPERATURE=0
 
 # ---------------------------------------------------------------------------
@@ -133,7 +133,7 @@ ERR_CLIP=10.0                   # goal error clipped here, then divided by it
 # ---------------------------------------------------------------------------
 # 5. Optimizer (gp_minimize).
 # ---------------------------------------------------------------------------
-N_CALLS=75                      # total trial budget per cell, INCLUDING resumed trials
+N_CALLS=500                      # total trial budget per cell, INCLUDING resumed trials
 N_INITIAL_POINTS=5             # random trials before the GP takes over
 ACQ_FUNC="gp_hedge"             # EI | LCB | PI | gp_hedge
 GP_NOISE="gaussian"             # "gaussian" or a float
