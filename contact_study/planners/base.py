@@ -102,6 +102,13 @@ class PlannerConfig:
     # plan() steps between noise resamples: 1=every step, None=sample once at
     # construction and reuse for the whole episode.
     resample_interval: int | None = 1
+    # Redraw the noise block before every optimizer iteration after the first,
+    # instead of reusing one block for the whole plan() call. Off (default) means
+    # the iterations inside one plan() re-center the SAME perturbations on the
+    # updated mean, which is what makes the update a fixed-point map (see MPPI's
+    # convergence_tol). Requires resample_interval (the GPU resampler); a no-op
+    # unless a plan() actually runs more than one iteration.
+    resample_per_iteration: bool = False
     # Stop rollouts once plan_budget_ms of wall-clock has elapsed (capped at
     # horizon) instead of always unrolling the full horizon.
     time_constrained: bool  = False
@@ -124,6 +131,14 @@ class PlannerConfig:
         if self.resample_interval is not None and self.resample_interval < 1:
             raise ValueError(
                 f"resample_interval must be >= 1 or None, got {self.resample_interval}"
+            )
+        if self.resample_per_iteration and self.resample_interval is None:
+            raise ValueError(
+                "resample_per_iteration=True requires resample_interval to be set: "
+                "resample_interval=None draws the block once on the host via "
+                "_draw_static_noise, and redrawing it on the GPU would silently replace "
+                "planner-shaped noise (MPPI's spline, CEM's unit-variance draw) with "
+                "plain Gaussian noise."
             )
         if self.n_iterations < 1:
             raise ValueError(f"n_iterations must be >= 1, got {self.n_iterations}")
@@ -409,6 +424,9 @@ class SamplingPlanner(abc.ABC):
         # Rollout steps actually taken by the last plan() — < horizon only when
         # the time-constrained path truncated.
         self.last_n_steps    = self.horizon
+        # Optimizer iterations the last plan() actually ran — below the cap only
+        # when the convergence test fired (MPPI's convergence_tol).
+        self.last_n_iterations = 0
 
         # The full (H, nu) mean action sequence produced by the last plan(),
         # captured BEFORE the warm-start shift. Synchronous drivers only need
@@ -613,6 +631,18 @@ class SamplingPlanner(abc.ABC):
             self._resample_count += 1
         self._plan_count += 1
 
+    def _resample_between_iterations(self):
+        """Redraw the noise block before an optimizer iteration after the first.
+
+        Only called when resample_per_iteration is set. Iteration 0 always uses
+        whatever block the per-plan resample_interval cadence selected in
+        _maybe_resample_noise, so the default (flag off) path is untouched.
+        _resample_count keeps advancing, so no two blocks in this planner's
+        lifetime replay the same noise.
+        """
+        self._sample_noise_block()
+        self._resample_count += 1
+
     # -- cost folding -------------------------------------------------------
 
     def _fold_costs(self, running_scale: float = 1.0, total_scale: float = 1.0):
@@ -758,7 +788,16 @@ class SamplingPlanner(abc.ABC):
 
         self._begin_plan()
         self.last_plan_ok = False
-        for _ in range(self.pc.n_iterations):
+        self.last_n_iterations = 0
+        # tol=None is the fixed-iteration path: the loop runs `cap` times and
+        # never pays the per-iteration device->host read of U[0].
+        tol, cap = self._converge_tol, self._iteration_cap()
+        u_prev = None
+        for i in range(cap):
+            # Iteration 0 keeps whatever block the per-plan resample_interval
+            # cadence selected above, so the flag-off path is untouched.
+            if i and self.pc.resample_per_iteration:
+                self._resample_between_iterations()
             self._build_samples()             # U^(i) ~ pi_theta(U)
             n_eff = self._rollout()           # J^(i) <- J(U^(i), x0)
             if not self._update_params(n_eff):
@@ -769,11 +808,45 @@ class SamplingPlanner(abc.ABC):
                 self.U_wp.zero_()
                 self.last_action_seq = np.zeros((self.horizon, self.nu), dtype=np.float32)
                 return np.zeros(self.nu, dtype=np.float32)
+            self.last_n_iterations = i + 1
+            if tol is None:
+                continue
+            # Row 0 is the action this call will return. Read self.U_wp fresh
+            # every iteration rather than caching the array: _extract_action
+            # swaps U_wp/U_shift_wp under warm_start, so a held reference would
+            # alias the wrong buffer.
+            u_now = self.U_wp.numpy()[0].copy()
+            if u_prev is not None:
+                d = u_now - u_prev
+                if float(d @ d) < tol:
+                    break
+            # u_prev is None on i == 0, so the test always compares two
+            # consecutive updates — the convergence path runs >= 2 iterations.
+            u_prev = u_now
+
+        if self.pc.debug and tol is not None:
+            print(f"  [{self.name}] converged in {self.last_n_iterations}/{cap} iterations")
 
         self.last_plan_ok = True
         return self._extract_action()         # u(t) <- get_action(theta, t)
 
     # -- planner-specific hooks --------------------------------------------
+
+    def _iteration_cap(self) -> int:
+        """Upper bound on optimizer iterations for one plan() call.
+
+        Planners that terminate on convergence rather than on a fixed count
+        (MPPI's convergence_tol) return their cap here instead."""
+        return self.pc.n_iterations
+
+    @property
+    def _converge_tol(self) -> float | None:
+        """Squared-L2 tolerance on the change in the returned action between
+        successive iterations, or None to run a fixed iteration count.
+
+        None also means plan() never pays the extra device->host read of U[0].
+        Only MPPI sets this (MPPIConfig.convergence_tol)."""
+        return None
 
     def _begin_plan(self):
         """Hook run once per plan() call, before the first iteration.

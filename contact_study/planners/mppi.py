@@ -9,8 +9,10 @@ The rollout engine itself (schedule quantization, Warp arrays, graph capture,
 the unroll, the control parameterization, the warm-start shift) lives in
 `contact_study.planners.base.SamplingPlanner` and is shared with the CEM and
 predictive-sampler planners. What is MPPI-specific and lives here: sampling
-Gaussian perturbations of the running mean, and updating that mean with the
-softmax(-cost/lambda)-weighted average of the sampled trajectories.
+Gaussian perturbations of the running mean, updating that mean with the
+softmax(-cost/lambda)-weighted average of the sampled trajectories, and
+optionally terminating the iteration once the chosen action stops changing
+(`convergence_tol`) rather than after a fixed `n_iterations`.
 """
 
 from __future__ import annotations
@@ -60,9 +62,35 @@ class MPPIConfig(PlannerConfig):
     # samples before the weight computation, so `temperature` is invariant to
     # n_samples.
     normalize_cost_by_samples: bool = False
+    # Convergence-terminated iteration. When set, plan() keeps iterating until
+    # the returned action settles -- sum_u (u_i - u_i+1)^2 < convergence_tol --
+    # instead of running exactly n_iterations, which is then ignored. The test
+    # compares consecutive updates, so the loop always runs at least 2
+    # iterations and never more than max_iterations. It is meaningful because
+    # the noise block is resampled once per plan(), not per iteration: each
+    # iteration re-centers the SAME perturbations on the updated mean, making
+    # the update a fixed-point map with something to converge to. Setting
+    # resample_per_iteration breaks that: the action then also moves with each
+    # fresh noise draw, so the test measures a sampling noise floor and the
+    # loop can run to max_iterations (though an action pinned to the
+    # delta_range clip still settles immediately). Note too that with
+    # time_constrained the rollout budget is per-iteration, so a single plan()
+    # can cost up to max_iterations * plan_budget_ms.
+    convergence_tol: float | None = None
+    max_iterations:  int = 10
 
     def __post_init__(self):
         super().__post_init__()
+        if self.convergence_tol is not None:
+            if self.convergence_tol <= 0.0:
+                raise ValueError(
+                    f"convergence_tol must be > 0 or None, got {self.convergence_tol}"
+                )
+            if self.max_iterations < 2:
+                raise ValueError(
+                    "convergence_tol needs max_iterations >= 2: the test compares two "
+                    f"consecutive updates, got {self.max_iterations}"
+                )
         if self.use_spline_noise and self.resample_interval is not None:
             raise ValueError(
                 "use_spline_noise is incompatible with resample_interval: spline noise is "
@@ -243,6 +271,18 @@ class MPPIController(SamplingPlanner):
     def _reset_params(self):
         """Undo any adaptive-temperature drift so a new goal starts from lambda."""
         self.lam = self.pc.temperature
+
+    # -- iteration termination ----------------------------------------------
+
+    def _iteration_cap(self) -> int:
+        """max_iterations bounds the convergence loop; otherwise n_iterations."""
+        if self.pc.convergence_tol is None:
+            return self.pc.n_iterations
+        return self.pc.max_iterations
+
+    @property
+    def _converge_tol(self) -> float | None:
+        return self.pc.convergence_tol
 
     # -- MPPI weight update -------------------------------------------------
 

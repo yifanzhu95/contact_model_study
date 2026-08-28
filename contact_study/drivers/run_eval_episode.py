@@ -300,7 +300,10 @@ def run_eval_episode(
               f"horizon={controller.horizon} steps "
               f"({controller.horizon*control_dt*1e3:.1f}ms)  "
               f"n_samples={planner_cfg.n_samples}  "
-              f"n_iterations={planner_cfg.n_iterations}")
+              f"n_iterations={planner_cfg.n_iterations}"
+              + (f"  convergence_tol={getattr(planner_cfg, 'convergence_tol'):g}"
+                 f"  max_iterations={getattr(planner_cfg, 'max_iterations')}"
+                 if getattr(planner_cfg, "convergence_tol", None) is not None else ""))
 
     step_times: list[float] = []
     ep_start = time.perf_counter()
@@ -455,8 +458,22 @@ def main():
     p.add_argument("--resample_interval", type=int, default=1,
                    help="Plan steps between noise resamples (1=every step; "
                         "omit=sample once and reuse, the default).")
+    p.add_argument("--resample_per_iteration", action=argparse.BooleanOptionalAction,
+                   default=True,
+                   help="Redraw the noise block before every optimizer iteration "
+                        "after the first, instead of reusing one block per plan(). "
+                        "No-op at a single iteration. Note it breaks the fixed "
+                        "point MPPI's --convergence_tol tests for, so the two "
+                        "together can run to the cap.")
     # --- MPPI-only ---------------------------------------------------------
     p.add_argument("--temperature", type=float, default=100.0)#30.0)#20.0 <- cube
+    p.add_argument("--convergence_tol", type=float, default=None,
+                   help="Iterate until the returned action settles — "
+                        "sum_u (u_i - u_i+1)^2 < tol — instead of running a fixed "
+                        "--n_iterations. Always runs >= 2 iterations and at most "
+                        "--max_iterations. Omit for fixed-iteration MPPI.")
+    p.add_argument("--max_iterations", type=int, default=None,
+                   help="Iteration cap for --convergence_tol (default: 10).")
     # --- CEM-only ----------------------------------------------------------
     p.add_argument("--n_elites",    type=int,   default=None,
                    help="CEM elite-set size; overrides --elite_frac when set.")
@@ -580,6 +597,7 @@ def main():
             seed           = ep_seed,
             debug          = args.debug,
             resample_interval = args.resample_interval,
+            resample_per_iteration = args.resample_per_iteration,
             time_constrained  = args.time_constrained,
             plan_budget_ms    = args.plan_budget_ms,
             temperature       = args.temperature,
@@ -587,7 +605,9 @@ def main():
         )
         # These have no CLI default: leaving them out lets the planner's own
         # default apply (e.g. CEM's n_iterations=3, elite_frac=0.1).
-        for name, val in (("n_iterations", args.n_iterations),
+        for name, val in (("n_iterations",    args.n_iterations),
+                          ("convergence_tol", args.convergence_tol),
+                          ("max_iterations",  args.max_iterations),
                           ("n_elites",     args.n_elites),
                           ("elite_frac",   args.elite_frac),
                           ("alpha",        args.cem_alpha),

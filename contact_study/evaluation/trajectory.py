@@ -216,6 +216,10 @@ class TrajectoryRecorder:
             "ctrl_relative_to_qpos":     bool(getattr(pc, "ctrl_relative_to_qpos", True)),
             "n_samples":                 int(getattr(pc, "n_samples", 0)),
             "n_iterations":              int(getattr(pc, "n_iterations", 1)),
+            # MPPI-only; None on planners that always run a fixed count.
+            "convergence_tol":           getattr(pc, "convergence_tol", None),
+            "max_iterations":            int(getattr(pc, "max_iterations", 0)),
+            "resample_per_iteration":    bool(getattr(pc, "resample_per_iteration", False)),
             "noise_sigma":               float(getattr(pc, "noise_sigma", 0.0)),
             "warm_start":                bool(getattr(pc, "warm_start", False)),
             "time_constrained":          bool(getattr(pc, "time_constrained", False)),
@@ -365,5 +369,8 @@ class TrajectoryRecorder:
             # < horizon only when the time-constrained path truncated the unroll;
             # mean_seq rows past this were never touched by the update.
             "n_steps_planned": int(getattr(self.controller, "last_n_steps", H)),
+            # Optimizer iterations the plan actually ran; below the configured
+            # cap only when MPPI's convergence_tol terminated the loop early.
+            "n_iterations_run": int(getattr(self.controller, "last_n_iterations", 0)),
             "degenerate":      bool(m.degenerate),
         })
