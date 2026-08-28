@@ -554,7 +554,8 @@ def save_state(path: Path, dim_names, dims, x_iters, func_vals, args) -> None:
         }, f, indent=2)
 
 
-def load_state(path: Path, dim_names: list[str]) -> tuple[list[list[float]], list[float]]:
+def load_state(path: Path, dim_names: list[str],
+               dims: list[Real]) -> tuple[list[list[float]], list[float]]:
     """Prior (x0, y0) from a bo_state.json, refusing a mismatched search space."""
     with open(path) as f:
         state = json.load(f)
@@ -568,6 +569,29 @@ def load_state(path: Path, dim_names: list[str]) -> tuple[list[list[float]], lis
     y0 = [float(v) for v in state.get("func_vals", [])]
     if len(x0) != len(y0):
         raise ValueError(f"--resume {path} has {len(x0)} x_iters but {len(y0)} func_vals")
+
+    # The dimensions may have been re-bracketed since the checkpoint was
+    # written. WIDENING one is fine -- every restored trial is still a legal
+    # point and the GP simply refits over the larger box -- but say so, because
+    # the restored trials then cover only a corner of the new space and the
+    # rebased --n_initial_points may leave no random trials to explore the rest.
+    # NARROWING strands the trials that fall outside; skopt would reject them
+    # with a message that names neither the dimension nor the value, so catch it
+    # here instead.
+    for name, d, (lo, hi, prior) in zip(dim_names, dims,
+                                        state.get("dim_bounds", [])):
+        if (lo, hi, prior) != (float(d.low), float(d.high), d.prior):
+            print(f"  ! --resume: {name} was [{lo:.5g}, {hi:.5g}] {prior} in the "
+                  f"checkpoint, now [{d.low:.5g}, {d.high:.5g}] {d.prior}")
+    for i, x in enumerate(x0):
+        for name, d, v in zip(dim_names, dims, x):
+            if not (float(d.low) <= v <= float(d.high)):
+                raise ValueError(
+                    f"--resume {path}: trial {i} has {name}={v:.6g}, outside the "
+                    f"current bracket [{d.low:.5g}, {d.high:.5g}]. Narrowing a "
+                    f"dimension strands the trials that fall outside it; widen "
+                    f"it back, or start a fresh outdir without --resume."
+                )
     return x0, y0
 
 
@@ -750,7 +774,7 @@ def main():
     x0 = y0 = None
     n_prior = 0
     if args.resume:
-        x0, y0 = load_state(Path(args.resume), names)
+        x0, y0 = load_state(Path(args.resume), names, dims)
         n_prior = len(x0)
         if n_prior == 0:
             x0 = y0 = None

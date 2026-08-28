@@ -146,8 +146,32 @@ RESUME=1
 
 # All cells of one submission share a parent dir keyed by the array job id;
 # export OUTDIR_ROOT to a FIXED path when you intend to --resume a previous
-# submission (the array job id changes on every sbatch).
+# submission WHOLESALE (the array job id changes on every sbatch), e.g.
+#
+#   sbatch --export=ALL,OUTDIR_ROOT=$ROOT_DIR/results/bayes_opt_1234567 \
+#          --array=0-1 experiments/hpc/bayes_opt.slurm
+#
 OUTDIR_ROOT="${OUTDIR_ROOT:-$ROOT_DIR/results/bayes_opt_${SLURM_ARRAY_JOB_ID:-manual}}"
+
+# PER-CELL resume dirs, for when the cells you are picking up do NOT all live
+# under one OUTDIR_ROOT (different submissions, a renamed dir, one object that
+# needs more trials than the rest). A hit here REPLACES $OUTDIR for that cell,
+# so the run continues writing cell_*.json and bo_state.json into the existing
+# directory. Keys are tried in this order, first hit wins:
+#
+#   1. the array task id                      [0]="/abs/path"
+#   2. the cell name, <task>_<obj>_<model>_<planner>
+#                                             [grasp_reorient_duck_M1+M2+M3+M4_mppi]="/abs/path"
+#   3. the object name                        [duck]="/abs/path"
+#
+# Leave it empty for the normal "everything under one root" case. Note that the
+# array ids that get a directory here are the ONLY thing tying an index to a
+# run -- the grid decode below still determines which object/model that index
+# actually optimizes, so the path you paste must belong to the same cell.
+declare -A RESUME_DIRS=(
+    # [0]="$ROOT_DIR/results/bayes_opt_1234567/grasp_reorient_cube_M1+M2+M3+M4_mppi"
+    # [1]="$ROOT_DIR/results/bayes_opt_7654321/grasp_reorient_duck_M1+M2+M3+M4_mppi"
+)
 
 # ===========================================================================
 # 6. Map this task's ID to one value per axis (mixed-radix decode, lowest-
@@ -192,7 +216,17 @@ fi
 
 # One directory per cell, named by what it contains rather than by task id, so
 # the winners are readable without cross-referencing the array indices.
-OUTDIR="$OUTDIR_ROOT/${TASK}_${OBJ}_${MODEL}_${PLANNER}"
+CELL_NAME="${TASK}_${OBJ}_${MODEL}_${PLANNER}"
+OUTDIR="$OUTDIR_ROOT/$CELL_NAME"
+
+# ...unless this cell was pinned to an existing directory above.
+for KEY in "${SLURM_ARRAY_TASK_ID:-0}" "$CELL_NAME" "$OBJ"; do
+    if [[ -n "${RESUME_DIRS[$KEY]:-}" ]]; then
+        OUTDIR="${RESUME_DIRS[$KEY]}"
+        echo "RESUME_DIRS[$KEY] -> $OUTDIR"
+        break
+    fi
+done
 mkdir -p "$OUTDIR"
 
 # ===========================================================================
