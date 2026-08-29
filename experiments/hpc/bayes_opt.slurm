@@ -145,8 +145,8 @@ ERR_CLIP=10.0                   # goal error clipped here, then divided by it
 # ---------------------------------------------------------------------------
 # 5. Optimizer (gp_minimize).
 # ---------------------------------------------------------------------------
-N_CALLS=500                      # total trial budget per cell, INCLUDING resumed trials
-N_INITIAL_POINTS=25             # random trials before the GP takes over
+N_CALLS=750                      # total trial budget per cell, INCLUDING resumed trials
+N_INITIAL_POINTS=120             # random trials before the GP takes over
 ACQ_FUNC="gp_hedge"             # EI | LCB | PI | gp_hedge
 GP_NOISE="gaussian"             # "gaussian" or a float
 BO_SEED=0                       # random_state for gp_minimize itself (not SEED)
@@ -181,8 +181,9 @@ OUTDIR_ROOT="${OUTDIR_ROOT:-$ROOT_DIR/results/bayes_opt_${SLURM_ARRAY_JOB_ID:-ma
 # run -- the grid decode below still determines which object/model that index
 # actually optimizes, so the path you paste must belong to the same cell.
 declare -A RESUME_DIRS=(
-    # [0]="$ROOT_DIR/results/bayes_opt_1234567/grasp_reorient_cube_M1+M2+M3+M4_mppi"
-    # [1]="$ROOT_DIR/results/bayes_opt_7654321/grasp_reorient_duck_M1+M2+M3+M4_mppi"
+    [cube]="$ROOT_DIR/results/bayes_opt_23990896/grasp_reorient_cube_M1+M2+M3+M4_mppi"
+    [ball]="$ROOT_DIR/results/bayes_opt_23990896/grasp_reorient_ball_M1+M2+M3+M4_mppi"
+    [duck]="$ROOT_DIR/results/bayes_opt_23990896/grasp_reorient_duck_M1+M2+M3+M4_mppi"
 )
 
 # ===========================================================================
