@@ -113,7 +113,7 @@ DELTA=""                        # per-step delta clip magnitude; empty disables 
 #    object) or 'name:lo:hi' for an explicit bracket. Leave the array empty to
 #    accept the driver's DEFAULT_OPT_WEIGHTS.
 # ---------------------------------------------------------------------------
-OPT_WEIGHTS=("w_quat:1.0:50.0" "w_pos_x:1.0:50.0" "w_pos_y:1.0:50.0" "w_pos_z:1.0:50.0" "w_contact:0.1:20.0" "w_joint:0.1:20.0" "w_fallen:100.0:300.0" "w_quat_term:100.0:300.0" "w_pos_term:100.0:300.0")
+OPT_WEIGHTS=("w_quat:1.0:50.0" "w_pos_x:1.0:50.0" "w_pos_y:1.0:50.0" "w_pos_z:1.0:50.0" "w_contact:0.1:100.0" "w_joint:0.01:20.0" "w_fallen:100.0:300.0" "w_quat_term:100.0:300.0" "w_pos_term:100.0:300.0")
 
 OPT_NOISE_SIGMA=0               # 1 -> search noise_sigma, 0 -> pin it to NOISE_SIGMA
 OPT_TEMPERATURE=1               # 1 -> search temperature, 0 -> pin it to TEMPERATURE

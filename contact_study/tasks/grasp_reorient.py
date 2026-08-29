@@ -244,17 +244,17 @@ _OBJ_PARAMS: dict[str, dict] = {
         # rounder than the cube, so the terms most likely to want retuning are
         # w_contact and w_quat.
         "cost_weights": {
-            "w_quat": 23.86,#100.0,
-            "w_pos_x": 25.25,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-            "w_pos_y": 1.07,#80.0,    #Y is across the fingers
+            "w_quat": 25.0,#100.0,
+            "w_pos_x": 25.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+            "w_pos_y": 2.0,#80.0,    #Y is across the fingers
             "w_pos_z": 4.0,#15.0,
             "w_velo": 0.0,
-            "w_contact": 0.3329,#12.50,
-            "w_joint": 0.220,
+            "w_contact": 50.0,#12.50,
+            "w_joint": 0.25,
             "w_joint_velo": 0.0,
-            "w_fallen": 127.616,
-            "w_quat_term": 188.5,#500.0,
-            "w_pos_term": 254.0,
+            "w_fallen": 200.0,
+            "w_quat_term": 200.0,#500.0,
+            "w_pos_term": 200.0,
             "w_fallen_term": 0.0,
         },
     },
