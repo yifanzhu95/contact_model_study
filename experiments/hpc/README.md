@@ -72,7 +72,7 @@ script — so a tiny submit wrapper sizes `--array` to the file first.
 
 | File | Role |
 |------|------|
-| `run_csv_cell.py` | Worker. Runs one CSV row (`--n_episodes` episodes via `run_eval_episode`) and writes `cell_<row>.json`. |
+| `run_csv_cell.py` | Worker. Runs one CSV row (`--n_episodes` episodes via `run_eval_episode`, or `run_async_eval_episode` when the row sets `driver=async`) and writes `cell_<row>.json`. |
 | `run_csv_sweep.slurm` | The array job. Reads `$CSV`, guards `$SLURM_ARRAY_TASK_ID` against the row count, runs the worker, and (from row 0) queues the combine job. |
 | `submit_csv_sweep.sh` | Counts `$CSV`'s data rows and submits `run_csv_sweep.slurm` with a matching `--array`. **This is what you run.** |
 | `example_params.csv` | Template covering mppi/cem/predictive_sampler rows and mixed models. |
@@ -84,7 +84,8 @@ One row = one experiment. All columns are optional except `task`.
 - **Reserved** (experiment-level, not planner knobs): `task`, `model`,
   `planner`, `n_episodes`, `seed`, `geometry`, `hand_acc`, `obj_acc`,
   `eval_sim`, `settle`, `eval_substeps`, `record_trajectory`,
-  `record_planner_dist`, `planner_dist_every`. A blank/missing cell falls
+  `record_planner_dist`, `planner_dist_every`, `driver`, `plan_latency_ms`,
+  `latency_scale`, `plan_warmup`, `executor`, `async_shift`. A blank/missing cell falls
   back to `run_csv_cell.py`'s own `--model` / `--planner` /
   `--record_trajectory` / ... default (see `build_parser`). These go to
   `run_eval_episode` directly — `eval_substeps` in particular is *not* a
@@ -101,6 +102,18 @@ One row = one experiment. All columns are optional except `task`.
   (a blank side falls back to that axis's task default). Leave both blank to
   use `geometry` exactly as before — a bare object name or an
   already-composed `"<obj>_<hand_acc>_<obj_acc>"` string.
+  `driver` picks the control loop: `sync` (the default, and what every row
+  did before this column existed) runs `run_eval_episode`, which freezes the
+  eval simulator for the duration of `plan()`; `async` runs
+  `contact_study/drivers/run_async_eval_episode.py`, which keeps the sim
+  running and charges the planning latency as *simulated* time, so a slower
+  contact model no longer looks free. The five async knobs —
+  `plan_latency_ms` (impose a latency in ms instead of measuring it; the most
+  sweepable axis), `latency_scale` (multiply the measured latency),
+  `plan_warmup`, `executor` (`zoh`/`tape`/`time`) and `async_shift` — are
+  arguments of that driver rather than planner-config fields, which is why
+  they are reserved here. They are **rejected** on a `driver=sync` row rather
+  than silently ignored.
 - **`w_<name>`**: cost-weight overrides, one column per weight (e.g.
   `w_quat`, `w_pos_x`, `w_quat_term`) — any key of the task's
   `cost_weights`.
@@ -115,6 +128,15 @@ One row = one experiment. All columns are optional except `task`.
   MPPI's `temperature`; CEM's `n_elites`/`elite_frac`/`alpha`/`min_sigma`;
   predictive sampler's `include_nominal`. `delta` is special-cased to a
   single clip magnitude, expanded to `delta_range=(-delta, delta)`.
+  `time_constrained` is special-cased too, in that setting it alone is
+  enough: `PlannerConfig` otherwise rejects it unless `plan_budget_ms > 0`
+  and `use_full_graph=false` agree with it, so `resolve_time_constraint`
+  defaults the budget to the row's `step_time` (in ms — the control period
+  the cell is running at, the same rule `run_cntrl_freq_cell.py` uses) and
+  forces the step-graph path, printing what it filled in. Give
+  `plan_budget_ms` explicitly to pin the budget instead. Combined with
+  `driver=async` this is the anytime planner: latency capped by truncating
+  the horizon.
 
 Because each row names its own `planner`/`model`, one CSV can compare
 planners or contact models side by side — something the bash-grid sweep

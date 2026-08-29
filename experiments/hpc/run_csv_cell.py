@@ -16,6 +16,22 @@ matching run_eval_episode.py's own --delta convention. `record_trajectory` /
 recording flags per row, so a sweep can run lean by default and still record
 a handful of interesting cells in full.
 
+Two rows can also differ in HOW the episode is run, not just in what is planned:
+
+  driver=async        runs contact_study/drivers/run_async_eval_episode.py
+                      instead of run_eval_episode: the eval sim keeps running
+                      while the planner solves, so planning latency is charged
+                      as simulated time rather than being free. The five
+                      ASYNC_COLUMNS (plan_latency_ms, latency_scale,
+                      plan_warmup, executor, async_shift) tune it and are
+                      rejected on a sync row.
+  time_constrained    an ordinary forwarded planner field, but one that
+                      PlannerConfig rejects unless plan_budget_ms and
+                      use_full_graph agree with it; resolve_time_constraint
+                      fills both in so the single cell is enough. Together with
+                      driver=async this is the anytime planner: latency capped
+                      by truncating the horizon.
+
 Output is written as cell_<row>.json in the same shape run_param_cell.py's
 run_cell() returns, so combine_results.py / combine.slurm merge it unchanged.
 
@@ -42,7 +58,10 @@ from contact_study.evaluation.trajectory import (
 from contact_study.drivers.run_eval_episode import (
     run_eval_episode, load_rollout_task, MODEL_FACTORIES,
 )
-from contact_study.planners import PLANNERS, make_planner_config, resolve_planner_name
+from contact_study.drivers.run_async_eval_episode import run_async_eval_episode
+from contact_study.planners import (
+    PLANNERS, make_planner_config, planner_config_cls, resolve_planner_name,
+)
 from contact_study.tasks.config import (
     DEFAULT_HAND_ACC, DEFAULT_OBJ_ACC, DEFAULT_SCENE_VARIANT, EvalSimulatorKind,
 )
@@ -66,11 +85,26 @@ from contact_study.tasks.config import (
 # columns, so a sweep can vary them independently of the object; when either is
 # set, `geometry` is taken as the bare object name and the three are joined
 # into "<geometry>_<hand_acc>_<obj_acc>" (bayes_opt.slurm's own convention).
+# `driver` picks the control loop: "sync" (default) runs run_eval_episode, which
+# freezes the eval sim for the duration of plan(); "async" runs
+# run_async_eval_episode, which keeps the sim running and charges the planning
+# latency as simulated time. The two take the same arguments and return the same
+# EpisodeResult, so only the call target changes. ASYNC_COLUMNS are
+# run_async_eval_episode ARGUMENTS rather than planner-config fields, so they
+# have to be reserved here — forwarding them would hit validate_columns as
+# unknown columns, and they are rejected outright on a sync row rather than
+# silently ignored.
 RESERVED_COLUMNS = (
     "task", "model", "planner", "n_episodes", "seed", "geometry", "hand_acc",
     "obj_acc", "eval_sim", "settle", "eval_substeps",
     "record_trajectory", "record_planner_dist", "planner_dist_every",
+    "driver", "plan_latency_ms", "latency_scale", "plan_warmup",
+    "executor", "async_shift",
 )
+
+DRIVERS = ("sync", "async")
+ASYNC_COLUMNS = ("plan_latency_ms", "latency_scale", "plan_warmup",
+                 "executor", "async_shift")
 
 
 def planner_field_names() -> set[str]:
@@ -166,6 +200,33 @@ def split_row(raw_row: dict) -> tuple[dict, dict, dict]:
     return experiment, overrides, planner_kwargs
 
 
+def resolve_time_constraint(planner: str, planner_kwargs: dict, row_id: int) -> None:
+    """Make a `time_constrained` row runnable, editing planner_kwargs in place.
+
+    PlannerConfig rejects time_constrained without plan_budget_ms > 0, and again
+    with use_full_graph=True (the full-graph unroll is one captured CUDA graph and
+    cannot stop mid-horizon), so the obvious two-cell row would crash in
+    __post_init__ before anything ran. Default the budget to the row's control
+    period and force the step-graph path, matching run_async_eval_episode.py's
+    `use_full_graph = not time_constrained` and run_cntrl_freq_cell.py's
+    resolve_plan_budget_ms.
+    """
+    if not planner_kwargs.get("time_constrained"):
+        return
+    if planner_kwargs.get("plan_budget_ms") is None:
+        # A blank step_time cell means that config's own default applies; read it
+        # off the dataclass so the budget matches the period that will actually
+        # run (a dataclass field's class attribute IS its default).
+        step_time = planner_kwargs.get("step_time", planner_config_cls(planner).step_time)
+        planner_kwargs["plan_budget_ms"] = float(step_time) * 1e3
+        print(f"[row {row_id}]  time_constrained with no plan_budget_ms -> "
+              f"{planner_kwargs['plan_budget_ms']:g} ms (step_time={step_time:g}s)")
+    if planner_kwargs.get("use_full_graph", True):
+        print(f"[row {row_id}]  time_constrained forces use_full_graph=false "
+              f"(the full-graph unroll cannot stop early); overriding.")
+        planner_kwargs["use_full_graph"] = False
+
+
 def combo_label(model_key: str, planner: str, axes: dict) -> str:
     """Short label encoding model + planner + every non-blank axis value."""
     parts = []
@@ -228,9 +289,39 @@ def run_cell(row_id: int, experiment: dict, overrides: dict, planner_kwargs: dic
         shrinkage           = cli_record.shrinkage,
     )
 
-    cfg   = MODEL_FACTORIES[model]()
-    axes  = {**overrides, **planner_kwargs, "model": model, "planner": planner}
-    label = combo_label(model, planner, {**overrides, **planner_kwargs})
+    # Which control loop runs the episode. The async knobs are meaningless to the
+    # synchronous driver, so a row that sets one without asking for async is a
+    # mistake worth failing on rather than silently ignoring — the same reasoning
+    # behind validate_columns' typo guard.
+    driver = experiment.get("driver", "sync")
+    if driver not in DRIVERS:
+        raise SystemExit(
+            f"row {row_id}: driver must be one of {', '.join(DRIVERS)}, got {driver!r}"
+        )
+    async_kwargs = {k: experiment[k] for k in ASYNC_COLUMNS if k in experiment}
+    if driver != "async" and async_kwargs:
+        names = sorted(async_kwargs)
+        raise SystemExit(
+            f"row {row_id}: {', '.join(names)} "
+            f"{'only applies' if len(names) == 1 else 'only apply'} with "
+            f"driver=async, but this row is driver={driver!r}"
+        )
+    # Must run before make_planner_config: the rejection it works around happens
+    # in PlannerConfig.__post_init__.
+    resolve_time_constraint(planner, planner_kwargs, row_id)
+
+    cfg = MODEL_FACTORIES[model]()
+    # driver/async knobs are reserved columns, so unlike the planner kwargs they
+    # are not in the label by construction — fold them in, or a sweep comparing
+    # sync against async produces two cells with identical labels and
+    # combine_results.py collapses them into one row. Keyed off the column being
+    # PRESENT (not its value) so a CSV without a driver column keeps the labels
+    # it produces today, exactly as a blank cell does.
+    sweep_axes = {**overrides, **planner_kwargs,
+                  **({"driver": driver} if "driver" in experiment else {}),
+                  **async_kwargs}
+    axes  = {**sweep_axes, "model": model, "planner": planner}
+    label = combo_label(model, planner, sweep_axes)
 
     # Peek at the rollout task once for default cost weights (to report the
     # fully-resolved weight set alongside the overrides).
@@ -239,7 +330,10 @@ def run_cell(row_id: int, experiment: dict, overrides: dict, planner_kwargs: dic
     full_weights    = {**default_weights, **overrides}
 
     print(f"[row {row_id}]  {label}")
-    print(f"  task={task_name}  model={model}  planner={planner}  n_episodes={n_episodes}")
+    print(f"  task={task_name}  model={model}  planner={planner}  "
+          f"n_episodes={n_episodes}  driver={driver}")
+    if async_kwargs:
+        print(f"  async kwargs    ={async_kwargs}")
     print(f"  weight overrides={overrides}")
     if planner_kwargs:
         print(f"  planner kwargs  ={planner_kwargs}")
@@ -264,7 +358,10 @@ def run_cell(row_id: int, experiment: dict, overrides: dict, planner_kwargs: dic
             planner, **{"debug": args.debug, **planner_kwargs, "seed": ep_seed},
         )
 
-        result = run_eval_episode(
+        # Same arguments either way: run_async_eval_episode takes every one of
+        # these and returns the same EpisodeResult, so only the target changes.
+        run_episode = run_async_eval_episode if driver == "async" else run_eval_episode
+        result = run_episode(
             task_name             = task_name,
             contact_cfg           = cfg,
             planner_cfg           = planner_cfg,
@@ -280,6 +377,7 @@ def run_cell(row_id: int, experiment: dict, overrides: dict, planner_kwargs: dic
             debug                 = args.debug,
             verbose               = args.debug,
             record                = record_cfg,
+            **(async_kwargs if driver == "async" else {}),
         )
         episodes.append(result)
         tick = "✓" if result.success else "✗"
@@ -320,6 +418,8 @@ def run_cell(row_id: int, experiment: dict, overrides: dict, planner_kwargs: dic
         "mean_elapsed_s":        float(np.mean(elapsed)),
         "planner_kwargs":        planner_kwargs,
         "seed":     base_seed,
+        "driver":       driver,
+        "async_kwargs": async_kwargs,
         "eval_sim": eval_sim_raw,
         "eval_substeps": eval_substeps,
         "geometry": geometry,

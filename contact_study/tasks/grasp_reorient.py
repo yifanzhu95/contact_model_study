@@ -203,17 +203,17 @@ _OBJ_PARAMS: dict[str, dict] = {
         "target_pos":    np.array([0.02, 0.035, 0.09]),#np.array([0.02, 0.03, 0.08])#np.array([0.012, 0.04, 0.085])
         "fallen_z":      0.08,
         "cost_weights": {
-            "w_quat": 23.624,#11.188,#100.0,
-            "w_pos_x": 8.831,#1.875,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-            "w_pos_y": 41.98,#3.750,#80.0,    #Y is across the fingers
-            "w_pos_z": 3.609,#20.0,#15.0,
+            "w_quat": 2.9504,#11.188,#100.0,
+            "w_pos_x": 31.37,#1.875,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+            "w_pos_y": 46.33,#3.750,#80.0,    #Y is across the fingers
+            "w_pos_z": 1.688,#20.0,#15.0,
             "w_velo": 0.0,
-            "w_contact": 15.34,#50.0,#15.0,#12.50,
-            "w_joint": 10.72,#5.18,#4.0,
+            "w_contact": 0.1569,#50.0,#15.0,#12.50,
+            "w_joint": 1.709,#5.18,#4.0,
             "w_joint_velo": 0.0,
-            "w_fallen": 169.75,#200.0,
-            "w_quat_term": 173.23,#200.0,#500.0,
-            "w_pos_term": 210.51,#200.0,
+            "w_fallen": 122.289,#200.0,
+            "w_quat_term": 119.822,#200.0,#500.0,
+            "w_pos_term": 130.632,#200.0,
             "w_fallen_term": 0.0,
         },
     },
@@ -244,17 +244,17 @@ _OBJ_PARAMS: dict[str, dict] = {
         # rounder than the cube, so the terms most likely to want retuning are
         # w_contact and w_quat.
         "cost_weights": {
-            "w_quat": 11.106,#100.0,
-            "w_pos_x": 50.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-            "w_pos_y": 31.0,#80.0,    #Y is across the fingers
-            "w_pos_z": 6.6,#15.0,
+            "w_quat": 23.86,#100.0,
+            "w_pos_x": 25.25,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+            "w_pos_y": 1.07,#80.0,    #Y is across the fingers
+            "w_pos_z": 4.0,#15.0,
             "w_velo": 0.0,
-            "w_contact": 50.0,#12.50,
-            "w_joint": 1.70,
+            "w_contact": 0.3329,#12.50,
+            "w_joint": 0.220,
             "w_joint_velo": 0.0,
-            "w_fallen": 100.0,
-            "w_quat_term": 100.0,#500.0,
-            "w_pos_term": 500.0,
+            "w_fallen": 127.616,
+            "w_quat_term": 188.5,#500.0,
+            "w_pos_term": 254.0,
             "w_fallen_term": 0.0,
         },
     },
@@ -614,7 +614,7 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 1000,#4000,
+            max_steps          = 1000,#1000,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # This object's weights from _OBJ_PARAMS, emitted in
             # _COST_WEIGHT_KEYS order — which must match the weights[...]

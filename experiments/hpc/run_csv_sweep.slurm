@@ -10,6 +10,14 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=05:00:00
+# ^ sized for ordinary synchronous rows. Rows using the new `driver=async` or
+# `time_constrained` columns are substantially slower: the async driver spends
+# each solve's latency as simulated time (so the sim runs *during* planning
+# rather than pausing), and the time-constrained path holds every plan() at its
+# full budget instead of returning once the horizon is done. A sweep containing
+# many of those wants a longer --time — time_constrained_cntrl_freq_eval.slurm
+# went from 5 h to 12 h for the same reason. Override per submission with
+# `sbatch --time=12:00:00 ...`; the command line wins over this header.
 
 set -euo pipefail
 

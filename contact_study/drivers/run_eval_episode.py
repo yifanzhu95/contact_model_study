@@ -421,8 +421,8 @@ def run_eval_episode(
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--task",        type=str,   default="cart_pole")
-    p.add_argument("--geometry",    type=str,   default=DEFAULT_SCENE_VARIANT,
+    p.add_argument("--task",        type=str,   default="grasp_reorient")
+    p.add_argument("--geometry",    type=str,   default="cube_high_high",
                    help="Scene variant: '<object>' or "
                         "'<object>_<hand_acc>_<obj_acc>' (e.g. duck_low_high). "
                         "Legacy geometry names map to the default scene.")
@@ -466,7 +466,7 @@ def main():
                         "point MPPI's --convergence_tol tests for, so the two "
                         "together can run to the cap.")
     # --- MPPI-only ---------------------------------------------------------
-    p.add_argument("--temperature", type=float, default=100.0)#30.0)#20.0 <- cube
+    p.add_argument("--temperature", type=float, default=7.0)#30.0)#20.0 <- cube
     p.add_argument("--convergence_tol", type=float, default=None,
                    help="Iterate until the returned action settles — "
                         "sum_u (u_i - u_i+1)^2 < tol — instead of running a fixed "
@@ -499,7 +499,7 @@ def main():
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
-    p.add_argument("--seed",        type=int,   default=64)#42)
+    p.add_argument("--seed",        type=int,   default=42)#64)
     p.add_argument("--n_episodes",  type=int,   default=1,
                    help="Number of episodes to run; reports the aggregate success rate.")
     p.add_argument("--weights",     nargs="+", default=[],
