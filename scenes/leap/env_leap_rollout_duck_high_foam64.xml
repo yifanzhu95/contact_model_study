@@ -1,0 +1,104 @@
+<mujoco model="right_leap_hand scene duck_high_foam64">
+  <include file="./leap_right_hand_high.xml" />
+  <statistic center="0 0 0" extent="0.3" />
+  <visual>
+    <rgba haze="0.15 0.25 0.35 1" />
+    <quality shadowsize="8192" />
+    <global azimuth="130" elevation="-40" offwidth="1280" offheight="960" />
+  </visual>
+  <asset>
+    <!-- NB: <mesh file> resolves against `meshdir`, which the included hand XML
+    sets to ./leap_hand/assets/ — hence the ../../ hop back out to scenes/leap/. -->
+    <mesh name="rubber_duck_mesh" file="../../objects/rubber_duck.stl" maxhullvert="30" />
+    <!-- Same mesh at the goal-marker scale (0.43x, matching the cube scene's
+    0.015/0.035 goal-to-object ratio). -->
+    <mesh name="rubber_duck_goal" file="../../objects/rubber_duck.stl" scale="0.43 0.43 0.43" />
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8" width="300" height="300" />
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0." />
+  </asset>
+  <worldbody>
+    <light directional="true" ambient="0.2 0.2 0.2" diffuse="0.8 0.8 0.8" castshadow="false" pos="0 1 4" dir="0 0 -1" name="light0" />
+    <camera name="demo-cam" pos="-0.003 -0.393 0.317" xyaxes="1.000 -0.000 0.000 0.000 0.462 0.887" />
+    <geom name="floor" pos="0 0 -0.1" size="0 0 0.05" type="plane" material="groundplane" />
+    <!-- Reorientation target marker. mocap="true" is REQUIRED: the task's
+    _update_goal rewrites mjd.mocap_quat here each time a goal is sampled, and
+    silently does nothing on a non-mocap body (which is why the older
+    env_leap_duck.xml marker never turned). pos matches the cube scene's proven
+    upper-left inset placement for the eval camera. Visual only. -->
+    <body name="goal" pos="0.005 -0.07 0.1353" quat="1 0 0 0" mocap="true">
+      <geom name="goal_visual" type="mesh" mesh="rubber_duck_goal" contype="0" conaffinity="0" density="0" rgba="0.97 0.6 0 0.6" />
+    </body>
+    <body name="obj" pos="0.02 0.05 0.1">
+      <freejoint name="obj_joint" />
+      <!-- Explicit inertia shared by every Duck collision variant. MuJoCo therefore keeps the same mass, center of mass, principal axes, and diagonal inertia regardless of the number or shape of collision geoms. -->
+      <inertial pos="-0.0088857 -0.0000003 -0.0152658" quat="0.6896432 0.1561964 0.1561924 0.6896367" mass="0.05" diaginertia="4.695783e-05 3.827842e-05 2.721782e-05" />
+      <!-- Visual-only Duck: the calibrated spheres above carry contact, while this mesh shows the original shape and contributes no mass or collision. -->
+      <!-- Calibrated FOAM rollout collision spheres. Positions use the same object-frame offset as the template visual mesh. The explicit inertial above fixes mass and inertia; density=0 prevents geometry-dependent dynamics. -->
+      <geom name="obj_sphere_000" type="sphere" size="0.02187076" pos="-0.0058791055104 -5.50249489295e-05 0.0222687104828" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_001" type="sphere" size="0.02357881" pos="0.000157934489598 -0.00011485494893 0.0194489804828" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_002" type="sphere" size="0.018610025" pos="0.000856594489598 -0.00021617994893 0.0105005354828" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_003" type="sphere" size="0.01785057" pos="-0.0014410705104 1.44550510705e-05 0.0285296304828" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_004" type="sphere" size="0.017320785" pos="-0.000345795510402 3.08600510705e-05 0.00412188548278" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_005" type="sphere" size="0.02676138" pos="0.000894229489598 -0.00017854494893 -0.0220884795172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_006" type="sphere" size="0.02009516" pos="0.0015205144896 -4.63399489295e-05 -0.0105026895172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_007" type="sphere" size="0.01712682" pos="-0.0074211755104 -0.00017468494893 -0.0106262095172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_008" type="sphere" size="0.02338002" pos="0.0017231644896 8.49000510705e-05 0.0197423404828" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_009" type="sphere" size="0.011829935" pos="0.0204258294896 -0.00378088994893 0.0215941754828" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_010" type="sphere" size="0.01148929" pos="0.0169701644896 0.00491665505107 0.0203454654828" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_011" type="sphere" size="0.01210882" pos="0.0209787744896 0.00155749005107 0.0217862104828" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_012" type="sphere" size="0.00828742" pos="0.0257034144896 0.00122649505107 0.0262860054828" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_013" type="sphere" size="0.008444715" pos="0.0241198494896 -0.00316425494893 0.0247593754828" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_014" type="sphere" size="0.011148645" pos="0.0202530944896 0.00089743005107 0.0217505054828" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_015" type="sphere" size="0.009288125" pos="0.0227968344896 -0.00021714494893 0.0208800754828" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_016" type="sphere" size="0.02645258" pos="0.000876859489598 -0.00364289494893 -0.0239943545172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_017" type="sphere" size="0.024100875" pos="0.000496649489598 -0.0107240649489 -0.0269221645172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_018" type="sphere" size="0.021588015" pos="-0.0117955205104 -0.0132214849489 -0.0290075295172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_019" type="sphere" size="0.020040155" pos="-0.0044152005104 -0.0146525799489 -0.0306576795172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_020" type="sphere" size="0.023904015" pos="-0.0027341705104 0.0116706900511 -0.0274432645172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_021" type="sphere" size="0.02440871" pos="0.0050186394896 0.00883359005107 -0.0265988895172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_022" type="sphere" size="0.02068767" pos="-0.0064561755104 0.0148069400511 -0.0309548995172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_023" type="sphere" size="0.02527914" pos="-0.0031703505104 0.00574462505107 -0.0254630845172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_024" type="sphere" size="0.02500701" pos="0.0057587944896 0.00231501505107 -0.0249998845172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_025" type="sphere" size="0.021842775" pos="0.0061177744896 0.0101672200511 -0.0270948995172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_026" type="sphere" size="0.021796455" pos="0.0089056594896 0.00598973505107 -0.0276806545172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_027" type="sphere" size="0.02239765" pos="0.0095821244896 0.00108753505107 -0.0273892245172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_028" type="sphere" size="0.022215265" pos="0.0092077044896 -0.00462912494893 -0.0274451945172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_029" type="sphere" size="0.02237835" pos="0.0044859594896 -0.0107732799489 -0.0272936895172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_030" type="sphere" size="0.02508421" pos="0.0052888394896 -0.00258621994893 -0.0247383695172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_031" type="sphere" size="0.02184374" pos="0.0075044794896 -0.00811663494893 -0.0278041745172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_032" type="sphere" size="0.024770585" pos="-0.0221277755104 0.00014955505107 -0.0254331695172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_033" type="sphere" size="0.02619975" pos="-0.0102312555104 -0.00021617994893 -0.0242259545172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_034" type="sphere" size="0.022547225" pos="-0.0100035155104 0.0111109900511 -0.0282287745172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_035" type="sphere" size="0.023170615" pos="-0.0082317755104 -0.00998390994893 -0.0274490545172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_036" type="sphere" size="0.021690305" pos="-0.0364647805104 -0.00014766494893 -0.0223992095172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_037" type="sphere" size="0.02175303" pos="-0.0330322755104 0.00441775005107 -0.0281679795172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_038" type="sphere" size="0.02197305" pos="-0.0331432505104 -0.00310249494893 -0.0274519495172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_039" type="sphere" size="0.018588795" pos="-0.0315095055104 -0.00964229994893 -0.0291532445172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_040" type="sphere" size="0.021746275" pos="-0.0233311305104 0.0102260850511 -0.0294330945172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_041" type="sphere" size="0.02234361" pos="-0.0282709655104 0.00712843505107 -0.0281641195172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_042" type="sphere" size="0.02149441" pos="-0.0149182605104 0.0130853800511 -0.0295537195172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_043" type="sphere" size="0.01746843" pos="-0.0161930255104 0.0156966700511 -0.0331879095172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_044" type="sphere" size="0.022581" pos="-0.0273657955104 -0.00556999994893 -0.0275175695172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_045" type="sphere" size="0.021499235" pos="-0.0137226255104 -0.0139249699489 -0.0298248845172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_046" type="sphere" size="0.019741005" pos="-0.0248606555104 -0.0125527399489 -0.0301056995172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_047" type="sphere" size="0.024465645" pos="-0.0182050505104 -0.00407328494893 -0.0266731945172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_048" type="sphere" size="0.019758375" pos="-0.0364898705104 0.00030492005107 -0.0208445945172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_049" type="sphere" size="0.01595531" pos="-0.0420318655104 0.00178137005107 -0.0180673245172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_050" type="sphere" size="0.01770003" pos="-0.0405776105104 -0.00062630494893 -0.0177208895172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_051" type="sphere" size="0.01640886" pos="-0.0418292155104 0.00077873505107 -0.0162782145172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_052" type="sphere" size="0.009131795" pos="-0.0485639505104 0.00072952005107 -0.00153976951722" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_053" type="sphere" size="0.00953806" pos="-0.0484220955104 -0.00093317494893 -0.00285313451722" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_054" type="sphere" size="0.007749915" pos="-0.0488254655104 0.00036185505107 0.00118249548278" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_055" type="sphere" size="0.007377425" pos="-0.0489267905104 -0.00121591994893 0.00133014048278" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_056" type="sphere" size="0.01560598" pos="-0.0426967505104 -0.00048927494893 -0.0148577345172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_057" type="sphere" size="0.01178072" pos="-0.0465683305104 -0.00094861494893 -0.00781516451722" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_058" type="sphere" size="0.013339195" pos="-0.0427893905104 -0.00233049494893 -0.0128756245172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_059" type="sphere" size="0.01311821" pos="-0.0453119005104 -0.00193677494893 -0.0134044445172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_060" type="sphere" size="0.01441903" pos="-0.0440023955104 0.00085014505107 -0.0128775545172" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_061" type="sphere" size="0.01136577" pos="-0.0470614455104 0.00085786505107 -0.00717729951722" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_062" type="sphere" size="0.009268825" pos="-0.0453688355104 0.00281006005107 -0.00556864451722" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_063" type="sphere" size="0.011200755" pos="-0.0470672355104 1.15600510705e-05 -0.00641108951722" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_visual" type="mesh" mesh="rubber_duck_mesh" contype="0" conaffinity="0" density="0" rgba="0.97 0.6 0 1.0" />
+    </body>
+  </worldbody>
+</mujoco>

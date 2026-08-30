@@ -144,6 +144,8 @@ def run_eval_episode(
     planner:     str | None = None,
     cost_weight_overrides: dict | None = None,
     settle_seconds: float = 0.0,
+    max_steps: int | None = None,
+    plan_warmup: int = 0,
     eval_substeps: int | None = None,
     eval_sim:    EvalSimulatorKind | None = None,
     video_path:  str | None = None,
@@ -168,12 +170,16 @@ def run_eval_episode(
     old name of `planner_cfg`, still accepted so existing sweep workers keep
     working unchanged.
 
-    The episode length is the task's TaskConfig.max_steps. mean_step_ms /
-    std_step_ms hold per-control-step planning latency (controller.plan() only,
-    excluding the eval-sim advance) in ms.
+    The episode length is the task's TaskConfig.max_steps unless max_steps is
+    supplied as a shorter/longer run-time override. mean_step_ms /
+    std_step_ms / median_step_ms / p95_step_ms hold per-control-step planning
+    latency (controller.plan() only, excluding the eval-sim advance) in ms.
 
     cost_weight_overrides: optional {weight_name: value} merged into the rollout
         task's cost weights before planning (used by the weight grid search).
+    plan_warmup: throwaway plan() calls at the settled initial state before the
+        episode clock starts. This removes CUDA graph/JIT startup from latency
+        summaries in controlled benchmarks; zero preserves historical behavior.
     fin_ep_on_success: stop at first success (default); if False, resample a new
         goal on each success and keep going (multi-goal mode).
     record: what to log per control step (state, applied control, planner
@@ -251,6 +257,22 @@ def run_eval_episode(
         mujoco.mj_forward(mjm, mjd)
         rollout_task.sample_new_goal(mjd, rng)
 
+    # Controlled timing studies must not charge one geometry for a first-use
+    # CUDA graph or kernel-cache event.  Warm up on the exact settled state and
+    # sampled goal, then reset the planner's adaptive state before step 0.  This
+    # phase neither advances the eval simulator nor enters episode timing.
+    if plan_warmup < 0:
+        raise ValueError(f"plan_warmup must be >= 0, got {plan_warmup}")
+    if plan_warmup:
+        st = sim.get_state()
+        mjd.qpos[:] = st.qpos
+        mjd.qvel[:] = st.qvel
+        mjd.ctrl[:] = u
+        mujoco.mj_forward(mjm, mjd)
+        for _ in range(plan_warmup):
+            controller.plan(mjd)
+        controller.reset()
+
     # ---- absolute command clip (force for cart_pole; ctrlrange for hands) -
     if cfg.force_limits is not None:
         clip_lo, clip_hi = cfg.force_limits
@@ -266,7 +288,9 @@ def run_eval_episode(
     # have specified them as durations (step_time / time_horizon).
     control_dt      = controller.control_dt
     eval_steps_per_control = controller.substeps * eval_substeps
-    n_steps         = cfg.max_steps
+    n_steps         = cfg.max_steps if max_steps is None else int(max_steps)
+    if n_steps < 1:
+        raise ValueError(f"max_steps must be >= 1, got {n_steps}")
     steps_to_success: int | None = None
 
     rec = TrajectoryRecorder(
@@ -411,6 +435,9 @@ def run_eval_episode(
         elapsed_seconds  = elapsed,
         mean_step_ms     = float(step_arr.mean()) if len(step_arr) else 0.0,
         std_step_ms      = float(step_arr.std())  if len(step_arr) else 0.0,
+        median_step_ms   = float(np.median(step_arr)) if len(step_arr) else 0.0,
+        p95_step_ms      = float(np.percentile(step_arr, 95)) if len(step_arr) else 0.0,
+        max_step_ms      = float(step_arr.max()) if len(step_arr) else 0.0,
         final_goal_errs  = final_goal_errs,
         time_out         = time_out,
         end_reason       = end_reason,
@@ -502,6 +529,12 @@ def main():
     p.add_argument("--seed",        type=int,   default=42)#64)
     p.add_argument("--n_episodes",  type=int,   default=1,
                    help="Number of episodes to run; reports the aggregate success rate.")
+    p.add_argument("--max_steps",   type=int,   default=None,
+                   help="Optional per-episode control-step cap for smoke tests; "
+                        "the task's configured max_steps is used when omitted.")
+    p.add_argument("--plan_warmup", type=int, default=0,
+                   help="Discard this many initial plan() calls before episode "
+                        "timing (controlled benchmarks typically use 2).")
     p.add_argument("--weights",     nargs="+", default=[],
                    help="Cost-weight overrides as name=value tokens "
                         "(e.g. --weights w_quat=50 w_pos_x=400). Order must match "
@@ -628,6 +661,8 @@ def main():
             use_mp4     = use_mp4,
             cost_weight_overrides = overrides or None,
             settle_seconds = args.settle,
+            max_steps      = args.max_steps,
+            plan_warmup    = args.plan_warmup,
             eval_substeps  = args.eval_substeps,
             eval_sim       = eval_sim,
             ep_idx         = ep_idx,

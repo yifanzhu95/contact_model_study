@@ -1,0 +1,5064 @@
+{
+  "schema_version": 1,
+  "reference_mesh": {
+    "path": "scenes/leap/objects/rubber_duck.stl",
+    "sha256": "61f21b40485c3c6cf202ed2d131e34d792c93e1fc7d3e62d7071b48f4077ace8",
+    "bounds_m": [
+      [
+        -0.05713244900107384,
+        -0.03250056877732277,
+        -0.048467300832271576
+      ],
+      [
+        0.03160751983523369,
+        0.03249942883849144,
+        0.04484352841973305
+      ]
+    ]
+  },
+  "sphere_model": {
+    "path": "analysis/duck_foam/exploration/duck_foam_safe_l6000_branch4_depth3.json",
+    "sha256": "3e65ba97e1a2aa408c9174bde21d4d45a54083d77bc12cc6612db5580c2dfaf8"
+  },
+  "transform": {
+    "definition": "center'=pivot+scale*(center-pivot); radius'=scale*radius",
+    "pivot": "reference mesh bounding-box center",
+    "pivot_m": [
+      -0.012762464582920074,
+      -5.699694156646729e-07,
+      -0.0018118862062692642
+    ]
+  },
+  "selection_constraint": {
+    "minimum_covered_fraction": 0.999,
+    "maximum_positive_gap_mm": 0.1,
+    "coverage_tolerance_mm": 0.01,
+    "objective": "minimum area-weighted mean positive overreach"
+  },
+  "sampling": {
+    "seed": 0,
+    "mesh_samples": 20000,
+    "sphere_surface_requested_samples": 8000,
+    "scales": [
+      0.923063887,
+      0.95,
+      0.951,
+      0.952,
+      0.953,
+      0.954,
+      0.955,
+      0.956,
+      0.957,
+      0.958,
+      0.959,
+      0.96,
+      0.961,
+      0.962,
+      0.963,
+      0.964,
+      0.965,
+      0.966,
+      0.967,
+      0.968,
+      0.969,
+      0.97,
+      1.0
+    ]
+  },
+  "depths": [
+    {
+      "depth": 1,
+      "sphere_count": 4,
+      "best_eligible_scale": 0.957,
+      "results": [
+        {
+          "scale": 0.923063887,
+          "eligible": false,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 0.9017,
+            "uncovered_fraction": 0.0983,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.07499847034604082,
+              "p50": 0.0,
+              "p95": 0.7445927190485462,
+              "p99": 1.4186770974030651,
+              "max": 1.9400063354445274
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.7629264409640346,
+              "p50": 0.7591282559092742,
+              "p95": 1.5077849531189882,
+              "p99": 1.6040991105337254,
+              "max": 1.9400063354445274
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": 1.9400063354445274
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 0.9207571876357017,
+            "unsigned_distance_mm": {
+              "mean": 6.149630248023557,
+              "p50": 6.099956997613648,
+              "p95": 12.831465859543467,
+              "p99": 13.727405606721168,
+              "max": 14.347953031695184
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 6.0698132725266865,
+              "p50": 6.058969871479204,
+              "p95": 12.795291660672099,
+              "p99": 13.724143985604805,
+              "max": 14.347953031695186
+            },
+            "overreach_mm_outside_only": {
+              "mean": 6.592196555282248,
+              "p50": 6.544628848034976,
+              "p95": 12.900625582916751,
+              "p99": 13.770347240862732,
+              "max": 14.347953031695186
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014922351498546002,
+                -0.025230861239168456,
+                0.002444591707552894
+              ],
+              "closest_mesh_point_m": [
+                -0.011464095393299865,
+                -0.016783448540612714,
+                -0.008625432665073304
+              ],
+              "nearest_triangle_id": 2897,
+              "source_sphere_index": 1,
+              "locally_signed_distance_mm": 14.347953031695186
+            }
+          }
+        },
+        {
+          "scale": 0.95,
+          "eligible": false,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 0.99465,
+            "uncovered_fraction": 0.00535,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0004918417005401462,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.45795852713770985
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.091226701080545,
+              "p50": 0.06740853775012018,
+              "p95": 0.33528091856771686,
+              "p99": 0.448323926967621,
+              "max": 0.45795852713770985
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": 0.45795852713770985
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 0.9951166420875611,
+            "unsigned_distance_mm": {
+              "mean": 7.066154371771414,
+              "p50": 7.07396927199894,
+              "p95": 13.53419667592461,
+              "p99": 14.261326682073419,
+              "max": 14.85625577193254
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.035655250640263,
+              "p50": 7.035962519330033,
+              "p95": 13.502021806369365,
+              "p99": 14.252377906639587,
+              "max": 14.851603183243606
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.070177439737799,
+              "p50": 7.077156603999352,
+              "p95": 13.504691080593833,
+              "p99": 14.26218740413019,
+              "max": 14.851603183243606
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.01298355322805871,
+                -0.02687513785776624,
+                0.002462801215530337
+              ],
+              "closest_mesh_point_m": [
+                -0.009661466545332387,
+                -0.018449732317614247,
+                -0.009313642098030317
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 14.851603183243606
+            }
+          }
+        },
+        {
+          "scale": 0.951,
+          "eligible": false,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 0.99725,
+            "uncovered_fraction": 0.00275,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0002434338091254793,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.4030295551174651
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.08753273285572359,
+              "p50": 0.04843964581677934,
+              "p95": 0.3689628503180837,
+              "p99": 0.3980448612613209,
+              "max": 0.4030295551174651
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": 0.4030295551174651
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 0.9966704095952292,
+            "unsigned_distance_mm": {
+              "mean": 7.104263760609226,
+              "p50": 7.116096500023108,
+              "p95": 13.557697499293363,
+              "p99": 14.280510022271457,
+              "max": 14.875918185024268
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.073869814756593,
+              "p50": 7.080746452346487,
+              "p95": 13.515580923104933,
+              "p99": 14.268167555623744,
+              "max": 14.871246678750474
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.097501016309839,
+              "p50": 7.107912163139818,
+              "p95": 13.523773615200835,
+              "p99": 14.285916053083907,
+              "max": 14.871246678750474
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012983785952948329,
+                -0.026903426876596085,
+                0.0024673008865006493
+              ],
+              "closest_mesh_point_m": [
+                -0.0096568190153669,
+                -0.018466839881226927,
+                -0.00932457058130902
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 14.871246678750474
+            }
+          }
+        },
+        {
+          "scale": 0.952,
+          "eligible": false,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 0.9992,
+            "uncovered_fraction": 0.0008,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.00012479354274086903,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.3481072708506963
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.15390825996548482,
+              "p50": 0.1397401018130677,
+              "p95": 0.34141061572167886,
+              "p99": 0.34676793982489285,
+              "max": 0.3481072708506963
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": 0.3481072708506963
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 0.9988900774633264,
+            "unsigned_distance_mm": {
+              "mean": 7.14260419716034,
+              "p50": 7.15270585944823,
+              "p95": 13.586350944637074,
+              "p99": 14.303768879935085,
+              "max": 14.895580615522714
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.112269918494987,
+              "p50": 7.130574278572971,
+              "p95": 13.550511239610328,
+              "p99": 14.299139557216424,
+              "max": 14.890890174257338
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.120172758704883,
+              "p50": 7.133318176966456,
+              "p95": 13.557628403211137,
+              "p99": 14.30183437074532,
+              "max": 14.890890174257338
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012984018677837949,
+                -0.026931715895425926,
+                0.002471800557470965
+              ],
+              "closest_mesh_point_m": [
+                -0.009652171485401413,
+                -0.018483947444839603,
+                -0.009335499064587723
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 14.890890174257338
+            }
+          }
+        },
+        {
+          "scale": 0.953,
+          "eligible": false,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 0.99955,
+            "uncovered_fraction": 0.00045,
+            "positive_gap_mm_all_samples": {
+              "mean": 9.282005161528953e-05,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.2931916859205963
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.20626678136731005,
+              "p50": 0.2486474786371068,
+              "p95": 0.2897410920798149,
+              "p99": 0.29250156715244,
+              "max": 0.2931916859205963
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": 0.2931916859205963
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 0.9991120442501361,
+            "unsigned_distance_mm": {
+              "mean": 7.1810557126504175,
+              "p50": 7.203264908758268,
+              "p95": 13.615004389980793,
+              "p99": 14.32306456652497,
+              "max": 14.915243063359043
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.150607405238327,
+              "p50": 7.169636771122497,
+              "p95": 13.56831640541558,
+              "p99": 14.317752688406726,
+              "max": 14.910533669764202
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.156962471216203,
+              "p50": 7.171973136404746,
+              "p95": 13.56831640541558,
+              "p99": 14.317752688406726,
+              "max": 14.910533669764202
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012984251402727567,
+                -0.026960004914255768,
+                0.0024763002284412805
+              ],
+              "closest_mesh_point_m": [
+                -0.009647523955435925,
+                -0.01850105500845228,
+                -0.009346427547866425
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 14.910533669764202
+            }
+          }
+        },
+        {
+          "scale": 0.954,
+          "eligible": false,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 0.9996,
+            "uncovered_fraction": 0.0004,
+            "positive_gap_mm_all_samples": {
+              "mean": 6.844917268920142e-05,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.23828281193313816
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.17112293172300355,
+              "p50": 0.19462995536271774,
+              "p95": 0.23536950033577927,
+              "p99": 0.23770014961366637,
+              "max": 0.23828281193313816
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": 0.23828281193313816
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 0.9991120442501361,
+            "unsigned_distance_mm": {
+              "mean": 7.219531121459374,
+              "p50": 7.2434687037729875,
+              "p95": 13.635241050761863,
+              "p99": 14.342410852521724,
+              "max": 14.934905528464766
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.189282397896195,
+              "p50": 7.205442457802549,
+              "p95": 13.590143609401512,
+              "p99": 14.324641879703325,
+              "max": 14.93017716527107
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.195671836077172,
+              "p50": 7.222655831035008,
+              "p95": 13.590143609401512,
+              "p99": 14.324641879703325,
+              "max": 14.93017716527107
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012984484127617187,
+                -0.026988293933085612,
+                0.002480799899411596
+              ],
+              "closest_mesh_point_m": [
+                -0.009642876425470437,
+                -0.01851816257206496,
+                -0.009357356031145129
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 14.93017716527107
+            }
+          }
+        },
+        {
+          "scale": 0.955,
+          "eligible": false,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 0.9996,
+            "uncovered_fraction": 0.0004,
+            "positive_gap_mm_all_samples": {
+              "mean": 4.6565652938186305e-05,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.18338066051713786
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.11641413234546577,
+              "p50": 0.14000826351134518,
+              "p95": 0.18057342897629425,
+              "p99": 0.18281921420896913,
+              "max": 0.18338066051713786
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": 0.18338066051713786
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 0.999112044250136,
+            "unsigned_distance_mm": {
+              "mean": 7.258031176927441,
+              "p50": 7.28113653910408,
+              "p95": 13.660303592972511,
+              "p99": 14.361801591779978,
+              "max": 14.95456801077177
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.228294885441009,
+              "p50": 7.244141491275638,
+              "p95": 13.618740956359572,
+              "p99": 14.348104038928158,
+              "max": 14.949820660777934
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.234718995771955,
+              "p50": 7.258407066399319,
+              "p95": 13.618740956359572,
+              "p99": 14.348104038928158,
+              "max": 14.949820660777934
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012984716852506807,
+                -0.02701658295191545,
+                0.002485299570381915
+              ],
+              "closest_mesh_point_m": [
+                -0.00963822889550495,
+                -0.018535270135677632,
+                -0.009368284514423827
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 14.949820660777934
+            }
+          }
+        },
+        {
+          "scale": 0.956,
+          "eligible": false,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 0.9997,
+            "uncovered_fraction": 0.0003,
+            "positive_gap_mm_all_samples": {
+              "mean": 2.7873357275606454e-05,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.12848524332427502
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.09291119091868819,
+              "p50": 0.1025842670461588,
+              "p95": 0.12655593668496265,
+              "p99": 0.12809938199641255,
+              "max": 0.12848524332427502
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": 0.12848524332427502
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 0.9991120442501363,
+            "unsigned_distance_mm": {
+              "mean": 7.296565836044699,
+              "p50": 7.318710424641653,
+              "p95": 13.692421706243186,
+              "p99": 14.381236590472586,
+              "max": 14.974230510212298
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.266407685818723,
+              "p50": 7.282447451633614,
+              "p95": 13.64733830331764,
+              "p99": 14.365507641390957,
+              "max": 14.969464156284804
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.272865668707236,
+              "p50": 7.297553286547337,
+              "p95": 13.64733830331764,
+              "p99": 14.365507641390957,
+              "max": 14.969464156284804
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012984949577396427,
+                -0.027044871970745298,
+                0.0024897992413522273
+              ],
+              "closest_mesh_point_m": [
+                -0.009633581365539462,
+                -0.01855237769929031,
+                -0.009379212997702533
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 14.969464156284804
+            }
+          }
+        },
+        {
+          "scale": 0.957,
+          "eligible": true,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 0.99975,
+            "uncovered_fraction": 0.00025,
+            "positive_gap_mm_all_samples": {
+              "mean": 1.3288778178770222e-05,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.07359657202919007
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.05315511271508089,
+              "p50": 0.06442368849570584,
+              "p95": 0.07211388362129839,
+              "p99": 0.07330003434761173,
+              "max": 0.07359657202919007
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": 0.07359657202919007
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 0.9991120442501363,
+            "unsigned_distance_mm": {
+              "mean": 7.335110552864002,
+              "p50": 7.3536249171765204,
+              "p95": 13.70299268757023,
+              "p99": 14.400715669403858,
+              "max": 14.993893026718936
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.304809611144145,
+              "p50": 7.317009560501769,
+              "p95": 13.676535214538825,
+              "p99": 14.385364599586396,
+              "max": 14.98910765179167
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.311301723548558,
+              "p50": 7.319953095652985,
+              "p95": 13.676535214538825,
+              "p99": 14.385364599586396,
+              "max": 14.98910765179167
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012985182302286047,
+                -0.02707316098957514,
+                0.002494298912322543
+              ],
+              "closest_mesh_point_m": [
+                -0.009628933835573974,
+                -0.018569485262902988,
+                -0.009390141480981235
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 14.98910765179167
+            }
+          }
+        },
+        {
+          "scale": 0.958,
+          "eligible": true,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 0.9999,
+            "uncovered_fraction": 0.0001,
+            "positive_gap_mm_all_samples": {
+              "mean": 2.007868519201053e-06,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.018714658329463396
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.015160004542331962,
+              "p50": 0.015160004542331962,
+              "p95": 0.018359192950750253,
+              "p99": 0.018643565253720767,
+              "max": 0.018714658329463396
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": 0.018714658329463396
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 0.999334033187602,
+            "unsigned_distance_mm": {
+              "mean": 7.373685951695932,
+              "p50": 7.384014947785404,
+              "p95": 13.731961074163602,
+              "p99": 14.420603497349653,
+              "max": 15.013555560224638
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.343429665768131,
+              "p50": 7.358694389937276,
+              "p95": 13.705738244878422,
+              "p99": 14.41111000790504,
+              "max": 15.008751147298536
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.348323405282817,
+              "p50": 7.358937120997547,
+              "p95": 13.705738244878422,
+              "p99": 14.41111000790504,
+              "max": 15.008751147298536
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012985415027175665,
+                -0.02710145000840498,
+                0.0024987985832928584
+              ],
+              "closest_mesh_point_m": [
+                -0.009624286305608486,
+                -0.018586592826515664,
+                -0.009401069964259937
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 15.008751147298536
+            }
+          }
+        },
+        {
+          "scale": 0.959,
+          "eligible": true,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": -0.03616048605433603
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 0.9995560221250681,
+            "unsigned_distance_mm": {
+              "mean": 7.412326466295014,
+              "p50": 7.417957032669952,
+              "p95": 13.75225149215729,
+              "p99": 14.446916312909828,
+              "max": 15.033218110662702
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.382488308348523,
+              "p50": 7.403327405973392,
+              "p95": 13.728565717574945,
+              "p99": 14.432915068506375,
+              "max": 15.028394642805402
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.385766339663009,
+              "p50": 7.405245252307379,
+              "p95": 13.728565717574945,
+              "p99": 14.432915068506375,
+              "max": 15.028394642805402
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012985647752065285,
+                -0.027129739027234822,
+                0.002503298254263174
+              ],
+              "closest_mesh_point_m": [
+                -0.009619638775643,
+                -0.01860370039012834,
+                -0.009411998447538638
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 15.028394642805402
+            }
+          }
+        },
+        {
+          "scale": 0.96,
+          "eligible": true,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": -0.09102884937856742
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 7.451032145449144,
+              "p50": 7.4632599728514055,
+              "p95": 13.774940245272496,
+              "p99": 14.4655805739906,
+              "max": 15.05288067796678
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.421268736870545,
+              "p50": 7.438129230579766,
+              "p95": 13.759292104819082,
+              "p99": 14.453975291562056,
+              "max": 15.048038138312268
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.421268736870545,
+              "p50": 7.438129230579766,
+              "p95": 13.759292104819082,
+              "p99": 14.453975291562056,
+              "max": 15.048038138312268
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012985880476954906,
+                -0.02715802804606467,
+                0.002507797925233486
+              ],
+              "closest_mesh_point_m": [
+                -0.00961499124567751,
+                -0.018620807953741023,
+                -0.009422926930817343
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 15.048038138312268
+            }
+          }
+        },
+        {
+          "scale": 0.961,
+          "eligible": true,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": -0.14589041987649737
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 7.489774609364656,
+              "p50": 7.502607286276175,
+              "p95": 13.805121494624931,
+              "p99": 14.488363665515749,
+              "max": 15.072543262070859
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.459749744419646,
+              "p50": 7.466963598579296,
+              "p95": 13.779115867324933,
+              "p99": 14.475292361587677,
+              "max": 15.067681633819138
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.459749744419646,
+              "p50": 7.466963598579296,
+              "p95": 13.779115867324933,
+              "p99": 14.475292361587677,
+              "max": 15.067681633819138
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012986113201844524,
+                -0.02718631706489451,
+                0.002512297596203805
+              ],
+              "closest_mesh_point_m": [
+                -0.009610343715712023,
+                -0.018637915517353696,
+                -0.009433855414096044
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 15.067681633819138
+            }
+          }
+        },
+        {
+          "scale": 0.962,
+          "eligible": true,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": -0.20074518575825123
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 7.528525095951527,
+              "p50": 7.5298538592657165,
+              "p95": 13.833273197134071,
+              "p99": 14.51272198173564,
+              "max": 15.092205862909276
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.49838994577822,
+              "p50": 7.510360904886933,
+              "p95": 13.798575954555789,
+              "p99": 14.49514370771322,
+              "max": 15.087325129326004
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.49838994577822,
+              "p50": 7.510360904886933,
+              "p95": 13.798575954555789,
+              "p99": 14.49514370771322,
+              "max": 15.087325129326004
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012986345926734144,
+                -0.027214606083724353,
+                0.002516797267174121
+              ],
+              "closest_mesh_point_m": [
+                -0.009605696185746535,
+                -0.018655023080966372,
+                -0.009444783897374746
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 15.087325129326004
+            }
+          }
+        },
+        {
+          "scale": 0.963,
+          "eligible": true,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": -0.2555931352107854
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 7.567309170147434,
+              "p50": 7.573640803638198,
+              "p95": 13.85891676559321,
+              "p99": 14.53872416511955,
+              "max": 15.111868480416712
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.537413721175718,
+              "p50": 7.54141282448296,
+              "p95": 13.82900451879442,
+              "p99": 14.522188445124595,
+              "max": 15.106968624832868
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.537413721175718,
+              "p50": 7.54141282448296,
+              "p95": 13.82900451879442,
+              "p99": 14.522188445124595,
+              "max": 15.106968624832868
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012986578651623762,
+                -0.027242895102554194,
+                0.0025212969381444364
+              ],
+              "closest_mesh_point_m": [
+                -0.009601048655781047,
+                -0.018672130644579052,
+                -0.00945571238065345
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 15.106968624832868
+            }
+          }
+        },
+        {
+          "scale": 0.964,
+          "eligible": true,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": -0.3104342563978388
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 7.606119974953069,
+              "p50": 7.6097476793205665,
+              "p95": 13.880267655659344,
+              "p99": 14.56483427098825,
+              "max": 15.131531114528185
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.575676028006474,
+              "p50": 7.568277872331594,
+              "p95": 13.848255679740882,
+              "p99": 14.548899694562866,
+              "max": 15.122538228152187
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.575676028006474,
+              "p50": 7.568277872331594,
+              "p95": 13.848255679740882,
+              "p99": 14.548899694562866,
+              "max": 15.122538228152187
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012986811376513386,
+                -0.02727118412138404,
+                0.0025257966091147485
+              ],
+              "closest_mesh_point_m": [
+                -0.00959640112581556,
+                -0.018689238208191728,
+                -0.009466640863932152
+              ],
+              "nearest_triangle_id": 8413,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 15.122538228152187
+            }
+          }
+        },
+        {
+          "scale": 0.965,
+          "eligible": true,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": -0.3652685374598563
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 7.644958518419814,
+              "p50": 7.633782377643177,
+              "p95": 13.9019607339635,
+              "p99": 14.590679219824198,
+              "max": 15.151193765179055
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.613912791031896,
+              "p50": 7.6076348045626965,
+              "p95": 13.870968879867593,
+              "p99": 14.57300716553895,
+              "max": 15.146255615846604
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.613912791031896,
+              "p50": 7.6076348045626965,
+              "p95": 13.870968879867593,
+              "p99": 14.57300716553895,
+              "max": 15.146255615846604
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012987044101403004,
+                -0.027299473140213883,
+                0.0025302962800850676
+              ],
+              "closest_mesh_point_m": [
+                -0.009591753595850072,
+                -0.018706345771804408,
+                -0.009477569347210854
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 15.146255615846604
+            }
+          }
+        },
+        {
+          "scale": 0.966,
+          "eligible": true,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": -0.42009596651400305
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 7.683820938466763,
+              "p50": 7.669452615089094,
+              "p95": 13.922729867216898,
+              "p99": 14.611240237192966,
+              "max": 15.170856432305008
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.653039362976547,
+              "p50": 7.6367444018322574,
+              "p95": 13.88723640583405,
+              "p99": 14.602655681412513,
+              "max": 15.165899111353468
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.653039362976547,
+              "p50": 7.6367444018322574,
+              "p95": 13.88723640583405,
+              "p99": 14.602655681412513,
+              "max": 15.165899111353468
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012987276826292622,
+                -0.027327762159043725,
+                0.0025347959510553797
+              ],
+              "closest_mesh_point_m": [
+                -0.009587106065884584,
+                -0.018723453335417084,
+                -0.009488497830489558
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 15.165899111353468
+            }
+          }
+        },
+        {
+          "scale": 0.967,
+          "eligible": true,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": -0.47491653165407377
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 7.722709873760142,
+              "p50": 7.696606222889683,
+              "p95": 13.937954244801505,
+              "p99": 14.632366290073906,
+              "max": 15.190519115842063
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.6919631971789615,
+              "p50": 7.665853999101812,
+              "p95": 13.91340252393726,
+              "p99": 14.629533674837335,
+              "max": 15.185542606860329
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.6919631971789615,
+              "p50": 7.665853999101812,
+              "p95": 13.91340252393726,
+              "p99": 14.629533674837335,
+              "max": 15.185542606860329
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012987509551182242,
+                -0.027356051177873562,
+                0.0025392956220256953
+              ],
+              "closest_mesh_point_m": [
+                -0.009582458535919098,
+                -0.018740560899029757,
+                -0.009499426313768256
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 15.185542606860329
+            }
+          }
+        },
+        {
+          "scale": 0.968,
+          "eligible": true,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": -0.5297302209504793
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 7.761620604462389,
+              "p50": 7.737441381851865,
+              "p95": 13.970216529620114,
+              "p99": 14.656678301993034,
+              "max": 15.21018181572659
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.730745224204966,
+              "p50": 7.694163285824921,
+              "p95": 13.926792375426725,
+              "p99": 14.650356163159403,
+              "max": 15.2051861023672
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.730745224204966,
+              "p50": 7.694163285824921,
+              "p95": 13.926792375426725,
+              "p99": 14.650356163159403,
+              "max": 15.2051861023672
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012987742276071863,
+                -0.02738434019670341,
+                0.002543795292996011
+              ],
+              "closest_mesh_point_m": [
+                -0.009577811005953608,
+                -0.01875766846264244,
+                -0.009510354797046962
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 15.2051861023672
+            }
+          }
+        },
+        {
+          "scale": 0.969,
+          "eligible": true,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": -0.5845370224501698
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 7.800555271361759,
+              "p50": 7.7662538084659625,
+              "p95": 13.99062453214142,
+              "p99": 14.681011058965733,
+              "max": 15.22984453189526
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.769435837967879,
+              "p50": 7.733921458855916,
+              "p95": 13.953322814123693,
+              "p99": 14.66991412614262,
+              "max": 15.224829597874068
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.769435837967879,
+              "p50": 7.733921458855916,
+              "p95": 13.953322814123693,
+              "p99": 14.66991412614262,
+              "max": 15.224829597874068
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012987975000961483,
+                -0.027412629215533255,
+                0.0025482949639663265
+              ],
+              "closest_mesh_point_m": [
+                -0.009573163475988121,
+                -0.018774776026255116,
+                -0.009521283280325664
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 15.224829597874068
+            }
+          }
+        },
+        {
+          "scale": 0.97,
+          "eligible": true,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.03117049362557649,
+                -0.0007089635764634302,
+                0.03052507017994496
+              ],
+              "signed_sdf_mm": -0.6393369241766214
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 7.839514700028496,
+              "p50": 7.7916623258078515,
+              "p95": 14.009834378713341,
+              "p99": 14.707382764239803,
+              "max": 15.249507264285084
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 7.807509139170643,
+              "p50": 7.750730970565321,
+              "p95": 13.983331894192915,
+              "p99": 14.689472089125834,
+              "max": 15.244473093380932
+            },
+            "overreach_mm_outside_only": {
+              "mean": 7.807509139170643,
+              "p50": 7.750730970565321,
+              "p95": 13.983331894192915,
+              "p99": 14.689472089125834,
+              "max": 15.244473093380932
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.012988207725851101,
+                -0.027440918234363097,
+                0.002552794634936642
+              ],
+              "closest_mesh_point_m": [
+                -0.009568515946022633,
+                -0.018791883589867792,
+                -0.009532211763604368
+              ],
+              "nearest_triangle_id": 2896,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 15.244473093380932
+            }
+          }
+        },
+        {
+          "scale": 1.0,
+          "eligible": true,
+          "sphere_count": 4,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                -0.0514530325129442,
+                -0.0014116341572239506,
+                0.006734723704350239
+              ],
+              "signed_sdf_mm": -2.006065257504602
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 7999,
+            "exposed_sample_count": 4505,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 9.018691402872369,
+              "p50": 8.821331251936558,
+              "p95": 14.972935656690776,
+              "p99": 15.426736250248648,
+              "max": 15.885869703754391
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 8.985259192324872,
+              "p50": 8.79219851575516,
+              "p95": 14.942508828026792,
+              "p99": 15.42673625024865,
+              "max": 15.885869703754391
+            },
+            "overreach_mm_outside_only": {
+              "mean": 8.985259192324872,
+              "p50": 8.79219851575516,
+              "p95": 14.942508828026792,
+              "p99": 15.42673625024865,
+              "max": 15.885869703754391
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.007502559259369583,
+                0.03065064884408142,
+                0.003517660404582356
+              ],
+              "closest_mesh_point_m": [
+                -0.0038174347872246394,
+                0.017236846683924546,
+                0.011189076537059525
+              ],
+              "nearest_triangle_id": 6225,
+              "source_sphere_index": 0,
+              "locally_signed_distance_mm": 15.885869703754391
+            }
+          }
+        }
+      ]
+    },
+    {
+      "depth": 2,
+      "sphere_count": 16,
+      "best_eligible_scale": 0.956,
+      "results": [
+        {
+          "scale": 0.923063887,
+          "eligible": false,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 0.9205,
+            "uncovered_fraction": 0.0795,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.04030516687669529,
+              "p50": 0.0,
+              "p95": 0.30965301457089134,
+              "p99": 0.9653255741450434,
+              "max": 1.9089450277077133
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.5069319212801496,
+              "p50": 0.4158883069565701,
+              "p95": 1.275129685122257,
+              "p99": 1.720652317914657,
+              "max": 1.9089450277077133
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": 1.9089450277077133
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 0.9377619564289962,
+            "unsigned_distance_mm": {
+              "mean": 2.8827628729444505,
+              "p50": 2.5444942109888276,
+              "p95": 6.9075649245997965,
+              "p99": 9.237341240390705,
+              "max": 10.120585854013704
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.8493663639255082,
+              "p50": 2.531653918844796,
+              "p95": 6.907338344621222,
+              "p99": 9.237341240390705,
+              "max": 10.097040046396241
+            },
+            "overreach_mm_outside_only": {
+              "mean": 3.0384693710712782,
+              "p50": 2.649886052350322,
+              "p95": 6.994462219312364,
+              "p99": 9.261661050042685,
+              "max": 10.097040046396241
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014243178768299673,
+                0.01928357525661881,
+                0.0019660878630056305
+              ],
+              "closest_mesh_point_m": [
+                -0.011321530988600361,
+                0.013162446201991534,
+                -0.005545370808679794
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.097040046396241
+            }
+          }
+        },
+        {
+          "scale": 0.95,
+          "eligible": false,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 0.99825,
+            "uncovered_fraction": 0.00175,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0003026502330715448,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.3835659375289874
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.17261022713509727,
+              "p50": 0.21131600537716358,
+              "p95": 0.34619641358881836,
+              "p99": 0.37548514753642914,
+              "max": 0.3835659375289874
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": 0.3835659375289874
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 0.9984436776737552,
+            "unsigned_distance_mm": {
+              "mean": 3.7541278643178777,
+              "p50": 3.619871399393213,
+              "p95": 7.174489170950353,
+              "p99": 9.62625769851239,
+              "max": 10.561531068552084
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 3.7470036309426233,
+              "p50": 3.6060806780734436,
+              "p95": 7.167820944054706,
+              "p99": 9.626257698512392,
+              "max": 10.55553442614004
+            },
+            "overreach_mm_outside_only": {
+              "mean": 3.7528424744785,
+              "p50": 3.6085263948898016,
+              "p95": 7.167820944054706,
+              "p99": 9.626257698512392,
+              "max": 10.55553442614004
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.0142863877868517,
+                0.019846309778283475,
+                0.002076333684420867
+              ],
+              "closest_mesh_point_m": [
+                -0.011401302830570878,
+                0.013181103316308274,
+                -0.005591602552030047
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.55553442614004
+            }
+          }
+        },
+        {
+          "scale": 0.951,
+          "eligible": false,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 0.9988,
+            "uncovered_fraction": 0.0012,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.00021915263906353567,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.32702266072653574
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.18257728786124008,
+              "p50": 0.19662262785399148,
+              "p95": 0.30109879835332265,
+              "p99": 0.3217149468121009,
+              "max": 0.32702266072653574
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": 0.32702266072653574
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 3.7889051092294372,
+              "p50": 3.6583714970633165,
+              "p95": 7.185256210671265,
+              "p99": 9.641281737423972,
+              "max": 10.578132987748047
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 3.7804333440477302,
+              "p50": 3.6466754065796834,
+              "p95": 7.1760636112654375,
+              "p99": 9.641281737423974,
+              "max": 10.572555975602052
+            },
+            "overreach_mm_outside_only": {
+              "mean": 3.7804333440477302,
+              "p50": 3.6466754065796834,
+              "p95": 7.1760636112654375,
+              "p99": 9.641281737423974,
+              "max": 10.572555975602052
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014287991916540049,
+                0.019867201230649476,
+                0.002080426547463699
+              ],
+              "closest_mesh_point_m": [
+                -0.011404264350741607,
+                0.013181795959464202,
+                -0.0055933189000179784
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.572555975602052
+            }
+          }
+        },
+        {
+          "scale": 0.952,
+          "eligible": false,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 0.999,
+            "uncovered_fraction": 0.001,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.00015954770162783117,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.2704857590528423
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.15954770162783116,
+              "p50": 0.15819152910831297,
+              "p95": 0.24921956654212138,
+              "p99": 0.26623252055069807,
+              "max": 0.2704857590528423
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": 0.2704857590528423
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 3.8237387637449545,
+              "p50": 3.698732588909627,
+              "p95": 7.19602325039218,
+              "p99": 9.656305776335559,
+              "max": 10.594750759864358
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 3.815571714687494,
+              "p50": 3.6922769219392593,
+              "p95": 7.184306278476165,
+              "p99": 9.656305776335559,
+              "max": 10.589577525064062
+            },
+            "overreach_mm_outside_only": {
+              "mean": 3.815571714687494,
+              "p50": 3.6922769219392593,
+              "p95": 7.184306278476165,
+              "p99": 9.656305776335559,
+              "max": 10.589577525064062
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014289596046228398,
+                0.019888092683015474,
+                0.0020845194105065315
+              ],
+              "closest_mesh_point_m": [
+                -0.011407225870912334,
+                0.01318248860262013,
+                -0.00559503524800591
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.589577525064062
+            }
+          }
+        },
+        {
+          "scale": 0.953,
+          "eligible": false,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 0.9991,
+            "uncovered_fraction": 0.0009,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.00010605095730494285,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.21395525401234766
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.11783439700549204,
+              "p50": 0.11344667265997081,
+              "p95": 0.1955167385343405,
+              "p99": 0.2102675509167462,
+              "max": 0.21395525401234766
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": 0.21395525401234766
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 3.85860370935051,
+              "p50": 3.737899177300728,
+              "p95": 7.20679029011309,
+              "p99": 9.671329815247148,
+              "max": 10.611384310422451
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 3.8503781286161147,
+              "p50": 3.7291749079771193,
+              "p95": 7.192548945686899,
+              "p99": 9.67132981524715,
+              "max": 10.60659907452607
+            },
+            "overreach_mm_outside_only": {
+              "mean": 3.8503781286161147,
+              "p50": 3.7291749079771193,
+              "p95": 7.192548945686899,
+              "p99": 9.67132981524715,
+              "max": 10.60659907452607
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014291200175916745,
+                0.019908984135381474,
+                0.0020886122735493604
+              ],
+              "closest_mesh_point_m": [
+                -0.011410187391083062,
+                0.013183181245776058,
+                -0.005596751595993842
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.60659907452607
+            }
+          }
+        },
+        {
+          "scale": 0.954,
+          "eligible": false,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 0.99925,
+            "uncovered_fraction": 0.00075,
+            "positive_gap_mm_all_samples": {
+              "mean": 5.727433055488905e-05,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.1574311672016132
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.07614048446718512,
+              "p50": 0.07589854990437683,
+              "p95": 0.14273275727283566,
+              "p99": 0.15449148521585768,
+              "max": 0.1574311672016132
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": 0.1574311672016132
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 3.8934902565409226,
+              "p50": 3.7778223066236323,
+              "p95": 7.217557329834004,
+              "p99": 9.686353854158744,
+              "max": 10.62803356533953
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 3.8854399986476085,
+              "p50": 3.7695262636923923,
+              "p95": 7.200791612897625,
+              "p99": 9.686353854158744,
+              "max": 10.623620623988083
+            },
+            "overreach_mm_outside_only": {
+              "mean": 3.8854399986476085,
+              "p50": 3.7695262636923923,
+              "p95": 7.200791612897625,
+              "p99": 9.686353854158744,
+              "max": 10.623620623988083
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014292804305605096,
+                0.019929875587747472,
+                0.002092705136592196
+              ],
+              "closest_mesh_point_m": [
+                -0.01141314891125379,
+                0.013183873888931986,
+                -0.005598467943981773
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.623620623988083
+            }
+          }
+        },
+        {
+          "scale": 0.955,
+          "eligible": false,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 0.9996,
+            "uncovered_fraction": 0.0004,
+            "positive_gap_mm_all_samples": {
+              "mean": 2.2371158422117462e-05,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.10091352030974429
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.05553953191037714,
+              "p50": 0.05242414136379103,
+              "p95": 0.0938079837095429,
+              "p99": 0.09949241298970402,
+              "max": 0.10091352030974429
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": 0.10091352030974429
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 3.9284063686722983,
+              "p50": 3.825456531484224,
+              "p95": 7.2283243695549215,
+              "p99": 9.701377893070331,
+              "max": 10.64469845092655
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 3.9200028187519305,
+              "p50": 3.801944353517193,
+              "p95": 7.228324369554921,
+              "p99": 9.701377893070333,
+              "max": 10.640642173450097
+            },
+            "overreach_mm_outside_only": {
+              "mean": 3.9200028187519305,
+              "p50": 3.801944353517193,
+              "p95": 7.228324369554921,
+              "p99": 9.701377893070333,
+              "max": 10.640642173450097
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014294408435293445,
+                0.019950767040113473,
+                0.0020967979996350285
+              ],
+              "closest_mesh_point_m": [
+                -0.011416110431424518,
+                0.013184566532087912,
+                -0.005600184291969705
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.640642173450097
+            }
+          }
+        },
+        {
+          "scale": 0.956,
+          "eligible": true,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 0.9999,
+            "uncovered_fraction": 0.0001,
+            "positive_gap_mm_all_samples": {
+              "mean": 4.297650876940347e-06,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0444023351189142
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.03460044484803089,
+              "p50": 0.03460044484803089,
+              "p95": 0.04342214609182586,
+              "p99": 0.04420629731349653,
+              "max": 0.0444023351189142
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": 0.0444023351189142
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 3.963347526485808,
+              "p50": 3.868294307912507,
+              "p95": 7.239091409275829,
+              "p99": 9.716401931981919,
+              "max": 10.66137889388623
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 3.9543257520168185,
+              "p50": 3.842546340481924,
+              "p95": 7.2390914092758285,
+              "p99": 9.716401931981919,
+              "max": 10.657663722912103
+            },
+            "overreach_mm_outside_only": {
+              "mean": 3.9543257520168185,
+              "p50": 3.842546340481924,
+              "p95": 7.2390914092758285,
+              "p99": 9.716401931981919,
+              "max": 10.657663722912103
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014296012564981794,
+                0.01997165849247947,
+                0.0021008908626778573
+              ],
+              "closest_mesh_point_m": [
+                -0.011419071951595246,
+                0.01318525917524384,
+                -0.005601900639957637
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.657663722912103
+            }
+          }
+        },
+        {
+          "scale": 0.957,
+          "eligible": true,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": -0.01210236649518831
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 3.9983075162847768,
+              "p50": 3.9009091040574067,
+              "p95": 7.249858448996743,
+              "p99": 9.731235894330231,
+              "max": 10.678074821311096
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 3.989630380459924,
+              "p50": 3.8914941359460284,
+              "p95": 7.249858448996743,
+              "p99": 9.731235894330231,
+              "max": 10.674685272374115
+            },
+            "overreach_mm_outside_only": {
+              "mean": 3.989630380459924,
+              "p50": 3.8914941359460284,
+              "p95": 7.249858448996743,
+              "p99": 9.731235894330231,
+              "max": 10.674685272374115
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014297616694670142,
+                0.01999254994484547,
+                0.0021049837257206896
+              ],
+              "closest_mesh_point_m": [
+                -0.011422033471765973,
+                0.013185951818399768,
+                -0.005603616987945568
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.674685272374115
+            }
+          }
+        },
+        {
+          "scale": 0.958,
+          "eligible": true,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": -0.0686005625628941
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 4.033297508477126,
+              "p50": 3.941519895700847,
+              "p95": 7.260625488717649,
+              "p99": 9.745414412850984,
+              "max": 10.694786160681456
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 4.023122986960534,
+              "p50": 3.9317280429103723,
+              "p95": 7.260625488717649,
+              "p99": 9.745414412850984,
+              "max": 10.691706821836119
+            },
+            "overreach_mm_outside_only": {
+              "mean": 4.023122986960534,
+              "p50": 3.9317280429103723,
+              "p95": 7.260625488717649,
+              "p99": 9.745414412850984,
+              "max": 10.691706821836119
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.01429922082435849,
+                0.020013441397211465,
+                0.0021090765887635185
+              ],
+              "closest_mesh_point_m": [
+                -0.011424994991936704,
+                0.013186644461555696,
+                -0.0056053333359335
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.691706821836119
+            }
+          }
+        },
+        {
+          "scale": 0.959,
+          "eligible": true,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": -0.12509223102007486
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 4.068315858152168,
+              "p50": 3.985129760955419,
+              "p95": 7.271392528438571,
+              "p99": 9.759592931371749,
+              "max": 10.711512839863468
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 4.059932359049441,
+              "p50": 3.973785595753807,
+              "p95": 7.271392528438569,
+              "p99": 9.759592931371749,
+              "max": 10.70872837129814
+            },
+            "overreach_mm_outside_only": {
+              "mean": 4.059932359049441,
+              "p50": 3.973785595753807,
+              "p95": 7.271392528438569,
+              "p99": 9.759592931371749,
+              "max": 10.70872837129814
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014300824954046842,
+                0.02003433284957747,
+                0.0021131694518063578
+              ],
+              "closest_mesh_point_m": [
+                -0.011427956512107429,
+                0.013187337104711622,
+                -0.005607049683921431
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.70872837129814
+            }
+          }
+        },
+        {
+          "scale": 0.96,
+          "eligible": true,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": -0.1815773497076366
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 4.103360499601436,
+              "p50": 4.0285982335738675,
+              "p95": 7.282159568159481,
+              "p99": 9.773771449892502,
+              "max": 10.728254787107105
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 4.094707998422954,
+              "p50": 4.006104573448171,
+              "p95": 7.282159568159481,
+              "p99": 9.7737714498925,
+              "max": 10.725749920760148
+            },
+            "overreach_mm_outside_only": {
+              "mean": 4.094707998422954,
+              "p50": 4.006104573448171,
+              "p95": 7.282159568159481,
+              "p99": 9.7737714498925,
+              "max": 10.725749920760148
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.01430242908373519,
+                0.02005522430194347,
+                0.0021172623148491866
+              ],
+              "closest_mesh_point_m": [
+                -0.01143091803227816,
+                0.01318802974786755,
+                -0.005608766031909364
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.725749920760148
+            }
+          }
+        },
+        {
+          "scale": 0.961,
+          "eligible": true,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": -0.2380558963710755
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 4.138430256242191,
+              "p50": 4.05200705391264,
+              "p95": 7.29292660788039,
+              "p99": 9.787949968413258,
+              "max": 10.74501193104426
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 4.129679768465967,
+              "p50": 4.041349952602212,
+              "p95": 7.29292660788039,
+              "p99": 9.787949968413256,
+              "max": 10.742771470222154
+            },
+            "overreach_mm_outside_only": {
+              "mean": 4.129679768465967,
+              "p50": 4.041349952602212,
+              "p95": 7.29292660788039,
+              "p99": 9.787949968413256,
+              "max": 10.742771470222154
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014304033213423538,
+                0.020076115754309468,
+                0.0021213551778920155
+              ],
+              "closest_mesh_point_m": [
+                -0.011433879552448888,
+                0.013188722391023477,
+                -0.005610482379897296
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.742771470222154
+            }
+          }
+        },
+        {
+          "scale": 0.962,
+          "eligible": true,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": -0.29452784865997145
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 4.173522651662552,
+              "p50": 4.090443911530697,
+              "p95": 7.303693647601304,
+              "p99": 9.802129396922023,
+              "max": 10.76178420068675
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 4.164830005010027,
+              "p50": 4.07916645746572,
+              "p95": 7.303693647601304,
+              "p99": 9.802128486934015,
+              "max": 10.759793019684166
+            },
+            "overreach_mm_outside_only": {
+              "mean": 4.164830005010027,
+              "p50": 4.07916645746572,
+              "p95": 7.303693647601304,
+              "p99": 9.802128486934015,
+              "max": 10.759793019684166
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014305637343111887,
+                0.020097007206675465,
+                0.002125448040934848
+              ],
+              "closest_mesh_point_m": [
+                -0.011436841072619615,
+                0.013189415034179405,
+                -0.0056121987278852275
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.759793019684166
+            }
+          }
+        },
+        {
+          "scale": 0.963,
+          "eligible": true,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": -0.3509931841275196
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 4.208647761227206,
+              "p50": 4.131854959102004,
+              "p95": 7.3144606873222155,
+              "p99": 9.816342107068108,
+              "max": 10.778571525424365
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 4.199355558185952,
+              "p50": 4.11960111243055,
+              "p95": 7.314460687322214,
+              "p99": 9.81630700545477,
+              "max": 10.776814569146175
+            },
+            "overreach_mm_outside_only": {
+              "mean": 4.199355558185952,
+              "p50": 4.11960111243055,
+              "p95": 7.314460687322214,
+              "p99": 9.81630700545477,
+              "max": 10.776814569146175
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014307241472800238,
+                0.020117898659041462,
+                0.00212954090397768
+              ],
+              "closest_mesh_point_m": [
+                -0.011439802592790344,
+                0.013190107677335333,
+                -0.005613915075873159
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.776814569146175
+            }
+          }
+        },
+        {
+          "scale": 0.964,
+          "eligible": true,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": -0.4074518802300031
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 4.243786242983781,
+              "p50": 4.181672833623375,
+              "p95": 7.325227727043123,
+              "p99": 9.830604076795302,
+              "max": 10.795373835022911
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 4.234580889291394,
+              "p50": 4.1670705617452075,
+              "p95": 7.325227727043122,
+              "p99": 9.830485523975524,
+              "max": 10.793836118608183
+            },
+            "overreach_mm_outside_only": {
+              "mean": 4.234580889291394,
+              "p50": 4.1670705617452075,
+              "p95": 7.325227727043122,
+              "p99": 9.830485523975524,
+              "max": 10.793836118608183
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014308845602488587,
+                0.020138790111407463,
+                0.002133633767020509
+              ],
+              "closest_mesh_point_m": [
+                -0.011442764112961074,
+                0.013190800320491261,
+                -0.0056156314238610915
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.793836118608183
+            }
+          }
+        },
+        {
+          "scale": 0.965,
+          "eligible": true,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": -0.46390391432635236
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 4.278962063061721,
+              "p50": 4.220573004683169,
+              "p95": 7.335994766764046,
+              "p99": 9.844915092021928,
+              "max": 10.812191059622297
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 4.269935984744097,
+              "p50": 4.208899889252349,
+              "p95": 7.335994766764046,
+              "p99": 9.844664042496287,
+              "max": 10.810857668070204
+            },
+            "overreach_mm_outside_only": {
+              "mean": 4.269935984744097,
+              "p50": 4.208899889252349,
+              "p95": 7.335994766764046,
+              "p99": 9.844664042496287,
+              "max": 10.810857668070204
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014310449732176937,
+                0.020159681563773468,
+                0.0021377266300633482
+              ],
+              "closest_mesh_point_m": [
+                -0.0114457256331318,
+                0.013191492963647187,
+                -0.005617347771849022
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.810857668070204
+            }
+          }
+        },
+        {
+          "scale": 0.966,
+          "eligible": true,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": -0.520349263677583
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 4.314157734254442,
+              "p50": 4.260611273533316,
+              "p95": 7.3467618064849525,
+              "p99": 9.8592749391752,
+              "max": 10.829023129734534
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 4.304707759988477,
+              "p50": 4.251023126824177,
+              "p95": 7.3467618064849525,
+              "p99": 9.858842561017042,
+              "max": 10.82787921753221
+            },
+            "overreach_mm_outside_only": {
+              "mean": 4.304707759988477,
+              "p50": 4.251023126824177,
+              "p95": 7.3467618064849525,
+              "p99": 9.858842561017042,
+              "max": 10.82787921753221
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014312053861865286,
+                0.02018057301613946,
+                0.002141819493106177
+              ],
+              "closest_mesh_point_m": [
+                -0.01144868715330253,
+                0.013192185606803115,
+                -0.005619064119836955
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.82787921753221
+            }
+          }
+        },
+        {
+          "scale": 0.967,
+          "eligible": true,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": -0.5767879054463833
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 4.349373756246223,
+              "p50": 4.302152475276357,
+              "p95": 7.357528846205865,
+              "p99": 9.873683405198172,
+              "max": 10.845869976241891
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 4.339906803009048,
+              "p50": 4.292509636302594,
+              "p95": 7.357528846205863,
+              "p99": 9.873021079537795,
+              "max": 10.844900766994218
+            },
+            "overreach_mm_outside_only": {
+              "mean": 4.339906803009048,
+              "p50": 4.292509636302594,
+              "p95": 7.357528846205863,
+              "p99": 9.873021079537795,
+              "max": 10.844900766994218
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014313657991553635,
+                0.020201464468505462,
+                0.002145912356149006
+              ],
+              "closest_mesh_point_m": [
+                -0.011451648673473258,
+                0.013192878249959043,
+                -0.005620780467824887
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.844900766994218
+            }
+          }
+        },
+        {
+          "scale": 0.968,
+          "eligible": true,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": -0.6332198166965307
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 4.38461923725801,
+              "p50": 4.349614494728467,
+              "p95": 7.368295885926779,
+              "p99": 9.88814027755644,
+              "max": 10.862731530394893
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 4.375044220327047,
+              "p50": 4.337903971362885,
+              "p95": 7.368295885926779,
+              "p99": 9.88719959805855,
+              "max": 10.861922316456225
+            },
+            "overreach_mm_outside_only": {
+              "mean": 4.375044220327047,
+              "p50": 4.337903971362885,
+              "p95": 7.368295885926779,
+              "p99": 9.88719959805855,
+              "max": 10.861922316456225
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014315262121241982,
+                0.02022235592087146,
+                0.002150005219191835
+              ],
+              "closest_mesh_point_m": [
+                -0.011454610193643987,
+                0.01319357089311497,
+                -0.005622496815812819
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.861922316456225
+            }
+          }
+        },
+        {
+          "scale": 0.969,
+          "eligible": true,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": -0.689644974392438
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 4.419884000673795,
+              "p50": 4.391414578666783,
+              "p95": 7.379062925647687,
+              "p99": 9.902615915220728,
+              "max": 10.879607723810455
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 4.41047401022435,
+              "p50": 4.380091008086601,
+              "p95": 7.379062925647686,
+              "p99": 9.902615915220725,
+              "max": 10.878943865918238
+            },
+            "overreach_mm_outside_only": {
+              "mean": 4.41047401022435,
+              "p50": 4.380091008086601,
+              "p95": 7.379062925647686,
+              "p99": 9.902615915220725,
+              "max": 10.878943865918238
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014316866250930331,
+                0.02024324737323746,
+                0.0021540980822346706
+              ],
+              "closest_mesh_point_m": [
+                -0.011457571713814714,
+                0.013194263536270899,
+                -0.005624213163800749
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.878943865918238
+            }
+          }
+        },
+        {
+          "scale": 0.97,
+          "eligible": true,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": -0.7460633553986219
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 4.455171212862813,
+              "p50": 4.429053767081659,
+              "p95": 7.389829965368604,
+              "p99": 9.917091822434546,
+              "max": 10.89649848846992
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 4.44525869056729,
+              "p50": 4.4165135132764535,
+              "p95": 7.3898299653686035,
+              "p99": 9.917091822434546,
+              "max": 10.895965415380248
+            },
+            "overreach_mm_outside_only": {
+              "mean": 4.44525869056729,
+              "p50": 4.4165135132764535,
+              "p95": 7.3898299653686035,
+              "p99": 9.917091822434546,
+              "max": 10.895965415380248
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.014318470380618682,
+                0.020264138825603458,
+                0.002158190945277503
+              ],
+              "closest_mesh_point_m": [
+                -0.011460533233985442,
+                0.013194956179426827,
+                -0.005625929511788682
+              ],
+              "nearest_triangle_id": 215,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 10.895965415380248
+            }
+          }
+        },
+        {
+          "scale": 1.0,
+          "eligible": true,
+          "sphere_count": 16,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.014594857199300731,
+                0.003239682289450887,
+                0.0016850992347011077
+              ],
+              "signed_sdf_mm": -1.7905044468822102
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 1928,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 5.52361530153432,
+              "p50": 5.503116449568051,
+              "p95": 7.870055582939758,
+              "p99": 10.319547086769546,
+              "max": 11.289521595506423
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 5.508498157745048,
+              "p50": 5.497400649035846,
+              "p95": 7.869967828894765,
+              "p99": 10.319547086769544,
+              "max": 11.289521595506422
+            },
+            "overreach_mm_outside_only": {
+              "mean": 5.508498157745048,
+              "p50": 5.497400649035846,
+              "p95": 7.869967828894765,
+              "p99": 10.319547086769544,
+              "max": 11.289521595506422
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.018150458298772234,
+                0.018979705856403604,
+                0.0022429536248276503
+              ],
+              "closest_mesh_point_m": [
+                -0.0151233680508115,
+                0.012279579164406139,
+                -0.006324328604519649
+              ],
+              "nearest_triangle_id": 5764,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 11.289521595506422
+            }
+          }
+        }
+      ]
+    },
+    {
+      "depth": 3,
+      "sphere_count": 64,
+      "best_eligible_scale": 0.962,
+      "results": [
+        {
+          "scale": 0.923063887,
+          "eligible": false,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 0.67415,
+            "uncovered_fraction": 0.32585,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.2238426547578449,
+              "p50": 0.0,
+              "p95": 1.196210103470526,
+              "p99": 1.603535839353973,
+              "max": 1.9962117610430943
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.6868981895869477,
+              "p50": 0.6156137397227424,
+              "p95": 1.5273264769311408,
+              "p99": 1.7293064828224716,
+              "max": 1.9962117610430943
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0258482013693772,
+                -0.0034038004952379906,
+                -0.04149787466092945
+              ],
+              "signed_sdf_mm": 1.9962117610430943
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 0.7188042826931157,
+            "unsigned_distance_mm": {
+              "mean": 1.5698210060139892,
+              "p50": 1.3327047990583343,
+              "p95": 3.6692740682239946,
+              "p99": 4.23512603860338,
+              "max": 4.704633350848009
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 1.3919938141765014,
+              "p50": 1.1233071067790044,
+              "p95": 3.665528918833091,
+              "p99": 4.22776363718577,
+              "max": 4.70463335084801
+            },
+            "overreach_mm_outside_only": {
+              "mean": 1.9365122975805626,
+              "p50": 1.9398518707027312,
+              "p95": 3.7934341187864185,
+              "p99": 4.432000807366956,
+              "max": 4.70463335084801
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.02607219875475207,
+                0.02372020510591362,
+                -0.013127571886151497
+              ],
+              "closest_mesh_point_m": [
+                -0.02520039203288562,
+                0.02201681350220107,
+                -0.017425476614041754
+              ],
+              "nearest_triangle_id": 5996,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 4.70463335084801
+            }
+          }
+        },
+        {
+          "scale": 0.95,
+          "eligible": false,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 0.9825,
+            "uncovered_fraction": 0.0175,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0022759228507821523,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0806287959459963,
+              "max": 0.644823158891604
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.129736025740598,
+              "p50": 0.09829092072998619,
+              "p95": 0.34851300314355343,
+              "p99": 0.48181814673058665,
+              "max": 0.644823158891604
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030801933718498847,
+                -0.004463341697292481,
+                0.029439980231309462
+              ],
+              "signed_sdf_mm": 0.644823158891604
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 0.9826208519061594,
+            "unsigned_distance_mm": {
+              "mean": 2.0675442404932673,
+              "p50": 2.01494235757875,
+              "p95": 3.8732630685787397,
+              "p99": 4.531222754893378,
+              "max": 4.979351951087105
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.063035371950514,
+              "p50": 2.012082447607674,
+              "p95": 3.87326306857874,
+              "p99": 4.531222754893379,
+              "max": 4.979351951087105
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.099523298277752,
+              "p50": 2.069444178638889,
+              "p95": 3.909092801967307,
+              "p99": 4.531222754893379,
+              "max": 4.979351951087105
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.02685372653494903,
+                0.023837225723269528,
+                -0.01303176306634574
+              ],
+              "closest_mesh_point_m": [
+                -0.025931012228059613,
+                0.022034367631494394,
+                -0.017580636208298313
+              ],
+              "nearest_triangle_id": 5996,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 4.979351951087105
+            }
+          }
+        },
+        {
+          "scale": 0.951,
+          "eligible": false,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 0.98855,
+            "uncovered_fraction": 0.01145,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0014018716564503939,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.022904645878454404,
+              "max": 0.5975389360383005
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.12185551910358863,
+              "p50": 0.09180784152844693,
+              "p95": 0.30856319897870704,
+              "p99": 0.4440491032857933,
+              "max": 0.5975389360383005
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030801933718498847,
+                -0.004463341697292481,
+                0.029439980231309462
+              ],
+              "signed_sdf_mm": 0.5975389360383005
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 0.9869660885042398,
+            "unsigned_distance_mm": {
+              "mean": 2.097593517239138,
+              "p50": 2.04547732907802,
+              "p95": 3.8895727728097307,
+              "p99": 4.541587074754034,
+              "max": 4.980396385320317
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.093656223817229,
+              "p50": 2.0421099536133105,
+              "p95": 3.889532417432237,
+              "p99": 4.541587074754034,
+              "max": 4.980396385320317
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.121305127099344,
+              "p50": 2.0819295541405864,
+              "p95": 3.889532417432237,
+              "p99": 4.541587074754034,
+              "max": 4.980396385320317
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.026868559442266952,
+                0.02386231813978814,
+                -0.01304357346304056
+              ],
+              "closest_mesh_point_m": [
+                -0.02594565159324212,
+                0.022059081893038793,
+                -0.017593400744985378
+              ],
+              "nearest_triangle_id": 5996,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 4.980396385320317
+            }
+          }
+        },
+        {
+          "scale": 0.952,
+          "eligible": false,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 0.99235,
+            "uncovered_fraction": 0.00765,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0008443710925240504,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.5417308747320098
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.11006230070891429,
+              "p50": 0.07843347919335095,
+              "p95": 0.2712305728674522,
+              "p99": 0.4575769651315582,
+              "max": 0.5417308747320098
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030801933718498847,
+                -0.004463341697292481,
+                0.029439980231309462
+              ],
+              "signed_sdf_mm": 0.5417308747320098
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 0.9927655783701016,
+            "unsigned_distance_mm": {
+              "mean": 2.1285144129293316,
+              "p50": 2.0766610998020405,
+              "p95": 3.9214713806951953,
+              "p99": 4.551951394614682,
+              "max": 4.981440819553526
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.1251325350851844,
+              "p50": 2.0759209205299105,
+              "p95": 3.9214303057525934,
+              "p99": 4.551951394614683,
+              "max": 4.981440819553525
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.1406186731153345,
+              "p50": 2.0873845350241083,
+              "p95": 3.9214303057525934,
+              "p99": 4.551951394614683,
+              "max": 4.981440819553525
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.02688339234958488,
+                0.023887410556306755,
+                -0.01305538385973538
+              ],
+              "closest_mesh_point_m": [
+                -0.025960290958424635,
+                0.022083796154583193,
+                -0.01760616528167244
+              ],
+              "nearest_triangle_id": 5996,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 4.981440819553525
+            }
+          }
+        },
+        {
+          "scale": 0.953,
+          "eligible": false,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 0.9955,
+            "uncovered_fraction": 0.0045,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.00048683081631963374,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.4859245499669717
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.10802157284297598,
+              "p50": 0.07385026876740967,
+              "p95": 0.3033936711382508,
+              "p99": 0.4736861723679464,
+              "max": 0.4859245499669717
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030801933718498847,
+                -0.004463341697292481,
+                0.029439980231309462
+              ],
+              "signed_sdf_mm": 0.4859245499669717
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 0.9985593812916796,
+            "unsigned_distance_mm": {
+              "mean": 2.160041724657246,
+              "p50": 2.105709389578026,
+              "p95": 3.94328125196192,
+              "p99": 4.562315714475336,
+              "max": 4.982500645081633
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.1569389587185577,
+              "p50": 2.105709389578026,
+              "p95": 3.943281251961921,
+              "p99": 4.562315714475336,
+              "max": 4.953361335058866
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.1600507682662435,
+              "p50": 2.105709389578026,
+              "p95": 3.943281251961921,
+              "p99": 4.562315714475336,
+              "max": 4.953361335058866
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.026898225256902802,
+                0.02391250297282537,
+                -0.013067194256430194
+              ],
+              "closest_mesh_point_m": [
+                -0.02597550550155821,
+                0.022119970748734088,
+                -0.01762358857177759
+              ],
+              "nearest_triangle_id": 433,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 4.953361335058866
+            }
+          }
+        },
+        {
+          "scale": 0.954,
+          "eligible": false,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 0.99765,
+            "uncovered_fraction": 0.00235,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0002867898702894954,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.43011998966804854
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.12156758234087615,
+              "p50": 0.10844022521684302,
+              "p95": 0.3012425321389471,
+              "p99": 0.42830902599766785,
+              "max": 0.43011998966804854
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030801933718498847,
+                -0.004463341697292481,
+                0.029439980231309462
+              ],
+              "signed_sdf_mm": 0.43011998966804854
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 0.9985593812916798,
+            "unsigned_distance_mm": {
+              "mean": 2.1918288760449984,
+              "p50": 2.140861047220029,
+              "p95": 3.954677401960123,
+              "p99": 4.572680034335989,
+              "max": 4.9835552678961
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.188859831955741,
+              "p50": 2.1408182771696427,
+              "p95": 3.954677401960124,
+              "p99": 4.57268003433599,
+              "max": 4.957391661444471
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.192017693654188,
+              "p50": 2.1408182771696427,
+              "p95": 3.954677401960124,
+              "p99": 4.57268003433599,
+              "max": 4.957391661444471
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.02691305816422073,
+                0.02393759538934399,
+                -0.01307900465312501
+              ],
+              "closest_mesh_point_m": [
+                -0.025988828106064954,
+                0.022118448755429954,
+                -0.01762568777734816
+              ],
+              "nearest_triangle_id": 433,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 4.957391661444471
+            }
+          }
+        },
+        {
+          "scale": 0.955,
+          "eligible": false,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 0.9983,
+            "uncovered_fraction": 0.0017,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.00016785897079344154,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.3803137740621479
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.09809364220174448,
+              "p50": 0.06985994248517868,
+              "p95": 0.2992340729239666,
+              "p99": 0.37833491200076974,
+              "max": 0.3803137740621479
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030749305522851725,
+                -0.004254481145617256,
+                0.029750331359946855
+              ],
+              "signed_sdf_mm": 0.3803137740621479
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 0.9985593812916798,
+            "unsigned_distance_mm": {
+              "mean": 2.22365209733752,
+              "p50": 2.173721051688419,
+              "p95": 3.966073551958333,
+              "p99": 4.58304435419664,
+              "max": 4.984771145020276
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.220831594450374,
+              "p50": 2.1647476919306716,
+              "p95": 3.966073551958334,
+              "p99": 4.58304435419664,
+              "max": 4.961421987830078
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.2240355817173656,
+              "p50": 2.1647476919306716,
+              "p95": 3.966073551958334,
+              "p99": 4.58304435419664,
+              "max": 4.961421987830078
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.026927891071538652,
+                0.023962687805862606,
+                -0.013090815049819831
+              ],
+              "closest_mesh_point_m": [
+                -0.026002150710571686,
+                0.022116926762125816,
+                -0.017627786982918732
+              ],
+              "nearest_triangle_id": 433,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 4.961421987830078
+            }
+          }
+        },
+        {
+          "scale": 0.956,
+          "eligible": false,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 0.99905,
+            "uncovered_fraction": 0.00095,
+            "positive_gap_mm_all_samples": {
+              "mean": 8.769446720079356e-05,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.33456713500885915
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.09158551377621284,
+              "p50": 0.03500159839406672,
+              "p95": 0.32012136297069127,
+              "p99": 0.3316779806012256,
+              "max": 0.33456713500885915
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030749305522851725,
+                -0.004254481145617256,
+                0.029750331359946855
+              ],
+              "signed_sdf_mm": 0.33456713500885915
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 0.9985593812916798,
+            "unsigned_distance_mm": {
+              "mean": 2.2555141502080107,
+              "p50": 2.1976744292533423,
+              "p95": 3.9774697019565326,
+              "p99": 4.593408674057294,
+              "max": 4.986148158488094
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.2531275053792736,
+              "p50": 2.1976744292533423,
+              "p95": 3.9774697019565335,
+              "p99": 4.593408674057294,
+              "max": 4.965452314215682
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.2563780858628113,
+              "p50": 2.1976744292533423,
+              "p95": 3.9774697019565335,
+              "p99": 4.593408674057294,
+              "max": 4.965452314215682
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.02694272397885658,
+                0.02398778022238122,
+                -0.013102625446514648
+              ],
+              "closest_mesh_point_m": [
+                -0.02601547331507843,
+                0.02211540476882168,
+                -0.0176298861884893
+              ],
+              "nearest_triangle_id": 433,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 4.965452314215682
+            }
+          }
+        },
+        {
+          "scale": 0.957,
+          "eligible": false,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 0.99965,
+            "uncovered_fraction": 0.00035,
+            "positive_gap_mm_all_samples": {
+              "mean": 5.3815739465268124e-05,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.28894480268968314
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.15375925561505177,
+              "p50": 0.14966554607838584,
+              "p95": 0.2810765170611117,
+              "p99": 0.2873711455639688,
+              "max": 0.28894480268968314
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030749305522851725,
+                -0.004254481145617256,
+                0.029750331359946855
+              ],
+              "signed_sdf_mm": 0.28894480268968314
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 2.287393920309714,
+              "p50": 2.220123432648454,
+              "p95": 3.988865851954736,
+              "p99": 4.608047871854801,
+              "max": 4.987686174838725
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.2844922378750705,
+              "p50": 2.2201234326484536,
+              "p95": 3.988865851954737,
+              "p99": 4.608047871854801,
+              "max": 4.969482640601285
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.2844922378750705,
+              "p50": 2.2201234326484536,
+              "p95": 3.988865851954737,
+              "p99": 4.608047871854801,
+              "max": 4.969482640601285
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.026957556886174502,
+                0.024012872638899833,
+                -0.013114435843209465
+              ],
+              "closest_mesh_point_m": [
+                -0.026028795919585165,
+                0.022113882775517544,
+                -0.01763198539405987
+              ],
+              "nearest_triangle_id": 433,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 4.969482640601285
+            }
+          }
+        },
+        {
+          "scale": 0.958,
+          "eligible": false,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 0.99975,
+            "uncovered_fraction": 0.00025,
+            "positive_gap_mm_all_samples": {
+              "mean": 3.579320754386276e-05,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.2434484075208264
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.14264084365871488,
+              "p50": 0.11705951915988791,
+              "p95": 0.23614272061789238,
+              "p99": 0.2419872701402396,
+              "max": 0.2434484075208264
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030749305522851725,
+                -0.004254481145617256,
+                0.029750331359946855
+              ],
+              "signed_sdf_mm": 0.2434484075208264
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 2.3193815567584313,
+              "p50": 2.250742416085568,
+              "p95": 4.018360088449874,
+              "p99": 4.6249865774738605,
+              "max": 4.98938504518104
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.317042654611968,
+              "p50": 2.250517869288168,
+              "p95": 4.018360088449874,
+              "p99": 4.624986577473861,
+              "max": 4.973512966986891
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.317042654611968,
+              "p50": 2.250517869288168,
+              "p95": 4.018360088449874,
+              "p99": 4.624986577473861,
+              "max": 4.973512966986891
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.02697238979349243,
+                0.024037965055418452,
+                -0.013126246239904285
+              ],
+              "closest_mesh_point_m": [
+                -0.026042118524091905,
+                0.02211236078221341,
+                -0.017634084599630444
+              ],
+              "nearest_triangle_id": 433,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 4.973512966986891
+            }
+          }
+        },
+        {
+          "scale": 0.959,
+          "eligible": false,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 0.9998,
+            "uncovered_fraction": 0.0002,
+            "positive_gap_mm_all_samples": {
+              "mean": 2.3814190742444103e-05,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.19807960286517995
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.11907095371222051,
+              "p50": 0.11058152111245115,
+              "p95": 0.19103636376350314,
+              "p99": 0.19667095504484458,
+              "max": 0.19807960286517995
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030749305522851725,
+                -0.004254481145617256,
+                0.029750331359946855
+              ],
+              "signed_sdf_mm": 0.19807960286517995
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 2.351396781366635,
+              "p50": 2.2754788776309773,
+              "p95": 4.053592699416218,
+              "p99": 4.642212598893078,
+              "max": 4.991244605265383
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.348812310425611,
+              "p50": 2.2754788776309773,
+              "p95": 4.047657096959035,
+              "p99": 4.64192528309292,
+              "max": 4.988751859186021
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.348812310425611,
+              "p50": 2.2754788776309773,
+              "p95": 4.047657096959035,
+              "p99": 4.64192528309292,
+              "max": 4.988751859186021
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.026987222700810352,
+                0.024063057471937068,
+                -0.013138056636599098
+              ],
+              "closest_mesh_point_m": [
+                -0.02605544112859864,
+                0.022110838788909272,
+                -0.017636183805201013
+              ],
+              "nearest_triangle_id": 5996,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 4.988751859186021
+            }
+          }
+        },
+        {
+          "scale": 0.96,
+          "eligible": false,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 0.9998,
+            "uncovered_fraction": 0.0002,
+            "positive_gap_mm_all_samples": {
+              "mean": 1.4110915540528363e-05,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.15284006528699762
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.07055457770264181,
+              "p50": 0.05923240014714826,
+              "p95": 0.14421375398229,
+              "p99": 0.15111480302605607,
+              "max": 0.15284006528699762
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030749305522851725,
+                -0.004254481145617256,
+                0.029750331359946855
+              ],
+              "signed_sdf_mm": 0.15284006528699762
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 2.383438526242134,
+              "p50": 2.298256051221013,
+              "p95": 4.063562995446516,
+              "p99": 4.690804947274328,
+              "max": 4.993264675562579
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.3809980826697363,
+              "p50": 2.296512942009455,
+              "p95": 4.056032276797123,
+              "p99": 4.688376828790127,
+              "max": 4.981573619758107
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.3809980826697363,
+              "p50": 2.296512942009455,
+              "p95": 4.056032276797123,
+              "p99": 4.688376828790127,
+              "max": 4.981573619758107
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.02700205560812828,
+                0.024088149888455687,
+                -0.013149867033293915
+              ],
+              "closest_mesh_point_m": [
+                -0.02606876373310538,
+                0.022109316795605138,
+                -0.017638283010771586
+              ],
+              "nearest_triangle_id": 433,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 4.981573619758107
+            }
+          }
+        },
+        {
+          "scale": 0.961,
+          "eligible": false,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 0.9999,
+            "uncovered_fraction": 0.0001,
+            "positive_gap_mm_all_samples": {
+              "mean": 7.36357217532551e-06,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.10773149480466926
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.0736357217532551,
+              "p50": 0.0736357217532551,
+              "p95": 0.10432191749952785,
+              "p99": 0.10704957934364097,
+              "max": 0.10773149480466926
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030749305522851725,
+                -0.004254481145617256,
+                0.029750331359946855
+              ],
+              "signed_sdf_mm": 0.10773149480466926
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 2.415499489263118,
+              "p50": 2.3231591842126655,
+              "p95": 4.072213987247811,
+              "p99": 4.7394070760675655,
+              "max": 4.995445061350087
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.4129558574809886,
+              "p50": 2.321104483048886,
+              "p95": 4.064407456635215,
+              "p99": 4.736731066524194,
+              "max": 4.985603946143709
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.4129558574809886,
+              "p50": 2.321104483048886,
+              "p95": 4.064407456635215,
+              "p99": 4.736731066524194,
+              "max": 4.985603946143709
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.027016888515446202,
+                0.024113242304974303,
+                -0.013161677429988736
+              ],
+              "closest_mesh_point_m": [
+                -0.026082086337612116,
+                0.022107794802301,
+                -0.017640382216342156
+              ],
+              "nearest_triangle_id": 433,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 4.985603946143709
+            }
+          }
+        },
+        {
+          "scale": 0.962,
+          "eligible": true,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 0.99995,
+            "uncovered_fraction": 5e-05,
+            "positive_gap_mm_all_samples": {
+              "mean": 3.137780757065181e-06,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.06275561514130362
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.06275561514130362,
+              "p50": 0.06275561514130362,
+              "p95": 0.06275561514130362,
+              "p99": 0.06275561514130362,
+              "max": 0.06275561514130362
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030749305522851725,
+                -0.004254481145617256,
+                0.029750331359946855
+              ],
+              "signed_sdf_mm": 0.06275561514130362
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 2.447567358063597,
+              "p50": 2.365924891213086,
+              "p95": 4.08155851430886,
+              "p99": 4.759778665763448,
+              "max": 4.997785552805223
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.4431305460850115,
+              "p50": 2.3641889724651106,
+              "p95": 4.080545938031244,
+              "p99": 4.759778665763448,
+              "max": 4.989634272529317
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.4431305460850115,
+              "p50": 2.3641889724651106,
+              "p95": 4.080545938031244,
+              "p99": 4.759778665763448,
+              "max": 4.989634272529317
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.02703172142276413,
+                0.02413833472149292,
+                -0.013173487826683553
+              ],
+              "closest_mesh_point_m": [
+                -0.026095408942118856,
+                0.022106272808996866,
+                -0.01764248142191273
+              ],
+              "nearest_triangle_id": 433,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 4.989634272529317
+            }
+          }
+        },
+        {
+          "scale": 0.963,
+          "eligible": true,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 0.99995,
+            "uncovered_fraction": 5e-05,
+            "positive_gap_mm_all_samples": {
+              "mean": 8.957086986389854e-07,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.01791417397277971
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": 0.01791417397277971,
+              "p50": 0.01791417397277971,
+              "p95": 0.01791417397277971,
+              "p99": 0.01791417397277971,
+              "max": 0.01791417397277971
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030749305522851725,
+                -0.004254481145617256,
+                0.029750331359946855
+              ],
+              "signed_sdf_mm": 0.01791417397277971
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 2.4796762695228636,
+              "p50": 2.4061488268982734,
+              "p95": 4.095906939780204,
+              "p99": 4.763663460443485,
+              "max": 5.000285925105276
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.4764564828015407,
+              "p50": 2.3919318342281914,
+              "p95": 4.095906939780205,
+              "p99": 4.763663460443485,
+              "max": 4.993664598914921
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.4764564828015407,
+              "p50": 2.3919318342281914,
+              "p95": 4.095906939780205,
+              "p99": 4.763663460443485,
+              "max": 4.993664598914921
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.027046554330082052,
+                0.024163427138011534,
+                -0.01318529822337837
+              ],
+              "closest_mesh_point_m": [
+                -0.02610873154662559,
+                0.02210475081569273,
+                -0.017644580627483298
+              ],
+              "nearest_triangle_id": 433,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 4.993664598914921
+            }
+          }
+        },
+        {
+          "scale": 0.964,
+          "eligible": true,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030749305522851725,
+                -0.004254481145617256,
+                0.029750331359946855
+              ],
+              "signed_sdf_mm": -0.026791056827020487
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 2.5117908122450134,
+              "p50": 2.432866143841976,
+              "p95": 4.118594868274843,
+              "p99": 4.767548255123521,
+              "max": 5.002945938534512
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.5086115905586657,
+              "p50": 2.4266084187983137,
+              "p95": 4.118594868274842,
+              "p99": 4.76754825512352,
+              "max": 4.99769492530053
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.5086115905586657,
+              "p50": 2.4266084187983137,
+              "p95": 4.118594868274842,
+              "p99": 4.76754825512352,
+              "max": 4.99769492530053
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.02706138723739998,
+                0.02418851955453015,
+                -0.013197108620073186
+              ],
+              "closest_mesh_point_m": [
+                -0.02612205415113233,
+                0.022103228822388594,
+                -0.01764667983305387
+              ],
+              "nearest_triangle_id": 433,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 4.99769492530053
+            }
+          }
+        },
+        {
+          "scale": 0.965,
+          "eligible": true,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030749305522851725,
+                -0.004254481145617256,
+                0.029750331359946855
+              ],
+              "signed_sdf_mm": -0.07525139564567608
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 2.5439311645525517,
+              "p50": 2.4662682373146443,
+              "p95": 4.138708873055004,
+              "p99": 4.7714330498035515,
+              "max": 5.005765338597851
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.5406410141056437,
+              "p50": 2.4662682373146443,
+              "p95": 4.128084769711734,
+              "p99": 4.771433049803551,
+              "max": 5.001725251686133
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.5406410141056437,
+              "p50": 2.4662682373146443,
+              "p95": 4.128084769711734,
+              "p99": 4.771433049803551,
+              "max": 5.001725251686133
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.027076220144717902,
+                0.024213611971048765,
+                -0.013208919016768003
+              ],
+              "closest_mesh_point_m": [
+                -0.026135376755639067,
+                0.02210170682908446,
+                -0.01764877903862444
+              ],
+              "nearest_triangle_id": 433,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 5.001725251686133
+            }
+          }
+        },
+        {
+          "scale": 0.966,
+          "eligible": true,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030749305522851725,
+                -0.004254481145617256,
+                0.029750331359946855
+              ],
+              "signed_sdf_mm": -0.13112290192448042
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 2.5760949629940355,
+              "p50": 2.5136469470153346,
+              "p95": 4.145989551267989,
+              "p99": 4.803220189135661,
+              "max": 5.008743856141189
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.5727269581849175,
+              "p50": 2.511815161994327,
+              "p95": 4.138429838917071,
+              "p99": 4.775317844483591,
+              "max": 5.005755578071742
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.5727269581849175,
+              "p50": 2.511815161994327,
+              "p95": 4.138429838917071,
+              "p99": 4.775317844483591,
+              "max": 5.005755578071742
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                -0.02709105305203583,
+                0.02423870438756738,
+                -0.01322072941346282
+              ],
+              "closest_mesh_point_m": [
+                -0.026148699360145806,
+                0.022100184835780322,
+                -0.017650878244195013
+              ],
+              "nearest_triangle_id": 433,
+              "source_sphere_index": 40,
+              "locally_signed_distance_mm": 5.005755578071742
+            }
+          }
+        },
+        {
+          "scale": 0.967,
+          "eligible": true,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030749305522851725,
+                -0.004254481145617256,
+                0.029750331359946855
+              ],
+              "signed_sdf_mm": -0.18699327820698336
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 2.6082963673623376,
+              "p50": 2.557736046777401,
+              "p95": 4.156031706908721,
+              "p99": 4.805734300782229,
+              "max": 5.030266081135319
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.6053713778541097,
+              "p50": 2.5577360467774004,
+              "p95": 4.149863191208467,
+              "p99": 4.779202639163625,
+              "max": 5.030266081135318
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.6053713778541097,
+              "p50": 2.5577360467774004,
+              "p95": 4.149863191208467,
+              "p99": 4.779202639163625,
+              "max": 5.030266081135318
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                0.0184239126580659,
+                -0.005675953436705772,
+                0.035207482739120555
+              ],
+              "closest_mesh_point_m": [
+                0.01430574394660011,
+                -0.004789474862502797,
+                0.032458224830447066
+              ],
+              "nearest_triangle_id": 10736,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 5.030266081135318
+            }
+          }
+        },
+        {
+          "scale": 0.968,
+          "eligible": true,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030749305522851725,
+                -0.004254481145617256,
+                0.029750331359946855
+              ],
+              "signed_sdf_mm": -0.24286250507994134
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 2.6405307277040984,
+              "p50": 2.595334938209668,
+              "p95": 4.164775261906696,
+              "p99": 4.808421356319173,
+              "max": 5.07862642959869
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.6375218617924334,
+              "p50": 2.5953349382096684,
+              "p95": 4.164052624932222,
+              "p99": 4.793303341751809,
+              "max": 5.078626429598689
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.6375218617924334,
+              "p50": 2.5953349382096684,
+              "p95": 4.164052624932222,
+              "p99": 4.793303341751809,
+              "max": 5.078626429598689
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                0.01845616330671221,
+                -0.005681822499236578,
+                0.035245765437099244
+              ],
+              "closest_mesh_point_m": [
+                0.014298403036727412,
+                -0.004786821430982136,
+                0.032470076507017616
+              ],
+              "nearest_triangle_id": 10736,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 5.078626429598689
+            }
+          }
+        },
+        {
+          "scale": 0.969,
+          "eligible": true,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030749305522851725,
+                -0.004254481145617256,
+                0.029750331359946855
+              ],
+              "signed_sdf_mm": -0.2987305626833605
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 2.672787222647692,
+              "p50": 2.62749006670084,
+              "p95": 4.177860301737011,
+              "p99": 4.811281065983855,
+              "max": 5.12698677806207
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.6692447260194894,
+              "p50": 2.6274900667008403,
+              "p95": 4.177860301737011,
+              "p99": 4.786972228523692,
+              "max": 5.1269867780620695
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.6692447260194894,
+              "p50": 2.6274900667008403,
+              "p95": 4.177860301737011,
+              "p99": 4.786972228523692,
+              "max": 5.1269867780620695
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                0.01848841395535853,
+                -0.005687691561767385,
+                0.035284048135077926
+              ],
+              "closest_mesh_point_m": [
+                0.014291062126854721,
+                -0.004784167999461475,
+                0.03248192818358815
+              ],
+              "nearest_triangle_id": 10736,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 5.1269867780620695
+            }
+          }
+        },
+        {
+          "scale": 0.97,
+          "eligible": true,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.030749305522851725,
+                -0.004254481145617256,
+                0.029750331359946855
+              ],
+              "signed_sdf_mm": -0.35459743069756083
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 2.705076403459359,
+              "p50": 2.659645195192,
+              "p95": 4.2205830670880555,
+              "p99": 4.824900354061654,
+              "max": 5.175347126525451
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 2.701935424058963,
+              "p50": 2.6529342631180666,
+              "p95": 4.2205830670880555,
+              "p99": 4.824727125595009,
+              "max": 5.17534712652545
+            },
+            "overreach_mm_outside_only": {
+              "mean": 2.701935424058963,
+              "p50": 2.6529342631180666,
+              "p95": 4.2205830670880555,
+              "p99": 4.824727125595009,
+              "max": 5.17534712652545
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                0.018520664604004845,
+                -0.005693560624298192,
+                0.035322330833056616
+              ],
+              "closest_mesh_point_m": [
+                0.014283721216982024,
+                -0.004781514567940816,
+                0.032493779860158695
+              ],
+              "nearest_triangle_id": 10736,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 5.17534712652545
+            }
+          }
+        },
+        {
+          "scale": 1.0,
+          "eligible": true,
+          "sphere_count": 64,
+          "mesh_to_union": {
+            "covered_fraction": 1.0,
+            "uncovered_fraction": 0.0,
+            "positive_gap_mm_all_samples": {
+              "mean": 0.0,
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "positive_gap_mm_uncovered_only": {
+              "mean": null,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "maximum_signed_sdf_sample": {
+              "mesh_point_m": [
+                0.0307406111910863,
+                -0.003839686041038083,
+                0.03005586056909792
+              ],
+              "signed_sdf_mm": -1.895497207752967
+            }
+          },
+          "union_to_mesh": {
+            "actual_candidate_samples": 8001,
+            "exposed_sample_count": 690,
+            "outside_surface_fraction": 1.0,
+            "unsigned_distance_mm": {
+              "mean": 3.684022750566809,
+              "p50": 3.6359368888203227,
+              "p95": 4.989110316556518,
+              "p99": 5.564621094139462,
+              "max": 6.626157580426752
+            },
+            "overreach_mm_all_exposed_samples": {
+              "mean": 3.677678118830105,
+              "p50": 3.6256493300483106,
+              "p95": 4.97797258487476,
+              "p99": 5.564621094139462,
+              "max": 6.626157580426752
+            },
+            "overreach_mm_outside_only": {
+              "mean": 3.677678118830105,
+              "p50": 3.6256493300483106,
+              "p95": 4.97797258487476,
+              "p99": 5.564621094139462,
+              "max": 6.626157580426752
+            },
+            "maximum_locally_signed_distance_sample": {
+              "sphere_union_point_m": [
+                0.019488184063394275,
+                -0.0058696325002223935,
+                0.03647081177241721
+              ],
+              "closest_mesh_point_m": [
+                0.014063493920801149,
+                -0.004701911622320998,
+                0.032849330157274995
+              ],
+              "nearest_triangle_id": 10736,
+              "source_sphere_index": 8,
+              "locally_signed_distance_mm": 6.626157580426752
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Results are sampled estimates, not analytic Hausdorff guarantees.",
+    "The selected scale is conditional on the stated coverage and gap constraints.",
+    "Uniform scale cannot restore local shape details lost during preprocessing."
+  ]
+}

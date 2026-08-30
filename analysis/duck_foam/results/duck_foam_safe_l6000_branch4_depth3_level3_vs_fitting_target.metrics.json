@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "reference_mesh": {
+    "path": "analysis/duck_foam/exploration/rubber_duck_foam_safe_l6000.obj",
+    "sha256": "27589e6176022fa11b71af6db2a5586a05e20f2117ed3f52fb9cf27c46b805a6",
+    "load_process": true,
+    "vertices_after_welding": 7008,
+    "faces": 14012,
+    "watertight": true,
+    "winding_consistent": true,
+    "is_volume": true,
+    "bounds_m": [
+      [
+        -0.0595714,
+        -0.0348567,
+        -0.0510029
+      ],
+      [
+        0.0335945,
+        0.0348387,
+        0.0471471
+      ]
+    ],
+    "volume_m3": 0.00025972041957379396,
+    "surface_area_m2": 0.024439486989185515
+  },
+  "sphere_model": {
+    "path": "analysis/duck_foam/exploration/duck_foam_safe_l6000_branch4_depth3.json",
+    "sha256": "3e65ba97e1a2aa408c9174bde21d4d45a54083d77bc12cc6612db5580c2dfaf8",
+    "depth": 3,
+    "sphere_count": 64,
+    "foam_reported_mean": 24.776,
+    "foam_reported_best": 0.0,
+    "foam_reported_worst": 59.767,
+    "radius_m": {
+      "mean": 0.019170484375,
+      "p50": 0.021130999999999997,
+      "p95": 0.0261657,
+      "p99": 0.0275304,
+      "max": 0.027732
+    }
+  },
+  "sampling": {
+    "seed": 0,
+    "mesh_surface_samples": 20000,
+    "sphere_surface_requested_samples": 8000,
+    "closest_point_method": "trimesh.proximity.closest_point_naive",
+    "closest_point_chunk": 64,
+    "sphere_overlap_tolerance_m": 1e-09
+  },
+  "mesh_to_sphere_union": {
+    "definition": "min_i(||mesh_point-center_i||-radius_i); positive is uncovered",
+    "sample_count": 20000,
+    "coverage_tolerance_mm": 0.01,
+    "covered_fraction": 0.99985,
+    "uncovered_fraction": 0.00015,
+    "signed_sphere_union_sdf_mm": {
+      "mean": -1.2223995447406977,
+      "p50": -1.141036300901845,
+      "p95": -0.3073329310444806,
+      "p99": -0.12835901403900957,
+      "max": 0.030393029753741224
+    },
+    "undercoverage_gap_mm_all_mesh_samples": {
+      "mean": 4.2033480299502775e-06,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0,
+      "max": 0.030393029753741224
+    },
+    "undercoverage_gap_mm_uncovered_only": {
+      "mean": 0.02737412507601335,
+      "p50": 0.027543991949440655,
+      "p95": 0.030108125973311167,
+      "p99": 0.030336048997655213,
+      "max": 0.030393029753741224
+    }
+  },
+  "sphere_union_to_mesh": {
+    "definition": "Closest triangle distance for exposed sphere-union samples; sign uses the nearest triangle outward normal, positive is outside Duck",
+    "requested_candidate_samples": 8000,
+    "actual_candidate_samples": 8001,
+    "exposed_sample_count": 643,
+    "exposed_acceptance_fraction": 0.08036495438070242,
+    "estimated_exposed_union_area_m2": 0.025935919248055234,
+    "overcoverage_tolerance_mm": 0.01,
+    "outside_surface_fraction": 0.9984507537598014,
+    "inside_or_on_surface_fraction": 0.0015492462401985904,
+    "unsigned_distance_mm": {
+      "mean": 1.200923672252184,
+      "p50": 1.1091850555757121,
+      "p95": 2.552913436304648,
+      "p99": 3.2775091164642354,
+      "max": 3.863734064801309
+    },
+    "locally_signed_distance_mm": {
+      "mean": 1.1977384366869894,
+      "p50": 1.1078088329551126,
+      "p95": 2.5529134363046486,
+      "p99": 3.2775091164642363,
+      "max": 3.863709236368569
+    },
+    "overreach_mm_all_exposed_samples": {
+      "mean": 1.1977610910380185,
+      "p50": 1.1078088329551126,
+      "p95": 2.5529134363046486,
+      "p99": 3.2775091164642363,
+      "max": 3.863709236368569
+    },
+    "overreach_mm_outside_only": {
+      "mean": 1.1996195971886316,
+      "p50": 1.1091850555757121,
+      "p95": 2.5529134363046486,
+      "p99": 3.2775091164642363,
+      "max": 3.863709236368569
+    }
+  },
+  "limitations": [
+    "Metrics are sampled estimates, not analytic Hausdorff guarantees.",
+    "Sphere-union outside/inside sign uses the nearest triangle normal.",
+    "The input reference mesh is welded at load time but is not additionally smoothed or simplified by this evaluator.",
+    "Negative sphere-union SDF at a mesh point is a coverage margin, not an exact distance to the boundary of an overlapping sphere union."
+  ]
+}

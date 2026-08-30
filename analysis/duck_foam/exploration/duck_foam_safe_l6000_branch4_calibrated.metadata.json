@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "reference_mesh": {
+    "path": "scenes/leap/objects/rubber_duck.stl",
+    "sha256": "61f21b40485c3c6cf202ed2d131e34d792c93e1fc7d3e62d7071b48f4077ace8",
+    "bounding_box_center_pivot_m": [
+      -0.012762464582920074,
+      -5.699694156646729e-07,
+      -0.0018118862062692642
+    ]
+  },
+  "source_sphere_model": {
+    "path": "analysis/duck_foam/exploration/duck_foam_safe_l6000_branch4_depth3.json",
+    "sha256": "3e65ba97e1a2aa408c9174bde21d4d45a54083d77bc12cc6612db5580c2dfaf8"
+  },
+  "transform": "center'=pivot+scale*(center-pivot); radius'=scale*radius",
+  "levels": [
+    {
+      "depth": 0,
+      "sphere_count": 1,
+      "uniform_scale": 1.0
+    },
+    {
+      "depth": 1,
+      "sphere_count": 4,
+      "uniform_scale": 0.96
+    },
+    {
+      "depth": 2,
+      "sphere_count": 16,
+      "uniform_scale": 0.96
+    },
+    {
+      "depth": 3,
+      "sphere_count": 64,
+      "uniform_scale": 0.965
+    }
+  ],
+  "output": {
+    "path": "analysis/duck_foam/exploration/duck_foam_safe_l6000_branch4_calibrated.json",
+    "sha256": "9f7b510dd2b921e35d6049741c5f6a6b2b2b50363ddb2d82d0e0af055636c740"
+  },
+  "note": "Retained FOAM mean/best/worst values describe the unscaled source levels only; use independent metrics for the calibrated geometry."
+}

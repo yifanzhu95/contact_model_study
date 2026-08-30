@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "status": "exploration",
+  "generated_date": "2026-08-29",
+  "input": {
+    "project_path": "scenes/leap/objects/rubber_duck.stl",
+    "sha256": "61f21b40485c3c6cf202ed2d131e34d792c93e1fc7d3e62d7071b48f4077ace8",
+    "assumed_coordinate_unit": "metre"
+  },
+  "foam": {
+    "repository": "https://github.com/CoMMALab/foam.git",
+    "commit": "116928f71aaa7c40356d79c84d3c9ff1f4497d90",
+    "pixi_version": "0.78.0",
+    "command": "pixi run python scripts/generate_spheres.py <project>/scenes/leap/objects/rubber_duck.stl --output=<project>/analysis/duck_foam/exploration/duck_branch4_depth3.json --depth=3 --branch=4",
+    "generation_seconds": 17.032126,
+    "parameters": {
+      "method": "medial",
+      "scale": 1.0,
+      "depth": 3,
+      "branch": 4,
+      "manifold_leaves": 1000,
+      "simplify_ratio": 0.2,
+      "testerLevels": 2,
+      "numCover": 5000,
+      "minCover": 5,
+      "initSpheres": 1000,
+      "minSpheres": 200,
+      "erFact": 2,
+      "expand": true,
+      "merge": true,
+      "burst": false,
+      "optimise_python_value": true,
+      "maxOptLevel": 1,
+      "balExcess": 0.05,
+      "verify": true,
+      "num_samples": 500,
+      "min_samples": 1
+    },
+    "effective_behavior": {
+      "repair_path_triggered": true,
+      "manifold_simplify_humphrey_pipeline_ran": true,
+      "convex_decomposition_fallback_ran": false,
+      "merge": true,
+      "expand": true,
+      "burst": false,
+      "optional_optimizer": "none",
+      "optional_optimizer_reason": "The wrapper does not forward -optimise for the medial method.",
+      "eval_cli_forwarded": false,
+      "statistics_produced": true
+    }
+  },
+  "output": {
+    "path": "analysis/duck_foam/exploration/duck_branch4_depth3.json",
+    "sha256": "3a521e9c2c0ea9434e8a794072115387c6b5d4bac0f82f4a8e1d34bf7449185d",
+    "levels": [
+      {
+        "depth": 0,
+        "sphere_count": 1,
+        "mean": 716.618,
+        "best": 716.618,
+        "worst": 716.618
+      },
+      {
+        "depth": 1,
+        "sphere_count": 4,
+        "mean": 178.113,
+        "best": 101.775,
+        "worst": 225.563
+      },
+      {
+        "depth": 2,
+        "sphere_count": 16,
+        "mean": 59.998,
+        "best": 25.067,
+        "worst": 92.067
+      },
+      {
+        "depth": 3,
+        "sphere_count": 64,
+        "mean": 17.3,
+        "best": 0.0,
+        "worst": 31.12
+      }
+    ]
+  },
+  "reference_roles": {
+    "foam_input": "rubber_duck.stl",
+    "foam_actual_fitting_target": "captured repaired/simplified/smoothed Duck mesh",
+    "geometry_analysis_reference": "rubber_duck.stl with duplicate vertices welded",
+    "project_evaluation_collision_reference": "existing 8 convex hull Duck model",
+    "project_visual_geometry": "rubber_duck.stl"
+  }
+}

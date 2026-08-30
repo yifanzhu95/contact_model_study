@@ -1,0 +1,364 @@
+{
+  "schema": 1,
+  "purpose": "Duck rollout-geometry accuracy/speed comparison",
+  "claim_scope": "local paired study; expand seeds before publication claims",
+  "protocol_hash": "42d36b650d92ea64",
+  "protocol": {
+    "study_type": "paired fixed-sample synchronous closed-loop",
+    "task": "grasp_reorient",
+    "rollout_contact_model": "M2_mjwarp_soft",
+    "eval_simulator": "MuJoCo",
+    "eval_geometry": "scenes/leap/env_leap_eval_duck.xml (reference 8-hull Duck)",
+    "selectors": [
+      "duck_low_high"
+    ],
+    "n_episodes_per_geometry": 5,
+    "paired_episode_seeds": [
+      3323235572,
+      3323235572,
+      3323235572,
+      3323235572,
+      3323235572
+    ],
+    "root_seed": 20260829,
+    "explicit_episode_seeds": true,
+    "n_samples": 256,
+    "time_horizon_seconds": 0.352,
+    "step_time_seconds": 0.064,
+    "noise_sigma": 0.15,
+    "temperature": 20.0,
+    "n_iterations": 1,
+    "warm_start": false,
+    "resample_interval": 1,
+    "nconmax": 200,
+    "njmax": 1000,
+    "settle_seconds": 1.0,
+    "max_steps": 300,
+    "discarded_warmup_plans": 2,
+    "trajectory_recording": false,
+    "geometry_order": "cyclic rotation by paired-seed index"
+  },
+  "provenance": {
+    "head": "064cc3c6577c22204da69ee1806503f0c4328711",
+    "branch": "duck_sphere_models",
+    "dirty": true,
+    "local_changes": [
+      "M README.md",
+      " M contact_study/drivers/run_async_eval_episode.py",
+      " M contact_study/drivers/run_eval_episode.py",
+      " M contact_study/evaluation/metrics.py",
+      " M pyproject.toml",
+      "?? analysis/duck_foam/",
+      "?? scenes/leap/env_leap_rollout_duck_high_foam16a.xml",
+      "?? scenes/leap/env_leap_rollout_duck_high_foam16b.xml",
+      "?? scenes/leap/env_leap_rollout_duck_high_foam4.xml",
+      "?? scenes/leap/env_leap_rollout_duck_high_foam64.xml",
+      "?? scenes/leap/env_leap_rollout_duck_low_foam16a.xml",
+      "?? scenes/leap/env_leap_rollout_duck_low_foam16b.xml",
+      "?? scenes/leap/env_leap_rollout_duck_low_foam4.xml",
+      "?? scenes/leap/env_leap_rollout_duck_low_foam64.xml",
+      "?? scenes/leap/env_leap_rollout_duck_med_foam16a.xml",
+      "?? scenes/leap/env_leap_rollout_duck_med_foam16b.xml",
+      "?? scenes/leap/env_leap_rollout_duck_med_foam4.xml",
+      "?? scenes/leap/env_leap_rollout_duck_med_foam64.xml"
+    ],
+    "github_write_performed": false
+  },
+  "records": [
+    {
+      "ok": true,
+      "geometry": "duck_low_high",
+      "label": "8-hull baseline",
+      "episode_index": 0,
+      "episode_seed": 3323235572,
+      "protocol_hash": "42d36b650d92ea64",
+      "result": {
+        "task_name": "grasp_reorient",
+        "model_label": "M2_mjwarp_soft",
+        "success": false,
+        "steps_to_success": null,
+        "final_cost": 1.953655,
+        "n_samples_used": 256,
+        "elapsed_seconds": 31.94988,
+        "mean_step_ms": 100.6902,
+        "std_step_ms": 7.352357,
+        "median_step_ms": 103.0029,
+        "p95_step_ms": 107.0046,
+        "max_step_ms": 108.9663,
+        "planner": "mppi",
+        "final_goal_errs": {
+          "pos": 0.02538561,
+          "quat": 0.7801558,
+          "vel": 0.06405874
+        },
+        "time_out": true,
+        "end_reason": "timeout",
+        "n_steps_taken": 300,
+        "n_plans": 0,
+        "mean_latency_ms": 0.0,
+        "std_latency_ms": 0.0,
+        "median_latency_ms": 0.0,
+        "p95_latency_ms": 0.0,
+        "mean_staleness_ms": 0.0,
+        "missed_ticks": 0,
+        "tape_exhausted_ticks": 0,
+        "sim_seconds": 0.0,
+        "trajectory": null,
+        "error": null
+      },
+      "software": {
+        "python": "3.12.3",
+        "mujoco": "3.6.0",
+        "warp": "1.12.0"
+      },
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120
+      }
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_high",
+      "label": "8-hull baseline",
+      "episode_index": 1,
+      "episode_seed": 3323235572,
+      "protocol_hash": "42d36b650d92ea64",
+      "result": {
+        "task_name": "grasp_reorient",
+        "model_label": "M2_mjwarp_soft",
+        "success": false,
+        "steps_to_success": null,
+        "final_cost": 1.996793,
+        "n_samples_used": 256,
+        "elapsed_seconds": 31.65033,
+        "mean_step_ms": 99.59912,
+        "std_step_ms": 7.055752,
+        "median_step_ms": 100.7197,
+        "p95_step_ms": 106.972,
+        "max_step_ms": 108.7679,
+        "planner": "mppi",
+        "final_goal_errs": {
+          "pos": 0.03056263,
+          "quat": 0.8153693,
+          "vel": 0.1027675
+        },
+        "time_out": true,
+        "end_reason": "timeout",
+        "n_steps_taken": 300,
+        "n_plans": 0,
+        "mean_latency_ms": 0.0,
+        "std_latency_ms": 0.0,
+        "median_latency_ms": 0.0,
+        "p95_latency_ms": 0.0,
+        "mean_staleness_ms": 0.0,
+        "missed_ticks": 0,
+        "tape_exhausted_ticks": 0,
+        "sim_seconds": 0.0,
+        "trajectory": null,
+        "error": null
+      },
+      "software": {
+        "python": "3.12.3",
+        "mujoco": "3.6.0",
+        "warp": "1.12.0"
+      },
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120
+      }
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_high",
+      "label": "8-hull baseline",
+      "episode_index": 2,
+      "episode_seed": 3323235572,
+      "protocol_hash": "42d36b650d92ea64",
+      "result": {
+        "task_name": "grasp_reorient",
+        "model_label": "M2_mjwarp_soft",
+        "success": false,
+        "steps_to_success": null,
+        "final_cost": 3.075393,
+        "n_samples_used": 256,
+        "elapsed_seconds": 29.2168,
+        "mean_step_ms": 113.9324,
+        "std_step_ms": 21.54358,
+        "median_step_ms": 104.2285,
+        "p95_step_ms": 143.9199,
+        "max_step_ms": 146.9547,
+        "planner": "mppi",
+        "final_goal_errs": {
+          "pos": 0.1654704,
+          "quat": 0.6074671,
+          "vel": 9.39899
+        },
+        "time_out": false,
+        "end_reason": "failed",
+        "n_steps_taken": 245,
+        "n_plans": 0,
+        "mean_latency_ms": 0.0,
+        "std_latency_ms": 0.0,
+        "median_latency_ms": 0.0,
+        "p95_latency_ms": 0.0,
+        "mean_staleness_ms": 0.0,
+        "missed_ticks": 0,
+        "tape_exhausted_ticks": 0,
+        "sim_seconds": 0.0,
+        "trajectory": null,
+        "error": null
+      },
+      "software": {
+        "python": "3.12.3",
+        "mujoco": "3.6.0",
+        "warp": "1.12.0"
+      },
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120
+      }
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_high",
+      "label": "8-hull baseline",
+      "episode_index": 3,
+      "episode_seed": 3323235572,
+      "protocol_hash": "42d36b650d92ea64",
+      "result": {
+        "task_name": "grasp_reorient",
+        "model_label": "M2_mjwarp_soft",
+        "success": false,
+        "steps_to_success": null,
+        "final_cost": 2.943212,
+        "n_samples_used": 256,
+        "elapsed_seconds": 30.86018,
+        "mean_step_ms": 97.2584,
+        "std_step_ms": 4.946551,
+        "median_step_ms": 96.79551,
+        "p95_step_ms": 104.7763,
+        "max_step_ms": 111.1004,
+        "planner": "mppi",
+        "final_goal_errs": {
+          "pos": 0.05139471,
+          "quat": 0.7866366,
+          "vel": 1.522309
+        },
+        "time_out": true,
+        "end_reason": "timeout",
+        "n_steps_taken": 300,
+        "n_plans": 0,
+        "mean_latency_ms": 0.0,
+        "std_latency_ms": 0.0,
+        "median_latency_ms": 0.0,
+        "p95_latency_ms": 0.0,
+        "mean_staleness_ms": 0.0,
+        "missed_ticks": 0,
+        "tape_exhausted_ticks": 0,
+        "sim_seconds": 0.0,
+        "trajectory": null,
+        "error": null
+      },
+      "software": {
+        "python": "3.12.3",
+        "mujoco": "3.6.0",
+        "warp": "1.12.0"
+      },
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120
+      }
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_high",
+      "label": "8-hull baseline",
+      "episode_index": 4,
+      "episode_seed": 3323235572,
+      "protocol_hash": "42d36b650d92ea64",
+      "result": {
+        "task_name": "grasp_reorient",
+        "model_label": "M2_mjwarp_soft",
+        "success": false,
+        "steps_to_success": null,
+        "final_cost": 2.187426,
+        "n_samples_used": 256,
+        "elapsed_seconds": 30.25866,
+        "mean_step_ms": 96.04275,
+        "std_step_ms": 4.228539,
+        "median_step_ms": 96.82828,
+        "p95_step_ms": 101.0214,
+        "max_step_ms": 102.723,
+        "planner": "mppi",
+        "final_goal_errs": {
+          "pos": 0.05006184,
+          "quat": 0.5968561,
+          "vel": 0.04631689
+        },
+        "time_out": true,
+        "end_reason": "timeout",
+        "n_steps_taken": 300,
+        "n_plans": 0,
+        "mean_latency_ms": 0.0,
+        "std_latency_ms": 0.0,
+        "median_latency_ms": 0.0,
+        "p95_latency_ms": 0.0,
+        "mean_staleness_ms": 0.0,
+        "missed_ticks": 0,
+        "tape_exhausted_ticks": 0,
+        "sim_seconds": 0.0,
+        "trajectory": null,
+        "error": null
+      },
+      "software": {
+        "python": "3.12.3",
+        "mujoco": "3.6.0",
+        "warp": "1.12.0"
+      },
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120
+      }
+    }
+  ],
+  "summaries": [
+    {
+      "geometry": "duck_low_high",
+      "label": "8-hull baseline",
+      "n_requested": 5,
+      "n_valid": 5,
+      "n_errors": 0,
+      "n_success": 0,
+      "success_rate": 0.0,
+      "success_ci95_low": 0.0,
+      "success_ci95_high": 0.4344825,
+      "end_reason_counts": {
+        "timeout": 4,
+        "failed": 1
+      },
+      "steps_to_success_median": null,
+      "steps_to_success_mean": null,
+      "plan_latency_ms_weighted_mean": 101.0315,
+      "episode_median_plan_ms_median": 100.7197,
+      "episode_p95_plan_ms_median": 106.972,
+      "final_goal_errors": {
+        "pos": {
+          "median": 0.05006184,
+          "mean": 0.06457504,
+          "p95": 0.1426553
+        },
+        "quat": {
+          "median": 0.7801558,
+          "mean": 0.717297,
+          "p95": 0.8096228
+        },
+        "vel": {
+          "median": 0.1027675,
+          "mean": 2.226888,
+          "p95": 7.823654
+        }
+      }
+    }
+  ],
+  "updated_at": "2026-08-30T04:04:41.802141+00:00"
+}

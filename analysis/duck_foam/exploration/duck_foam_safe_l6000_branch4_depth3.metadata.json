@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "status": "exploration",
+  "generated_date": "2026-08-29",
+  "input": {
+    "project_path": "analysis/duck_foam/exploration/rubber_duck_foam_safe_l6000.obj",
+    "sha256": "27589e6176022fa11b71af6db2a5586a05e20f2117ed3f52fb9cf27c46b805a6",
+    "preprocessing_record": "analysis/duck_foam/exploration/rubber_duck_foam_safe_l6000.metadata.json",
+    "assumed_coordinate_unit": "metre",
+    "spheretree_valid_before_generation": true
+  },
+  "foam": {
+    "repository": "https://github.com/CoMMALab/foam.git",
+    "commit": "116928f71aaa7c40356d79c84d3c9ff1f4497d90",
+    "pixi_version": "0.78.0",
+    "command": "pixi run python scripts/generate_spheres.py <project>/analysis/duck_foam/exploration/rubber_duck_foam_safe_l6000.obj --output=<project>/analysis/duck_foam/exploration/duck_foam_safe_l6000_branch4_depth3.json --depth=3 --branch=4",
+    "generation_seconds": 244.352808,
+    "normalization_scale_internal_units_per_m": 20376.974019358127,
+    "parameters": {
+      "method": "medial",
+      "scale": 1.0,
+      "depth": 3,
+      "branch": 4,
+      "testerLevels": 2,
+      "numCover": 5000,
+      "minCover": 5,
+      "initSpheres": 1000,
+      "minSpheres": 200,
+      "erFact": 2,
+      "expand": true,
+      "merge": true,
+      "burst": false,
+      "optimise_python_value": true,
+      "maxOptLevel": 1,
+      "balExcess": 0.05,
+      "verify": true,
+      "num_samples": 500,
+      "min_samples": 1
+    },
+    "effective_behavior": {
+      "additional_repair_path_triggered": false,
+      "simplification_during_generation": false,
+      "smoothing_during_generation": false,
+      "merge": true,
+      "expand": true,
+      "burst": false,
+      "optional_optimizer": "none",
+      "optional_optimizer_reason": "The wrapper does not forward -optimise for the medial method.",
+      "eval_cli_forwarded": false,
+      "statistics_produced": true
+    }
+  },
+  "output": {
+    "path": "analysis/duck_foam/exploration/duck_foam_safe_l6000_branch4_depth3.json",
+    "sha256": "3e65ba97e1a2aa408c9174bde21d4d45a54083d77bc12cc6612db5580c2dfaf8",
+    "levels": [
+      {
+        "depth": 0,
+        "sphere_count": 1,
+        "mean": 740.378,
+        "best": 740.378,
+        "worst": 740.378
+      },
+      {
+        "depth": 1,
+        "sphere_count": 4,
+        "mean": 203.846,
+        "best": 126.522,
+        "worst": 257.998
+      },
+      {
+        "depth": 2,
+        "sphere_count": 16,
+        "mean": 74.874,
+        "best": 22.887,
+        "worst": 115.173
+      },
+      {
+        "depth": 3,
+        "sphere_count": 64,
+        "mean": 24.776,
+        "best": 0.0,
+        "worst": 59.767
+      }
+    ],
+    "depth3_foam_values_converted_mm": {
+      "best": 0.0,
+      "mean": 1.2158822,
+      "worst": 2.933065525
+    }
+  },
+  "reference_roles": {
+    "foam_input_and_actual_fitting_target": "rubber_duck_foam_safe_l6000.obj",
+    "geometry_analysis_reference": "rubber_duck.stl with duplicate vertices welded",
+    "project_evaluation_collision_reference": "existing 8 convex hull Duck model",
+    "project_visual_geometry": "rubber_duck.stl"
+  }
+}

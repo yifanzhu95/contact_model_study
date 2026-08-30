@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "input": {
+    "path": "scenes/leap/objects/rubber_duck.stl",
+    "sha256": "61f21b40485c3c6cf202ed2d131e34d792c93e1fc7d3e62d7071b48f4077ace8",
+    "raw_process_false": {
+      "vertices": 32880,
+      "faces": 10960,
+      "watertight": false,
+      "winding_consistent": true,
+      "bounds_m": [
+        [
+          -0.05713244900107384,
+          -0.03250056877732277,
+          -0.048467300832271576
+        ],
+        [
+          0.03160751983523369,
+          0.03249942883849144,
+          0.04484352841973305
+        ]
+      ]
+    }
+  },
+  "foam": {
+    "root": "<foam-root>",
+    "method": "medial",
+    "manifold_leaves": 1000,
+    "simplify_ratio": 0.2,
+    "fit_into_box_half_extent": 1000.0,
+    "normalization_scale_internal_units_per_m": 19730.22581690813,
+    "internal_distance_unit_m": 5.068365710964312e-05
+  },
+  "decision_path": {
+    "raw_valid": false,
+    "repair_path_triggered": true,
+    "valid_after_manifold_simplify_humphrey": true,
+    "convex_decomposition_fallback": false,
+    "final_valid": true
+  },
+  "original_bbox_offset_m": [
+    -0.012762464582920074,
+    -5.699694156646729e-07,
+    -0.0018118862062692642
+  ],
+  "processed_centered": {
+    "vertices": 374,
+    "faces": 744,
+    "watertight": true,
+    "winding_consistent": true,
+    "bounds_m": [
+      [
+        -0.04838965347830997,
+        -0.036146299904589445,
+        -0.05174683042626669
+      ],
+      [
+        0.048017452453897866,
+        0.036052468406189066,
+        0.049620483793019546
+      ]
+    ]
+  },
+  "processed_restored_to_input_frame": {
+    "vertices": 374,
+    "faces": 744,
+    "watertight": true,
+    "winding_consistent": true,
+    "bounds_m": [
+      [
+        -0.06115211806123005,
+        -0.03614686987400511,
+        -0.05355871663253595
+      ],
+      [
+        0.03525498787097779,
+        0.0360518984367734,
+        0.04780859758675028
+      ]
+    ]
+  },
+  "output": {
+    "path": "analysis/duck_foam/exploration/rubber_duck_foam_preprocessed.obj",
+    "sha256": "d3f48a52f712199d81bba6a60eef0d4b4a2fef26e553d60058c0ed48f0d46d24"
+  }
+}

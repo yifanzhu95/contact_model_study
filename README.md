@@ -39,14 +39,28 @@ Scene files are found by convention (see `contact_study.tasks.config.SceneVarian
 
 The eval scene carries no accuracy suffix — it *is* the reference fidelity. Only
 the planner's model is degraded, which is the axis the study varies. Hand rungs
-are an `<include>` swap (`low` -> `leap_right_hand.xml`, `high` ->
-`leap_right_hand_eval.xml`); all hand XMLs are kinematically identical, so
+are an `<include>` swap (`low` / `med` / `high` -> the corresponding
+`leap_right_hand_{accuracy}.xml`); all hand XMLs are kinematically identical, so
 rollout and eval scenes differ only in collision geometry.
 
-Available today: `cube_low_high` (default), `cube_high_high`, `duck_low_high`,
-`duck_low_low`, `duck_high_high`. Adding an object means dropping in the two
-XMLs plus an entry in `_OBJ_OVERRIDES` (`contact_study/tasks/grasp_reorient.py`)
-for its initial pose and target — no other code changes.
+Available convex-hull Duck baselines are `duck_low_high`, `duck_med_high`, and
+`duck_high_high`, where the middle token selects hand accuracy and `high` means
+the existing eight-hull Duck collision model. The FOAM study adds four object
+accuracy labels for every hand accuracy:
+
+| Object label | Duck rollout collision model |
+|--------------|------------------------------|
+| `foam4`      | calibrated 4-sphere Low      |
+| `foam16a`    | calibrated 16-sphere Medium-A |
+| `foam16b`    | calibrated 16-sphere Medium-B |
+| `foam64`     | calibrated 64-sphere High    |
+
+For the first object-only comparison, keep the hand fixed and run
+`duck_low_foam4`, `duck_low_foam16a`, `duck_low_foam16b`, and
+`duck_low_foam64`. All four selectors still resolve eval to the same
+`env_leap_eval_duck.xml` eight-hull reference. The generated scene manifest,
+source geometry metrics, and regeneration instructions live in
+`analysis/duck_foam/README.md`.
 
 The retired `GeometryVariant` names (`accurate`, `convex_hull`,
 `primitive_union`, `linearized`) are still accepted and map to the default
@@ -121,14 +135,47 @@ contact_study/
 
 ## Installation
 
-### Install ComFree and the dependencies
+The GPU contact backends are sensitive to the MuJoCo/Warp combination.  The
+versions below are pinned in `pyproject.toml` because this repository was
+verified with MuJoCo 3.6.0 and Warp 1.12.0; Warp 1.16 does not compile the
+current ComFree/MJWarp sensor kernels.
 
-## What has been implemented and tested for far
-1. Contact models M1-M4. Tested for throughput testing on primitives and allegro scenes.
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
 
-## What neesd to be done next
-1. Test the planner for some manipulation task
-2. Test physics parameter noise (geometry fidelity is now wired — see Scene variants)
+The editable install fetches the official `comfree_warp` revision recorded in
+`pyproject.toml`.  To inspect or edit that dependency as a separate checkout,
+install the checkout after the command above:
+
+```bash
+git clone https://github.com/asu-iris/comfree_warp.git /path/to/comfree_warp
+python -m pip install -e /path/to/comfree_warp
+```
+
+Verify the environment before a long experiment:
+
+```bash
+python -c "import mujoco, warp, comfree_warp; print(mujoco.__version__, warp.__version__)"
+```
+
+The expected version line is `3.6.0 1.12.0`.
+
+## What has been implemented and tested so far
+
+1. Contact models M1-M4, with throughput checks on primitives and Allegro scenes.
+2. Duck `grasp_reorient` MPPI closed-loop smoke tests on the four FOAM sphere
+   scenes, using the fixed eight-hull Duck as the eval model.
+
+## What needs to be done next
+
+1. Tune the Duck MPPI/controller on development seeds until it has nonzero
+   success, then freeze the parameters and run the predeclared multi-seed test.
+2. Repeat a subset of seeds to quantify non-bitwise-deterministic contact
+   variation, then test physics parameter noise (geometry fidelity is wired).
 
 
 ---

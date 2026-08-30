@@ -9,8 +9,11 @@ description = "Systematic study of contact model fidelity for sampling-based MPC
 requires-python = ">=3.10"
 
 dependencies = [
-    "mujoco>=3.1",
-    "warp-lang>=1.4",
+    # comfree_warp currently targets MuJoCo 3.6 and its vendored MJWarp code
+    # compiles with Warp 1.12.  Warp 1.16 fails while compiling sensor.py.
+    "mujoco==3.6.0",
+    "warp-lang==1.12.0",
+    "comfree_warp @ git+https://github.com/asu-iris/comfree_warp.git@ba8b9969f5f7859d51b1f738f458f8d2f49be080",
     "numpy>=1.26",
     "matplotlib>=3.8",
     "scipy>=1.12",

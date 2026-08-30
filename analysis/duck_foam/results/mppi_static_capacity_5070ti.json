@@ -1,0 +1,1282 @@
+{
+  "schema": 1,
+  "purpose": "fixed-state MPPI latency and GPU-memory capacity calibration",
+  "not_a_success_experiment": true,
+  "configuration": {
+    "selectors": [
+      "duck_low_high",
+      "duck_low_foam4",
+      "duck_low_foam16a",
+      "duck_low_foam16b",
+      "duck_low_foam64"
+    ],
+    "samples": [
+      64,
+      128,
+      256,
+      512,
+      1024
+    ],
+    "time_horizon_seconds": 0.352,
+    "step_time_seconds": 0.064,
+    "noise_sigma": 0.2324821,
+    "temperature": 1.0,
+    "nconmax": 200,
+    "njmax": 1000,
+    "warmup_plans": 2,
+    "timed_plans": 5,
+    "paired_seed": 64
+  },
+  "records": [
+    {
+      "ok": true,
+      "geometry": "duck_low_high",
+      "label": "8-hull baseline",
+      "n_samples": 64,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 5120,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 56.15934,
+        "median": 56.89367,
+        "p95": 60.90096,
+        "min": 51.80645,
+        "max": 61.74444,
+        "std": 3.568416,
+        "samples": [
+          52.8251,
+          57.52703,
+          61.74444,
+          56.89367,
+          51.80645
+        ]
+      },
+      "throughput_world_steps_per_second": 91169.17,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15730147328,
+        "free_after_setup_bytes": 15656878080,
+        "free_after_plans_bytes": 15556411392,
+        "resident_setup_delta_bytes": 73269248,
+        "resident_total_delta_bytes": 173735936
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam4",
+      "label": "FOAM 4",
+      "n_samples": 64,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 5120,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 53.62944,
+        "median": 39.72238,
+        "p95": 79.722,
+        "min": 34.04653,
+        "max": 79.88253,
+        "std": 21.19237,
+        "samples": [
+          34.04653,
+          35.41585,
+          39.72238,
+          79.07991,
+          79.88253
+        ]
+      },
+      "throughput_world_steps_per_second": 95469.95,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15730409472,
+        "free_after_setup_bytes": 15665659904,
+        "free_after_plans_bytes": 15596191744,
+        "resident_setup_delta_bytes": 64749568,
+        "resident_total_delta_bytes": 134217728
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam16a",
+      "label": "FOAM 16A",
+      "n_samples": 64,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 5120,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 36.55741,
+        "median": 36.2701,
+        "p95": 37.94699,
+        "min": 35.51967,
+        "max": 38.18251,
+        "std": 0.9549276,
+        "samples": [
+          38.18251,
+          37.00487,
+          35.51967,
+          35.80989,
+          36.2701
+        ]
+      },
+      "throughput_world_steps_per_second": 140053.7,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15734538240,
+        "free_after_setup_bytes": 15661465600,
+        "free_after_plans_bytes": 15596453888,
+        "resident_setup_delta_bytes": 73072640,
+        "resident_total_delta_bytes": 138084352
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam16b",
+      "label": "FOAM 16B",
+      "n_samples": 64,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 5120,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 39.87531,
+        "median": 39.85311,
+        "p95": 41.82075,
+        "min": 36.83162,
+        "max": 41.97764,
+        "std": 1.763329,
+        "samples": [
+          41.97764,
+          41.19318,
+          39.85311,
+          39.52103,
+          36.83162
+        ]
+      },
+      "throughput_world_steps_per_second": 128400.2,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15734865920,
+        "free_after_setup_bytes": 15665659904,
+        "free_after_plans_bytes": 15600648192,
+        "resident_setup_delta_bytes": 69206016,
+        "resident_total_delta_bytes": 134217728
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam64",
+      "label": "FOAM 64",
+      "n_samples": 64,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 5120,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 77.47392,
+        "median": 92.00836,
+        "p95": 96.75276,
+        "min": 50.02542,
+        "max": 97.72847,
+        "std": 20.62705,
+        "samples": [
+          50.02542,
+          54.75746,
+          92.84991,
+          97.72847,
+          92.00836
+        ]
+      },
+      "throughput_world_steps_per_second": 66086.75,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15739060224,
+        "free_after_setup_bytes": 15665594368,
+        "free_after_plans_bytes": 15600582656,
+        "resident_setup_delta_bytes": 73465856,
+        "resident_total_delta_bytes": 138477568
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_high",
+      "label": "8-hull baseline",
+      "n_samples": 128,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 10240,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 66.94783,
+        "median": 66.99975,
+        "p95": 70.07919,
+        "min": 63.42174,
+        "max": 70.39712,
+        "std": 2.496323,
+        "samples": [
+          70.39712,
+          68.80746,
+          63.42174,
+          65.11309,
+          66.99975
+        ]
+      },
+      "throughput_world_steps_per_second": 152954.9,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15739060224,
+        "free_after_setup_bytes": 15632105472,
+        "free_after_plans_bytes": 15464267776,
+        "resident_setup_delta_bytes": 106954752,
+        "resident_total_delta_bytes": 274792448
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam4",
+      "label": "FOAM 4",
+      "n_samples": 128,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 10240,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 38.87354,
+        "median": 38.84715,
+        "p95": 39.90813,
+        "min": 37.82996,
+        "max": 40.16857,
+        "std": 0.7502534,
+        "samples": [
+          37.82996,
+          38.6556,
+          38.86641,
+          38.84715,
+          40.16857
+        ]
+      },
+      "throughput_world_steps_per_second": 263418.3,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15734603776,
+        "free_after_setup_bytes": 15627911168,
+        "free_after_plans_bytes": 15562899456,
+        "resident_setup_delta_bytes": 106692608,
+        "resident_total_delta_bytes": 171704320
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam16a",
+      "label": "FOAM 16A",
+      "n_samples": 128,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 10240,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 42.6078,
+        "median": 42.49391,
+        "p95": 43.15517,
+        "min": 42.27966,
+        "max": 43.29549,
+        "std": 0.3598544,
+        "samples": [
+          42.37603,
+          42.27966,
+          42.49391,
+          43.29549,
+          42.59391
+        ]
+      },
+      "throughput_world_steps_per_second": 240331.6,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15734865920,
+        "free_after_setup_bytes": 15632105472,
+        "free_after_plans_bytes": 15567093760,
+        "resident_setup_delta_bytes": 102760448,
+        "resident_total_delta_bytes": 167772160
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam16b",
+      "label": "FOAM 16B",
+      "n_samples": 128,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 10240,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 44.38765,
+        "median": 44.60051,
+        "p95": 45.56036,
+        "min": 41.69755,
+        "max": 45.57111,
+        "std": 1.413204,
+        "samples": [
+          41.69755,
+          44.60051,
+          44.5517,
+          45.51739,
+          45.57111
+        ]
+      },
+      "throughput_world_steps_per_second": 230694.8,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15738994688,
+        "free_after_setup_bytes": 15632105472,
+        "free_after_plans_bytes": 15567093760,
+        "resident_setup_delta_bytes": 106889216,
+        "resident_total_delta_bytes": 171900928
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam64",
+      "label": "FOAM 64",
+      "n_samples": 128,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 10240,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 65.06969,
+        "median": 64.71035,
+        "p95": 70.40166,
+        "min": 61.12518,
+        "max": 71.79036,
+        "std": 3.625439,
+        "samples": [
+          61.12518,
+          64.84687,
+          64.71035,
+          62.87568,
+          71.79036
+        ]
+      },
+      "throughput_world_steps_per_second": 157369.7,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15739060224,
+        "free_after_setup_bytes": 15617753088,
+        "free_after_plans_bytes": 15551627264,
+        "resident_setup_delta_bytes": 121307136,
+        "resident_total_delta_bytes": 187432960
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_high",
+      "label": "8-hull baseline",
+      "n_samples": 256,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 20480,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 75.54969,
+        "median": 76.97165,
+        "p95": 80.13334,
+        "min": 69.1839,
+        "max": 80.16726,
+        "std": 4.486425,
+        "samples": [
+          69.1839,
+          71.42798,
+          80.16726,
+          76.97165,
+          79.99766
+        ]
+      },
+      "throughput_world_steps_per_second": 271079.9,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15718285312,
+        "free_after_setup_bytes": 15612641280,
+        "free_after_plans_bytes": 15277490176,
+        "resident_setup_delta_bytes": 105644032,
+        "resident_total_delta_bytes": 440795136
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam4",
+      "label": "FOAM 4",
+      "n_samples": 256,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 20480,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 44.53549,
+        "median": 44.48514,
+        "p95": 44.69882,
+        "min": 44.38221,
+        "max": 44.70478,
+        "std": 0.1305353,
+        "samples": [
+          44.70478,
+          44.43036,
+          44.38221,
+          44.67498,
+          44.48514
+        ]
+      },
+      "throughput_world_steps_per_second": 459858.0,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15720120320,
+        "free_after_setup_bytes": 15626862592,
+        "free_after_plans_bytes": 15561850880,
+        "resident_setup_delta_bytes": 93257728,
+        "resident_total_delta_bytes": 158269440
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam16a",
+      "label": "FOAM 16A",
+      "n_samples": 256,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 20480,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 46.16831,
+        "median": 46.47901,
+        "p95": 47.46021,
+        "min": 44.59366,
+        "max": 47.51659,
+        "std": 1.17092,
+        "samples": [
+          47.2347,
+          47.51659,
+          44.59366,
+          45.01759,
+          46.47901
+        ]
+      },
+      "throughput_world_steps_per_second": 443594.3,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15733489664,
+        "free_after_setup_bytes": 15630860288,
+        "free_after_plans_bytes": 15565979648,
+        "resident_setup_delta_bytes": 102629376,
+        "resident_total_delta_bytes": 167510016
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam16b",
+      "label": "FOAM 16B",
+      "n_samples": 256,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 20480,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 45.98908,
+        "median": 45.82906,
+        "p95": 47.96186,
+        "min": 44.02678,
+        "max": 48.34413,
+        "std": 1.419642,
+        "samples": [
+          45.82906,
+          45.31264,
+          44.02678,
+          48.34413,
+          46.43276
+        ]
+      },
+      "throughput_world_steps_per_second": 445323.2,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15737946112,
+        "free_after_setup_bytes": 15630991360,
+        "free_after_plans_bytes": 15565979648,
+        "resident_setup_delta_bytes": 106954752,
+        "resident_total_delta_bytes": 171966464
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam64",
+      "label": "FOAM 64",
+      "n_samples": 256,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 20480,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 65.51895,
+        "median": 65.47348,
+        "p95": 68.1537,
+        "min": 62.93506,
+        "max": 68.7853,
+        "std": 1.892874,
+        "samples": [
+          65.47348,
+          65.62731,
+          68.7853,
+          64.77361,
+          62.93506
+        ]
+      },
+      "throughput_world_steps_per_second": 312581.3,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15737946112,
+        "free_after_setup_bytes": 15630860288,
+        "free_after_plans_bytes": 15565848576,
+        "resident_setup_delta_bytes": 107085824,
+        "resident_total_delta_bytes": 172097536
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_high",
+      "label": "8-hull baseline",
+      "n_samples": 512,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 40960,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 89.85691,
+        "median": 87.4992,
+        "p95": 95.99423,
+        "min": 83.74561,
+        "max": 96.24545,
+        "std": 4.886235,
+        "samples": [
+          83.74561,
+          86.80496,
+          94.98934,
+          96.24545,
+          87.4992
+        ]
+      },
+      "throughput_world_steps_per_second": 455835.8,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15737946112,
+        "free_after_setup_bytes": 15563882496,
+        "free_after_plans_bytes": 14959771648,
+        "resident_setup_delta_bytes": 174063616,
+        "resident_total_delta_bytes": 778174464
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam4",
+      "label": "FOAM 4",
+      "n_samples": 512,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 40960,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 49.44143,
+        "median": 49.98642,
+        "p95": 50.65299,
+        "min": 47.72123,
+        "max": 50.7911,
+        "std": 1.114184,
+        "samples": [
+          48.60784,
+          50.7911,
+          50.10056,
+          49.98642,
+          47.72123
+        ]
+      },
+      "throughput_world_steps_per_second": 828455.0,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15737946112,
+        "free_after_setup_bytes": 15563882496,
+        "free_after_plans_bytes": 15498870784,
+        "resident_setup_delta_bytes": 174063616,
+        "resident_total_delta_bytes": 239075328
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam16a",
+      "label": "FOAM 16A",
+      "n_samples": 512,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 40960,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 53.71409,
+        "median": 53.49847,
+        "p95": 55.15659,
+        "min": 52.42304,
+        "max": 55.40181,
+        "std": 1.018615,
+        "samples": [
+          53.49847,
+          53.07139,
+          52.42304,
+          54.17572,
+          55.40181
+        ]
+      },
+      "throughput_world_steps_per_second": 762556.0,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15737946112,
+        "free_after_setup_bytes": 15563882496,
+        "free_after_plans_bytes": 15498870784,
+        "resident_setup_delta_bytes": 174063616,
+        "resident_total_delta_bytes": 239075328
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam16b",
+      "label": "FOAM 16B",
+      "n_samples": 512,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 40960,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 55.51605,
+        "median": 54.85263,
+        "p95": 57.62504,
+        "min": 53.22722,
+        "max": 57.77713,
+        "std": 1.655203,
+        "samples": [
+          54.70659,
+          53.22722,
+          57.01669,
+          57.77713,
+          54.85263
+        ]
+      },
+      "throughput_world_steps_per_second": 737804.6,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15733358592,
+        "free_after_setup_bytes": 15559557120,
+        "free_after_plans_bytes": 15494676480,
+        "resident_setup_delta_bytes": 173801472,
+        "resident_total_delta_bytes": 238682112
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam64",
+      "label": "FOAM 64",
+      "n_samples": 512,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 40960,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 71.51108,
+        "median": 69.99611,
+        "p95": 76.78177,
+        "min": 68.28238,
+        "max": 77.63891,
+        "std": 3.579735,
+        "samples": [
+          73.35322,
+          77.63891,
+          69.99611,
+          68.28478,
+          68.28238
+        ]
+      },
+      "throughput_world_steps_per_second": 572778.4,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15733751808,
+        "free_after_setup_bytes": 15563882496,
+        "free_after_plans_bytes": 15498870784,
+        "resident_setup_delta_bytes": 169869312,
+        "resident_total_delta_bytes": 234881024
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_high",
+      "label": "8-hull baseline",
+      "n_samples": 1024,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 81920,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 109.1698,
+        "median": 106.2611,
+        "p95": 120.2578,
+        "min": 101.9926,
+        "max": 122.8256,
+        "std": 7.298839,
+        "samples": [
+          101.9926,
+          106.2611,
+          109.9865,
+          104.783,
+          122.8256
+        ]
+      },
+      "throughput_world_steps_per_second": 750390.9,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15708585984,
+        "free_after_setup_bytes": 15445196800,
+        "free_after_plans_bytes": 14315356160,
+        "resident_setup_delta_bytes": 263389184,
+        "resident_total_delta_bytes": 1393229824
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam4",
+      "label": "FOAM 4",
+      "n_samples": 1024,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 81920,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 65.02198,
+        "median": 63.96091,
+        "p95": 69.23608,
+        "min": 61.54364,
+        "max": 70.11093,
+        "std": 2.871625,
+        "samples": [
+          61.54364,
+          63.75777,
+          65.73666,
+          63.96091,
+          70.11093
+        ]
+      },
+      "throughput_world_steps_per_second": 1259882.0,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15730933760,
+        "free_after_setup_bytes": 15463809024,
+        "free_after_plans_bytes": 15398797312,
+        "resident_setup_delta_bytes": 267124736,
+        "resident_total_delta_bytes": 332136448
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam16a",
+      "label": "FOAM 16A",
+      "n_samples": 1024,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 81920,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 87.58142,
+        "median": 69.75356,
+        "p95": 120.8833,
+        "min": 61.71079,
+        "max": 121.0021,
+        "std": 27.16653,
+        "samples": [
+          61.71079,
+          65.03259,
+          69.75356,
+          120.4081,
+          121.0021
+        ]
+      },
+      "throughput_world_steps_per_second": 935358.2,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15738535936,
+        "free_after_setup_bytes": 15447883776,
+        "free_after_plans_bytes": 15382872064,
+        "resident_setup_delta_bytes": 290652160,
+        "resident_total_delta_bytes": 355663872
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam16b",
+      "label": "FOAM 16B",
+      "n_samples": 1024,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 81920,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 100.4842,
+        "median": 87.00738,
+        "p95": 134.3454,
+        "min": 71.90306,
+        "max": 134.4414,
+        "std": 27.98669,
+        "samples": [
+          71.90306,
+          75.10781,
+          87.00738,
+          133.9613,
+          134.4414
+        ]
+      },
+      "throughput_world_steps_per_second": 815252.7,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15751249920,
+        "free_after_setup_bytes": 15475081216,
+        "free_after_plans_bytes": 15405613056,
+        "resident_setup_delta_bytes": 276168704,
+        "resident_total_delta_bytes": 345636864
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    },
+    {
+      "ok": true,
+      "geometry": "duck_low_foam64",
+      "label": "FOAM 64",
+      "n_samples": 1024,
+      "horizon": 5,
+      "substeps": 16,
+      "rollout_dt_seconds": 0.004,
+      "control_dt_seconds": 0.064,
+      "world_steps_per_plan": 81920,
+      "warmup_plans": 2,
+      "timed_plans": 5,
+      "latency_ms": {
+        "mean": 90.49575,
+        "median": 92.05704,
+        "p95": 95.87853,
+        "min": 85.05821,
+        "max": 96.66728,
+        "std": 4.370648,
+        "samples": [
+          96.66728,
+          92.05704,
+          92.7235,
+          85.97274,
+          85.05821
+        ]
+      },
+      "throughput_world_steps_per_second": 905235.8,
+      "gpu_memory": {
+        "total_bytes": 16587751424,
+        "free_before_bytes": 15745351680,
+        "free_after_setup_bytes": 15470690304,
+        "free_after_plans_bytes": 15405744128,
+        "resident_setup_delta_bytes": 274661376,
+        "resident_total_delta_bytes": 339607552
+      },
+      "action_finite": true,
+      "last_plan_ok": true,
+      "device": {
+        "name": "NVIDIA GeForce RTX 5070 Ti",
+        "arch": 120,
+        "warp_version": "1.12.0",
+        "mujoco_version": "3.6.0"
+      },
+      "capacities": {
+        "nconmax": 200,
+        "njmax": 1000
+      },
+      "seed": 64
+    }
+  ]
+}

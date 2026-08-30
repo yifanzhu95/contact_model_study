@@ -1,0 +1,310 @@
+{
+  "schema_version": 1,
+  "generator": "analysis/duck_foam/generate_mujoco_sphere_scenes.py",
+  "generator_sha256": "d17a7528a779996c8de7c429e3beab9e3ec4edc595932451f6201ba4054484c4",
+  "principle": "Vary rollout Duck collision spheres while keeping visual geometry, mass, center of mass, inertia, friction, object frame, and eval scene fixed.",
+  "recommended_first_comparison": {
+    "fixed_hand_accuracy": "low",
+    "selectors": [
+      "duck_low_foam4",
+      "duck_low_foam16a",
+      "duck_low_foam16b",
+      "duck_low_foam64"
+    ]
+  },
+  "fixed_eval_reference": {
+    "scene": "scenes/leap/env_leap_eval_duck.xml",
+    "scene_sha256": "460237f3d6a7d0e5a1d98b80eabcd7ff30ed04c1c734b133a2c6716416aca3c1",
+    "duck_collision_geometry": "8 convex hull mesh geoms"
+  },
+  "generated_scenes": [
+    {
+      "selector": "duck_low_foam4",
+      "scene": "scenes/leap/env_leap_rollout_duck_low_foam4.xml",
+      "scene_sha256": "df6db8a0a52ba0fc421bc511a36dc152643e73b2fc13c23fb325fd83ad372f4c",
+      "template": "scenes/leap/env_leap_rollout_duck_low_high.xml",
+      "template_sha256": "aa4f4603adc357a97178c507e0dbc2fdf798f6a12b45852def54e7b30ac064d5",
+      "sphere_source": "analysis/duck_foam/exploration/duck_foam_safe_l6000_branch4_calibrated.json",
+      "sphere_source_sha256": "9f7b510dd2b921e35d6049741c5f6a6b2b2b50363ddb2d82d0e0af055636c740",
+      "depth": 1,
+      "sphere_count": 4,
+      "baked_uniform_scale": 0.96,
+      "object_geom_offset_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "object_inertial": {
+        "pos": "-0.0088857 -0.0000003 -0.0152658",
+        "quat": "0.6896432 0.1561964 0.1561924 0.6896367",
+        "mass": "0.05",
+        "diaginertia": "4.695783e-05 3.827842e-05 2.721782e-05"
+      },
+      "candidate_role": "Low"
+    },
+    {
+      "selector": "duck_low_foam16a",
+      "scene": "scenes/leap/env_leap_rollout_duck_low_foam16a.xml",
+      "scene_sha256": "d26bb093dc7ff6acfc7224eac3120441f3dec11ee8508cd4512676f92cf578f1",
+      "template": "scenes/leap/env_leap_rollout_duck_low_high.xml",
+      "template_sha256": "aa4f4603adc357a97178c507e0dbc2fdf798f6a12b45852def54e7b30ac064d5",
+      "sphere_source": "analysis/duck_foam/exploration/duck_foam_safe_l6000_branch4_calibrated.json",
+      "sphere_source_sha256": "9f7b510dd2b921e35d6049741c5f6a6b2b2b50363ddb2d82d0e0af055636c740",
+      "depth": 2,
+      "sphere_count": 16,
+      "baked_uniform_scale": 0.96,
+      "object_geom_offset_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "object_inertial": {
+        "pos": "-0.0088857 -0.0000003 -0.0152658",
+        "quat": "0.6896432 0.1561964 0.1561924 0.6896367",
+        "mass": "0.05",
+        "diaginertia": "4.695783e-05 3.827842e-05 2.721782e-05"
+      },
+      "candidate_role": "Medium-A"
+    },
+    {
+      "selector": "duck_low_foam16b",
+      "scene": "scenes/leap/env_leap_rollout_duck_low_foam16b.xml",
+      "scene_sha256": "8c348ba9d7a64f9a5007303a775359e59364ea10ae562ab3a5ce82b82410e07e",
+      "template": "scenes/leap/env_leap_rollout_duck_low_high.xml",
+      "template_sha256": "aa4f4603adc357a97178c507e0dbc2fdf798f6a12b45852def54e7b30ac064d5",
+      "sphere_source": "analysis/duck_foam/exploration/duck_branch4_medium16_scale096_alternative.json",
+      "sphere_source_sha256": "a67fb06c2d7d137f235adcac18c69758291d32cee730a398fbb96b4359d7969a",
+      "depth": 2,
+      "sphere_count": 16,
+      "baked_uniform_scale": 0.96,
+      "object_geom_offset_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "object_inertial": {
+        "pos": "-0.0088857 -0.0000003 -0.0152658",
+        "quat": "0.6896432 0.1561964 0.1561924 0.6896367",
+        "mass": "0.05",
+        "diaginertia": "4.695783e-05 3.827842e-05 2.721782e-05"
+      },
+      "candidate_role": "Medium-B"
+    },
+    {
+      "selector": "duck_low_foam64",
+      "scene": "scenes/leap/env_leap_rollout_duck_low_foam64.xml",
+      "scene_sha256": "2845b5751e5a9e34c7540e285592c8480f6e092ca488b21cf0f855c2e3ded92d",
+      "template": "scenes/leap/env_leap_rollout_duck_low_high.xml",
+      "template_sha256": "aa4f4603adc357a97178c507e0dbc2fdf798f6a12b45852def54e7b30ac064d5",
+      "sphere_source": "analysis/duck_foam/exploration/duck_foam_safe_l6000_branch4_calibrated.json",
+      "sphere_source_sha256": "9f7b510dd2b921e35d6049741c5f6a6b2b2b50363ddb2d82d0e0af055636c740",
+      "depth": 3,
+      "sphere_count": 64,
+      "baked_uniform_scale": 0.965,
+      "object_geom_offset_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "object_inertial": {
+        "pos": "-0.0088857 -0.0000003 -0.0152658",
+        "quat": "0.6896432 0.1561964 0.1561924 0.6896367",
+        "mass": "0.05",
+        "diaginertia": "4.695783e-05 3.827842e-05 2.721782e-05"
+      },
+      "candidate_role": "High"
+    },
+    {
+      "selector": "duck_med_foam4",
+      "scene": "scenes/leap/env_leap_rollout_duck_med_foam4.xml",
+      "scene_sha256": "93b5b8f9e29c5f710d8355232b0e2c3ea3bc32ce43ba2c6f7934ed86273591ee",
+      "template": "scenes/leap/env_leap_rollout_duck_med_high.xml",
+      "template_sha256": "6f0c60252e9e7e083967c18c47deddef2bb173afe784a220b3b8e7556f6acd14",
+      "sphere_source": "analysis/duck_foam/exploration/duck_foam_safe_l6000_branch4_calibrated.json",
+      "sphere_source_sha256": "9f7b510dd2b921e35d6049741c5f6a6b2b2b50363ddb2d82d0e0af055636c740",
+      "depth": 1,
+      "sphere_count": 4,
+      "baked_uniform_scale": 0.96,
+      "object_geom_offset_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "object_inertial": {
+        "pos": "-0.0088857 -0.0000003 -0.0152658",
+        "quat": "0.6896432 0.1561964 0.1561924 0.6896367",
+        "mass": "0.05",
+        "diaginertia": "4.695783e-05 3.827842e-05 2.721782e-05"
+      },
+      "candidate_role": "Low"
+    },
+    {
+      "selector": "duck_med_foam16a",
+      "scene": "scenes/leap/env_leap_rollout_duck_med_foam16a.xml",
+      "scene_sha256": "4f7b7e8e287d95fb88b86a7e4436e6ce402e6a44d5c4a2edd56ab73b64f8ea52",
+      "template": "scenes/leap/env_leap_rollout_duck_med_high.xml",
+      "template_sha256": "6f0c60252e9e7e083967c18c47deddef2bb173afe784a220b3b8e7556f6acd14",
+      "sphere_source": "analysis/duck_foam/exploration/duck_foam_safe_l6000_branch4_calibrated.json",
+      "sphere_source_sha256": "9f7b510dd2b921e35d6049741c5f6a6b2b2b50363ddb2d82d0e0af055636c740",
+      "depth": 2,
+      "sphere_count": 16,
+      "baked_uniform_scale": 0.96,
+      "object_geom_offset_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "object_inertial": {
+        "pos": "-0.0088857 -0.0000003 -0.0152658",
+        "quat": "0.6896432 0.1561964 0.1561924 0.6896367",
+        "mass": "0.05",
+        "diaginertia": "4.695783e-05 3.827842e-05 2.721782e-05"
+      },
+      "candidate_role": "Medium-A"
+    },
+    {
+      "selector": "duck_med_foam16b",
+      "scene": "scenes/leap/env_leap_rollout_duck_med_foam16b.xml",
+      "scene_sha256": "2046353cddfcc77f1810036f7916b9d991959a41fcf8d50b56776fafe02eef44",
+      "template": "scenes/leap/env_leap_rollout_duck_med_high.xml",
+      "template_sha256": "6f0c60252e9e7e083967c18c47deddef2bb173afe784a220b3b8e7556f6acd14",
+      "sphere_source": "analysis/duck_foam/exploration/duck_branch4_medium16_scale096_alternative.json",
+      "sphere_source_sha256": "a67fb06c2d7d137f235adcac18c69758291d32cee730a398fbb96b4359d7969a",
+      "depth": 2,
+      "sphere_count": 16,
+      "baked_uniform_scale": 0.96,
+      "object_geom_offset_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "object_inertial": {
+        "pos": "-0.0088857 -0.0000003 -0.0152658",
+        "quat": "0.6896432 0.1561964 0.1561924 0.6896367",
+        "mass": "0.05",
+        "diaginertia": "4.695783e-05 3.827842e-05 2.721782e-05"
+      },
+      "candidate_role": "Medium-B"
+    },
+    {
+      "selector": "duck_med_foam64",
+      "scene": "scenes/leap/env_leap_rollout_duck_med_foam64.xml",
+      "scene_sha256": "1b3b7a920f44eee5ec068bdb1f6e663dc346b3bd96ecb3c2ff2984acc63faa1d",
+      "template": "scenes/leap/env_leap_rollout_duck_med_high.xml",
+      "template_sha256": "6f0c60252e9e7e083967c18c47deddef2bb173afe784a220b3b8e7556f6acd14",
+      "sphere_source": "analysis/duck_foam/exploration/duck_foam_safe_l6000_branch4_calibrated.json",
+      "sphere_source_sha256": "9f7b510dd2b921e35d6049741c5f6a6b2b2b50363ddb2d82d0e0af055636c740",
+      "depth": 3,
+      "sphere_count": 64,
+      "baked_uniform_scale": 0.965,
+      "object_geom_offset_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "object_inertial": {
+        "pos": "-0.0088857 -0.0000003 -0.0152658",
+        "quat": "0.6896432 0.1561964 0.1561924 0.6896367",
+        "mass": "0.05",
+        "diaginertia": "4.695783e-05 3.827842e-05 2.721782e-05"
+      },
+      "candidate_role": "High"
+    },
+    {
+      "selector": "duck_high_foam4",
+      "scene": "scenes/leap/env_leap_rollout_duck_high_foam4.xml",
+      "scene_sha256": "90bdfc3899c2c37ba7dedd2d3bece1aae658b38f5ace520e0408c04ef83a2ccf",
+      "template": "scenes/leap/env_leap_rollout_duck_high_high.xml",
+      "template_sha256": "6fd3d71644398396982816f56f2e19f72e203397e6e999078d3b61923dd9ee52",
+      "sphere_source": "analysis/duck_foam/exploration/duck_foam_safe_l6000_branch4_calibrated.json",
+      "sphere_source_sha256": "9f7b510dd2b921e35d6049741c5f6a6b2b2b50363ddb2d82d0e0af055636c740",
+      "depth": 1,
+      "sphere_count": 4,
+      "baked_uniform_scale": 0.96,
+      "object_geom_offset_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "object_inertial": {
+        "pos": "-0.0088857 -0.0000003 -0.0152658",
+        "quat": "0.6896432 0.1561964 0.1561924 0.6896367",
+        "mass": "0.05",
+        "diaginertia": "4.695783e-05 3.827842e-05 2.721782e-05"
+      },
+      "candidate_role": "Low"
+    },
+    {
+      "selector": "duck_high_foam16a",
+      "scene": "scenes/leap/env_leap_rollout_duck_high_foam16a.xml",
+      "scene_sha256": "5b72d4ba9a8c2af5a91c12519ac81a802db0728a67f8d91e061c01fe735d15b2",
+      "template": "scenes/leap/env_leap_rollout_duck_high_high.xml",
+      "template_sha256": "6fd3d71644398396982816f56f2e19f72e203397e6e999078d3b61923dd9ee52",
+      "sphere_source": "analysis/duck_foam/exploration/duck_foam_safe_l6000_branch4_calibrated.json",
+      "sphere_source_sha256": "9f7b510dd2b921e35d6049741c5f6a6b2b2b50363ddb2d82d0e0af055636c740",
+      "depth": 2,
+      "sphere_count": 16,
+      "baked_uniform_scale": 0.96,
+      "object_geom_offset_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "object_inertial": {
+        "pos": "-0.0088857 -0.0000003 -0.0152658",
+        "quat": "0.6896432 0.1561964 0.1561924 0.6896367",
+        "mass": "0.05",
+        "diaginertia": "4.695783e-05 3.827842e-05 2.721782e-05"
+      },
+      "candidate_role": "Medium-A"
+    },
+    {
+      "selector": "duck_high_foam16b",
+      "scene": "scenes/leap/env_leap_rollout_duck_high_foam16b.xml",
+      "scene_sha256": "c5e4cad79d0b8ce4991437e28aae1c854a40060650b86e1e11166b9c360723ab",
+      "template": "scenes/leap/env_leap_rollout_duck_high_high.xml",
+      "template_sha256": "6fd3d71644398396982816f56f2e19f72e203397e6e999078d3b61923dd9ee52",
+      "sphere_source": "analysis/duck_foam/exploration/duck_branch4_medium16_scale096_alternative.json",
+      "sphere_source_sha256": "a67fb06c2d7d137f235adcac18c69758291d32cee730a398fbb96b4359d7969a",
+      "depth": 2,
+      "sphere_count": 16,
+      "baked_uniform_scale": 0.96,
+      "object_geom_offset_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "object_inertial": {
+        "pos": "-0.0088857 -0.0000003 -0.0152658",
+        "quat": "0.6896432 0.1561964 0.1561924 0.6896367",
+        "mass": "0.05",
+        "diaginertia": "4.695783e-05 3.827842e-05 2.721782e-05"
+      },
+      "candidate_role": "Medium-B"
+    },
+    {
+      "selector": "duck_high_foam64",
+      "scene": "scenes/leap/env_leap_rollout_duck_high_foam64.xml",
+      "scene_sha256": "34100d05da967575e0aa944413e82b3635fe55c47b19f597178678b21991c0a6",
+      "template": "scenes/leap/env_leap_rollout_duck_high_high.xml",
+      "template_sha256": "6fd3d71644398396982816f56f2e19f72e203397e6e999078d3b61923dd9ee52",
+      "sphere_source": "analysis/duck_foam/exploration/duck_foam_safe_l6000_branch4_calibrated.json",
+      "sphere_source_sha256": "9f7b510dd2b921e35d6049741c5f6a6b2b2b50363ddb2d82d0e0af055636c740",
+      "depth": 3,
+      "sphere_count": 64,
+      "baked_uniform_scale": 0.965,
+      "object_geom_offset_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "object_inertial": {
+        "pos": "-0.0088857 -0.0000003 -0.0152658",
+        "quat": "0.6896432 0.1561964 0.1561924 0.6896367",
+        "mass": "0.05",
+        "diaginertia": "4.695783e-05 3.827842e-05 2.721782e-05"
+      },
+      "candidate_role": "High"
+    }
+  ]
+}

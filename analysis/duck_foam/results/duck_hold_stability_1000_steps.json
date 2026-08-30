@@ -1,0 +1,29 @@
+{
+  "purpose": "reference-eval Duck initial-grasp stability without planning",
+  "geometry_selector": "duck_low_high",
+  "eval_geometry": "scenes/leap/env_leap_eval_duck.xml",
+  "eval_simulator": "MuJoCo",
+  "control": "fixed initial hand command; no planner",
+  "configuration": {
+    "settle_seconds": 1.0,
+    "control_dt_seconds": 0.064,
+    "max_steps": 1000,
+    "seed": 0
+  },
+  "result": {
+    "stable": true,
+    "failed_step": null,
+    "steps_run": 1000,
+    "simulated_seconds_after_settle": 64.0,
+    "object_z_after_settle": 0.08122413,
+    "object_z_final": 0.08141285,
+    "object_z_min": 0.08121915,
+    "object_z_max": 0.08317099,
+    "object_position_drift_m": 0.0003738331,
+    "object_quaternion_change": 9.048811e-05,
+    "final_object_speed": 2.685476e-06
+  },
+  "software": {
+    "warp": "1.12.0"
+  }
+}

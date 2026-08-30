@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "operation": "merge coincident vertices only; no smoothing or simplification",
+  "input": {
+    "path": "scenes/leap/objects/rubber_duck.stl",
+    "sha256": "61f21b40485c3c6cf202ed2d131e34d792c93e1fc7d3e62d7071b48f4077ace8",
+    "raw_process_false": {
+      "vertices": 32880,
+      "faces": 10960,
+      "watertight": false,
+      "winding_consistent": true,
+      "is_volume": false,
+      "bounds_m": [
+        [
+          -0.05713244900107384,
+          -0.03250056877732277,
+          -0.048467300832271576
+        ],
+        [
+          0.03160751983523369,
+          0.03249942883849144,
+          0.04484352841973305
+        ]
+      ],
+      "surface_area_m2": 0.021367222614400768,
+      "volume_m3": 0.0002042684891197503
+    }
+  },
+  "welded_before_export": {
+    "vertices": 5482,
+    "faces": 10960,
+    "watertight": true,
+    "winding_consistent": true,
+    "is_volume": true,
+    "bounds_m": [
+      [
+        -0.05713244900107384,
+        -0.03250056877732277,
+        -0.048467300832271576
+      ],
+      [
+        0.03160751983523369,
+        0.03249942883849144,
+        0.04484352841973305
+      ]
+    ],
+    "surface_area_m2": 0.021367222614400768,
+    "volume_m3": 0.0002042684891197503
+  },
+  "output": {
+    "path": "analysis/duck_foam/exploration/rubber_duck_welded.obj",
+    "sha256": "1d919949d9e0ea4b74d2d3302714e841e720f89bb42b62086ff807576a07a81b",
+    "reloaded_process_false": {
+      "vertices": 5482,
+      "faces": 10960,
+      "watertight": true,
+      "winding_consistent": true,
+      "is_volume": true,
+      "bounds_m": [
+        [
+          -0.05713245,
+          -0.03250057,
+          -0.0484673
+        ],
+        [
+          0.03160752,
+          0.03249943,
+          0.04484353
+        ]
+      ],
+      "surface_area_m2": 0.021367222702487584,
+      "volume_m3": 0.0002042684934268384
+    }
+  },
+  "preservation_checks": {
+    "bounds_unchanged_before_export": true,
+    "surface_area_unchanged_before_export": true,
+    "volume_unchanged_before_export": true,
+    "exported_obj_valid_without_processing": true
+  }
+}

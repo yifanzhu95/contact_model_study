@@ -1,0 +1,44 @@
+<mujoco model="right_leap_hand scene duck_low_foam4">
+  <include file="./leap_right_hand_low.xml" />
+  <statistic center="0 0 0" extent="0.3" />
+  <visual>
+    <rgba haze="0.15 0.25 0.35 1" />
+    <quality shadowsize="8192" />
+    <global azimuth="130" elevation="-40" offwidth="1280" offheight="960" />
+  </visual>
+  <asset>
+    <!-- NB: <mesh file> resolves against `meshdir`, which the included hand XML
+    sets to ./leap_hand/assets/ — hence the ../../ hop back out to scenes/leap/. -->
+    <mesh name="rubber_duck_mesh" file="../../objects/rubber_duck.stl" maxhullvert="30" />
+    <!-- Same mesh at the goal-marker scale (0.43x, matching the cube scene's
+    0.015/0.035 goal-to-object ratio). -->
+    <mesh name="rubber_duck_goal" file="../../objects/rubber_duck.stl" scale="0.43 0.43 0.43" />
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8" width="300" height="300" />
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0." />
+  </asset>
+  <worldbody>
+    <light directional="true" ambient="0.2 0.2 0.2" diffuse="0.8 0.8 0.8" castshadow="false" pos="0 1 4" dir="0 0 -1" name="light0" />
+    <camera name="demo-cam" pos="-0.003 -0.393 0.317" xyaxes="1.000 -0.000 0.000 0.000 0.462 0.887" />
+    <geom name="floor" pos="0 0 -0.1" size="0 0 0.05" type="plane" material="groundplane" />
+    <!-- Reorientation target marker. mocap="true" is REQUIRED: the task's
+    _update_goal rewrites mjd.mocap_quat here each time a goal is sampled, and
+    silently does nothing on a non-mocap body (which is why the older
+    env_leap_duck.xml marker never turned). pos matches the cube scene's proven
+    upper-left inset placement for the eval camera. Visual only. -->
+    <body name="goal" pos="0.005 -0.07 0.1353" quat="1 0 0 0" mocap="true">
+      <geom name="goal_visual" type="mesh" mesh="rubber_duck_goal" contype="0" conaffinity="0" density="0" rgba="0.97 0.6 0 0.6" />
+    </body>
+    <body name="obj" pos="0.02 0.05 0.1">
+      <freejoint name="obj_joint" />
+      <!-- Explicit inertia shared by every Duck collision variant. MuJoCo therefore keeps the same mass, center of mass, principal axes, and diagonal inertia regardless of the number or shape of collision geoms. -->
+      <inertial pos="-0.0088857 -0.0000003 -0.0152658" quat="0.6896432 0.1561964 0.1561924 0.6896367" mass="0.05" diaginertia="4.695783e-05 3.827842e-05 2.721782e-05" />
+      <!-- Visual-only Duck: the calibrated spheres above carry contact, while this mesh shows the original shape and contributes no mass or collision. -->
+      <!-- Calibrated FOAM rollout collision spheres. Positions use the same object-frame offset as the template visual mesh. The explicit inertial above fixes mass and inertia; density=0 prevents geometry-dependent dynamics. -->
+      <geom name="obj_sphere_000" type="sphere" size="0.0339072" pos="-0.000415890583317 -1.15427987766e-05 0.0184690605517" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_001" type="sphere" size="0.03725568" pos="-0.00456213058332 -2.40227987766e-05 -0.0217069394483" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_002" type="sphere" size="0.03447552" pos="-0.0226523705833 2.49372012234e-05 -0.0247549394483" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_003" type="sphere" size="0.01772256" pos="-0.0458315705833 0.000734377201223 -0.00872581944825" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_visual" type="mesh" mesh="rubber_duck_mesh" contype="0" conaffinity="0" density="0" rgba="0.97 0.6 0 1.0" />
+    </body>
+  </worldbody>
+</mujoco>

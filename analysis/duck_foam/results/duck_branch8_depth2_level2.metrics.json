@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "reference_mesh": {
+    "path": "scenes/leap/objects/rubber_duck.stl",
+    "sha256": "61f21b40485c3c6cf202ed2d131e34d792c93e1fc7d3e62d7071b48f4077ace8",
+    "load_process": true,
+    "vertices_after_welding": 5482,
+    "faces": 10960,
+    "watertight": true,
+    "winding_consistent": true,
+    "is_volume": true,
+    "bounds_m": [
+      [
+        -0.05713244900107384,
+        -0.03250056877732277,
+        -0.048467300832271576
+      ],
+      [
+        0.03160751983523369,
+        0.03249942883849144,
+        0.04484352841973305
+      ]
+    ],
+    "volume_m3": 0.0002042684891197503,
+    "surface_area_m2": 0.021367222614400768
+  },
+  "sphere_model": {
+    "path": "analysis/duck_foam/exploration/duck_branch8_depth2.json",
+    "sha256": "43e03c82a444fbdd3c2d000e17b386000fc47acde2e74eaa8ff9e7ce0074d15f",
+    "depth": 2,
+    "sphere_count": 64,
+    "foam_reported_mean": 17.099,
+    "foam_reported_best": 0.0,
+    "foam_reported_worst": 32.793,
+    "radius_m": {
+      "mean": 0.02177628125,
+      "p50": 0.022651499999999998,
+      "p95": 0.028624849999999997,
+      "p99": 0.029531359999999996,
+      "max": 0.029927
+    }
+  },
+  "sampling": {
+    "seed": 0,
+    "mesh_surface_samples": 20000,
+    "sphere_surface_requested_samples": 8000,
+    "closest_point_method": "trimesh.proximity.closest_point_naive",
+    "closest_point_chunk": 64,
+    "sphere_overlap_tolerance_m": 1e-09
+  },
+  "mesh_to_sphere_union": {
+    "definition": "min_i(||mesh_point-center_i||-radius_i); positive is uncovered",
+    "sample_count": 20000,
+    "coverage_tolerance_mm": 0.01,
+    "covered_fraction": 1.0,
+    "uncovered_fraction": 0.0,
+    "signed_sphere_union_sdf_mm": {
+      "mean": -4.868276258486901,
+      "p50": -4.741065387828351,
+      "p95": -3.6275184818262427,
+      "p99": -2.7797561569205564,
+      "max": -1.41381582926986
+    },
+    "undercoverage_gap_mm_all_mesh_samples": {
+      "mean": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0,
+      "max": 0.0
+    },
+    "undercoverage_gap_mm_uncovered_only": {
+      "mean": null,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "max": null
+    }
+  },
+  "sphere_union_to_mesh": {
+    "definition": "Closest triangle distance for exposed sphere-union samples; sign uses the nearest triangle outward normal, positive is outside Duck",
+    "requested_candidate_samples": 8000,
+    "actual_candidate_samples": 7996,
+    "exposed_sample_count": 552,
+    "exposed_acceptance_fraction": 0.06903451725862932,
+    "estimated_exposed_union_area_m2": 0.027736582216488212,
+    "overcoverage_tolerance_mm": 0.01,
+    "outside_surface_fraction": 1.0,
+    "inside_or_on_surface_fraction": 0.0,
+    "unsigned_distance_mm": {
+      "mean": 4.718377665694629,
+      "p50": 4.649021516439737,
+      "p95": 6.2640664500887775,
+      "p99": 7.409520027042696,
+      "max": 8.399091322514892
+    },
+    "locally_signed_distance_mm": {
+      "mean": 4.711711421111286,
+      "p50": 4.647555263942863,
+      "p95": 6.2640664500887775,
+      "p99": 7.409520027042697,
+      "max": 8.399091322514892
+    },
+    "overreach_mm_all_exposed_samples": {
+      "mean": 4.711711421111286,
+      "p50": 4.647555263942863,
+      "p95": 6.2640664500887775,
+      "p99": 7.409520027042697,
+      "max": 8.399091322514892
+    },
+    "overreach_mm_outside_only": {
+      "mean": 4.711711421111286,
+      "p50": 4.647555263942863,
+      "p95": 6.2640664500887775,
+      "p99": 7.409520027042697,
+      "max": 8.399091322514892
+    }
+  },
+  "limitations": [
+    "Metrics are sampled estimates, not analytic Hausdorff guarantees.",
+    "Sphere-union outside/inside sign uses the nearest triangle normal.",
+    "The input reference mesh is welded at load time but is not additionally smoothed or simplified by this evaluator.",
+    "Negative sphere-union SDF at a mesh point is a coverage margin, not an exact distance to the boundary of an overlapping sphere union."
+  ]
+}

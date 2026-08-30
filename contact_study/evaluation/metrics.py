@@ -44,6 +44,12 @@ class EpisodeResult:
     elapsed_seconds:   float
     mean_step_ms:      float = 0.0
     std_step_ms:       float = 0.0
+    # Distribution summaries of controller.plan() latency.  The mean alone is
+    # easily distorted by occasional CUDA scheduling or contact-heavy spikes;
+    # median and P95 distinguish the typical cost from the slow tail.
+    median_step_ms:    float = 0.0
+    p95_step_ms:       float = 0.0
+    max_step_ms:       float = 0.0
     # Which sampling planner produced the episode ("mppi" | "cem" |
     # "predictive_sampler"). Defaulted so results written before the planner
     # became selectable still load via EpisodeResult.from_dict.
@@ -100,6 +106,8 @@ class EpisodeResult:
     n_plans:              int   = 0
     mean_latency_ms:      float = 0.0
     std_latency_ms:       float = 0.0
+    median_latency_ms:    float = 0.0
+    p95_latency_ms:       float = 0.0
     mean_staleness_ms:    float = 0.0
     missed_ticks:         int   = 0
     tape_exhausted_ticks: int   = 0
