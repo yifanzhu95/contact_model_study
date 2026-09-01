@@ -11,6 +11,8 @@ using scikit-optimize's Gaussian-process minimizer (skopt.gp_minimize).
 Search space (all log-uniform by default):
   * the cost weights named by --opt_weights, bracketed multiplicatively around
     the task's own defaults, so the space auto-adapts per task/object;
+    --no-opt_cost_weights drops them entirely, pinning every weight to the
+    task's default and tuning only the planner knobs below;
   * noise_sigma, the sampling planner's action-noise standard deviation;
   * temperature, MPPI's softmax sharpness (dropped for planners that have no
     such field — make_planner_config filters by the config's declared fields).
@@ -644,7 +646,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--task",        type=str, default="grasp_reorient")
     p.add_argument("--geometry",    type=str, default="cube_high_high",#DEFAULT_SCENE_VARIANT,
                    help="Scene variant: '<object>' or '<object>_<hand_acc>_<obj_acc>'.")
-    p.add_argument("--models", "--model", dest="models", nargs="+", default=["M1","M2","M3","M4"],
+    p.add_argument("--models", "--model", dest="models", nargs="+", default=["M3"],#["M1","M2","M3","M4"],
                    choices=list(MODEL_FACTORIES), metavar="MODEL",
                    help="Contact model(s) to optimize over. With more than one, EVERY "
                         "trial evaluates the SAME weight vector on EVERY model, at the "
@@ -661,7 +663,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "is the stricter reading of 'weights that work for all of "
                         "them'. Ignored with a single --models entry.")
     p.add_argument("--planner",     type=str, default="mppi", choices=PLANNER_NAMES)
-    p.add_argument("--n_samples",   type=int, default=256)
+    p.add_argument("--n_samples",   type=int, default=64)#256)
     p.add_argument("--horizon",     type=int, default=None,
                    help="Planning horizon in control steps (ignored with --time_horizon).")
     p.add_argument("--time_horizon", type=float, default=0.352,
@@ -707,16 +709,16 @@ def build_parser() -> argparse.ArgumentParser:
                         "one (mujoco), where planning is already 89%% of wall time.")
 
     # --- search space -------------------------------------------------------
-    p.add_argument("--opt_weights", nargs="*", default=[
-                                                    "w_quat:1.0:50.0",
-                                                    "w_pos_x:1.0:50.0",
-                                                    "w_pos_y:1.0:50.0",
-                                                    "w_pos_z:1.0:50.0",
-                                                    "w_contact:0.1:20.0",
-                                                    "w_joint:0.1:20.0",
-                                                    "w_fallen:100.0:300.0",
-                                                    "w_quat_term:100.0:300.0",
-                                                    "w_pos_term:100.0:300.0"],
+    p.add_argument("--opt_weights", nargs="*", default=[],
+                                                    # "w_quat:1.0:50.0",
+                                                    # "w_pos_x:1.0:50.0",
+                                                    # "w_pos_y:1.0:50.0",
+                                                    # "w_pos_z:1.0:50.0",
+                                                    # "w_contact:0.1:20.0",
+                                                    # "w_joint:0.1:20.0",
+                                                    # "w_fallen:100.0:300.0",
+                                                    # "w_quat_term:100.0:300.0",
+                                                    # "w_pos_term:100.0:300.0"],
                    help="Cost weights to optimize, as 'name' (bounds bracketed "
                         f"multiplicatively at x{BOUND_SCALE:g} around the task's default) "
                         "or 'name:lo:hi'. The default above is grasp_reorient's "
@@ -725,6 +727,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "error. Pass a bare 'name' to fall back to the "
                         f"multiplicative bracket, or the {' '.join(DEFAULT_OPT_WEIGHTS)} "
                         "subset for the old behavior.")
+    p.add_argument("--opt_cost_weights", action=argparse.BooleanOptionalAction, default=False,
+                   help="Search over the cost weights; --no-opt_cost_weights drops "
+                        "every weight dimension and pins them to the task's own "
+                        "defaults, leaving only the planner knobs (noise_sigma, "
+                        "temperature) in the space. Cannot be combined with an "
+                        "explicit --opt_weights, and needs at least one planner "
+                        "knob left to search.")
     p.add_argument("--opt_noise_sigma", action=argparse.BooleanOptionalAction, default=False,
                    help="Search over noise_sigma; --no-opt_noise_sigma pins it to "
                         "--noise_sigma instead.")
@@ -743,7 +752,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "--opt_temperature; ignored for a single model.")
     p.add_argument("--noise_sigma_range", type=float, nargs=2, default=(1e-3, 1.0),
                    metavar=("LO", "HI"))
-    p.add_argument("--temperature_range", type=float, nargs=2, default=(0.001, 100.0),
+    p.add_argument("--temperature_range", type=float, nargs=2, default=(0.001, 1000.0),
                    metavar=("LO", "HI"))
     p.add_argument("--noise_sigma", type=float, default=0.1,
                    help="Fixed noise_sigma when --no-opt_noise_sigma.")
@@ -761,7 +770,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "catastrophic episode.")
 
     # --- optimizer ----------------------------------------------------------
-    p.add_argument("--n_calls",    type=int, default=500,
+    p.add_argument("--n_calls",    type=int, default=250,
                    help="Total trial budget, INCLUDING any trials restored by --resume.")
     p.add_argument("--n_initial_points", type=int, default=10,
                    help="Random trials before the GP takes over (reduced by the number "
@@ -804,7 +813,23 @@ def main():
             "pinned to --temperature by --no-opt_temperature"
         )
 
-    specs      = parse_weight_specs(args.opt_weights, default_weights)
+    if args.opt_cost_weights:
+        specs = parse_weight_specs(args.opt_weights, default_weights)
+    else:
+        # Weights pinned: no weight dimensions at all, so every trial runs the
+        # task's own cost_weights and only the planner knobs move. The space
+        # still has to contain something for the GP to search.
+        if args.opt_weights:
+            raise ValueError(
+                "--opt_weights lists weights to search, but --no-opt_cost_weights "
+                "pins them all to the task's defaults; drop one of the two"
+            )
+        if not (args.opt_noise_sigma or args.opt_temperature):
+            raise ValueError(
+                "--no-opt_cost_weights leaves an empty search space; enable "
+                "--opt_noise_sigma and/or --opt_temperature"
+            )
+        specs = []
     dims, names = build_space(specs, args)
 
     # Quantize the requested durations into the step counts the controller will
@@ -864,6 +889,8 @@ def main():
     print(f"  search space ({len(dims)} dims):")
     for d, name in zip(dims, names):
         print(f"      {name:<16} [{d.low:.5g}, {d.high:.5g}]  {d.prior}")
+    if not args.opt_cost_weights:
+        print(f"      cost weights     pinned to the task's defaults")
     if not args.opt_noise_sigma:
         print(f"      noise_sigma      pinned to {args.noise_sigma:g}")
     if not args.opt_temperature:

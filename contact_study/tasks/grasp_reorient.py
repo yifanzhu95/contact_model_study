@@ -203,17 +203,17 @@ _OBJ_PARAMS: dict[str, dict] = {
         "target_pos":    np.array([0.02, 0.035, 0.09]),#np.array([0.02, 0.03, 0.08])#np.array([0.012, 0.04, 0.085])
         "fallen_z":      0.08,
         "cost_weights": {
-            "w_quat": 2.9504,#11.188,#100.0,
-            "w_pos_x": 31.37,#1.875,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-            "w_pos_y": 46.33,#3.750,#80.0,    #Y is across the fingers
-            "w_pos_z": 1.688,#20.0,#15.0,
+            "w_quat": 27.5,#
+            "w_pos_x": 1.5,#  #I think X is down the fingers # separate X/Y/Z position-error weights
+            "w_pos_y": 25.0,#  #Y is across the fingers
+            "w_pos_z": 15.0,#
             "w_velo": 0.0,
-            "w_contact": 0.1569,#50.0,#15.0,#12.50,
-            "w_joint": 1.709,#5.18,#4.0,
+            "w_contact": 0.26,#
+            "w_joint": 6.37,#
             "w_joint_velo": 0.0,
-            "w_fallen": 122.289,#200.0,
-            "w_quat_term": 119.822,#200.0,#500.0,
-            "w_pos_term": 130.632,#200.0,
+            "w_fallen": 126.0,#
+            "w_quat_term": 204.0,#
+            "w_pos_term": 229.0,#200.0,
             "w_fallen_term": 0.0,
         },
     },
