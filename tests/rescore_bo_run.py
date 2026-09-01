@@ -20,6 +20,22 @@ goal-error cutoffs can both be applied offline: no episode has to be re-run.
 The GP only ever saw the scalar J, so replacing every J with the one the new
 objective would have produced gives a legitimate (x, y) seed set.
 
+With several --models, J is scored per model FIRST and the per-model scores are
+then folded into the one number the GP sees. The cells keep every episode's
+model_label, so that fold is a free choice at rescore time too:
+
+    MODEL_AGG = "worst"  minimax -- J is the WORST model's score (a max, since
+                         J is minimized). The strict reading of "weights that
+                         work for all of them": a model that fails every
+                         episode cannot be hidden by one that succeeds.
+    MODEL_AGG = "mean"   average performance, which lets a good model carry a
+                         bad one.
+    MODEL_AGG = None     keep whatever each cell recorded, i.e. the fold the
+                         original run used (--model_agg on the driver).
+
+Switching the fold is the one rescore that changes NOTHING per episode -- it
+only re-reads the same per-model scores -- so it is always exact.
+
 What is NOT recoverable
 -----------------------
 * `success` was decided DURING the episode, at every step, against the run's
@@ -43,6 +59,10 @@ What is NOT recoverable
 
 Consistency with the next run (important)
 -----------------------------------------
+The fold is a driver flag: rescoring with MODEL_AGG = "mean" and then resuming
+without --model_agg mean leaves the seeded y0 on a different scale than the new
+trials. The final banner prints the flags to carry over.
+
 run_bayes_opt.py reads the cutoffs from the TASK, not from a flag:
 contact_study/tasks/grasp_reorient.py -> TaskConfig.success_thresholds. The
 coefficients are flags (--w_success/--w_cost/--err_clip). So if GOAL_THRESHOLDS
@@ -64,6 +84,9 @@ Usage
     python tests/rescore_bo_run.py <run> --w_success 1.0 --w_cost 0.5 \
         --err_clip 10 --thresholds pos=0.03 quat=0.06 vel=0.2 \
         --success_mode final_state
+
+    # re-fold a minimax run as an average one (or the other way round)
+    python tests/rescore_bo_run.py <run> --model_agg mean
 
     # then seed a new search from it
     python -m contact_study.drivers.run_bayes_opt --resume <out>/bo_state.json \
@@ -116,7 +139,9 @@ GOAL_THRESHOLDS = {
 # "final_state" -> re-decide success from final_goal_errs vs GOAL_THRESHOLDS
 SUCCESS_MODE = "stored"
 
-# None -> keep whatever each cell recorded ("worst" or "mean").
+# How the per-model scores fold into the one number the GP sees, for a run with
+# several --models. "worst" is minimax (a MAX, because J is minimized); "mean"
+# averages. None keeps whatever fold each cell recorded, i.e. the original run's.
 MODEL_AGG = None
 
 
@@ -586,7 +611,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "from final_goal_errs, which undercounts if you LOOSENED "
                         "the cutoffs -- see the module docstring.")
     p.add_argument("--model_agg", choices=["mean", "worst"], default=MODEL_AGG,
-                   help="Fold per-model objectives differently than the run did.")
+                   help="Fold the per-model objectives differently than the run "
+                        "did: 'worst' is minimax (the worst model's score, a max "
+                        "since J is minimized), 'mean' averages them. Omit to "
+                        "keep each cell's own fold. Exact either way -- nothing "
+                        "per-episode is re-decided.")
     p.add_argument("--check_task", action="store_true",
                    help="Import the task and diff its success_thresholds against "
                         "the cutoffs used here (needs the mujoco env).")
@@ -612,6 +641,9 @@ def main():
           f"norm_goal_err   (err_clip={cfg.err_clip:g})")
     print(f"  goal cutoffs: " + "  ".join(f"{k}={v:g}" for k, v in cfg.thresholds.items())
           + f"   success_mode={cfg.success_mode}")
+    print(f"  multi-model fold: "
+          + (f"{cfg.model_agg} (overriding each run's own)" if cfg.model_agg
+             else "as each run recorded it (--model_agg to re-fold)"))
     print(f"{'='*70}")
 
     reports = [rescore_run(r, out if single else out / r.name, cfg, args.dry_run)
@@ -627,8 +659,9 @@ def main():
     print(f"  wrote {out}" if not args.dry_run else "  nothing written (--dry_run)")
     print(f"  The next run must use the SAME objective, or the seeded y0 values "
           f"and its fresh trials measure different things:")
+    agg_flag = f" --model_agg {cfg.model_agg}" if cfg.model_agg else ""
     print(f"    --w_success {cfg.w_success:g} --w_cost {cfg.w_cost:g} "
-          f"--err_clip {cfg.err_clip:g}")
+          f"--err_clip {cfg.err_clip:g}{agg_flag}")
     print(f"  and the cutoffs come from the TASK, not a flag -- set")
     print(f"    success_thresholds = "
           + "{" + ", ".join(f'"{k}": {v:g}' for k, v in cfg.thresholds.items()) + "}")
@@ -638,7 +671,7 @@ def main():
     print(f"    python -m contact_study.drivers.run_bayes_opt \\")
     print(f"        --resume {seed} --outdir results/bo_next \\")
     print(f"        --w_success {cfg.w_success:g} --w_cost {cfg.w_cost:g} "
-          f"--err_clip {cfg.err_clip:g} \\")
+          f"--err_clip {cfg.err_clip:g}{agg_flag} \\")
     print(f"        <the original --task/--geometry/--models/--opt_* flags>")
     print(f"{'='*70}")
 
