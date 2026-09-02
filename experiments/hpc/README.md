@@ -83,7 +83,7 @@ One row = one experiment. All columns are optional except `task`.
 
 - **Reserved** (experiment-level, not planner knobs): `task`, `model`,
   `planner`, `n_episodes`, `seed`, `geometry`, `hand_acc`, `obj_acc`,
-  `eval_sim`, `settle`, `eval_substeps`, `record_trajectory`,
+  `eval_sim`, `settle`, `eval_substeps`, `goal_difficulty`, `record_trajectory`,
   `record_planner_dist`, `planner_dist_every`, `driver`, `plan_latency_ms`,
   `latency_scale`, `plan_warmup`, `executor`, `async_shift`. A blank/missing cell falls
   back to `run_csv_cell.py`'s own `--model` / `--planner` /
@@ -102,6 +102,15 @@ One row = one experiment. All columns are optional except `task`.
   (a blank side falls back to that axis's task default). Leave both blank to
   use `geometry` exactly as before — a bare object name or an
   already-composed `"<obj>_<hand_acc>_<obj_acc>"` string.
+  `goal_difficulty` picks which goal the task asks for, for tasks that have
+  levels (`grasp_reorient`: 0 fixed 90 deg spin, 1 +/-90 deg spin, 2 +/-90 deg
+  about a random object axis, 3 adjacent face + random twist, 4 any other face
+  + twist, 5 180 deg flip, 6 adjacent face no twist, 7 roll to "O", 8 roll
+  either way — see `GraspReorientTask`'s class docstring). A blank cell keeps
+  the task's own default; a level on a task with no difficulty levels is an
+  error rather than a silent no-op. Like `driver`, it is folded into the cell
+  label when the column is present, so rows differing only in difficulty stay
+  separate rows in `combine_results.py`.
   `driver` picks the control loop: `sync` (the default, and what every row
   did before this column existed) runs `run_eval_episode`, which freezes the
   eval simulator for the duration of `plan()`; `async` runs

@@ -656,7 +656,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "single contact model. Cost is proportional: a trial is "
                         "n_models x --n_episodes episodes, which --n_workers runs "
                         "concurrently.")
-    p.add_argument("--model_agg",   type=str, default="worst", choices=["mean", "worst"],
+    p.add_argument("--model_agg",   type=str, default="mean", choices=["mean", "worst"],
                    help="How per-model objectives become the trial's score. 'mean' "
                         "optimizes average performance and lets a good model carry a "
                         "bad one; 'worst' (minimax) optimizes the worst model, which "
@@ -709,16 +709,16 @@ def build_parser() -> argparse.ArgumentParser:
                         "one (mujoco), where planning is already 89%% of wall time.")
 
     # --- search space -------------------------------------------------------
-    p.add_argument("--opt_weights", nargs="*", default=[],
-                                                    # "w_quat:1.0:50.0",
-                                                    # "w_pos_x:1.0:50.0",
-                                                    # "w_pos_y:1.0:50.0",
-                                                    # "w_pos_z:1.0:50.0",
-                                                    # "w_contact:0.1:20.0",
-                                                    # "w_joint:0.1:20.0",
-                                                    # "w_fallen:100.0:300.0",
-                                                    # "w_quat_term:100.0:300.0",
-                                                    # "w_pos_term:100.0:300.0"],
+    p.add_argument("--opt_weights", nargs="*", default=[
+                                                    "w_quat:1.0:50.0",
+                                                    "w_pos_x:1.0:50.0",
+                                                    "w_pos_y:1.0:50.0",
+                                                    "w_pos_z:1.0:50.0",
+                                                    "w_contact:0.1:100.0",
+                                                    "w_joint:0.1:20.0",
+                                                    "w_fallen:100.0:300.0",
+                                                    "w_quat_term:100.0:300.0",
+                                                    "w_pos_term:100.0:300.0"],
                    help="Cost weights to optimize, as 'name' (bounds bracketed "
                         f"multiplicatively at x{BOUND_SCALE:g} around the task's default) "
                         "or 'name:lo:hi'. The default above is grasp_reorient's "
@@ -727,7 +727,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "error. Pass a bare 'name' to fall back to the "
                         f"multiplicative bracket, or the {' '.join(DEFAULT_OPT_WEIGHTS)} "
                         "subset for the old behavior.")
-    p.add_argument("--opt_cost_weights", action=argparse.BooleanOptionalAction, default=False,
+    p.add_argument("--opt_cost_weights", action=argparse.BooleanOptionalAction, default=True,
                    help="Search over the cost weights; --no-opt_cost_weights drops "
                         "every weight dimension and pins them to the task's own "
                         "defaults, leaving only the planner knobs (noise_sigma, "
@@ -760,11 +760,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Fixed temperature when --no-opt_temperature.")
 
     # --- objective ----------------------------------------------------------
-    p.add_argument("--w_success",  type=float, default=1.0,
+    p.add_argument("--w_success",  type=float, default=0.0,
                    help="Weight on the success rate (maximized).")
-    p.add_argument("--w_cost",     type=float, default=0.1,
+    p.add_argument("--w_cost",     type=float, default=1.0,
                    help="Weight on the normalized final goal error (minimized).")
-    p.add_argument("--err_clip",   type=float, default=25.0,
+    p.add_argument("--err_clip",   type=float, default=100.0,
                    help="Goal error is clipped here then divided by it, mapping the "
                         "cost term into [0, 1] so it cannot be dominated by one "
                         "catastrophic episode.")

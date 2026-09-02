@@ -135,6 +135,30 @@ def apply_cost_weight_overrides(task, overrides: dict) -> None:
     task.weights_wp = wp.array(weights_arr, dtype=wp.float32, device="cuda")
 
 
+def apply_goal_difficulty(task, difficulty: int) -> None:
+    """Override a task's goal-difficulty level on this (already built) instance.
+
+    The level picks which sampler GraspReorientTask.sample_new_goal dispatches
+    to; it is a class attribute, so this sets it per instance — "override on an
+    instance before the first episode", as the task documents. TaskConfig.
+    difficulty is refreshed too: the task copies it off the class attribute when
+    it builds its config, so it would otherwise report the stale default.
+
+    A task with no goal_difficulty cannot honour the request, and silently
+    ignoring it would run a whole sweep at the wrong setting — so that is an
+    error, not a no-op.
+    """
+    if not hasattr(task, "goal_difficulty"):
+        raise ValueError(
+            f"{type(task).__name__} has no goal_difficulty (task "
+            f"{getattr(task.config, 'name', '?')!r} does not support "
+            f"goal-difficulty levels)"
+        )
+    task.goal_difficulty = int(difficulty)
+    if task.config is not None:
+        task.config.difficulty = int(difficulty)
+
+
 def run_eval_episode(
     task_name:   str,
     contact_cfg: ContactModelConfig,
@@ -143,6 +167,7 @@ def run_eval_episode(
     geometry:    str = DEFAULT_SCENE_VARIANT,
     planner:     str | None = None,
     cost_weight_overrides: dict | None = None,
+    goal_difficulty: int | None = None,
     settle_seconds: float = 0.0,
     eval_substeps: int | None = None,
     eval_sim:    EvalSimulatorKind | None = None,
@@ -174,6 +199,9 @@ def run_eval_episode(
 
     cost_weight_overrides: optional {weight_name: value} merged into the rollout
         task's cost weights before planning (used by the weight grid search).
+    goal_difficulty: optional goal-difficulty level for tasks that have one
+        (grasp_reorient levels 0-8, see its class docstring); None keeps the
+        task's own default.
     fin_ep_on_success: stop at first success (default); if False, resample a new
         goal on each success and keep going (multi-goal mode).
     record: what to log per control step (state, applied control, planner
@@ -195,6 +223,10 @@ def run_eval_episode(
 
     # ---- ROLLOUT task + planner ------------------------------------------
     rollout_task = get_task(task_name, geometry=geometry, role=TaskRole.ROLLOUT)
+    # Before load(): this is the instance sample_new_goal runs on, and the level
+    # has to be in place before the first goal is drawn below.
+    if goal_difficulty is not None:
+        apply_goal_difficulty(rollout_task, goal_difficulty)
     mjm, mjd = rollout_task.load()
     cfg = rollout_task.config
     if cost_weight_overrides:
@@ -216,6 +248,10 @@ def run_eval_episode(
 
     # ---- EVAL task + "real" simulator ------------------------------------
     eval_task = get_task(task_name, geometry=geometry, role=TaskRole.EVAL)
+    # The eval instance never samples goals; set it so both instances report the
+    # same TaskConfig.difficulty.
+    if goal_difficulty is not None:
+        apply_goal_difficulty(eval_task, goal_difficulty)
     eval_task.load()
     # eval_sim=None keeps the task's TaskConfig default; otherwise override it.
     if eval_sim is not None:
@@ -277,6 +313,7 @@ def run_eval_episode(
         extra_context={
             "task":        task_name,
             "geometry":    geometry,
+            "goal_difficulty": getattr(rollout_task, "goal_difficulty", None),
             "planner":     planner,
             "model_label": contact_cfg.label,
             "eval_sim":    getattr(eval_task.config.eval_sim, "value", None),
@@ -466,7 +503,7 @@ def main():
                         "point MPPI's --convergence_tol tests for, so the two "
                         "together can run to the cap.")
     # --- MPPI-only ---------------------------------------------------------
-    p.add_argument("--temperature", type=float, default=7.5)#30.0)#20.0 <- cube
+    p.add_argument("--temperature", type=float, default=9.23072)#30.0)#20.0 <- cube
     p.add_argument("--convergence_tol", type=float, default=None,
                    help="Iterate until the returned action settles — "
                         "sum_u (u_i - u_i+1)^2 < tol — instead of running a fixed "
@@ -499,6 +536,13 @@ def main():
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
+    p.add_argument("--goal_difficulty", type=int, default=None,
+                   help="Goal-difficulty level for tasks that have one "
+                        "(grasp_reorient: 0 fixed 90 deg spin, 1 +/-90 deg spin, "
+                        "2 +/-90 deg about a random axis, 3 adjacent face + twist, "
+                        "4 any other face + twist, 5 180 deg flip, 6 adjacent face "
+                        "no twist, 7 roll to 'O', 8 roll either way). Default: "
+                        "the task's own.")
     p.add_argument("--seed",        type=int,   default=42)#64)
     p.add_argument("--n_episodes",  type=int,   default=1,
                    help="Number of episodes to run; reports the aggregate success rate.")
@@ -627,6 +671,7 @@ def main():
             video_path  = video_path,
             use_mp4     = use_mp4,
             cost_weight_overrides = overrides or None,
+            goal_difficulty = args.goal_difficulty,
             settle_seconds = args.settle,
             eval_substeps  = args.eval_substeps,
             eval_sim       = eval_sim,

@@ -133,7 +133,7 @@ from contact_study.utils.headless_gl import configure_headless_gl
 # rollout/eval split, the rollout timestep and the cost-weight overrides.
 from contact_study.drivers.run_eval_episode import (
     MODEL_FACTORIES, RESULTS_DIR, VIDEOS_DIR,
-    apply_cost_weight_overrides, default_eval_sim,
+    apply_cost_weight_overrides, apply_goal_difficulty, default_eval_sim,
 )
 
 EXECUTOR_MODES = ("zoh", "tape", "time")
@@ -148,6 +148,7 @@ def run_async_eval_episode(
     geometry:    str = DEFAULT_SCENE_VARIANT,
     planner:     str | None = None,
     cost_weight_overrides: dict | None = None,
+    goal_difficulty: int | None = None,
     settle_seconds: float = 0.0,
     eval_substeps: int | None = None,
     eval_sim:    EvalSimulatorKind | None = None,
@@ -171,6 +172,8 @@ def run_async_eval_episode(
     simulator, settle, goal sampling); only the control loop differs — see the
     module docstring.
 
+    goal_difficulty: optional goal-difficulty level for tasks that have one
+        (grasp_reorient levels 0-8); None keeps the task's own default.
     plan_latency_ms: impose this latency per plan() instead of measuring it.
         0 selects the degenerate synchronous mode. None (default) measures.
     latency_scale:   multiply the MEASURED latency (ignored when plan_latency_ms
@@ -205,6 +208,9 @@ def run_async_eval_episode(
 
     # ---- ROLLOUT task + planner ------------------------------------------
     rollout_task = get_task(task_name, geometry=geometry, role=TaskRole.ROLLOUT)
+    # Before load(): this is the instance sample_new_goal runs on.
+    if goal_difficulty is not None:
+        apply_goal_difficulty(rollout_task, goal_difficulty)
     mjm, mjd = rollout_task.load()
     cfg = rollout_task.config
     if cost_weight_overrides:
@@ -224,6 +230,9 @@ def run_async_eval_episode(
 
     # ---- EVAL task + "real" simulator ------------------------------------
     eval_task = get_task(task_name, geometry=geometry, role=TaskRole.EVAL)
+    # Never samples goals; set so both instances report the same difficulty.
+    if goal_difficulty is not None:
+        apply_goal_difficulty(eval_task, goal_difficulty)
     eval_task.load()
     if eval_sim is not None:
         eval_task.config.eval_sim = eval_sim
@@ -276,6 +285,7 @@ def run_async_eval_episode(
         extra_context={
             "task":            task_name,
             "geometry":        geometry,
+            "goal_difficulty": getattr(rollout_task, "goal_difficulty", None),
             "planner":         planner,
             "model_label":     contact_cfg.label,
             "eval_sim":        getattr(eval_task.config.eval_sim, "value", None),
@@ -653,6 +663,10 @@ def main():
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
+    p.add_argument("--goal_difficulty", type=int, default=None,
+                   help="Goal-difficulty level for tasks that have one "
+                        "(grasp_reorient levels 0-8; see run_eval_episode.py). "
+                        "Default: the task's own.")
     p.add_argument("--seed",        type=int,   default=42)
     p.add_argument("--n_episodes",  type=int,   default=1,
                    help="Number of episodes to run; reports the aggregate success rate.")
@@ -765,6 +779,7 @@ def main():
             video_path  = video_path,
             use_mp4     = use_mp4,
             cost_weight_overrides = overrides or None,
+            goal_difficulty = args.goal_difficulty,
             settle_seconds = args.settle,
             eval_substeps  = args.eval_substeps,
             eval_sim       = eval_sim,
