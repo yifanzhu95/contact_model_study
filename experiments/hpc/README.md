@@ -112,8 +112,8 @@ One row = one experiment. All columns are optional except `task`.
   levels (`grasp_reorient`: 0 fixed 90 deg spin, 1 +/-90 deg spin, 2 +/-90 deg
   about a random object axis, 3 adjacent face + random twist, 4 any other face
   + twist, 5 180 deg flip, 6 adjacent face no twist, 7 roll to "O", 8 roll
-  either way — see `GraspReorientTask`'s class docstring). A blank cell keeps
-  the task's own default; a level on a task with no difficulty levels is an
+  either way, 9 roll to "B" — see `GraspReorientTask`'s class docstring). A
+  blank cell keeps the task's own default; a level on a task with no difficulty levels is an
   error rather than a silent no-op. Like `driver`, it is folded into the cell
   label when the column is present, so rows differing only in difficulty stay
   separate rows in `combine_results.py`.

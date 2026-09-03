@@ -646,7 +646,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--task",        type=str, default="grasp_reorient")
     p.add_argument("--geometry",    type=str, default="cube_high_high",#DEFAULT_SCENE_VARIANT,
                    help="Scene variant: '<object>' or '<object>_<hand_acc>_<obj_acc>'.")
-    p.add_argument("--models", "--model", dest="models", nargs="+", default=["M3"],#["M1","M2","M3","M4"],
+    p.add_argument("--models", "--model", dest="models", nargs="+", default=["M1","M2","M3","M4"],
                    choices=list(MODEL_FACTORIES), metavar="MODEL",
                    help="Contact model(s) to optimize over. With more than one, EVERY "
                         "trial evaluates the SAME weight vector on EVERY model, at the "
@@ -663,7 +663,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "is the stricter reading of 'weights that work for all of "
                         "them'. Ignored with a single --models entry.")
     p.add_argument("--planner",     type=str, default="mppi", choices=PLANNER_NAMES)
-    p.add_argument("--n_samples",   type=int, default=64)#256)
+    p.add_argument("--n_samples",   type=int, default=256)#256)
     p.add_argument("--horizon",     type=int, default=None,
                    help="Planning horizon in control steps (ignored with --time_horizon).")
     p.add_argument("--time_horizon", type=float, default=0.352,
@@ -690,7 +690,7 @@ def build_parser() -> argparse.ArgumentParser:
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
-    p.add_argument("--n_episodes",  type=int, default=4,
+    p.add_argument("--n_episodes",  type=int, default=1,
                    help="Episodes per objective evaluation. More episodes average out "
                         "episode-specific luck at a proportional cost in wall time.")
     p.add_argument("--seed",        type=int, default=64,
@@ -741,7 +741,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Search over MPPI's temperature; --no-opt_temperature pins it to "
                         "--temperature instead.")
     p.add_argument("--per_model_temperature", action=argparse.BooleanOptionalAction,
-                   default=False,
+                   default=True,
                    help="With several --models, give each its OWN temperature "
                         "dimension (temperature_<model>) instead of one shared "
                         "value; all of them use --temperature_range. The cost "
@@ -760,11 +760,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Fixed temperature when --no-opt_temperature.")
 
     # --- objective ----------------------------------------------------------
-    p.add_argument("--w_success",  type=float, default=0.0,
+    p.add_argument("--w_success",  type=float, default=1.0,
                    help="Weight on the success rate (maximized).")
-    p.add_argument("--w_cost",     type=float, default=1.0,
+    p.add_argument("--w_cost",     type=float, default=0.1,
                    help="Weight on the normalized final goal error (minimized).")
-    p.add_argument("--err_clip",   type=float, default=100.0,
+    p.add_argument("--err_clip",   type=float, default=500.0,
                    help="Goal error is clipped here then divided by it, mapping the "
                         "cost term into [0, 1] so it cannot be dominated by one "
                         "catastrophic episode.")

@@ -200,7 +200,7 @@ def run_eval_episode(
     cost_weight_overrides: optional {weight_name: value} merged into the rollout
         task's cost weights before planning (used by the weight grid search).
     goal_difficulty: optional goal-difficulty level for tasks that have one
-        (grasp_reorient levels 0-8, see its class docstring); None keeps the
+        (grasp_reorient levels 0-9, see its class docstring); None keeps the
         task's own default.
     fin_ep_on_success: stop at first success (default); if False, resample a new
         goal on each success and keep going (multi-goal mode).
@@ -503,7 +503,7 @@ def main():
                         "point MPPI's --convergence_tol tests for, so the two "
                         "together can run to the cap.")
     # --- MPPI-only ---------------------------------------------------------
-    p.add_argument("--temperature", type=float, default=9.23072)#30.0)#20.0 <- cube
+    p.add_argument("--temperature", type=float, default=2.27)#30.0)#20.0 <- cube
     p.add_argument("--convergence_tol", type=float, default=None,
                    help="Iterate until the returned action settles — "
                         "sum_u (u_i - u_i+1)^2 < tol — instead of running a fixed "
@@ -541,7 +541,8 @@ def main():
                         "(grasp_reorient: 0 fixed 90 deg spin, 1 +/-90 deg spin, "
                         "2 +/-90 deg about a random axis, 3 adjacent face + twist, "
                         "4 any other face + twist, 5 180 deg flip, 6 adjacent face "
-                        "no twist, 7 roll to 'O', 8 roll either way). Default: "
+                        "no twist, 7 roll to 'O', 8 roll either way, 9 roll to "
+                        "'B'). Default: "
                         "the task's own.")
     p.add_argument("--seed",        type=int,   default=42)#64)
     p.add_argument("--n_episodes",  type=int,   default=1,

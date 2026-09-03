@@ -12,7 +12,7 @@ single CSV can mix mppi/cem/predictive_sampler rows, and a blank cell simply
 falls back to that planner's own default. `delta` is the one special-cased knob:
 a single clip magnitude, expanded to the `delta_range=(-delta, delta)` field,
 matching run_eval_episode.py's own --delta convention. `goal_difficulty` picks the
-task's goal-difficulty level (grasp_reorient 0-8) for the row. `record_trajectory` /
+task's goal-difficulty level (grasp_reorient 0-9) for the row. `record_trajectory` /
 `record_planner_dist` / `planner_dist_every` columns override the CLI's
 recording flags per row, so a sweep can run lean by default and still record
 a handful of interesting cells in full.
@@ -97,7 +97,7 @@ from contact_study.tasks.config import (
 # unknown columns, and they are rejected outright on a sync row rather than
 # silently ignored.
 # `goal_difficulty` is likewise a run_eval_episode argument (which goal sampler
-# the task dispatches to — grasp_reorient levels 0-8, see its class docstring),
+# the task dispatches to — grasp_reorient levels 0-9, see its class docstring),
 # not a planner-config field, so it is reserved rather than forwarded. A blank
 # cell leaves the task's own default in place.
 RESERVED_COLUMNS = (

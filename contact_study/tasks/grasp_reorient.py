@@ -244,17 +244,17 @@ _OBJ_PARAMS: dict[str, dict] = {
         # rounder than the cube, so the terms most likely to want retuning are
         # w_contact and w_quat.
         "cost_weights": {
-            "w_quat": 25.0,#100.0,
-            "w_pos_x": 25.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-            "w_pos_y": 2.0,#80.0,    #Y is across the fingers
-            "w_pos_z": 4.0,#15.0,
+            "w_quat": 10.7281,#100.0,
+            "w_pos_x": 7.62219,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+            "w_pos_y": 2.90693,#80.0,    #Y is across the fingers
+            "w_pos_z": 5.84646,#15.0,
             "w_velo": 0.0,
-            "w_contact": 50.0,#12.50,
-            "w_joint": 0.25,
+            "w_contact": 0.13753,#12.50,
+            "w_joint": 2.35556,
             "w_joint_velo": 0.0,
-            "w_fallen": 200.0,
-            "w_quat_term": 200.0,#500.0,
-            "w_pos_term": 200.0,
+            "w_fallen": 113.977,
+            "w_quat_term": 121.84,#500.0,
+            "w_pos_term": 180.552,
             "w_fallen_term": 0.0,
         },
     },
@@ -384,18 +384,18 @@ _OBJ_PARAMS: dict[str, dict] = {
         # Cube's tuned weights, unchanged. Same mass, but the ball is round and
         # bigger, so w_contact and w_quat are the likeliest to want retuning.
         "cost_weights": {
-            "w_quat": 3.37119,
-            "w_pos_x": 2.52259,   # X is down the fingers
-            "w_pos_y": 1.73923,   # Y is across the fingers
-            "w_pos_z": 7.13778,
+            "w_quat": 2.064853,
+            "w_pos_x": 1.471905,
+            "w_pos_y": 23.10067,
+            "w_pos_z": 42.31061,
             "w_velo": 0.0,
-            "w_contact": 0.528134,
-            "w_joint": 4.19725,
+            "w_contact": 33.7552,
+            "w_joint": 3.498556,
             "w_joint_velo": 0.0,
-            "w_fallen": 162.1,
-            "w_quat_term": 161.625,
-            "w_pos_term": 194.277,
-            "w_fallen_term": 0.0,
+            "w_fallen": 100.0,
+            "w_quat_term": 296.2317,
+            "w_pos_term": 129.3434,
+            "w_fallen_term": 0.0
         },
     },
 }
@@ -558,6 +558,10 @@ class GraspReorientTask(BaseTask):
         8 — Roll either way: 90° roll about the object-frame X axis in a
             randomly-chosen direction, showing either "O" or "B". The two
             roll-axis members of level 6's candidate set.
+        9 — Roll to "B": level 7 mirrored — the same fixed 90° roll about the
+            object-frame X axis, rolled the other way (Rx +90°), so the "B"
+            face is always the one shown. Levels 7 and 9 are the two halves
+            level 8 picks between.
     """
 
     # Controls which sampling method sample_new_goal dispatches to.
@@ -928,6 +932,20 @@ class GraspReorientTask(BaseTask):
         """
         self._set_goal_to_face(mjd, self._ROLL_FACES["O"])
 
+    def sample_new_goal_by_roll_to_b(self, mjd: mujoco.MjData, rng: np.random.Generator):
+        """Difficulty 9: always show the "B" face — difficulty 7 mirrored.
+
+        The same single 90° roll about the object-frame X axis, taken the other
+        way (face 1 = Rx +90°) and again with no twist. Together 7 and 9 are the
+        two outcomes difficulty 8 chooses between, so running them separately
+        splits that level's variance into its two deterministic halves — useful
+        when one roll direction turns out harder than the other. Like 7, the
+        goal is the face itself rather than a roll off the current pose, so "B"
+        is shown whichever face the object happens to be on when the goal is
+        sampled.
+        """
+        self._set_goal_to_face(mjd, self._ROLL_FACES["B"])
+
     def sample_new_goal_by_roll(self, mjd: mujoco.MjData, rng: np.random.Generator):
         """Difficulty 8: show either the "O" or the "B" face, chosen uniformly.
 
@@ -1040,6 +1058,8 @@ class GraspReorientTask(BaseTask):
             self.sample_new_goal_by_roll_to_o(mjd, rng)
         elif self.goal_difficulty == 8:
             self.sample_new_goal_by_roll(mjd, rng)
+        elif self.goal_difficulty == 9:
+            self.sample_new_goal_by_roll_to_b(mjd, rng)
         else:
             self.sample_new_goal_by_face(mjd, rng)
 

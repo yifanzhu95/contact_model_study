@@ -173,7 +173,7 @@ def run_async_eval_episode(
     module docstring.
 
     goal_difficulty: optional goal-difficulty level for tasks that have one
-        (grasp_reorient levels 0-8); None keeps the task's own default.
+        (grasp_reorient levels 0-9); None keeps the task's own default.
     plan_latency_ms: impose this latency per plan() instead of measuring it.
         0 selects the degenerate synchronous mode. None (default) measures.
     latency_scale:   multiply the MEASURED latency (ignored when plan_latency_ms
@@ -665,7 +665,7 @@ def main():
     p.add_argument("--settle",      type=float, default=1.0)
     p.add_argument("--goal_difficulty", type=int, default=None,
                    help="Goal-difficulty level for tasks that have one "
-                        "(grasp_reorient levels 0-8; see run_eval_episode.py). "
+                        "(grasp_reorient levels 0-9; see run_eval_episode.py). "
                         "Default: the task's own.")
     p.add_argument("--seed",        type=int,   default=42)
     p.add_argument("--n_episodes",  type=int,   default=1,
