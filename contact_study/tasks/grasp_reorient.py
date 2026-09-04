@@ -200,21 +200,33 @@ _OBJ_PARAMS: dict[str, dict] = {
             0.709056,  1.01884 ,  0.74176 ,  0.26175 ,  0.701455,  0.610097,
             0.69912 ,  1.53211 ,  1.33179 ,  0.8657
         ]),
-        "target_pos":    np.array([0.02, 0.035, 0.09]),#np.array([0.02, 0.03, 0.08])#np.array([0.012, 0.04, 0.085])
+        "target_pos":    np.array([0.02, 0.035, 0.08]),#np.array([0.02, 0.03, 0.09])
         "fallen_z":      0.08,
         "cost_weights": {
-            "w_quat": 27.5,#
-            "w_pos_x": 1.5,#  #I think X is down the fingers # separate X/Y/Z position-error weights
-            "w_pos_y": 25.0,#  #Y is across the fingers
-            "w_pos_z": 15.0,#
+            "w_quat": 50.0,
+            "w_pos_x": 2.031746,
+            "w_pos_y": 50.0,
+            "w_pos_z": 50.0,
             "w_velo": 0.0,
-            "w_contact": 0.26,#
-            "w_joint": 6.37,#
+            "w_contact": 26.52397,
+            "w_joint": 2.226744,
             "w_joint_velo": 0.0,
-            "w_fallen": 126.0,#
-            "w_quat_term": 204.0,#
-            "w_pos_term": 229.0,#200.0,
-            "w_fallen_term": 0.0,
+            "w_fallen": 194.6098,
+            "w_quat_term": 100.0,
+            "w_pos_term": 300.0,
+            "w_fallen_term": 0.0
+            # "w_quat": 27.7042,#50.0,
+            # "w_pos_x": 1.44077,#1.846327,
+            # "w_pos_y": 24.9981,#50.0,
+            # "w_pos_z": 15.3234,#50.0,
+            # "w_velo": 0.0,
+            # "w_contact": 0.266601,#90.00788,
+            # "w_joint": 6.37889,#3.033515,
+            # "w_joint_velo": 0.0,
+            # "w_fallen": 126.11,#129.521,
+            # "w_quat_term": 204.511,#117.8495,
+            # "w_pos_term": 229.656,#300.0,
+            # "w_fallen_term": 0.0
         },
     },
     # TODO(retune): the hand block of init_qpos, and init_ctrl, are still the
@@ -244,17 +256,17 @@ _OBJ_PARAMS: dict[str, dict] = {
         # rounder than the cube, so the terms most likely to want retuning are
         # w_contact and w_quat.
         "cost_weights": {
-            "w_quat": 25.0,#100.0,
-            "w_pos_x": 25.0,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-            "w_pos_y": 2.0,#80.0,    #Y is across the fingers
-            "w_pos_z": 4.0,#15.0,
+            "w_quat": 10.7281,#100.0,
+            "w_pos_x": 7.62219,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
+            "w_pos_y": 2.90693,#80.0,    #Y is across the fingers
+            "w_pos_z": 5.84646,#15.0,
             "w_velo": 0.0,
-            "w_contact": 50.0,#12.50,
-            "w_joint": 0.25,
+            "w_contact": 0.13753,#12.50,
+            "w_joint": 2.35556,
             "w_joint_velo": 0.0,
-            "w_fallen": 200.0,
-            "w_quat_term": 200.0,#500.0,
-            "w_pos_term": 200.0,
+            "w_fallen": 113.977,
+            "w_quat_term": 121.84,#500.0,
+            "w_pos_term": 180.552,
             "w_fallen_term": 0.0,
         },
     },
@@ -370,7 +382,7 @@ _OBJ_PARAMS: dict[str, dict] = {
             5.37995866e-01,  2.37394401e-01,  8.84233738e-01,  9.67669103e-01,
             6.78255227e-01,  1.35324943e+00 + 1.0,  1.21785619e+00,  6.34822484e-01,
             2.58181221e-02 - 0.02,  4.08290136e-02,  8.46989861e-02 + 0.05,  
-            6.19413091e-01,  3.59257657e-01, -1.30919532e-01,  6.85654019e-01
+            1,0,0,0#6.19413091e-01,  3.59257657e-01, -1.30919532e-01,  6.85654019e-01
         ]),
         "init_ctrl": np.array([
             0.60184 , -0.46068 ,  1.09597 ,  0.97044 ,  0.41104 ,  0.      ,
@@ -384,17 +396,17 @@ _OBJ_PARAMS: dict[str, dict] = {
         # Cube's tuned weights, unchanged. Same mass, but the ball is round and
         # bigger, so w_contact and w_quat are the likeliest to want retuning.
         "cost_weights": {
-            "w_quat": 23.624,
-            "w_pos_x": 8.831,   # X is down the fingers
-            "w_pos_y": 41.98,   # Y is across the fingers
-            "w_pos_z": 3.609,
+            "w_quat": 31.32742,
+            "w_pos_x": 4.921833,
+            "w_pos_y": 14.8858,
+            "w_pos_z": 13.79068,
             "w_velo": 0.0,
-            "w_contact": 15.34,
-            "w_joint": 10.72,
+            "w_contact": 37.0711,
+            "w_joint": 0.2571318,
             "w_joint_velo": 0.0,
-            "w_fallen": 169.75,
-            "w_quat_term": 173.23,
-            "w_pos_term": 210.51,
+            "w_fallen": 249.4166,
+            "w_quat_term": 165.8724,
+            "w_pos_term": 175.5941,
             "w_fallen_term": 0.0,
         },
     },
@@ -552,11 +564,21 @@ class GraspReorientTask(BaseTask):
             the 4 faces adjacent to the currently-shown face), but with no
             random twist — the new face's canonical (untwisted) orientation
             is always used.
+        7 — Roll to "O": fixed 90° roll (about the object-frame X axis) from
+            the initial face, so the "O" face is always the one shown. One of
+            the four faces level 6 can pick, with the choice removed.
+        8 — Roll either way: 90° roll about the object-frame X axis in a
+            randomly-chosen direction, showing either "O" or "B". The two
+            roll-axis members of level 6's candidate set.
+        9 — Roll to "B": level 7 mirrored — the same fixed 90° roll about the
+            object-frame X axis, rolled the other way (Rx +90°), so the "B"
+            face is always the one shown. Levels 7 and 9 are the two halves
+            level 8 picks between.
     """
 
     # Controls which sampling method sample_new_goal dispatches to.
     # Override on an instance before the first episode to change difficulty.
-    goal_difficulty: int = 6
+    goal_difficulty: int = 7
 
     # Most recently built eval simulator, so _update_goal can spin its goal
     # marker. Class-level on purpose: the drivers build TWO task instances per
@@ -603,6 +625,18 @@ class GraspReorientTask(BaseTask):
         _axis_angle_quat([0, 1, 0], -np.pi / 2),
     ]
 
+    # Letter the iris_block atlas paints on the face each index shows, i.e. the
+    # letter that ends up facing up (objects/iris_cube.obj maps +X/-X to the two
+    # "I" faces, +Y to "B", -Y to "O", +Z to "R", -Z to "S"; _FACE_ROTS[i]
+    # brings _FACE_NORMALS[i] up). Indexed like _FACE_NORMALS and _FACE_ROTS.
+    _FACE_LETTERS = ["R", "B", "O", "S", "I", "I"]
+
+    # The two faces a single 90° roll (about the object-frame X axis) can bring
+    # up from the initial face, keyed by the letter shown. Both are members of
+    # difficulty 6's candidate set; levels 7 and 8 just narrow it to the roll
+    # axis. Derived from _FACE_ROTS: face 1 is Rx +90°, face 2 is Rx -90°.
+    _ROLL_FACES = {_FACE_LETTERS[1]: 1, _FACE_LETTERS[2]: 2}
+
     def __init__(self, geometry=None, role=None):
         kwargs = {}
         if geometry is not None:
@@ -614,7 +648,7 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 2000,#1000,
+            max_steps          = 4000,#1000,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # This object's weights from _OBJ_PARAMS, emitted in
             # _COST_WEIGHT_KEYS order — which must match the weights[...]
@@ -886,12 +920,54 @@ class GraspReorientTask(BaseTask):
             i for i in range(6)
             if i != self._face_index and i != self._OPPOSITE_FACES[self._face_index]
         ]
-        self._face_index = int(rng.choice(candidates))
+        self._set_goal_to_face(mjd, int(rng.choice(candidates)))
+
+    def _set_goal_to_face(self, mjd: mujoco.MjData, face_index: int) -> None:
+        """Point the goal at face_index's canonical (untwisted) orientation."""
+        self._face_index = int(face_index)
 
         new_quat = np.zeros(4)
         mujoco.mju_mulQuat(new_quat, self._canonical_quat, self._FACE_ROTS[self._face_index])
 
         self._update_goal(mjd, new_quat)
+
+    def sample_new_goal_by_roll_to_o(self, mjd: mujoco.MjData, rng: np.random.Generator):
+        """Difficulty 7: always show the "O" face.
+
+        From the initial face that is a single 90° roll about the object-frame X
+        axis (face 2 = Rx -90°), with no twist — the deterministic half of
+        difficulty 8, and one of the four faces difficulty 6 samples from. The
+        goal is the face itself rather than a roll applied to the current pose,
+        so "O" is shown no matter which face the cube is on when the goal is
+        sampled (in multi-goal mode the same goal is therefore re-issued once
+        the cube is already there).
+        """
+        self._set_goal_to_face(mjd, self._ROLL_FACES["O"])
+
+    def sample_new_goal_by_roll_to_b(self, mjd: mujoco.MjData, rng: np.random.Generator):
+        """Difficulty 9: always show the "B" face — difficulty 7 mirrored.
+
+        The same single 90° roll about the object-frame X axis, taken the other
+        way (face 1 = Rx +90°) and again with no twist. Together 7 and 9 are the
+        two outcomes difficulty 8 chooses between, so running them separately
+        splits that level's variance into its two deterministic halves — useful
+        when one roll direction turns out harder than the other. Like 7, the
+        goal is the face itself rather than a roll off the current pose, so "B"
+        is shown whichever face the object happens to be on when the goal is
+        sampled.
+        """
+        self._set_goal_to_face(mjd, self._ROLL_FACES["B"])
+
+    def sample_new_goal_by_roll(self, mjd: mujoco.MjData, rng: np.random.Generator):
+        """Difficulty 8: show either the "O" or the "B" face, chosen uniformly.
+
+        The two faces a 90° roll about the object-frame X axis can bring up from
+        the initial face (Rx -90° and Rx +90°), i.e. difficulty 6's candidate set
+        restricted to the roll axis, with no twist. Like difficulty 7 the goal is
+        the face itself, not a roll off the current pose.
+        """
+        self._set_goal_to_face(mjd, int(rng.choice([self._ROLL_FACES["O"],
+                                                    self._ROLL_FACES["B"]])))
 
     def sample_new_goal_by_rot(self, mjd: mujoco.MjData, rng: np.random.Generator):
         """Sample a new goal orientation by rotating +/- 90 degrees around an object-local cardinal axis."""
@@ -990,6 +1066,12 @@ class GraspReorientTask(BaseTask):
             self.sample_new_goal_by_flip(mjd, rng)
         elif self.goal_difficulty == 6:
             self.sample_new_goal_by_adjacent_face_no_twist(mjd, rng)
+        elif self.goal_difficulty == 7:
+            self.sample_new_goal_by_roll_to_o(mjd, rng)
+        elif self.goal_difficulty == 8:
+            self.sample_new_goal_by_roll(mjd, rng)
+        elif self.goal_difficulty == 9:
+            self.sample_new_goal_by_roll_to_b(mjd, rng)
         else:
             self.sample_new_goal_by_face(mjd, rng)
 

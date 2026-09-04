@@ -1,13 +1,18 @@
 # HPC sweeps
 
-Two ways to run a batch of experiments as a SLURM **job array**, both ending in
-a merged `combine_results.py` output:
+Three ways to run a batch of experiments as a SLURM **job array**, all ending
+in a merged `combine_results.py` output:
 
 - **Grid search** (below): the grid (models × weight combos) is hardcoded as
-  bash arrays in `param_search.slurm`.
+  bash arrays in `param_search.slurm`, and each array task evaluates **one**
+  point of it.
 - **[CSV-driven sweep](#csv-driven-sweep)**: every experiment is one row of a
   CSV instead — no bash grid to edit, and each row can pick its own
   planner/model.
+- **[Temperature / noise-sigma grid](#temperature--noise-sigma-grid)**: the
+  array assigns each GPU a contact model and an object, and the cell itself
+  walks a whole temperature × `noise_sigma` grid with its episodes running
+  concurrently in a pool.
 
 ## HPC weight grid search
 
@@ -23,6 +28,7 @@ JSON. When the array finishes, a combine job merges every cell.
 | `param_search.slurm` | The array job. Defines the parameter grids inline, decodes the task id into one value per axis, runs the cell, and (from task 0) queues the combine job. **This is the only thing you submit.** |
 | `run_param_cell.py` | Worker. Runs `--n_episodes` episodes for one `--model` + `--weights` set (via `run_eval_episode`) and writes `cell_<id>.json`. |
 | `bayes_opt.slurm` | Array job over **objects × contact models**. Each cell runs its own `contact_study.drivers.run_bayes_opt` (scikit-optimize GP search over the cost weights + `noise_sigma`/`temperature`) into its own `results/bayes_opt_<arrayjobid>/<task>_<obj>_<model>_<planner>/`. Not a grid *search* — the array axes just fan out one independent optimization per pair. Needs `scikit-optimize` in the env; re-submitting with `OUTDIR_ROOT` pointing at a previous run resumes each cell from its `bo_state.json`. |
+| `temp_sigma_grid.slurm` | Array job over **objects × contact models**, one cell per GPU. Each cell runs `contact_study.drivers.run_temp_sigma_grid` over the whole temperature × `noise_sigma` grid. See [its section](#temperature--noise-sigma-grid). |
 | `combine.slurm` | Runs the combiner after the array (queued automatically as an `afterok` dependency). |
 | `combine_results.py` | Merges all `cell_*.json` into `<prefix>_rich.json` + `<prefix>_agg.json` and prints a ranked top-N table. |
 
@@ -83,7 +89,7 @@ One row = one experiment. All columns are optional except `task`.
 
 - **Reserved** (experiment-level, not planner knobs): `task`, `model`,
   `planner`, `n_episodes`, `seed`, `geometry`, `hand_acc`, `obj_acc`,
-  `eval_sim`, `settle`, `eval_substeps`, `record_trajectory`,
+  `eval_sim`, `settle`, `eval_substeps`, `goal_difficulty`, `record_trajectory`,
   `record_planner_dist`, `planner_dist_every`, `driver`, `plan_latency_ms`,
   `latency_scale`, `plan_warmup`, `executor`, `async_shift`. A blank/missing cell falls
   back to `run_csv_cell.py`'s own `--model` / `--planner` /
@@ -102,6 +108,15 @@ One row = one experiment. All columns are optional except `task`.
   (a blank side falls back to that axis's task default). Leave both blank to
   use `geometry` exactly as before — a bare object name or an
   already-composed `"<obj>_<hand_acc>_<obj_acc>"` string.
+  `goal_difficulty` picks which goal the task asks for, for tasks that have
+  levels (`grasp_reorient`: 0 fixed 90 deg spin, 1 +/-90 deg spin, 2 +/-90 deg
+  about a random object axis, 3 adjacent face + random twist, 4 any other face
+  + twist, 5 180 deg flip, 6 adjacent face no twist, 7 roll to "O", 8 roll
+  either way, 9 roll to "B" — see `GraspReorientTask`'s class docstring). A
+  blank cell keeps the task's own default; a level on a task with no difficulty levels is an
+  error rather than a silent no-op. Like `driver`, it is folded into the cell
+  label when the column is present, so rows differing only in difficulty stay
+  separate rows in `combine_results.py`.
   `driver` picks the control loop: `sync` (the default, and what every row
   did before this column existed) runs `run_eval_episode`, which freezes the
   eval simulator for the duration of `plan()`; `async` runs
@@ -171,4 +186,70 @@ To run a single row locally (e.g. to sanity-check a CSV before submitting):
 ```bash
 python experiments/hpc/run_csv_cell.py \
     --csv experiments/hpc/example_params.csv --row 0 --outdir /tmp/csv_test
+```
+
+## Temperature / noise-sigma grid
+
+A third array job, for the two planner knobs that do **not** transfer between
+contact models and objects. MPPI's `temperature` divides the cost inside the
+softmax weighting, so the useful λ scales with the magnitude of the task cost —
+which differs per contact model and per object. The readable picture is
+therefore one grid per (model, object), not a single global optimum.
+
+| File | Role |
+|------|------|
+| `temp_sigma_grid.slurm` | The array job. Decodes `$SLURM_ARRAY_TASK_ID` into one **object** and one **contact model** (mixed-radix, objects varying fastest, same block `bayes_opt.slurm` uses), then runs one cell. **This is the only thing you submit.** |
+| `contact_study/drivers/run_temp_sigma_grid.py` | The cell. Walks the whole temperature × `noise_sigma` grid for that one (model, object), running episodes through the same `EpisodePool` as `run_bayes_opt.py`, and writes one `cell_<id>.json` per grid point. |
+
+How it differs from the two sweeps above:
+
+- Unlike `param_search.slurm`, the SLURM script does **not** own the grid — it
+  owns the *cells*. The grid lives in two comma-separated lists
+  (`TEMPERATURES`, `NOISE_SIGMAS`) passed straight to the driver, so bash never
+  needs to know how many points they expand to, and one array task keeps a GPU
+  busy for a whole grid instead of a single point.
+- Unlike `bayes_opt.slurm`, the search is an even grid rather than a GP, and it
+  needs no `scikit-optimize` (the driver deliberately imports nothing from
+  `run_bayes_opt.py`, which pulls in `skopt` at module scope).
+
+### Usage
+
+```bash
+sbatch experiments/hpc/temp_sigma_grid.slurm
+```
+
+Edit the `OBJECTS` / `MODELS` arrays and **keep `#SBATCH --array` in sync** —
+it must be `0-((#OBJECTS * #MODELS) - 1)`. An id past the end exits with a
+message naming the correct range rather than silently rerunning cell 0.
+
+Every array task writes into **one** shared directory,
+`results/temp_sigma_grid_<arrayjobid>/`, with cell ids offset by the array
+index (`id = array_index * n_points + point`), so nothing collides and a single
+combine job merges every model/object pair. Task 0 queues that combine
+automatically as an `afterok` dependency; by hand it is the usual
+
+```bash
+OUTDIR=/abs/path/to/results/temp_sigma_grid_1234567 TASK=temp_sigma_grid \
+    sbatch experiments/hpc/combine.slurm
+```
+
+Each cell also writes `grid_summary_<array index>.json` — its own points ranked
+by success rate, ties broken by mean steps-to-success — and prints that table
+plus a ready-to-paste `run_eval_episode` replay command for the winner.
+
+**Resuming.** A grid point whose `cell_*.json` already exists is skipped, so a
+cell that hit the wall clock picks up where it stopped. Point the resubmission
+at the old directory:
+
+```bash
+sbatch --export=ALL,OUTDIR=/abs/path/to/results/temp_sigma_grid_1234567 \
+       experiments/hpc/temp_sigma_grid.slurm
+```
+
+To check one cell locally before submitting (2 points, 2 episodes):
+```bash
+python -m contact_study.drivers.run_temp_sigma_grid \
+    --task grasp_reorient --geometry duck_low_high --model M2 \
+    --temperatures 20,40 --noise_sigmas 0.1 --n_episodes 2 --n_samples 64 \
+    --n_workers 2 --outdir /tmp/tsgrid --no-record_trajectory --no-record_planner_dist
 ```

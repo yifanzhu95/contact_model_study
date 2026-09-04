@@ -11,7 +11,8 @@ planner's config doesn't declare (contact_study/planners/__init__.py) — so a
 single CSV can mix mppi/cem/predictive_sampler rows, and a blank cell simply
 falls back to that planner's own default. `delta` is the one special-cased knob:
 a single clip magnitude, expanded to the `delta_range=(-delta, delta)` field,
-matching run_eval_episode.py's own --delta convention. `record_trajectory` /
+matching run_eval_episode.py's own --delta convention. `goal_difficulty` picks the
+task's goal-difficulty level (grasp_reorient 0-9) for the row. `record_trajectory` /
 `record_planner_dist` / `planner_dist_every` columns override the CLI's
 recording flags per row, so a sweep can run lean by default and still record
 a handful of interesting cells in full.
@@ -63,7 +64,8 @@ from contact_study.planners import (
     PLANNERS, make_planner_config, planner_config_cls, resolve_planner_name,
 )
 from contact_study.tasks.config import (
-    DEFAULT_HAND_ACC, DEFAULT_OBJ_ACC, DEFAULT_SCENE_VARIANT, EvalSimulatorKind,
+    DEFAULT_HAND_ACC, DEFAULT_OBJ_ACC, DEFAULT_OBJECT, DEFAULT_SCENE_VARIANT,
+    EvalSimulatorKind,
 )
 
 
@@ -94,9 +96,13 @@ from contact_study.tasks.config import (
 # have to be reserved here — forwarding them would hit validate_columns as
 # unknown columns, and they are rejected outright on a sync row rather than
 # silently ignored.
+# `goal_difficulty` is likewise a run_eval_episode argument (which goal sampler
+# the task dispatches to — grasp_reorient levels 0-9, see its class docstring),
+# not a planner-config field, so it is reserved rather than forwarded. A blank
+# cell leaves the task's own default in place.
 RESERVED_COLUMNS = (
     "task", "model", "planner", "n_episodes", "seed", "geometry", "hand_acc",
-    "obj_acc", "eval_sim", "settle", "eval_substeps",
+    "obj_acc", "eval_sim", "settle", "eval_substeps", "goal_difficulty",
     "record_trajectory", "record_planner_dist", "planner_dist_every",
     "driver", "plan_latency_ms", "latency_scale", "plan_warmup",
     "executor", "async_shift",
@@ -276,6 +282,9 @@ def run_cell(row_id: int, experiment: dict, overrides: dict, planner_kwargs: dic
     eval_substeps = experiment.get("eval_substeps", args.eval_substeps)
     if eval_substeps is not None:
         eval_substeps = int(eval_substeps)
+    goal_difficulty = experiment.get("goal_difficulty", args.goal_difficulty)
+    if goal_difficulty is not None:
+        goal_difficulty = int(goal_difficulty)
 
     # Recording defaults to the CLI flags, overridable per row so a sweep can
     # run lean (--no-record_trajectory --no-record_planner_dist) while a few
@@ -319,6 +328,8 @@ def run_cell(row_id: int, experiment: dict, overrides: dict, planner_kwargs: dic
     # it produces today, exactly as a blank cell does.
     sweep_axes = {**overrides, **planner_kwargs,
                   **({"driver": driver} if "driver" in experiment else {}),
+                  **({"goal_difficulty": goal_difficulty}
+                     if "goal_difficulty" in experiment else {}),
                   **async_kwargs}
     axes  = {**sweep_axes, "model": model, "planner": planner}
     label = combo_label(model, planner, sweep_axes)
@@ -369,6 +380,7 @@ def run_cell(row_id: int, experiment: dict, overrides: dict, planner_kwargs: dic
             rng                   = rng,
             geometry              = geometry,
             cost_weight_overrides = overrides,
+            goal_difficulty       = goal_difficulty,
             settle_seconds        = settle,
             eval_substeps         = eval_substeps,
             eval_sim              = eval_sim,
@@ -426,6 +438,7 @@ def run_cell(row_id: int, experiment: dict, overrides: dict, planner_kwargs: dic
         "hand_acc": hand_acc,
         "obj_acc":  obj_acc,
         "settle":   settle,
+        "goal_difficulty": goal_difficulty,
         "episodes": [r.to_dict() for r in episodes],
     }
 
@@ -440,8 +453,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--csv",  type=str, required=True,
                    help="CSV of experiments; one row = one cell. See RESERVED_COLUMNS "
                         "for the task/model/planner/n_episodes/seed/geometry/eval_sim/"
-                        "settle columns; 'w_<name>' columns are cost-weight overrides; "
-                        "every other column is a planner-config field.")
+                        "settle/goal_difficulty columns; 'w_<name>' columns are "
+                        "cost-weight overrides; every other column is a "
+                        "planner-config field.")
     p.add_argument("--row",  type=int, default=None,
                    help="0-indexed data row to run (default: $SLURM_ARRAY_TASK_ID).")
     p.add_argument("--outdir", type=str, default="results/csv_sweep_run",
@@ -462,6 +476,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--eval_sim", type=str, default="none",
                    choices=["none", "mujoco", "drake", "pinocchio"])
     p.add_argument("--settle",   type=float, default=1.0)
+    p.add_argument("--goal_difficulty", type=int, default=None,
+                   help="Goal-difficulty level for rows with a blank "
+                        "goal_difficulty cell (default: the task's own).")
     p.add_argument("--eval_substeps", type=int, default=None,
                    help="Eval steps per rollout step (default: task config).")
     add_record_flags(p)

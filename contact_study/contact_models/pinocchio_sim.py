@@ -1098,6 +1098,15 @@ class PinocchioSimulator(EvalSimulator):
             loadPrcFileData("", "framebuffer-multisample 1")
             loadPrcFileData("", f"multisamples {self._msaa_samples}")
         if _PANDA_VIEWER is None:
+            # Panda3d caches every loaded mesh as a .bam under ~/.cache/panda3d
+            # and does NOT invalidate the entry when the source file changes, so
+            # a repaired mesh keeps rendering with its old geometry until that
+            # cache is cleared by hand (this bit once already: rubber_duck.stl
+            # was rewritten with real facet normals and the viewer went on
+            # drawing the unlit version). Turn the on-disk cache off — the
+            # in-process ModelPool still keeps each mesh from being parsed more
+            # than once per run, so the cost is one assimp parse per process.
+            loadPrcFileData("", "model-cache-models false")
             # MSAA only smooths geometry silhouettes. The cube-face textures
             # alias on their own when minified (a 180px sticker drawn ~40px
             # wide), which shows up as crawling//sparkling letter edges. Trilinear

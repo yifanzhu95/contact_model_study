@@ -646,7 +646,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--task",        type=str, default="grasp_reorient")
     p.add_argument("--geometry",    type=str, default="cube_high_high",#DEFAULT_SCENE_VARIANT,
                    help="Scene variant: '<object>' or '<object>_<hand_acc>_<obj_acc>'.")
-    p.add_argument("--models", "--model", dest="models", nargs="+", default=["M3"],#["M1","M2","M3","M4"],
+    p.add_argument("--models", "--model", dest="models", nargs="+", default=["M1","M2","M3","M4"],
                    choices=list(MODEL_FACTORIES), metavar="MODEL",
                    help="Contact model(s) to optimize over. With more than one, EVERY "
                         "trial evaluates the SAME weight vector on EVERY model, at the "
@@ -656,19 +656,19 @@ def build_parser() -> argparse.ArgumentParser:
                         "single contact model. Cost is proportional: a trial is "
                         "n_models x --n_episodes episodes, which --n_workers runs "
                         "concurrently.")
-    p.add_argument("--model_agg",   type=str, default="worst", choices=["mean", "worst"],
+    p.add_argument("--model_agg",   type=str, default="mean", choices=["mean", "worst"],
                    help="How per-model objectives become the trial's score. 'mean' "
                         "optimizes average performance and lets a good model carry a "
                         "bad one; 'worst' (minimax) optimizes the worst model, which "
                         "is the stricter reading of 'weights that work for all of "
                         "them'. Ignored with a single --models entry.")
     p.add_argument("--planner",     type=str, default="mppi", choices=PLANNER_NAMES)
-    p.add_argument("--n_samples",   type=int, default=64)#256)
+    p.add_argument("--n_samples",   type=int, default=256)#256)
     p.add_argument("--horizon",     type=int, default=None,
                    help="Planning horizon in control steps (ignored with --time_horizon).")
-    p.add_argument("--time_horizon", type=float, default=0.352,
+    p.add_argument("--time_horizon", type=float, default=0.256,
                    help="Planning horizon in SECONDS; quantized down to whole control steps.")
-    p.add_argument("--step_time",   type=float, default=0.064,
+    p.add_argument("--step_time",   type=float, default=0.032,
                    help="Control-step duration in SECONDS; quantized down to whole rollout steps.")
     p.add_argument("--n_iterations", type=int, default=None,
                    help="Optimizer iterations per plan() (default: the planner's own).")
@@ -690,7 +690,7 @@ def build_parser() -> argparse.ArgumentParser:
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
-    p.add_argument("--n_episodes",  type=int, default=4,
+    p.add_argument("--n_episodes",  type=int, default=1,
                    help="Episodes per objective evaluation. More episodes average out "
                         "episode-specific luck at a proportional cost in wall time.")
     p.add_argument("--seed",        type=int, default=64,
@@ -709,16 +709,16 @@ def build_parser() -> argparse.ArgumentParser:
                         "one (mujoco), where planning is already 89%% of wall time.")
 
     # --- search space -------------------------------------------------------
-    p.add_argument("--opt_weights", nargs="*", default=[],
-                                                    # "w_quat:1.0:50.0",
-                                                    # "w_pos_x:1.0:50.0",
-                                                    # "w_pos_y:1.0:50.0",
-                                                    # "w_pos_z:1.0:50.0",
-                                                    # "w_contact:0.1:20.0",
-                                                    # "w_joint:0.1:20.0",
-                                                    # "w_fallen:100.0:300.0",
-                                                    # "w_quat_term:100.0:300.0",
-                                                    # "w_pos_term:100.0:300.0"],
+    p.add_argument("--opt_weights", nargs="*", default=[
+                                                    "w_quat:1.0:50.0",
+                                                    "w_pos_x:1.0:50.0",
+                                                    "w_pos_y:1.0:50.0",
+                                                    "w_pos_z:1.0:50.0",
+                                                    "w_contact:0.1:100.0",
+                                                    "w_joint:0.1:20.0",
+                                                    "w_fallen:100.0:300.0",
+                                                    "w_quat_term:100.0:300.0",
+                                                    "w_pos_term:100.0:300.0"],
                    help="Cost weights to optimize, as 'name' (bounds bracketed "
                         f"multiplicatively at x{BOUND_SCALE:g} around the task's default) "
                         "or 'name:lo:hi'. The default above is grasp_reorient's "
@@ -737,7 +737,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--opt_noise_sigma", action=argparse.BooleanOptionalAction, default=False,
                    help="Search over noise_sigma; --no-opt_noise_sigma pins it to "
                         "--noise_sigma instead.")
-    p.add_argument("--opt_temperature", action=argparse.BooleanOptionalAction, default=True,
+    p.add_argument("--opt_temperature", action=argparse.BooleanOptionalAction, default=False,
                    help="Search over MPPI's temperature; --no-opt_temperature pins it to "
                         "--temperature instead.")
     p.add_argument("--per_model_temperature", action=argparse.BooleanOptionalAction,
@@ -752,11 +752,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "--opt_temperature; ignored for a single model.")
     p.add_argument("--noise_sigma_range", type=float, nargs=2, default=(1e-3, 1.0),
                    metavar=("LO", "HI"))
-    p.add_argument("--temperature_range", type=float, nargs=2, default=(0.001, 1000.0),
+    p.add_argument("--temperature_range", type=float, nargs=2, default=(0.001, 25.0),
                    metavar=("LO", "HI"))
-    p.add_argument("--noise_sigma", type=float, default=0.1,
+    p.add_argument("--noise_sigma", type=float, default=0.05,
                    help="Fixed noise_sigma when --no-opt_noise_sigma.")
-    p.add_argument("--temperature", type=float, default=30.0,
+    p.add_argument("--temperature", type=float, default=10.0,
                    help="Fixed temperature when --no-opt_temperature.")
 
     # --- objective ----------------------------------------------------------
@@ -764,7 +764,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Weight on the success rate (maximized).")
     p.add_argument("--w_cost",     type=float, default=0.1,
                    help="Weight on the normalized final goal error (minimized).")
-    p.add_argument("--err_clip",   type=float, default=25.0,
+    p.add_argument("--err_clip",   type=float, default=250.0,
                    help="Goal error is clipped here then divided by it, mapping the "
                         "cost term into [0, 1] so it cannot be dominated by one "
                         "catastrophic episode.")
