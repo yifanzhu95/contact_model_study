@@ -142,7 +142,7 @@ SUCCESS_MODE = "stored"
 # How the per-model scores fold into the one number the GP sees, for a run with
 # several --models. "worst" is minimax (a MAX, because J is minimized); "mean"
 # averages. None keeps whatever fold each cell recorded, i.e. the original run's.
-MODEL_AGG = None
+MODEL_AGG = "worst"
 
 
 class Config:
