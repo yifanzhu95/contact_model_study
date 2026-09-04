@@ -391,22 +391,22 @@ _OBJ_PARAMS: dict[str, dict] = {
         ]),
         # Cube's (0.02, 0.035, 0.09) and 0.08, both raised by the 0.0135 radius
         # difference so the ball is not judged "fallen" at its resting height.
-        "target_pos":    np.array([0.025, 0.04, 0.085]),
-        "fallen_z":      0.08,
+        "target_pos":    np.array([0.025, 0.015, 0.08]),
+        "fallen_z":      0.075,
         # Cube's tuned weights, unchanged. Same mass, but the ball is round and
         # bigger, so w_contact and w_quat are the likeliest to want retuning.
         "cost_weights": {
-            "w_quat": 31.32742,
-            "w_pos_x": 4.921833,
-            "w_pos_y": 14.8858,
-            "w_pos_z": 13.79068,
+            "w_quat": 1.25,
+            "w_pos_x": 20.0,
+            "w_pos_y": 40.0,
+            "w_pos_z": 10.0,
             "w_velo": 0.0,
-            "w_contact": 37.0711,
-            "w_joint": 0.2571318,
+            "w_contact": 2.0,
+            "w_joint": 0.4,
             "w_joint_velo": 0.0,
-            "w_fallen": 249.4166,
-            "w_quat_term": 165.8724,
-            "w_pos_term": 175.5941,
+            "w_fallen": 200.0,
+            "w_quat_term": 100.0,
+            "w_pos_term": 300.0,
             "w_fallen_term": 0.0,
         },
     },
@@ -578,7 +578,7 @@ class GraspReorientTask(BaseTask):
 
     # Controls which sampling method sample_new_goal dispatches to.
     # Override on an instance before the first episode to change difficulty.
-    goal_difficulty: int = 8
+    goal_difficulty: int = 1#8
 
     # Most recently built eval simulator, so _update_goal can spin its goal
     # marker. Class-level on purpose: the drivers build TWO task instances per
