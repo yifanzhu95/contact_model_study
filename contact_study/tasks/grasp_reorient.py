@@ -250,24 +250,24 @@ _OBJ_PARAMS: dict[str, dict] = {
             0.709056,  1.01884 ,  0.60184 ,  0.2094  ,  0.964465,  1.0186  ,
             0.738135,  1.251165,  1.2778  ,  0.6564
         ]),
-        "target_pos":    np.array([0.03, 0.03, 0.095]),
+        "target_pos":    np.array([0.03, 0.015, 0.09]),#np.array([0.03, 0.03, 0.08]),
         "fallen_z":      0.075,
         # Retuned weights for the duck. It is lighter (0.05 kg vs 0.14) and
         # rounder than the cube, so the terms most likely to want retuning are
         # w_contact and w_quat.
         "cost_weights": {
-            "w_quat": 10.7281,#100.0,
-            "w_pos_x": 7.62219,#60.0,   #I think X is down the fingers # separate X/Y/Z position-error weights
-            "w_pos_y": 2.90693,#80.0,    #Y is across the fingers
-            "w_pos_z": 5.84646,#15.0,
+            "w_quat": 33.78959,
+            "w_pos_x": 6.358367,
+            "w_pos_y": 3.998368,
+            "w_pos_z": 1.842393,
             "w_velo": 0.0,
-            "w_contact": 0.13753,#12.50,
-            "w_joint": 2.35556,
+            "w_contact": 0.1478407,
+            "w_joint": 13.80133,
             "w_joint_velo": 0.0,
-            "w_fallen": 113.977,
-            "w_quat_term": 121.84,#500.0,
-            "w_pos_term": 180.552,
-            "w_fallen_term": 0.0,
+            "w_fallen": 108.8746,
+            "w_quat_term": 143.5411,
+            "w_pos_term": 182.4654,
+            "w_fallen_term": 0.0
         },
     },
     # TODO(tune): UNSETTLED. Every number below is the duck's, written out here
