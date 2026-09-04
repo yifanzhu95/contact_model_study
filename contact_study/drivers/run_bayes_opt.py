@@ -727,7 +727,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "error. Pass a bare 'name' to fall back to the "
                         f"multiplicative bracket, or the {' '.join(DEFAULT_OPT_WEIGHTS)} "
                         "subset for the old behavior.")
-    p.add_argument("--opt_cost_weights", action=argparse.BooleanOptionalAction, default=False,
+    p.add_argument("--opt_cost_weights", action=argparse.BooleanOptionalAction, default=True,
                    help="Search over the cost weights; --no-opt_cost_weights drops "
                         "every weight dimension and pins them to the task's own "
                         "defaults, leaving only the planner knobs (noise_sigma, "

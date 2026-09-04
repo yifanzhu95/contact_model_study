@@ -145,7 +145,7 @@ ERR_CLIP=10.0                   # goal error clipped here, then divided by it
 # ---------------------------------------------------------------------------
 # 5. Optimizer (gp_minimize).
 # ---------------------------------------------------------------------------
-N_CALLS=750                      # total trial budget per cell, INCLUDING resumed trials
+N_CALLS=1000                      # total trial budget per cell, INCLUDING resumed trials
 N_INITIAL_POINTS=120             # random trials before the GP takes over
 ACQ_FUNC="gp_hedge"             # EI | LCB | PI | gp_hedge
 GP_NOISE="gaussian"             # "gaussian" or a float
