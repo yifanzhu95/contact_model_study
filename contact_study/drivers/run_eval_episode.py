@@ -471,10 +471,10 @@ def main():
     p.add_argument("--horizon",     type=int,   default=None,
                    help="Planning horizon in control steps (ignored when "
                         "--time_horizon is given).")
-    p.add_argument("--time_horizon", type=float, default=0.352,
+    p.add_argument("--time_horizon", type=float, default=0.352,#0.256,
                    help="Planning horizon in SECONDS; quantized down to whole "
                         "control steps. Overrides --horizon.")
-    p.add_argument("--step_time",   type=float, default=0.064,
+    p.add_argument("--step_time",   type=float, default=0.064,#0.032,
                    help="Control-step duration in SECONDS; quantized down to whole "
                         "rollout steps. Overrides --substeps.")
     p.add_argument("--n_iterations", type=int,  default=None,
@@ -503,7 +503,7 @@ def main():
                         "point MPPI's --convergence_tol tests for, so the two "
                         "together can run to the cap.")
     # --- MPPI-only ---------------------------------------------------------
-    p.add_argument("--temperature", type=float, default=2.27)#30.0)#20.0 <- cube
+    p.add_argument("--temperature", type=float, default=13.7)#30.0)#20.0 <- cube
     p.add_argument("--convergence_tol", type=float, default=None,
                    help="Iterate until the returned action settles — "
                         "sum_u (u_i - u_i+1)^2 < tol — instead of running a fixed "

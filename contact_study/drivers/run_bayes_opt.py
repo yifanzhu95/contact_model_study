@@ -666,9 +666,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--n_samples",   type=int, default=256)#256)
     p.add_argument("--horizon",     type=int, default=None,
                    help="Planning horizon in control steps (ignored with --time_horizon).")
-    p.add_argument("--time_horizon", type=float, default=0.352,
+    p.add_argument("--time_horizon", type=float, default=0.256,
                    help="Planning horizon in SECONDS; quantized down to whole control steps.")
-    p.add_argument("--step_time",   type=float, default=0.064,
+    p.add_argument("--step_time",   type=float, default=0.032,
                    help="Control-step duration in SECONDS; quantized down to whole rollout steps.")
     p.add_argument("--n_iterations", type=int, default=None,
                    help="Optimizer iterations per plan() (default: the planner's own).")
@@ -737,11 +737,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--opt_noise_sigma", action=argparse.BooleanOptionalAction, default=False,
                    help="Search over noise_sigma; --no-opt_noise_sigma pins it to "
                         "--noise_sigma instead.")
-    p.add_argument("--opt_temperature", action=argparse.BooleanOptionalAction, default=True,
+    p.add_argument("--opt_temperature", action=argparse.BooleanOptionalAction, default=False,
                    help="Search over MPPI's temperature; --no-opt_temperature pins it to "
                         "--temperature instead.")
     p.add_argument("--per_model_temperature", action=argparse.BooleanOptionalAction,
-                   default=True,
+                   default=False,
                    help="With several --models, give each its OWN temperature "
                         "dimension (temperature_<model>) instead of one shared "
                         "value; all of them use --temperature_range. The cost "
@@ -752,11 +752,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "--opt_temperature; ignored for a single model.")
     p.add_argument("--noise_sigma_range", type=float, nargs=2, default=(1e-3, 1.0),
                    metavar=("LO", "HI"))
-    p.add_argument("--temperature_range", type=float, nargs=2, default=(0.001, 1000.0),
+    p.add_argument("--temperature_range", type=float, nargs=2, default=(0.001, 25.0),
                    metavar=("LO", "HI"))
-    p.add_argument("--noise_sigma", type=float, default=0.1,
+    p.add_argument("--noise_sigma", type=float, default=0.05,
                    help="Fixed noise_sigma when --no-opt_noise_sigma.")
-    p.add_argument("--temperature", type=float, default=30.0,
+    p.add_argument("--temperature", type=float, default=10.0,
                    help="Fixed temperature when --no-opt_temperature.")
 
     # --- objective ----------------------------------------------------------
@@ -764,7 +764,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Weight on the success rate (maximized).")
     p.add_argument("--w_cost",     type=float, default=0.1,
                    help="Weight on the normalized final goal error (minimized).")
-    p.add_argument("--err_clip",   type=float, default=500.0,
+    p.add_argument("--err_clip",   type=float, default=250.0,
                    help="Goal error is clipped here then divided by it, mapping the "
                         "cost term into [0, 1] so it cannot be dominated by one "
                         "catastrophic episode.")

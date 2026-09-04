@@ -200,21 +200,33 @@ _OBJ_PARAMS: dict[str, dict] = {
             0.709056,  1.01884 ,  0.74176 ,  0.26175 ,  0.701455,  0.610097,
             0.69912 ,  1.53211 ,  1.33179 ,  0.8657
         ]),
-        "target_pos":    np.array([0.02, 0.035, 0.09]),#np.array([0.02, 0.03, 0.08])#np.array([0.012, 0.04, 0.085])
+        "target_pos":    np.array([0.02, 0.035, 0.08]),#np.array([0.02, 0.03, 0.09])
         "fallen_z":      0.08,
         "cost_weights": {
-            "w_quat": 27.7042,#50.0,
-            "w_pos_x": 1.44077,#1.846327,
-            "w_pos_y": 24.9981,#50.0,
-            "w_pos_z": 15.3234,#50.0,
+            "w_quat": 50.0,
+            "w_pos_x": 2.031746,
+            "w_pos_y": 50.0,
+            "w_pos_z": 50.0,
             "w_velo": 0.0,
-            "w_contact": 0.266601,#90.00788,
-            "w_joint": 6.37889,#3.033515,
+            "w_contact": 26.52397,
+            "w_joint": 2.226744,
             "w_joint_velo": 0.0,
-            "w_fallen": 126.11,#129.521,
-            "w_quat_term": 204.511,#117.8495,
-            "w_pos_term": 229.656,#300.0,
+            "w_fallen": 194.6098,
+            "w_quat_term": 100.0,
+            "w_pos_term": 300.0,
             "w_fallen_term": 0.0
+            # "w_quat": 27.7042,#50.0,
+            # "w_pos_x": 1.44077,#1.846327,
+            # "w_pos_y": 24.9981,#50.0,
+            # "w_pos_z": 15.3234,#50.0,
+            # "w_velo": 0.0,
+            # "w_contact": 0.266601,#90.00788,
+            # "w_joint": 6.37889,#3.033515,
+            # "w_joint_velo": 0.0,
+            # "w_fallen": 126.11,#129.521,
+            # "w_quat_term": 204.511,#117.8495,
+            # "w_pos_term": 229.656,#300.0,
+            # "w_fallen_term": 0.0
         },
     },
     # TODO(retune): the hand block of init_qpos, and init_ctrl, are still the
@@ -384,18 +396,18 @@ _OBJ_PARAMS: dict[str, dict] = {
         # Cube's tuned weights, unchanged. Same mass, but the ball is round and
         # bigger, so w_contact and w_quat are the likeliest to want retuning.
         "cost_weights": {
-            "w_quat": 2.064853,
-            "w_pos_x": 1.471905,
-            "w_pos_y": 23.10067,
-            "w_pos_z": 42.31061,
+            "w_quat": 31.32742,
+            "w_pos_x": 4.921833,
+            "w_pos_y": 14.8858,
+            "w_pos_z": 13.79068,
             "w_velo": 0.0,
-            "w_contact": 33.7552,
-            "w_joint": 3.498556,
+            "w_contact": 37.0711,
+            "w_joint": 0.2571318,
             "w_joint_velo": 0.0,
-            "w_fallen": 100.0,
-            "w_quat_term": 296.2317,
-            "w_pos_term": 129.3434,
-            "w_fallen_term": 0.0
+            "w_fallen": 249.4166,
+            "w_quat_term": 165.8724,
+            "w_pos_term": 175.5941,
+            "w_fallen_term": 0.0,
         },
     },
 }
@@ -566,7 +578,7 @@ class GraspReorientTask(BaseTask):
 
     # Controls which sampling method sample_new_goal dispatches to.
     # Override on an instance before the first episode to change difficulty.
-    goal_difficulty: int = 0
+    goal_difficulty: int = 7
 
     # Most recently built eval simulator, so _update_goal can spin its goal
     # marker. Class-level on purpose: the drivers build TWO task instances per
@@ -636,7 +648,7 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 1000,#1000,
+            max_steps          = 4000,#1000,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # This object's weights from _OBJ_PARAMS, emitted in
             # _COST_WEIGHT_KEYS order — which must match the weights[...]
