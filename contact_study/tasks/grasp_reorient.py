@@ -200,7 +200,7 @@ _OBJ_PARAMS: dict[str, dict] = {
             0.709056,  1.01884 ,  0.74176 ,  0.26175 ,  0.701455,  0.610097,
             0.69912 ,  1.53211 ,  1.33179 ,  0.8657
         ]),
-        "target_pos":    np.array([0.02, 0.035, 0.08]),#np.array([0.02, 0.03, 0.09])
+        "target_pos":    np.array([0.02, 0.035, 0.085]),#np.array([0.02, 0.03, 0.09])
         "fallen_z":      0.08,
         "cost_weights": {
             "w_quat": 50.0,
@@ -251,7 +251,7 @@ _OBJ_PARAMS: dict[str, dict] = {
             0.738135,  1.251165,  1.2778  ,  0.6564
         ]),
         "target_pos":    np.array([0.03, 0.03, 0.095]),
-        "fallen_z":      0.08,
+        "fallen_z":      0.075,
         # Retuned weights for the duck. It is lighter (0.05 kg vs 0.14) and
         # rounder than the cube, so the terms most likely to want retuning are
         # w_contact and w_quat.
@@ -578,7 +578,7 @@ class GraspReorientTask(BaseTask):
 
     # Controls which sampling method sample_new_goal dispatches to.
     # Override on an instance before the first episode to change difficulty.
-    goal_difficulty: int = 7
+    goal_difficulty: int = 8
 
     # Most recently built eval simulator, so _update_goal can spin its goal
     # marker. Class-level on purpose: the drivers build TWO task instances per
@@ -648,7 +648,7 @@ class GraspReorientTask(BaseTask):
         self.config = TaskConfig(
             name               = "grasp_reorient",
             complexity         = ContactComplexity.MEDIUM,
-            max_steps          = 4000,#1000,
+            max_steps          = 1000,#1000,
             success_thresholds = {"pos": 0.02, "quat": 0.04, "vel": 0.1},
             # This object's weights from _OBJ_PARAMS, emitted in
             # _COST_WEIGHT_KEYS order — which must match the weights[...]

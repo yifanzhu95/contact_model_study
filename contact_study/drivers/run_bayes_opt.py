@@ -59,6 +59,12 @@ Each trial then runs n_models x --n_episodes episodes at identical seeds, up to
 
 Add --per_model_temperature to let each of those models tune its own MPPI
 temperature (same bounds, one dimension each) while sharing the weight vector.
+
+--goal_difficulty pins which goal sampler the episodes draw from. It is a
+setting, not a search dimension: one level for the whole run, fixed across every
+trial and every model, so the models stay comparable. A run covers ONE object
+(--geometry names it), so per-object levels are chosen by whatever launches the
+runs — see experiments/hpc/bayes_opt.slurm, which keys them off its object axis.
 """
 
 from __future__ import annotations
@@ -332,6 +338,8 @@ class BOObjective:
         The seed is keyed by EPISODE ONLY, never by model: every model must be
         handed the identical initial states, goals and planner noise, or a
         per-model score difference could not be attributed to the contact model.
+        goal_difficulty is part of that: it is one level for the whole run, so
+        every model is scored on the same goal distribution.
         """
         args = self.args
         planner_kwargs = dict(
@@ -365,6 +373,7 @@ class BOObjective:
             seed_seq              = self.episode_seeds[ep],
             video_path            = None,
             cost_weight_overrides = overrides or None,
+            goal_difficulty       = args.goal_difficulty,
             settle_seconds        = args.settle,
             eval_substeps         = args.eval_substeps,
             eval_sim              = self.eval_sim,
@@ -548,6 +557,9 @@ class BOObjective:
             "eval_sim": args.eval_sim,
             "geometry": args.geometry,
             "settle":   args.settle,
+            # None = the task's own default, the same meaning the column
+            # carries in run_csv_cell.py's records.
+            "goal_difficulty": args.goal_difficulty,
             # -- BO-specific ---------------------------------------------------
             "planner":            self.planner,
             "objective":          objective,
@@ -690,6 +702,20 @@ def build_parser() -> argparse.ArgumentParser:
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
+    p.add_argument("--goal_difficulty", type=int, default=None,
+                   help="Goal-difficulty level: which goal sampler the episodes "
+                        "draw from. PINNED for the whole run — one level for "
+                        "every trial and every model, not a search dimension "
+                        "and not a per-model knob, so the per-model objectives "
+                        "--model_agg folds stay like-for-like. A run covers one "
+                        "object (--geometry), so vary this PER OBJECT from the "
+                        "launcher; experiments/hpc/bayes_opt.slurm keys it off "
+                        "its object axis. grasp_reorient levels: 0 fixed 90 deg "
+                        "spin, 1 +/-90 deg spin, 2 +/-90 deg about a random "
+                        "axis, 3 adjacent face + twist, 4 any other face + "
+                        "twist, 5 180 deg flip, 6 adjacent face no twist, "
+                        "7 roll to 'O', 8 roll either way, 9 roll to 'B'. "
+                        "Default: the task's own.")
     p.add_argument("--n_episodes",  type=int, default=1,
                    help="Episodes per objective evaluation. More episodes average out "
                         "episode-specific luck at a proportional cost in wall time.")
@@ -813,6 +839,16 @@ def main():
             "pinned to --temperature by --no-opt_temperature"
         )
 
+    # Checked before the search starts: apply_goal_difficulty raises inside the
+    # worker, where episode_pool would swallow it and score every episode as a
+    # plain failure — a whole cell of trials at -0.0 with no obvious cause.
+    if args.goal_difficulty is not None and not hasattr(peek_task, "goal_difficulty"):
+        raise ValueError(
+            f"--goal_difficulty was given, but task {args.task!r} has no "
+            f"goal-difficulty levels; every episode would raise and be scored "
+            f"as a failure"
+        )
+
     if args.opt_cost_weights:
         specs = parse_weight_specs(args.opt_weights, default_weights)
     else:
@@ -880,6 +916,8 @@ def main():
               f"same episode seeds; folded by --model_agg {args.model_agg}")
     print(f"  eval_sim={args.eval_sim}  geometry={args.geometry}  "
           f"n_episodes={args.n_episodes}  seed={args.seed} (constant)")
+    print(f"  goal_difficulty="
+          f"{'task default' if args.goal_difficulty is None else args.goal_difficulty}")
     print(f"  rollout_dt={rollout_dt*1e3:.3f}ms  step_time={args.step_time:g}s -> "
           f"{substeps} substeps  time_horizon={args.time_horizon:g}s -> {horizon} steps")
     print(f"  objective = -({args.w_success:g} * success_rate) + "
@@ -990,6 +1028,7 @@ def main():
         "planner":      planner,
         "geometry":     args.geometry,
         "eval_sim":     args.eval_sim,
+        "goal_difficulty": args.goal_difficulty,
         "n_episodes":   args.n_episodes,
         "seed":         args.seed,
         "bo_seed":      args.bo_seed,
@@ -1040,6 +1079,8 @@ def main():
         print(f"        --noise_sigma {best_params.get('noise_sigma', args.noise_sigma):g} \\")
         print(f"        --temperature {temp:g} \\")
         print(f"        --seed {args.seed} --settle {args.settle:g} \\")
+        if args.goal_difficulty is not None:
+            print(f"        --goal_difficulty {args.goal_difficulty} \\")
         print(f"        --weights {weight_flags}")
     print(f"\n  Saved -> {outdir}")
     print(f"{'='*70}")
