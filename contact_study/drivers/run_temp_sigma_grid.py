@@ -1,4 +1,8 @@
-"""Pooled temperature x noise_sigma grid search — one (model, object) per GPU.
+"""Pooled temperature x noise_sigma grid search — one cell per GPU.
+
+A cell is one (contact model, object, n_iterations, n_samples): the SLURM script
+owns those four axes and hands this script a single value of each, and this
+script grids temperature x noise_sigma inside it.
 
 The third sweep in this repo, and deliberately distinct from the other two:
 
@@ -9,13 +13,20 @@ The third sweep in this repo, and deliberately distinct from the other two:
     EpisodePool running many episodes at once on one GPU) but a GP search, so it
     never produces an even, readable surface over two knobs.
 
-Here the SLURM script hands each array task one contact model and one object
-(via --geometry), and THIS script walks the whole temperature x noise_sigma grid
-inside that cell, running its episodes through the same pool run_bayes_opt uses.
-That suits these two knobs in particular: the right MPPI temperature depends on
-the scale of the task cost, which differs per contact model and per object, so
-the useful picture is one grid per (model, object) rather than a single global
-optimum.
+Here the SLURM script hands each array task one contact model, one object (via
+--geometry), one --n_iterations and one --n_samples, and THIS script walks the
+whole temperature x noise_sigma grid inside that cell, running its episodes
+through the same pool run_bayes_opt uses. That suits these two knobs in
+particular: the right MPPI temperature depends on the scale of the task cost,
+which differs per contact model and per object, so the useful picture is one grid
+per cell rather than a single global optimum. The iteration and sample counts are
+cell axes rather than grid axes because they change the cost of an episode rather
+than only its outcome: giving each its own GPU keeps one cell's wall clock
+roughly constant instead of multiplying the inner grid.
+
+--convergence_tol switches MPPI to its convergence-terminated mode (iterate until
+the returned action settles, at most --max_iterations), which decides the
+iteration count per plan() call; --n_iterations is then ignored.
 
 Grid points are scored on the SAME episodes (--seed is constant, spawned once),
 so neighbouring temperatures differ only in the knob. Points are ranked by
@@ -43,6 +54,7 @@ import os
 os.environ.setdefault("MUJOCO_GL", "egl")
 
 import argparse
+import dataclasses
 import gc
 import json
 import time
@@ -65,7 +77,7 @@ from contact_study.drivers.run_eval_episode import (
     MODEL_FACTORIES, load_rollout_task, resolve_mppi_schedule,
 )
 from contact_study.planners import (
-    PLANNER_NAMES, make_planner_config, resolve_planner_name,
+    PLANNER_NAMES, make_planner_config, planner_config_cls, resolve_planner_name,
 )
 from contact_study.planners.mppi import MPPIConfig
 from contact_study.tasks.config import EvalSimulatorKind, SceneVariant
@@ -107,18 +119,33 @@ def parse_values(raw: str, flag: str) -> list[float]:
 
 
 def combo_label(model_key: str, obj: str, axes: dict) -> str:
-    """Short label encoding model + object + every grid axis.
+    """Short label encoding model + object + every axis, grid AND cell.
 
-    The object is in here, unlike run_param_cell.py's version, because every
+    The cell axes are in here, unlike run_param_cell.py's version, because every
     array task writes into ONE shared directory: two cells that differ only in
-    their object would otherwise collide on a label and combine_results.py would
-    fold them into a single row.
+    their object, iteration count or sample count would otherwise collide on a
+    label and combine_results.py would fold them into a single row.
     """
     parts = []
     for k, v in axes.items():
         short = k[2:] if k.startswith("w_") else k
         parts.append(f"{short}={v:g}" if isinstance(v, (int, float)) else f"{short}={v}")
     return f"{model_key}_{obj}__" + "_".join(parts)
+
+
+def planner_default(planner: str, field: str):
+    """A planner config's own default for `field`.
+
+    The iteration flags have no CLI default so that omitting one lets the config
+    default stand (base.PlannerConfig.n_iterations=1, CEMConfig's 3,
+    MPPIConfig.max_iterations=10). The cell record and label still want the value
+    the run actually used, so read it off the dataclass rather than duplicating
+    the number here.
+    """
+    for f in dataclasses.fields(planner_config_cls(planner)):
+        if f.name == field:
+            return f.default
+    raise KeyError(f"planner {planner!r} has no {field!r} field")
 
 
 def _device_free_gb() -> float | None:
@@ -134,7 +161,11 @@ def _device_free_gb() -> float | None:
 # ---------------------------------------------------------------------------
 
 class GridSearch:
-    """Runs the temperature x noise_sigma grid for one (model, object) cell.
+    """Runs the temperature x noise_sigma grid for one cell.
+
+    A cell is one (model, object, n_iterations, n_samples) — those four are the
+    SLURM array's axes and are fixed here; only temperature and noise_sigma vary
+    across `points`.
 
     Holds the per-episode seeds (computed ONCE, so every point is evaluated on
     the same episodes), the resolved schedule and the output directory.
@@ -159,6 +190,22 @@ class GridSearch:
                             else EvalSimulatorKind(args.eval_sim))
         self.delta       = ((-args.delta, args.delta) if args.delta is not None
                             else (None, None))
+
+        # The axes the SLURM array owns: fixed for this whole cell, but part of
+        # every point's identity because all array tasks share one --outdir.
+        # Under --convergence_tol the iteration count is decided per plan() call,
+        # so the tolerance stands in for it (and args.n_iterations is ignored).
+        if args.convergence_tol is not None:
+            self.cell_axes = {"convergence_tol": args.convergence_tol,
+                              "n_samples":       args.n_samples}
+            self.max_iterations = (args.max_iterations if args.max_iterations is not None
+                                   else planner_default(self.planner, "max_iterations"))
+        else:
+            self.max_iterations = None
+            n_iter = (args.n_iterations if args.n_iterations is not None
+                      else planner_default(self.planner, "n_iterations"))
+            self.cell_axes = {"n_iterations": n_iter,
+                              "n_samples":    args.n_samples}
 
         # THE constant seeds. Spawned once and replayed for every grid point, so
         # two points differ only in their knobs — the whole reason a grid over
@@ -217,9 +264,15 @@ class GridSearch:
             resample_interval = args.resample_interval,
             temperature       = temperature,
         )
-        # No CLI default: omitting it lets each planner's own default stand
-        # (1 for mppi/predictive_sampler, 3 for cem).
-        if args.n_iterations is not None:
+        # No CLI default on any of these: omitting a key lets the planner
+        # config's own default stand (n_iterations 1 for mppi/predictive_sampler
+        # and 3 for cem, max_iterations 10). --convergence_tol replaces the fixed
+        # count outright, so n_iterations is left out entirely under it.
+        if args.convergence_tol is not None:
+            planner_kwargs["convergence_tol"] = args.convergence_tol
+            if args.max_iterations is not None:
+                planner_kwargs["max_iterations"] = args.max_iterations
+        elif args.n_iterations is not None:
             planner_kwargs["n_iterations"] = args.n_iterations
 
         return dict(
@@ -262,12 +315,19 @@ class GridSearch:
         step_sd      = [r.std_step_ms  for r in episodes]
         elapsed      = [r.elapsed_seconds for r in episodes]
 
+        # The cell axes (n_iterations/n_samples, or convergence_tol in place of
+        # the iteration count) ride in `axes` and in the label alongside the two
+        # grid axes: every array task shares one --outdir, so without them two
+        # cells differing only in iterations or samples would produce the same
+        # label and combine_results.py would merge them into one row.
         axes = {"model":       args.model,
                 "object":      self.obj,
                 "temperature": temperature,
-                "noise_sigma": noise_sigma}
+                "noise_sigma": noise_sigma,
+                **self.cell_axes}
         label = combo_label(args.model, self.obj,
-                            {"temperature": temperature, "noise_sigma": noise_sigma})
+                            {"temperature": temperature, "noise_sigma": noise_sigma,
+                             **self.cell_axes})
 
         record = {
             "combo_index":           self.cell_id(i),
@@ -278,7 +338,8 @@ class GridSearch:
             # Every grid axis — what the analysis scripts group rows by.
             # "overrides" stays weights-only for combine_results.py.
             "axes":                  axes,
-            "swept_knobs":           ["temperature", "noise_sigma"],
+            "swept_knobs":           ["temperature", "noise_sigma",
+                                      *self.cell_axes],
             "full_weights":          {**self.default_weights, **self.overrides},
             "n_episodes":            len(episodes),
             "n_success":             n_success,
@@ -293,6 +354,11 @@ class GridSearch:
                 "temperature":       temperature,
                 "noise_sigma":       noise_sigma,
                 "step_time":         args.step_time,
+                # Resolved, not the raw flags: a flag left off means "the
+                # planner config's own default", which is what actually ran.
+                "n_iterations":      self.cell_axes.get("n_iterations"),
+                "convergence_tol":   args.convergence_tol,
+                "max_iterations":    self.max_iterations,
                 # Resolved against rollout_dt — what the controller actually ran.
                 "step_horizon":      self.horizon,
                 "step_substeps":     self.substeps,
@@ -315,7 +381,8 @@ class GridSearch:
         summary = {k: record[k] for k in
                    ("combo_index", "label", "success_rate", "n_success",
                     "mean_steps_to_success", "mean_step_ms", "mean_elapsed_s")}
-        summary.update(temperature=temperature, noise_sigma=noise_sigma, grid_point=i)
+        summary.update(temperature=temperature, noise_sigma=noise_sigma,
+                       grid_point=i, **self.cell_axes)
         self.summaries.append(summary)
 
         sstr = f"{mean_sts:.1f}" if mean_sts is not None else "—"
@@ -403,6 +470,7 @@ class GridSearch:
             "temperature":           t,
             "noise_sigma":           s,
             "grid_point":            i,
+            **self.cell_axes,
         })
 
     def _ranked(self) -> list[dict]:
@@ -440,7 +508,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="--temperature is an MPPI-only field, so a temperature grid "
                         "under cem/predictive_sampler would silently collapse to one "
                         "distinct point (make_planner_config drops unknown fields).")
-    p.add_argument("--n_samples",   type=int, default=256)
+    p.add_argument("--n_samples",   type=int, default=256,
+                   help="Rollouts per optimizer iteration. A CELL axis, not a grid "
+                        "axis: the SLURM script gives each array task one value, so "
+                        "the per-episode cost (and VRAM) is constant within a cell.")
     p.add_argument("--horizon",     type=int, default=None,
                    help="Planning horizon in control steps (ignored with --time_horizon).")
     p.add_argument("--time_horizon", type=float, default=0.352,
@@ -448,7 +519,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--step_time",   type=float, default=0.064,
                    help="Control-step duration in SECONDS; quantized down to whole rollout steps.")
     p.add_argument("--n_iterations", type=int, default=None,
-                   help="Optimizer iterations per plan() (default: the planner's own).")
+                   help="Optimizer iterations per plan() (default: the planner's own). "
+                        "A CELL axis, not a grid axis: the SLURM script gives each "
+                        "array task one value. Ignored under --convergence_tol.")
+    p.add_argument("--convergence_tol", type=float, default=None,
+                   help="Switch MPPI to convergence-terminated iteration: keep "
+                        "iterating until the returned action settles — "
+                        "sum_u (u_i - u_i+1)^2 < tol — instead of running a fixed "
+                        "--n_iterations, which is then ignored. Always runs >= 2 "
+                        "iterations and at most --max_iterations. Omit for "
+                        "fixed-iteration MPPI.")
+    p.add_argument("--max_iterations", type=int, default=None,
+                   help="Iteration cap for --convergence_tol (default: 10).")
     p.add_argument("--substeps",    type=int, default=None,
                    help="Rollout substeps per control step (control frequency knob).")
     p.add_argument("--eval_substeps", type=int, default=None,
@@ -547,6 +629,33 @@ def main():
             f"configuration that many times; use --planner mppi"
         )
 
+    # convergence_tol/max_iterations are MPPIConfig-only, and make_planner_config
+    # DROPS fields the selected config does not declare — so under another planner
+    # the whole cell would silently run plain fixed-iteration instead. Both checks
+    # (and MPPIConfig's own max_iterations >= 2 rule) fire here, before wp.init and
+    # the worker pool, rather than inside every spawned episode.
+    if args.convergence_tol is not None:
+        if planner != "mppi":
+            raise ValueError(
+                f"--convergence_tol is an MPPI-only field, so --planner {planner} "
+                f"would silently ignore it and run fixed-iteration; use --planner mppi"
+            )
+        if args.convergence_tol <= 0.0:
+            raise ValueError(
+                f"--convergence_tol must be > 0, got {args.convergence_tol:g}")
+        if args.max_iterations is not None and args.max_iterations < 2:
+            raise ValueError(
+                "--convergence_tol needs --max_iterations >= 2: the test compares "
+                f"two consecutive updates, got {args.max_iterations}"
+            )
+        if args.n_iterations is not None:
+            print(f"  ! --n_iterations {args.n_iterations} is IGNORED: "
+                  f"--convergence_tol {args.convergence_tol:g} decides the "
+                  f"iteration count per plan() call")
+    elif args.max_iterations is not None:
+        print(f"  ! --max_iterations {args.max_iterations} is IGNORED without "
+              f"--convergence_tol; it only caps the convergence loop")
+
     wp.init()
 
     peek_task       = load_rollout_task(args.task, args.geometry)
@@ -571,6 +680,20 @@ def main():
           f"model={args.model}  object={obj}  planner={planner}")
     print(f"  eval_sim={args.eval_sim}  geometry={args.geometry}  "
           f"n_episodes={args.n_episodes}  seed={args.seed} (constant)")
+    # Resolved once here and recorded in grid_summary: a flag left off means
+    # "the planner config's own default", and the summary should say which.
+    if args.convergence_tol is not None:
+        n_iter_used = None
+        cap_used    = (args.max_iterations if args.max_iterations is not None
+                       else planner_default(planner, "max_iterations"))
+        print(f"  n_samples={args.n_samples}  iteration: converge to "
+              f"{args.convergence_tol:g}, cap {cap_used} (fixed for this cell)")
+    else:
+        cap_used    = None
+        n_iter_used = (args.n_iterations if args.n_iterations is not None
+                       else planner_default(planner, "n_iterations"))
+        print(f"  n_samples={args.n_samples}  n_iterations={n_iter_used} "
+              f"(fixed for this cell)")
     print(f"  rollout_dt={rollout_dt*1e3:.3f}ms  step_time={args.step_time:g}s -> "
           f"{substeps} substeps  time_horizon={args.time_horizon:g}s -> {horizon} steps")
     print(f"  temperatures ({len(temperatures)}): "
@@ -639,7 +762,10 @@ def main():
         "array_index":  args.array_index,
         "overrides":    overrides,
         "mppi": {
-            "n_samples":    args.n_samples,
+            "n_samples":       args.n_samples,
+            "n_iterations":    n_iter_used,
+            "convergence_tol": args.convergence_tol,
+            "max_iterations":  cap_used,
             "time_horizon": args.time_horizon,
             "step_time":    args.step_time,
             "step_horizon": horizon,
@@ -680,6 +806,12 @@ def main():
               f"--step_time {args.step_time:g} \\")
         print(f"        --temperature {best['temperature']:g} "
               f"--noise_sigma {best['noise_sigma']:g} \\")
+        if args.convergence_tol is not None:
+            cap = ("" if args.max_iterations is None
+                   else f" --max_iterations {args.max_iterations}")
+            print(f"        --convergence_tol {args.convergence_tol:g}{cap} \\")
+        elif args.n_iterations is not None:
+            print(f"        --n_iterations {args.n_iterations} \\")
         print(f"        --seed {args.seed} --settle {args.settle:g}"
               + (f" \\\n        --weights {weight_flags}" if weight_flags else ""))
     print(f"\n  Saved -> {outdir}")
