@@ -2,18 +2,18 @@
 #SBATCH --job-name=cont_modeling_bayes_opt
 #SBATCH --output=logs/cont_modeling_bayes_opt_%A_%a.out
 #SBATCH --error=logs/cont_modeling_bayes_opt_%A_%a.err
-#SBATCH --array=0-2       # (#OBJECTS * #MODELS) - 1; the %N suffix caps how many
+#SBATCH --array=0-1       # (#OBJECTS * #MODELS) - 1; the %N suffix caps how many
                              # cells hold a GPU at once. Each task prints the grid
                              # total, and an id past the end errors out instead of
                              # silently rerunning cell 0.
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
-#SBATCH --cpus-per-task=20    # >= N_WORKERS below: each worker drives one eval
+#SBATCH --cpus-per-task=17    # >= N_WORKERS below: each worker drives one eval
                              # sim on its own core.
 #SBATCH --mem=32G            # 4 SPAWNED interpreters, each re-importing warp +
                              # mujoco + pinocchio/coal and carrying a CUDA
                              # context's host allocations. 16G OOM-kills a worker.
-#SBATCH --time=12:00:00      # one cell = N_CALLS trials x N_EPISODES episodes.
+#SBATCH --time=24:00:00      # one cell = N_CALLS trials x N_EPISODES episodes.
                              # Episodes within a trial now run CONCURRENTLY (see
                              # N_WORKERS), so a trial costs about as long as its
                              # SLOWEST episode rather than their sum. Budget
@@ -39,7 +39,7 @@ TASK="grasp_reorient"
 # Each needs scenes/leap/env_leap_rollout_{obj}_{HAND_ACC}_{OBJ_ACC}.xml (and
 # env_leap_eval_{obj}.xml when EVAL_SIM is not "none").
 # OBJECTS=("cube" "duck" "spam" "tomato")
-OBJECTS=("cube" "duck" "ball")
+OBJECTS=("duck" "ball")
 
 # Goal difficulty PER OBJECT: which goal sampler this cell's episodes draw from
 # (grasp_reorient levels: 0 fixed 90 deg spin, 1 +/-90 deg spin, 2 +/-90 deg
@@ -142,7 +142,7 @@ DELTA=""                        # per-step delta clip magnitude; empty disables 
 #    object) or 'name:lo:hi' for an explicit bracket. Leave the array empty to
 #    accept the driver's DEFAULT_OPT_WEIGHTS.
 # ---------------------------------------------------------------------------
-OPT_WEIGHTS=("w_quat:1.0:50.0" "w_pos_x:1.0:50.0" "w_pos_y:1.0:50.0" "w_pos_z:1.0:50.0" "w_contact:0.1:100.0" "w_joint:0.01:20.0" "w_fallen:100.0:300.0" "w_quat_term:100.0:300.0" "w_pos_term:100.0:300.0")
+OPT_WEIGHTS=("w_quat:0.01:100.0" "w_pos_x:0.01:100.0" "w_pos_y:0.01:100.0" "w_pos_z:0.01:100.0" "w_contact:0.01:100.0" "w_joint:0.01:100.0" "w_fallen:50.0:300.0" "w_quat_term:100.0:500.0" "w_pos_term:100.0:500.0")
 
 OPT_NOISE_SIGMA=0               # 1 -> search noise_sigma, 0 -> pin it to NOISE_SIGMA
 OPT_TEMPERATURE=1               # 1 -> search temperature, 0 -> pin it to TEMPERATURE
@@ -159,7 +159,7 @@ OPT_TEMPERATURE=1               # 1 -> search temperature, 0 -> pin it to TEMPER
 # unresumable -- start such a cell in a fresh directory.
 PER_MODEL_TEMPERATURE=0
 NOISE_SIGMA_RANGE=(0.001 1.0)   # LO HI, log-uniform
-TEMPERATURE_RANGE=(0.001 25.0)   # LO HI, log-uniform
+TEMPERATURE_RANGE=(0.001 100.0)   # LO HI, log-uniform
 NOISE_SIGMA=0.1                 # fixed value when OPT_NOISE_SIGMA=0
 TEMPERATURE=30.0                # fixed value when OPT_TEMPERATURE=0
 
@@ -175,7 +175,7 @@ ERR_CLIP=250.0                   # goal error clipped here, then divided by it
 # 5. Optimizer (gp_minimize).
 # ---------------------------------------------------------------------------
 N_CALLS=750                      # total trial budget per cell, INCLUDING resumed trials
-N_INITIAL_POINTS=20             # random trials before the GP takes over
+N_INITIAL_POINTS=120             # random trials before the GP takes over
 ACQ_FUNC="gp_hedge"             # EI | LCB | PI | gp_hedge
 GP_NOISE="gaussian"             # "gaussian" or a float
 BO_SEED=0                       # random_state for gp_minimize itself (not SEED)
@@ -211,8 +211,8 @@ OUTDIR_ROOT="${OUTDIR_ROOT:-$ROOT_DIR/results/bayes_opt_${SLURM_ARRAY_JOB_ID:-ma
 # actually optimizes, so the path you paste must belong to the same cell.
 declare -A RESUME_DIRS=(
     [cube]=""
-    [ball]=""
-    [duck]=""
+    [ball]="$ROOT_DIR/results/bayes_opt_24823933/grasp_reorient_ball_M1+M2+M3+M4_mppi"
+    [duck]="$ROOT_DIR/results/bayes_opt_24823933/grasp_reorient_duck_M1+M2+M3+M4_mppi"
 )
 
 # ===========================================================================

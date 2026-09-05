@@ -208,7 +208,7 @@ _OBJ_PARAMS: dict[str, dict] = {
             "w_pos_y": 50.0,
             "w_pos_z": 1,#50.0,
             "w_velo": 0.0,
-            "w_contact": 5.99412,#26.52397,
+            "w_contact": 2.48369,#26.52397,
             "w_joint": 20,#2.226744,
             "w_joint_velo": 0.0,
             "w_fallen": 100,#194.6098,

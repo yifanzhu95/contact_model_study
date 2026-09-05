@@ -2,7 +2,7 @@
 #SBATCH --job-name=cont_modeling_temp_sigma_grid
 #SBATCH --output=logs/cont_modeling_temp_sigma_grid_%A_%a.out
 #SBATCH --error=logs/cont_modeling_temp_sigma_grid_%A_%a.err
-#SBATCH --array=0-107%12     # (#OBJECTS * #MODELS * #N_ITERATIONS * #SAMPLE_COUNTS)
+#SBATCH --array=0-32%12     # (#OBJECTS * #MODELS * #N_ITERATIONS * #SAMPLE_COUNTS)
                              # - 1; keep in sync with the arrays below. Note that
                              # USE_CONVERGENCE=true COLLAPSES N_ITERATIONS to one
                              # value, so flipping that flag changes the required
@@ -12,7 +12,7 @@
                              # caps how many cells hold a GPU at once.
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
-#SBATCH --cpus-per-task=20   # >= N_WORKERS below: each worker drives one eval
+#SBATCH --cpus-per-task=17   # >= N_WORKERS below: each worker drives one eval
                              # sim on its own core.
 #SBATCH --mem=32G            # N_WORKERS SPAWNED interpreters, each re-importing
                              # warp + mujoco + pinocchio/coal and carrying a CUDA
@@ -80,12 +80,12 @@ cd "$PROJ_DIR"
 #    array task.
 # ===========================================================================
 TASK="grasp_reorient"
-OBJECTS=("cube" "duck" "ball")          # keys of _OBJ_PARAMS in tasks/grasp_reorient.py
+OBJECTS=("cube")          # keys of _OBJ_PARAMS in tasks/grasp_reorient.py; OBJECTS=("cube" "duck" "ball") 
 MODELS=("M1" "M2" "M3" "M4")
-N_ITERATIONS=(1 2 4)                    # MPPI optimizer iterations per plan().
+N_ITERATIONS=(1 2 3)                    # MPPI optimizer iterations per plan().
                                         # IGNORED (and collapsed to ONE cell) when
                                         # USE_CONVERGENCE=true below.
-SAMPLE_COUNTS=(128 256 512)             # rollouts per iteration. THE VRAM AXIS
+SAMPLE_COUNTS=(16 64 256 1024)             # rollouts per iteration. THE VRAM AXIS
                                         # ACROSS cells: the --gpus/--mem request
                                         # is uniform, so the largest value here
                                         # sets what a node must hold.
@@ -114,8 +114,8 @@ MAX_ITERATIONS=10                       # cap on that loop; must be >= 2
 # 2. THE GRID inside each cell. Comma-separated, expanded by the driver — bash
 #    never needs to know how many points these make.
 # ===========================================================================
-TEMPERATURES="40,20,10"                 # MPPI lambda: divides cost in the softmax
-NOISE_SIGMAS="0.2,0.1,0.05"             # action-noise std dev; ONE value here
+TEMPERATURES="50,25,12.5,6.25"                 # MPPI lambda: divides cost in the softmax
+NOISE_SIGMAS="0.1"             # action-noise std dev; ONE value here
                                         # collapses this to a 1-D temperature sweep
 
 # ===========================================================================
