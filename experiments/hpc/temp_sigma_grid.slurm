@@ -80,13 +80,13 @@ NOISE_SIGMAS="0.2,0.1,0.05"             # action-noise std dev; ONE value here
 #    replays by copy-pasting the flags the driver prints.
 # ===========================================================================
 PLANNER="mppi"                          # temperature is an MPPI-only field
-N_EPISODES=5                            # episodes per grid point -> success rate
+N_EPISODES=10                            # episodes per grid point -> success rate
 N_WORKERS=16                            # episodes run CONCURRENTLY, one process
                                         # each. THE VRAM KNOB: every worker holds
                                         # its own CUDA context and MJWarp Data at
                                         # N_SAMPLES worlds. Lower it (with
                                         # --cpus-per-task and --mem) on an OOM.
-SEED=0                                  # THE constant episode seed: every grid
+SEED=42                                  # THE constant episode seed: every grid
                                         # point is scored on the same episodes
 N_SAMPLES=256
 TIME_HORIZON=0.352                      # planning horizon in SECONDS

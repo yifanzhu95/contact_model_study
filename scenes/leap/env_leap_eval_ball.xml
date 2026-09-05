@@ -12,39 +12,39 @@
   <asset>
     <!-- A bare sphere renders as a featureless blob, which makes a REORIENTATION
     task impossible to read: nothing on the surface shows how the object turned.
-    So the ball wears a patterned skin, which gives it features that visibly move
-    when it turns. type="cube" (not "2d") is what lets a texture wrap a sphere
-    without a UV-mapped mesh. Any image works here — swap the file below; the one
-    requirement is that the pattern be busy enough to read a rotation from.
+    So the ball wears a softball skin, whose seam gives it features that visibly
+    move when it turns — one closed, chiral curve, so no two orientations look
+    alike.
 
     The image is a FILE rather than a MuJoCo builtin (procedural) texture, and
     that is the point: Pinocchio's MJCF parser only records a texture that exists
     on disk (as GeometryObject.meshTexturePath), so a builtin — which lives only
     inside the MuJoCo compiler — left the Panda3d eval viewer drawing a flat
     white ball, exactly the failure the cube scene's atlas comment describes.
-    The two renderers map this image differently, and the skin is drawn for
-    Panda3d's mapping because that is the eval default (grasp_reorient.py sets
-    eval_sim = EvalSimulatorKind.PINOCCHIO). Panda3d's sphere primitive carries
-    UV coordinates, but TRANSPOSED from the usual equirectangular convention:
-    panda3d_viewer/geometry.py::make_capsule emits tcoord = (u/pi, v/2pi) with u
-    the polar angle and v the azimuth, so image X is latitude (the +z pole lands
-    on the image's LEFT edge) and image Y is longitude, wrapping between the
-    image's bottom and top. Drawing that ignores this comes out rotated 90° on
-    the ball — straight "belts" across the image render as pole-to-pole
-    meridians, not as rings around it.
 
-    scenes/scripts/make_softball_texture.py generates this skin — a yellow base
-    with one continuous red softball seam and its cross-stitches — by working in
-    those coordinates. MuJoCo cube-maps the same file instead (type="cube" stamps
-    one square onto all 6 faces), so with eval_sim=mujoco the seam reads as red
-    squiggles per face rather than a single seam. One image cannot serve
-    both: a MuJoCo-correct version needs a cross-layout cube map, which Panda3d
-    would then smear over the sphere. The busier, mapping-agnostic alternative is
-    make_ball_texture.py / ball_surface.png.
-    <texture file> resolves against the model directory (texturedir is unset). -->
-    <texture type="cube" name="ball_surface" file="./textures/softball_surface.png"/>
-    <material name="obj_material" texture="ball_surface" texuniform="true"
+    It rides on a UV-mapped mesh for the same reason the cube's atlas does: a
+    sphere PRIMITIVE is textured by each renderer's own projection, and they do
+    not agree. MuJoCo's type="cube" stamps one square onto all 6 cube faces, so a
+    single continuous seam comes out as six copies of itself; its type="2d" is a
+    planar projection that smears anywhere off-axis; and Panda3d's primitive
+    (panda3d_viewer/geometry.py::make_capsule) emits tcoord = (u/pi, v/2pi) with
+    u the polar angle — equirectangular, but TRANSPOSED, latitude along image X.
+    Plain OBJ `vt` is understood by both, so one image now works everywhere.
+
+    scenes/scripts/make_uv_sphere.py writes that mesh (conventional
+    equirectangular UVs, longitude across and latitude up), and
+    scenes/scripts/make_softball_texture.py writes the matching skin — a yellow
+    base with one continuous red seam and its cross-stitches. The busier,
+    mapping-agnostic alternative is make_ball_texture.py / ball_surface.png.
+    <texture file> resolves against the model directory (texturedir is unset),
+    but <mesh file> resolves against `meshdir`, which the included
+    leap_right_hand_eval.xml sets to ./leap_hand/assets/ — hence the ../../ hop
+    back out to scenes/leap/objects/. -->
+    <texture type="2d" name="ball_surface" file="./textures/softball_surface.png"/>
+    <material name="obj_material" texture="ball_surface" texuniform="false"
       specular="0.3" shininess="0.4"/>
+    <mesh name="ball_mesh" file="../../objects/uv_sphere.obj" scale="0.0485 0.0485 0.0485"/>
+    <mesh name="ball_mesh_goal" file="../../objects/uv_sphere.obj" scale="0.0208 0.0208 0.0208"/>
 
     <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
       markrgb="0.8 0.8 0.8" width="300" height="300"/>
@@ -66,26 +66,36 @@
     so this inset reads at the same size as the cube scene's. Visual only
     (contype/conaffinity 0, density 0): it never collides and carries no mass. -->
     <body name="goal" pos="0.005 -0.07 0.1353" quat="1 0 0 0" mocap="true">
-      <geom name="goal_visual" type="sphere" size="0.0208" material="obj_material"
+      <geom name="goal_visual" type="mesh" mesh="ball_mesh_goal" material="obj_material"
         contype="0" conaffinity="0" density="0"/>
     </body>
 
     <body name="obj" pos="0 0.05 0.0835">
         <freejoint name="obj_joint"/>
-        <!-- One geom does both jobs here: a sphere primitive is exact, so unlike
-        the duck/spam/tomato scenes there is no mesh to hide behind a separate
-        collision hull, and unlike the cube scene no UV-mapped mesh is needed to
-        carry the texture. mass="0.14" matches the cube's, making the ball the
-        cube's mass with a rounder shape rather than a second variable; MuJoCo
-        derives the inertia from the sphere (2/5 m r^2 = 1.32e-4). Set `mass` to
-        reweight — inertia follows automatically.
+        <!-- Split the way the cube scene splits, and for the same reason: the
+        visual mesh only exists to carry UVs, so CONTACT still sees an analytic
+        sphere — exact, cheap, and unchanged by anything in this file. Nothing
+        about the contact model depends on the mesh; swapping the skin cannot
+        perturb a result. group="3" hides the collision sphere from all three
+        renderers (MuJoCo's default mjvOption, Drake's illustration/perception
+        roles, and Pinocchio's visual model all treat group>=3 as collision-only)
+        so it doesn't z-fight with the mesh drawn over it.
+
+        mass="0.14" matches the cube's, making the ball the cube's mass with a
+        rounder shape rather than a second variable; MuJoCo derives the inertia
+        from the sphere (2/5 m r^2 = 1.32e-4), and the visual mesh contributes
+        none of its own (density="0"). Set `mass` to reweight — inertia follows
+        automatically.
 
         Body pos: the cube rests with its underside at z = 0.07 - 0.035 = 0.035,
         so a ball sitting on that same palm height centres at 0.035 + 0.0485.
         This is only the settling/viewer pose — a run's actual reset state comes
         from _OBJ_PARAMS["ball"]["init_qpos"] in tasks/grasp_reorient.py. -->
         <geom name="obj" type="sphere" size="0.0485" material="obj_material"
-              friction="0.5" mass="0.14"/>
+              friction="0.5" mass="0.14" group="3"/>
+        <!-- Visual-only textured sphere (contype/conaffinity 0, density 0). -->
+        <geom name="obj_visual" type="mesh" mesh="ball_mesh" material="obj_material"
+              contype="0" conaffinity="0" density="0"/>
     </body>
 
   </worldbody>

@@ -4,34 +4,32 @@ The ball geom needs a skin that reads as a rotation (see the comment in
 env_leap_eval_ball.xml), and a softball's seam does that well: one closed,
 chiral, asymmetric curve, so no two orientations look alike.
 
-The hard part is WHERE to draw it. The eval renderer for this task is Pinocchio
-+ Panda3d (grasp_reorient.py sets eval_sim = EvalSimulatorKind.PINOCCHIO), which
-draws a MuJoCo type="sphere" geom as a Panda3d UV sphere built by
-panda3d_viewer/geometry.py::make_capsule:
+This is a plain EQUIRECTANGULAR map: image X is longitude (0..2pi, wrapping left
+to right), image Y is latitude (+z pole on the top row, -z on the bottom). It is
+consumed through the UV-mapped sphere mesh that scenes/scripts/make_uv_sphere.py
+writes, NOT by either renderer's built-in sphere projection — because neither of
+those works here and the two disagree with each other:
 
-    for u in np.linspace(0, np.pi, num_rings):             # polar angle from +z
-        for v in np.linspace(0, 2 * np.pi, num_segments):  # azimuth
-            tcoord.addData2(u / np.pi, v / (2 * np.pi))
+  - MuJoCo's type="cube" stamps one square onto all 6 cube faces before
+    projecting, so a single continuous seam comes out as six copies of itself,
+    one per face. Its type="2d" on a primitive is a planar projection, which
+    smears badly anywhere off-axis.
+  - Panda3d's sphere primitive (panda3d_viewer/geometry.py::make_capsule) emits
+    tcoord = (u/pi, v/2pi) with u the polar angle — equirectangular, but
+    TRANSPOSED: latitude along image X, longitude along image Y. An earlier
+    version of this script drew for that convention; carrying UVs on the mesh
+    instead is what lets one image serve both renderers.
 
-So the mapping is equirectangular but TRANSPOSED from the usual convention:
-image X is latitude (the +z pole lands on the LEFT edge, -z on the right) and
-image Y is longitude, wrapping between the image's bottom and top. This is what
-broke the previous version of this script: its two straight "belts" across the
-image were rendered as two pole-to-pole meridians sitting side by side on one
-face of the ball. Bending them in image space cannot fix that — the drawing has
-to happen in the sphere's coordinates.
+Putting the UVs on the mesh means this file gets to use the conventional layout
+and both renderers agree on it. It also means a straight "belt" drawn across the
+image really is a ring around the ball, which is what the very first version of
+this script wrongly assumed.
 
-Hence the approach here: instead of stroking 2D polylines, every pixel is turned
-back into a direction on the sphere and coloured by its ANGULAR DISTANCE to the
-seam curve. The seam then has a constant width *on the ball*, and the longitude
-wrap and the latitude pinch near the poles both fall out for free rather than
-needing special cases.
-
-This optimises for the Panda3d path. Under MuJoCo's cube map (type="cube" stamps
-one square onto all 6 faces) the same image reads as red squiggles per face —
-still a yellow ball with red stitching, but not an authentic seam. One image
-cannot serve both; a MuJoCo-correct version would need a cross-layout cube map,
-which Panda3d would in turn read as garbage.
+The drawing itself works on the sphere, not in the image: instead of stroking 2D
+polylines, every pixel is turned back into a direction and coloured by its
+ANGULAR DISTANCE to the seam curve. The seam then has a constant width *on the
+ball*, and the longitude wrap and the latitude pinch near the poles both fall
+out for free rather than needing special cases.
 
 Deterministic by construction: the seam is an analytic curve and the stitches
 are placed by arc length, so there is no RNG to seed — re-running reproduces the
@@ -62,9 +60,9 @@ STITCHES = 56    # ticks around the seam. A regulation ball has 88; fewer and
                  # bolder survives 512 px and mipmapping better.
 
 # All widths are half-angles in RADIANS ON THE SPHERE, not pixels, because the
-# mapping is anisotropic: one pixel spans 0.352 deg of latitude horizontally but
-# 0.703*sin(u) deg of arc vertically, so a constant-pixel feature would visibly
-# fatten and thin as the seam turned. In radians it stays put.
+# mapping is anisotropic: one pixel spans 0.352 deg of latitude vertically but
+# only 0.703*sin(theta) deg of arc horizontally, so a constant-pixel feature
+# would visibly fatten and thin as the seam turned. In radians it stays put.
 GROOVE_HALF    = 0.075   # recessed channel the thread sits in (4.3 deg)
 SEAM_HALF      = 0.012   # the red seam line itself (0.7 deg)
 STITCH_INNER   = 0.014   # tick's near end — just outside the seam line
@@ -111,33 +109,33 @@ def _tangent(t: np.ndarray) -> np.ndarray:
 
 
 def _pixel_directions(s: int) -> tuple[np.ndarray, int, int]:
-    """Unit vector per pixel, restricted to the columns the seam can reach.
+    """Unit vector per pixel, restricted to the rows the seam can reach.
 
-    Inverts the Panda3d mapping quoted in the module docstring. The V flip is the
-    whole point: Panda3d's V=0 is the image BOTTOM, PIL's row 0 is the TOP. (Get
-    it backwards and the ball mirrors to (x,-y,z), flipping the seam's
-    handedness — a real change, if a near-invisible one.)
+    Standard equirectangular: column -> longitude, row -> polar angle with row 0
+    at the +z pole. make_uv_sphere.py writes the matching vt, flipping the
+    latitude axis there (OBJ v=0 is the image BOTTOM, PIL row 0 is the TOP) so
+    the two stay in agreement — that flip lives on exactly one side of the pair.
 
-    Columns outside the seam's latitude band are base yellow by construction, so
+    Rows outside the seam's latitude band are base yellow by construction, so
     skipping them is free; it also doubles as a check that the curve clears the
     poles, since the returned band must sit strictly inside the image.
     """
-    u = np.pi * (np.arange(s) + 0.5) / s                    # polar angle -> X
-    v = 2 * np.pi * (1.0 - (np.arange(s) + 0.5) / s)        # azimuth     -> Y
+    phi = 2 * np.pi * (np.arange(s) + 0.5) / s              # longitude -> X
+    theta = np.pi * (np.arange(s) + 0.5) / s                # polar angle -> Y
 
     reach = np.arcsin(_TWO_ROOT_AB)                         # max latitude
     margin = GROOVE_HALF + STITCH_HALF + STITCH_OUTLINE
     lo, hi = np.pi / 2 - reach - margin, np.pi / 2 + reach + margin
-    cols = np.nonzero((u >= lo) & (u <= hi))[0]
-    c0, c1 = int(cols[0]), int(cols[-1]) + 1
-    assert c0 > 0 and c1 < s, "seam reaches the poles; check A/B"
+    rows = np.nonzero((theta >= lo) & (theta <= hi))[0]
+    r0, r1 = int(rows[0]), int(rows[-1]) + 1
+    assert r0 > 0 and r1 < s, "seam reaches the poles; check A/B"
 
-    su, cu = np.sin(u[c0:c1]), np.cos(u[c0:c1])
-    dirs = np.empty((s, c1 - c0, 3), np.float32)
-    dirs[..., 0] = np.cos(v)[:, None] * su[None, :]
-    dirs[..., 1] = np.sin(v)[:, None] * su[None, :]
-    dirs[..., 2] = cu[None, :]
-    return dirs.reshape(-1, 3), c0, c1
+    st, ct = np.sin(theta[r0:r1]), np.cos(theta[r0:r1])
+    dirs = np.empty((r1 - r0, s, 3), np.float32)
+    dirs[..., 0] = st[:, None] * np.cos(phi)[None, :]
+    dirs[..., 1] = st[:, None] * np.sin(phi)[None, :]
+    dirs[..., 2] = ct[:, None]
+    return dirs.reshape(-1, 3), r0, r1
 
 
 def _max_cosine(dirs: np.ndarray, points: np.ndarray, chunk: int = 4096) -> np.ndarray:
@@ -197,8 +195,8 @@ def _stitch_points() -> np.ndarray:
 
 def make_softball_texture() -> Image.Image:
     s = SIZE * SUPERSAMPLE
-    dirs, c0, c1 = _pixel_directions(s)
-    rows, cols = s, c1 - c0
+    dirs, r0, r1 = _pixel_directions(s)
+    rows, cols = r1 - r0, s
 
     seam = _curve(np.linspace(0, 2 * np.pi, SEAM_SAMPLES, endpoint=False))
     assert np.allclose(np.linalg.norm(seam, axis=1), 1.0)
@@ -208,7 +206,7 @@ def make_softball_texture() -> Image.Image:
 
     img = np.empty((s, s, 3), np.uint8)
     img[:] = YELLOW
-    band = img[:, c0:c1]
+    band = img[r0:r1, :]
     # Painted outside-in, so each layer sits on top of the one it belongs to:
     # channel, then the line in it, then the thread crossing over both.
     band[seam_cos   > np.cos(GROOVE_HALF)]                  = GROOVE
@@ -216,10 +214,10 @@ def make_softball_texture() -> Image.Image:
     band[stitch_cos > np.cos(STITCH_HALF + STITCH_OUTLINE)] = DARKRED
     band[stitch_cos > np.cos(STITCH_HALF)]                  = RED
 
-    # P(t+pi) = (-x,-y,z) is a pi rotation about +z, i.e. a half-height shift in
-    # azimuth at unchanged latitude, so the image must repeat exactly twice down
-    # its height. Cheapest possible proof that the mapping is right.
-    assert np.array_equal(img, np.roll(img, s // 2, axis=0))
+    # P(t+pi) = (-x,-y,z) is a pi rotation about +z, i.e. a half-width shift in
+    # longitude at unchanged latitude, so the image must repeat exactly twice
+    # across its width. Cheapest possible proof that the mapping is right.
+    assert np.array_equal(img, np.roll(img, s // 2, axis=1))
 
     # BOX, not LANCZOS: at an exact integer factor BOX is a true box average,
     # while LANCZOS's negative lobes halo saturated red against saturated yellow.
