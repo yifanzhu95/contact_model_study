@@ -391,21 +391,21 @@ _OBJ_PARAMS: dict[str, dict] = {
         ]),
         # Cube's (0.02, 0.035, 0.09) and 0.08, both raised by the 0.0135 radius
         # difference so the ball is not judged "fallen" at its resting height.
-        "target_pos":    np.array([0.025, 0.015, 0.08]),
-        "fallen_z":      0.075,
+        "target_pos":    np.array([0.03, 0.03, 0.085]),
+        "fallen_z":      0.08,
         # Cube's tuned weights, unchanged. Same mass, but the ball is round and
         # bigger, so w_contact and w_quat are the likeliest to want retuning.
         "cost_weights": {
-            "w_quat": 1.25,
-            "w_pos_x": 20.0,
-            "w_pos_y": 40.0,
-            "w_pos_z": 10.0,
+            "w_quat": 50.0,
+            "w_pos_x": 50.0,
+            "w_pos_y": 3.0,
+            "w_pos_z": 50.0,
             "w_velo": 0.0,
-            "w_contact": 2.0,
-            "w_joint": 0.4,
+            "w_contact": 25.0,
+            "w_joint": 4.0,
             "w_joint_velo": 0.0,
-            "w_fallen": 200.0,
-            "w_quat_term": 100.0,
+            "w_fallen": 100.0,
+            "w_quat_term": 200.0,
             "w_pos_term": 300.0,
             "w_fallen_term": 0.0,
         },
