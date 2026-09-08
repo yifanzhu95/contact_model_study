@@ -43,14 +43,22 @@ are an `<include>` swap (`low` -> `leap_right_hand.xml`, `high` ->
 `leap_right_hand_eval.xml`); all hand XMLs are kinematically identical, so
 rollout and eval scenes differ only in collision geometry.
 
-Available today: `cube_low_high` (default), `cube_high_high`, `duck_low_high`,
-`duck_low_low`, `duck_high_high`. Adding an object means dropping in the two
-XMLs plus an entry in `_OBJ_OVERRIDES` (`contact_study/tasks/grasp_reorient.py`)
-for its initial pose and target — no other code changes.
+Current assets include `low_high`, `med_high` and `high_high` rollout scenes
+for cube, duck, ball, spam and tomato, plus a fixed evaluation scene for each
+object. General drivers retain `cube_low_high` as their default. Object-specific
+initial states, goals and costs are defined in `_OBJ_PARAMS`
+(`contact_study/tasks/grasp_reorient.py`); each variant also needs its scene assets.
 
 The retired `GeometryVariant` names (`accurate`, `convex_hull`,
 `primitive_union`, `linearized`) are still accepted and map to the default
 variant, so existing SLURM scripts keep working.
+
+The [KL-vs-success workflow](analysis/README_kl_divergence.md) intentionally
+uses a stricter selector: all five current objects (`cube`, `duck`, `ball`,
+`spam`, `tomato`) use `high_high` rollout geometry with their fixed evaluation
+scenes. In that worker only, object shorthand selects `high_high`, lower
+fidelities and legacy aliases are rejected, and plots separate object/config
+families. Other drivers retain the general scene-selection behavior above.
 
 ### Contact model variants
 
@@ -111,7 +119,8 @@ contact_study/
 │   └── measure_approx_error.py # Approximation error vs horizon
 │
 ├── analysis/
-│   └── plot_results.py         # All paper figures
+│   ├── plot_results.py         # All paper figures
+│   └── README_kl_divergence.md # KL-vs-success workflow and diagnostics
 │
 └── tests/
     ├── test_allegro.py

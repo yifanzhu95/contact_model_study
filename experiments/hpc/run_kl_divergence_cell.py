@@ -1,21 +1,22 @@
 """run_kl_divergence_cell.py
 
 HPC worker for the planner-approximation-quality sweep — one degraded-planner
-cell. Measures the KL divergence between the contact model's *induced optimal
-control distribution* and a compute-degraded approximation of it, then pairs
+cell. Measures Gaussian KL between two planners' weighted first-action
+distributions under the same contact model but different compute, then pairs
 that with the success rate the degraded planner achieves on the eval sim.
 
 The idea
 --------
-MPPI's target is not its Gaussian proposal but the optimal control distribution
+For a fixed proposal, cost-weighted sampling targets a tilted distribution
 
     q*(V)  proportional to  exp(-S(V)/lambda) * p(V),     p = N(U, sigma^2 I)
 
 where S is the trajectory cost and lambda is the temperature. MPPI never
 represents q* explicitly: it draws N samples from p and computes
 self-normalized weights w_n ~ exp(-(S_n - beta)/lambda). That weighted particle
-set {(V_n, w_n)} IS an importance-sampling approximation of q*, and both
-planners carry one every control step.
+set {(V_n, w_n)} approximates that distribution. These are finite-sample,
+last-iteration distributions, not a proof of the globally optimal policy.
+Multiple iterations can move the proposal centers differently.
 
 Two particle sets cannot be compared with KL directly (disjoint support), so
 each is moment-matched to a Gaussian on the FIRST action (the only one that is
@@ -25,17 +26,16 @@ ever executed):
     Sigma = sum_n w_n (V_n[0]-mu)(V_n[0]-mu)^T
 
 and the analytic Gaussian KL is evaluated in closed form. Comparing the induced
-distributions rather than the proposals is what makes this a real KL: the
+distributions rather than just the proposals includes the effect of costs: the
 proposals share sigma by construction, so a proposal-level KL would collapse to
 ||mu_ref - mu_deg||^2 / (2 sigma^2) and see only mean displacement. The
-moment-matched version additionally sees *concentration* (a planner whose
-weights are near-uniform has learned nothing from its rollouts and its Sigma
-relaxes back to sigma^2 I) and *shape*.
+moment-matched version additionally sees concentration and shape, but loses
+non-Gaussian structure such as multiple separated modes.
 
-Why the first action only: for the full horizon d = H*nu, but the weighted
-covariance has rank at most the effective sample size, so a full-horizon
-covariance is badly rank-deficient. On the first action d = nu, which is
-well-conditioned at realistic ESS.
+Why the first action only: it is executed now, and reduces the dimension from
+H*nu to nu. The raw covariance rank is at most min(d, N-1), NOT bounded by ESS.
+Low ESS can still make the covariance ill-conditioned; even first-action
+covariance needs shrinkage and sensitivity checks at small sample counts.
 
 What runs each step
 -------------------
@@ -43,14 +43,14 @@ Two MPPIControllers share one rollout task, state, horizon, step_time and
 noise_sigma, and differ only in compute (n_samples, n_iterations):
 
   * the DEGRADED planner plans every control step and drives the eval sim;
-  * the REFERENCE ("optimal") planner is a shadow that never controls. It runs
+  * the higher-compute REFERENCE planner is a shadow that never controls. It runs
     only every --kl_every steps, because it is the expensive one.
 
 Before each reference solve, the reference planner's mean is seeded from the
 degraded planner's mean as it was BEFORE that step's solve, so both
-distributions are conditioned on an identical (state, U0) and the KL isolates
-optimizer quality. This also makes the reference planner immune to --kl_every:
-its own U never goes stale, because it is overwritten every time it runs.
+distributions start at identical (state, U0). This removes a stale reference
+mean as a comparison factor, but does not guarantee repeatable GPU solves or
+that the high-compute planner is optimal.
 Pass --no-sync_reference_mean to let the two means evolve independently
 instead, which measures accumulated policy divergence rather than
 instantaneous approximation error.
@@ -61,14 +61,15 @@ The degraded planner is degraded by having fewer samples, and fewer samples
 also make its moment estimates noisier — so measured KL rises with degradation
 partly for statistical rather than substantive reasons. With --null_control the
 reference planner is rebuilt with the DEGRADED planner's own settings (differing
-only in noise seed), so the cell measures the estimator-noise floor at that
-sample count. Run every config both ways and compare; a config whose real KL is
-not clearly above its own null floor is not reporting a meaningful difference.
+only in noise seed). This remains a SEPARATE closed-loop run. It diagnoses
+finite-sample and optimization variability, but its visited states may differ
+from the real run. It is not a strictly matched noise floor or significance
+test, and should not be subtracted from real KL as a bias correction.
 
 Known approximation (not corrected here)
 ----------------------------------------
-V = clamp(U + eps, delta_range), so the particles come from a TRUNCATED
-Gaussian and moment-matching to an untruncated one is an approximation. It bites
+When clipping is enabled, V = clamp(U + eps, delta_range) has boundary masses
+(a clipped, not truncated, Gaussian). Moment-matching is an approximation. It bites
 harder than for a mean-only comparison, because clipped dimensions get
 artificially small variance which feeds straight into the log-det term. Left
 uncorrected deliberately; treat cells whose actions ride the delta clip with
@@ -80,14 +81,14 @@ Sigma is shrunk toward the proposal covariance before inversion:
 
     Sigma <- (1-alpha) Sigma + alpha * sigma^2 I
 
-with alpha = --kl_shrinkage. sigma^2 I is the natural prior (it is exactly what
-Sigma relaxes to when the weights go uniform). Shrinkage is what keeps the
+with alpha = --kl_shrinkage. sigma^2 I is the isotropic proposal-scale target.
+Finite samples or clipping need not have exactly that covariance. Shrinkage keeps the
 log-det finite when the effective sample size collapses toward 1, which does
 happen on this task even when the mean ESS is healthy.
 
     python run_kl_divergence_cell.py \
         --outdir results/kl_divergence_eval_run \
-        --task grasp_reorient --model M2 \
+        --task grasp_reorient --model M3 --geometry cube_high_high \
         --n_samples 64 --n_iterations 1 \
         --ref_n_samples 4096 --ref_n_iterations 4 \
         --n_episodes 5 --kl_every 20
@@ -98,8 +99,12 @@ import os
 os.environ.setdefault("MUJOCO_GL", "egl")
 
 import argparse
+from dataclasses import asdict
+import hashlib
 import json
+import re
 import time
+import uuid
 from pathlib import Path
 
 import mujoco
@@ -116,19 +121,108 @@ from contact_study.tasks.base import get_task
 from contact_study.tasks.config import EvalSimulatorKind, TaskRole
 
 from contact_study.drivers.run_eval_episode import (
-    load_rollout_task, resolve_mppi_schedule, MODEL_FACTORIES,
+    apply_goal_difficulty, load_rollout_task, resolve_mppi_schedule,
+    MODEL_FACTORIES,
 )
-from contact_study.tasks.config import DEFAULT_SCENE_VARIANT
+from contact_study.tasks.config import SceneVariant
 from contact_study.evaluation import json_io
-from contact_study.evaluation.distributions import gaussian_kl, weighted_moments
+from contact_study.evaluation.distributions import (
+    gaussian_kl, weighted_moments, weighted_moments_from_particles,
+)
 from contact_study.evaluation.trajectory import (
     TrajectoryConfig, TrajectoryRecorder, add_cli_flags as add_record_flags,
 )
 
 
+def resolve_kl_geometry(task: str, geometry: str) -> str:
+    """Use explicit high/high geometry for the grasp-reorient compute study.
+
+    Object-only selectors are convenient, but legacy fidelity aliases are
+    rejected instead of silently resolving to cube_low_high. Other experiment
+    drivers and the shared SceneVariant defaults are unchanged.
+    """
+    if task != "grasp_reorient":
+        return geometry
+    value = geometry.strip()
+    if value in {"accurate", "convex_hull", "primitive_union", "linearized"}:
+        raise ValueError("KL geometry must name an object at high_high; use "
+                         "--geometry cube_high_high, not a legacy alias.")
+    if re.fullmatch(r"[a-zA-Z0-9]+", value):
+        value += "_high_high"
+    variant = SceneVariant.parse(value)
+    if (variant.hand_acc, variant.obj_acc) != ("high", "high"):
+        raise ValueError("The KL compute study requires high_high geometry for "
+                         "both planners. Example: --geometry duck_high_high")
+    if not re.fullmatch(r"[a-zA-Z0-9]+", variant.obj):
+        raise ValueError("Invalid object name in KL geometry.")
+    return f"{variant.obj}_high_high"
+
+
+def result_filename(out: dict) -> str:
+    """Names include geometry, config identity and a unique run identifier.
+
+    A repeated seed is not new independent evidence; the plotter checks that
+    separately. UUIDs prevent reruns or concurrent jobs overwriting raw data.
+    """
+    encoded = json.dumps(out["config"], sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(encoded.encode()).hexdigest()[:12]
+    label = re.sub(r"[^a-zA-Z0-9_.-]", "_", out["label"])
+    return f"{label}_{digest}_seed{out['config']['seed']}_{out['run_id']}.json"
+
+
+def validate_kl_args(args) -> None:
+    """Reject invalid numerical settings before starting expensive rollouts."""
+    for name in ("n_episodes", "kl_every", "n_samples", "ref_n_samples",
+                 "n_iterations", "ref_n_iterations", "nconmax", "njmax"):
+        if getattr(args, name) < 1:
+            raise ValueError(f"--{name} must be positive")
+    for name in ("max_steps", "eval_substeps"):
+        value = getattr(args, name)
+        if value is not None and value < 1:
+            raise ValueError(f"--{name} must be positive")
+    for name in ("noise_sigma", "temperature", "time_horizon", "step_time"):
+        value = getattr(args, name)
+        if not np.isfinite(value) or value <= 0.0:
+            raise ValueError(f"--{name} must be finite and positive")
+    for name in ("settle", "delta"):
+        value = getattr(args, name)
+        if value is not None and (not np.isfinite(value) or value < 0.0):
+            raise ValueError(f"--{name} must be finite and nonnegative")
+    if not (0.0 < args.kl_shrinkage <= 1.0):
+        raise ValueError("--kl_shrinkage must be in (0, 1]")
+    if args.task == "grasp_reorient" and args.eval_sim == "drake":
+        raise ValueError("The all-object KL workflow supports Pinocchio or "
+                         "MuJoCo evaluation. The legacy Drake hand-only asset "
+                         "does not implement these per-object scenes.")
+
+
 # ---------------------------------------------------------------------------
 # One episode with two planners
 # ---------------------------------------------------------------------------
+def measure_distribution(controller, args, sigma):
+    """Optionally retain raw moments of the exact candidates used for KL.
+
+    No extra solve or random draw is made. Raw moments permit CPU-only
+    shrinkage sensitivity on fixed weighted particles, without reconstructing
+    a nearly singular covariance by subtracting its regularization later.
+    """
+    if not args.record_kl_moments:
+        mu, cov, ess = weighted_moments(controller, args.kl_shrinkage, sigma)
+        return mu, cov, ess, None
+    particles = controller.V_wp.numpy()[:, 0, :]
+    weights = controller.w_wp.numpy()
+    mu, raw, ess = weighted_moments_from_particles(particles, weights, 0.0, sigma)
+    cov = ((1.0 - args.kl_shrinkage) * raw
+           + args.kl_shrinkage * sigma ** 2 * np.eye(mu.size))
+    record = {
+        "mean": json_io.compact(mu, precision=0),
+        "covariance_raw": json_io.compact(raw, precision=0),
+        "ess": ess,
+        "n_particles": int(particles.shape[0]),
+    }
+    return mu, cov, ess, record
+
+
 def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
                    rng, geometry, eval_sim, ep_idx: int):
     """Closed-loop episode driven by the degraded planner, shadowed by the
@@ -141,6 +235,8 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
     """
     # ---- ROLLOUT task + both planners -------------------------------------
     rollout_task = get_task(args.task, geometry=geometry, role=TaskRole.ROLLOUT)
+    if args.goal_difficulty is not None:
+        apply_goal_difficulty(rollout_task, args.goal_difficulty)
     mjm, mjd = rollout_task.load()
     cfg = rollout_task.config
 
@@ -167,6 +263,8 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
 
     # ---- EVAL task + "real" simulator -------------------------------------
     eval_task = get_task(args.task, geometry=geometry, role=TaskRole.EVAL)
+    if args.goal_difficulty is not None:
+        apply_goal_difficulty(eval_task, args.goal_difficulty)
     eval_task.load()
     if eval_sim is not None:
         eval_task.config.eval_sim = eval_sim
@@ -228,7 +326,10 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
     n_steps_taken = n_steps
 
     kl_fwd, kl_rev, ess_ref, ess_deg, mu_dist, kl_steps = [], [], [], [], [], []
+    invalid_kl_steps: list[int] = []
     step_times: list[float] = []
+    ref_plan_times: list[float] = []
+    moment_records: list[dict] = []
     ep_start = time.perf_counter()
 
     for t in range(n_steps):
@@ -263,26 +364,35 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
         step_times.append(plan_ms)
 
         if measure:
-            mu_d, S_d, e_d = weighted_moments(deg, args.kl_shrinkage, sigma)
+            mu_d, S_d, e_d, moments_d = measure_distribution(deg, args, sigma)
 
             # --- reference planner: shadow solve at the same (state, U0) ---
             if U0 is not None:
                 ref.U_wp.assign(U0)
+            ref_start = time.perf_counter()
             ref.plan(mjd)
-            mu_r, S_r, e_r = weighted_moments(ref, args.kl_shrinkage, sigma)
+            ref_plan_times.append((time.perf_counter() - ref_start) * 1e3)
+            mu_r, S_r, e_r, moments_r = measure_distribution(ref, args, sigma)
 
-            # Forward = KL(reference || degraded): information lost by using the
-            # degraded planner in place of the reference. Reverse swaps them and
-            # punishes the degraded planner for being over-broad instead.
+            # Direction matters: each expectation is taken under its first
+            # distribution. Both mean differences and covariance shape matter.
             f = gaussian_kl(mu_r, S_r, mu_d, S_d)
             r = gaussian_kl(mu_d, S_d, mu_r, S_r)
-            if np.isfinite(f) and np.isfinite(r):
+            if deg.last_plan_ok and ref.last_plan_ok and np.isfinite(f) and np.isfinite(r):
                 kl_fwd.append(f)
                 kl_rev.append(r)
                 ess_ref.append(e_r)
                 ess_deg.append(e_d)
                 mu_dist.append(float(np.linalg.norm(mu_r - mu_d)))
                 kl_steps.append(t)
+                if args.record_kl_moments:
+                    moment_records.append({"step": t, "degraded": moments_d,
+                                           "reference": moments_r})
+            else:
+                # Do not silently reuse a stale particle cloud after an
+                # all-NaN planner solve. Keep the step number so a failed cell
+                # is diagnosable instead of merely returning fewer samples.
+                invalid_kl_steps.append(t)
 
         # --- turn the planned delta into the absolute command --------------
         if args.execute == "sample":
@@ -320,6 +430,19 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
                   f"{ref_cfg.n_samples} deg={ess_deg[-1] if ess_deg else float('nan'):7.1f}/"
                   f"{deg_cfg.n_samples}")
 
+    # Also score the state produced by the last allowed command. Without this
+    # boundary check, success or a drop on that command is labelled timeout.
+    if end_reason == "timeout":
+        final_state = sim.get_state()
+        mjd.qpos[:] = final_state.qpos
+        mjd.qvel[:] = final_state.qvel
+        mujoco.mj_forward(mjm, mjd)
+        if rollout_task.is_success(mjd):
+            steps_to_success = n_steps_taken
+            end_reason = "success"
+        elif rollout_task.has_failed(mjd):
+            end_reason = "failed"
+
     elapsed  = time.perf_counter() - ep_start
     step_arr = np.asarray(step_times)
     final_qpos = sim.get_state().qpos
@@ -346,7 +469,11 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
         "ess_ref":   ess_ref,
         "ess_deg":   ess_deg,
         "mu_dist":   mu_dist,
+        "reference_plan_ms": ref_plan_times,
+        "invalid_steps": invalid_kl_steps,
     }
+    if args.record_kl_moments:
+        record["moments"] = moment_records
     return result, record
 
 
@@ -373,21 +500,31 @@ def _stats(v: list[float]) -> dict:
 
 
 def run_cell(args):
-    geometry = args.geometry
-    eval_sim = None if args.eval_sim == "none" else EvalSimulatorKind(args.eval_sim)
+    validate_kl_args(args)
+
+    geometry = resolve_kl_geometry(args.task, args.geometry)
+    eval_peek = get_task(args.task, geometry=geometry, role=TaskRole.EVAL)
+    eval_sim = (eval_peek.config.eval_sim if args.eval_sim == "none"
+                else EvalSimulatorKind(args.eval_sim))
+    eval_scene = eval_peek.resolve_scene_path()
     contact_cfg = MODEL_FACTORIES[args.model]()
 
     # In null-control mode the "reference" is a second instance of the degraded
-    # planner (different noise seed only), so the cell measures the
-    # estimator-noise floor at this sample count rather than a real difference.
+    # planner (different noise seed only). This independent closed-loop run is
+    # a stochastic diagnostic, not an exactly state-matched noise floor.
     ref_n_samples   = args.n_samples   if args.null_control else args.ref_n_samples
     ref_n_iterations = args.n_iterations if args.null_control else args.ref_n_iterations
 
-    label = f"{args.model}_n{args.n_samples}_i{args.n_iterations}"
+    label = f"{geometry}_{args.model}_n{args.n_samples}_i{args.n_iterations}"
     if args.null_control:
         label += "_null"
 
     peek = load_rollout_task(args.task, geometry)
+    if args.goal_difficulty is not None:
+        apply_goal_difficulty(peek, args.goal_difficulty)
+    effective_difficulty = getattr(peek, "goal_difficulty", peek.config.difficulty)
+    eval_substeps = (args.eval_substeps if args.eval_substeps is not None
+                    else peek.config.eval_substeps_per_rollout)
     horizon, substeps, rollout_dt = resolve_mppi_schedule(
         MPPIConfig(time_horizon=args.time_horizon, step_time=args.step_time),
         peek.config, args.eval_substeps,
@@ -396,6 +533,9 @@ def run_cell(args):
 
     print(f"[{label}]  nq={peek.mjm.nq} nv={peek.mjm.nv} nu={peek.mjm.nu}  "
           f"max_steps={n_steps}  n_episodes={args.n_episodes}")
+    print(f"[{label}]  geometry={geometry} eval_sim={eval_sim.value} "
+          f"goal_difficulty={effective_difficulty} "
+          f"ccd_iterations={peek.mjm.opt.ccd_iterations} (unchanged)")
     print(f"[{label}]  degraded : n_samples={args.n_samples} n_iterations={args.n_iterations}")
     print(f"[{label}]  reference: n_samples={ref_n_samples} n_iterations={ref_n_iterations}"
           + ("   (NULL CONTROL: same settings, different seed)" if args.null_control else ""))
@@ -425,63 +565,127 @@ def run_cell(args):
             debug          = False,   # per-plan MPPI spam would swamp two planners
         )
 
-    model_ord = list(MODEL_FACTORIES).index(args.model)
-    seed_seq  = np.random.SeedSequence(
-        [s for s in (args.seed, args.n_samples, args.n_iterations,
-                     int(args.null_control), model_ord) if s is not None] or None
-    )
-    episode_seeds = seed_seq.spawn(args.n_episodes)
+    # Common-random-number protocol. Every sweep cell receives the same
+    # environment/goal seed for episode k, and a real/null pair receives the
+    # same degraded-planner seed. Only the shadow reference gets its own stream.
+    # This keeps task difficulty and the executed controller paired across the
+    # sweep instead of confounding KL with a different randomly sampled goal.
+    root_seed = (int(args.seed) if args.seed is not None else
+                 int(np.random.SeedSequence().generate_state(1)[0]))
 
-    episodes, records = [], []
+    def child_seed(stream: int, ep: int, *extra: int) -> int:
+        return int(np.random.SeedSequence(
+            [root_seed, stream, ep, *(int(x) for x in extra)]
+        ).generate_state(1)[0])
+
+    episodes, records, seed_records = [], [], []
     for ep in range(args.n_episodes):
-        ep_seed = int(episode_seeds[ep].generate_state(1)[0])
-        rng     = np.random.default_rng(episode_seeds[ep])
+        env_seed = child_seed(0, ep)
+        deg_seed = child_seed(1, ep)
+        # The real reference is held fixed across degraded-compute cells. The
+        # null reference uses a separate stream but is keyed by its own compute
+        # so it remains an independent, matched replicate of the degraded one.
+        ref_seed = (child_seed(3, ep, args.n_samples, args.n_iterations)
+                    if args.null_control else child_seed(2, ep))
+        rng = np.random.default_rng(env_seed)
 
-        deg_cfg = make_cfg(args.n_samples, args.n_iterations, ep_seed)
-        # Offset keeps the two noise streams independent — essential in null
-        # mode, where an identical seed would make the KL identically zero.
-        ref_cfg = make_cfg(ref_n_samples, ref_n_iterations,
-                           (ep_seed + 0x5EED) % (2**31 - 1))
+        deg_cfg = make_cfg(args.n_samples, args.n_iterations, deg_seed)
+        ref_cfg = make_cfg(ref_n_samples, ref_n_iterations, ref_seed)
 
         result, rec = run_kl_episode(
             args, contact_cfg, deg_cfg, ref_cfg, rng, geometry, eval_sim, ep,
         )
         episodes.append(result)
         records.append(rec)
+        seed_records.append({
+            "episode_index": ep,
+            "environment_seed": env_seed,
+            "degraded_planner_seed": deg_seed,
+            "reference_planner_seed": ref_seed,
+        })
 
         tick = "✓" if result.success else "✗"
         kf, kr = _stats(rec["kl_forward"]), _stats(rec["kl_reverse"])
+        ref_ms = _stats(rec["reference_plan_ms"])["mean"]
         print(f"    ep {ep:02d}  {tick}  "
               f"KL_fwd={kf['mean'] if kf['mean'] is not None else float('nan'):9.4f}  "
               f"KL_rev={kr['mean'] if kr['mean'] is not None else float('nan'):9.4f}  "
-              f"n_kl={kf['n']:4d}  step={result.mean_step_ms:.1f}ms")
+              f"n_kl={kf['n']:4d}  deg_step={result.mean_step_ms:.1f}ms  "
+              f"ref_plan={(ref_ms if ref_ms is not None else float('nan')):.1f}ms")
 
     agg = aggregate_episodes(episodes, args.task, label)
 
-    # Pool every measured step across all episodes for the cell-level KL. The
-    # scatter point uses this; per-episode and per-step values are kept below.
+    # Preserve legacy pooled-step summaries. The plotter's default instead
+    # reconstructs episode-balanced means from per-episode/per-step records.
     all_fwd = [x for r in records for x in r["kl_forward"]]
     all_rev = [x for r in records for x in r["kl_reverse"]]
     all_er  = [x for r in records for x in r["ess_ref"]]
     all_ed  = [x for r in records for x in r["ess_deg"]]
     all_md  = [x for r in records for x in r["mu_dist"]]
+    all_ref_ms = [x for r in records for x in r["reference_plan_ms"]]
+    n_invalid = sum(len(r["invalid_steps"]) for r in records)
 
     headline = all_fwd if args.kl_direction == "forward" else all_rev
+    headline_stats = _stats(headline)
+    headline_mean = (headline_stats["mean"] if headline_stats["mean"] is not None
+                     else float("nan"))
+    headline_median = (headline_stats["median"] if headline_stats["median"] is not None
+                       else float("nan"))
+    ess_ref_mean = _stats(all_er)["mean"]
+    ess_deg_mean = _stats(all_ed)["mean"]
+    ref_plan_mean = _stats(all_ref_ms)["mean"]
+    headline_field = "kl_forward" if args.kl_direction == "forward" else "kl_reverse"
+    episode_headline = [float(np.mean(r[headline_field])) for r in records if r[headline_field]]
+    episode_headline_mean = float(np.mean(episode_headline)) if episode_headline else float("nan")
     print(f"  → success={agg.success_rate*100:.1f}%  "
-          f"KL_{args.kl_direction}={_stats(headline)['mean']:.4f} "
-          f"(median {_stats(headline)['median']:.4f}, n={len(headline)})  "
-          f"ESS ref={_stats(all_er)['mean']:.1f}/{ref_n_samples} "
-          f"deg={_stats(all_ed)['mean']:.1f}/{args.n_samples}")
+          f"KL_{args.kl_direction}_episode_mean={episode_headline_mean:.4f} "
+          f"(valid_episodes={len(episode_headline)}; "
+          f"pooled_step_mean={headline_mean:.4f}, "
+          f"pooled_step_median={headline_median:.4f}, n_steps={len(headline)})  "
+          f"ESS ref={(ess_ref_mean if ess_ref_mean is not None else float('nan')):.1f}/"
+          f"{ref_n_samples} deg={(ess_deg_mean if ess_deg_mean is not None else float('nan')):.1f}/"
+          f"{args.n_samples} ref_plan="
+          f"{(ref_plan_mean if ref_plan_mean is not None else float('nan')):.1f}ms "
+          f"invalid_KL={n_invalid}")
 
     out = {
+        "schema_version": 2,
+        "run_id": uuid.uuid4().hex,
         "label": label,
         "task":  args.task,
         "model": args.model,
+        "geometry": geometry,
+        "object": peek.scene_variant.obj,
         "config": {
+            "kl_protocol": "first_action_v2_final_state_check",
+            "record_kl_moments": args.record_kl_moments,
+            "geometry": geometry,
+            "object": peek.scene_variant.obj,
+            "planner": "mppi",
+            "eval_sim": eval_sim.value,
+            "eval_dt": float(peek.config.timestep),
+            "eval_substeps": int(eval_substeps),
+            "settle": args.settle,
+            "contact_config": asdict(contact_cfg),
+            "cost_weights": dict(peek.config.cost_weights),
+            "success_thresholds": dict(peek.config.success_thresholds),
+            "ccd_iterations": int(peek.mjm.opt.ccd_iterations),
+            "ccd_tolerance": float(peek.mjm.opt.ccd_tolerance),
+            "nconmax": args.nconmax,
+            "njmax": args.njmax,
+            "use_full_graph": args.use_full_graph,
+            "warm_start": False,
+            "resample_interval": 1,
+            "control_dt": float(substeps * rollout_dt),
+            "realized_time_horizon": float(horizon * substeps * rollout_dt),
             "n_samples":        args.n_samples,
             "n_iterations":     args.n_iterations,
             "ref_n_samples":    ref_n_samples,
             "ref_n_iterations": ref_n_iterations,
+            # Keep the intended high-compute comparison budget in null records
+            # too, so plots cannot attach a null to an incompatible reference.
+            "comparison_ref_n_samples": args.ref_n_samples,
+            "comparison_ref_n_iterations": args.ref_n_iterations,
             "null_control":     args.null_control,
             "kl_every":         args.kl_every,
             "kl_shrinkage":     args.kl_shrinkage,
@@ -494,11 +698,18 @@ def run_cell(args):
             "noise_sigma":      args.noise_sigma,
             "delta":            args.delta,
             "horizon":          horizon,
+            "action_dim":       int(peek.mjm.nu),
             "substeps":         substeps,
             "rollout_dt":       rollout_dt,
             "max_steps":        n_steps,
             "n_episodes":       args.n_episodes,
-            "seed":             args.seed,
+            "seed":             root_seed,
+            "seed_protocol":    "common_random_numbers_v1",
+            "goal_difficulty":  effective_difficulty,
+        },
+        "scene_files": {
+            "rollout": peek.resolve_scene_path().name,
+            "eval": eval_scene.name,
         },
         # AggregatedResult carries the success-rate side, in the same schema the
         # rest of the study's sweeps use.
@@ -512,16 +723,20 @@ def run_cell(args):
             "ess_ref": _stats(all_er),
             "ess_deg": _stats(all_ed),
             "mu_dist": _stats(all_md),
+            "reference_plan_ms": _stats(all_ref_ms),
+            "n_invalid_kl": n_invalid,
         },
         # The full EpisodeResult (end_reason / time_out / trajectory included),
         # with this cell's KL summary folded in beside it.
         "episodes": [
             {
                 **e.to_dict(),
+                **seeds,
                 "kl_forward": _stats(r["kl_forward"]),
                 "kl_reverse": _stats(r["kl_reverse"]),
+                "reference_plan_ms": _stats(r["reference_plan_ms"]),
             }
-            for e, r in zip(episodes, records)
+            for e, r, seeds in zip(episodes, records, seed_records)
         ],
         # Raw per-step series (a few hundred floats per episode) so the
         # aggregation choice can be changed without re-running the sweep.
@@ -538,26 +753,27 @@ def build_parser() -> argparse.ArgumentParser:
         description="HPC worker: run one KL-divergence vs success-rate cell."
     )
     p.add_argument("--task",  type=str, default="grasp_reorient")
-    p.add_argument("--model", type=str, default="M2", choices=list(MODEL_FACTORIES),
+    p.add_argument("--model", type=str, default="M3", choices=list(MODEL_FACTORIES),
                    help="Contact model. Both planners use the SAME one — this "
                         "experiment varies optimizer quality, not model fidelity.")
     p.add_argument("--outdir", type=str, default="results/kl_divergence_eval_run")
     p.add_argument("--n_episodes", type=int, default=10)
+    p.add_argument("--goal_difficulty", type=int, default=1,
+                   help="Task goal difficulty (default 1, matching the KL grid).")
 
     # --- the swept axis: degraded-planner compute --------------------------
     p.add_argument("--n_samples",    type=int, default=64,
                    help="Degraded planner sample count (swept).")
     p.add_argument("--n_iterations", type=int, default=1,
                    help="Degraded planner MPPI iterations per plan (swept).")
-    # --- the reference ("optimal") planner ---------------------------------
+    # --- the higher-compute reference planner -------------------------------
     p.add_argument("--ref_n_samples",    type=int, default=4096,
                    help="Reference planner sample count. Ignored with --null_control.")
     p.add_argument("--ref_n_iterations", type=int, default=4,
                    help="Reference planner iterations. Ignored with --null_control.")
     p.add_argument("--null_control", action=argparse.BooleanOptionalAction, default=False,
                    help="Rebuild the reference planner with the DEGRADED settings "
-                        "(different seed only) to measure this cell's "
-                        "estimator-noise floor.")
+                        "(different seed only) in an independent diagnostic run.")
 
     # --- KL estimator knobs -------------------------------------------------
     p.add_argument("--kl_every", type=int, default=20,
@@ -568,11 +784,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Shrink each covariance toward sigma^2*I by this factor "
                         "before inversion, keeping the log-det finite when the "
                         "effective sample size collapses.")
+    p.add_argument("--record_kl_moments", action=argparse.BooleanOptionalAction,
+                   default=False,
+                   help="Retain both planners' unregularized first-action means "
+                        "and covariances at valid KL steps for CPU sensitivity "
+                        "analysis. No extra plans; adds storage, default off.")
     p.add_argument("--kl_direction", type=str, default="forward",
                    choices=["forward", "reverse"],
                    help="Which direction is the headline number. forward = "
                         "KL(reference||degraded) (information lost by the "
-                        "approximation); reverse punishes over-broadness. BOTH "
+                        "approximation); reverse swaps the arguments. BOTH "
                         "are always computed and stored — this only picks the "
                         "one printed and marked as headline.")
     p.add_argument("--sync_reference_mean",
@@ -585,16 +806,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--execute", type=str, default="mean", choices=["mean", "sample"],
                    help="What the degraded planner executes. 'mean' matches every "
                         "other sweep in the study. 'sample' draws a particle from "
-                        "its induced distribution, which is closer to the "
-                        "'execute the distribution' framing but injects a full "
-                        "sigma of extra noise into every action and will depress "
-                        "the success-rate axis for reasons unrelated to KL.")
+                        "its weighted particle distribution. This changes the "
+                        "execution policy and is not pooled with mean execution.")
 
     # --- shared MPPI / eval knobs (must match across the two planners) ------
-    p.add_argument("--time_horizon", type=float, default=0.256)
-    p.add_argument("--step_time",    type=float, default=0.032)
-    p.add_argument("--temperature",  type=float, default=0.01)
-    p.add_argument("--noise_sigma",  type=float, default=0.02)
+    p.add_argument("--time_horizon", type=float, default=0.352)
+    p.add_argument("--step_time",    type=float, default=0.064)
+    p.add_argument("--temperature",  type=float, default=1.0)
+    p.add_argument("--noise_sigma",  type=float, default=0.025)
     p.add_argument("--delta",        type=float, default=None,
                    help="Per-step MPPI delta clip magnitude (action units); "
                         "default disables the clamp, matching run_eval_episode.py.")
@@ -604,10 +823,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--eval_sim",     type=str,   default="none",
                    choices=["none", "mujoco", "drake", "pinocchio"])
     p.add_argument("--settle",       type=float, default=1.0)
-    p.add_argument("--geometry",     type=str,   default=DEFAULT_SCENE_VARIANT,
-                   help="Scene variant: '<object>' or "
-                        "'<object>_<hand_acc>_<obj_acc>' (e.g. duck_low_high). "
-                        "Legacy geometry names map to the default scene.")
+    p.add_argument("--geometry", type=str, default="cube_high_high",
+                   help="For grasp_reorient: '<object>' or '<object>_high_high' "
+                        "(cube, duck, ball, spam, tomato). Object-only names "
+                        "select high_high; lower fidelity and legacy aliases "
+                        "are rejected. The per-object eval scene stays fixed.")
     p.add_argument("--nconmax",      type=int,   default=200)
     p.add_argument("--njmax",        type=int,   default=500)
     p.add_argument("--use_full_graph",
@@ -621,28 +841,21 @@ def build_parser() -> argparse.ArgumentParser:
 def main():
     args = build_parser().parse_args()
 
+    # Reject misleading geometry before initializing GPU resources.
+    args.geometry = resolve_kl_geometry(args.task, args.geometry)
+    validate_kl_args(args)
     wp.init()
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    out, label = run_cell(args)
-    json_io.dump(out, outdir / f"{label}.json",
-                 precision=TrajectoryConfig.from_args(args).precision)
-
-    meta_path = outdir / "meta.json"
-    with open(meta_path, "w") as f:
-        json.dump({
-            "task":             args.task,
-            "model":            args.model,
-            "ref_n_samples":    args.ref_n_samples,
-            "ref_n_iterations": args.ref_n_iterations,
-            "kl_every":         args.kl_every,
-            "kl_shrinkage":     args.kl_shrinkage,
-            "kl_direction":     args.kl_direction,
-            "noise_sigma":      args.noise_sigma,
-            "step_time":        args.step_time,
-            "time_horizon":     args.time_horizon,
-        }, f, indent=2)
+    out, _ = run_cell(args)
+    output_path = outdir / result_filename(out)
+    # One self-describing file per run: a shared meta.json would be overwritten
+    # by parallel array jobs with different objects or settings. Keep config
+    # floats at full precision for scientific grouping; trajectory arrays still
+    # use the recorder's own compact precision.
+    json_io.dump(out, output_path, precision=0)
+    print(f"Saved: {output_path}")
 
 
 if __name__ == "__main__":

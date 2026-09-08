@@ -4,8 +4,8 @@ Directory plotter for the planner-approximation-quality sweep — reads a whole
 directory of per-cell JSONs written by experiments/hpc/kl_divergence_eval.slurm
 (results/kl_divergence_eval_<id>/<model>_n<samples>_i<iters>[_null].json) and
 turns them into the figure that sweep exists to produce: success rate vs. the
-KL divergence between the reference planner's induced optimal control
-distribution and the degraded planner's approximation of it.
+KL divergence between the higher-compute planner's weighted first-action
+distribution and the degraded planner's distribution, each Gaussian-approximated.
 
 Unlike the other sweeps in analysis/, this one is NOT a clustered bar chart of
 M1-M4: every cell uses the same contact model, and the swept axis is optimizer
@@ -16,33 +16,41 @@ Panels
 ------
 Top    — scatter of success rate (%) vs. KL, one point per non-null cell.
          Marker colour = n_samples, marker shape = n_iterations; x-error is the
-         SE of the pooled per-step KL mean, y-error the binomial ±1 SE.
-Bottom — the null-control check: real KL next to that config's own null KL
-         (same settings, different noise seed = the estimator-noise floor).
-         A config whose real bar is not clearly above its null bar is not
-         reporting a meaningful difference; those cells are drawn hollow in the
-         top panel and dropped entirely with --drop_below_null.
+         between-episode SE of the episode-balanced KL mean. The default
+         y-error is a Wilson 95% binomial interval, which remains honest at
+         0% and 100% success; --success_error se reproduces the old ±1 SE.
+Bottom — the independent-run null diagnostic: real KL next to that config's
+         matched-budget null KL (same planner settings, different noise seed).
+         Independent closed-loop runs can visit different states, so this is
+         NOT a matched-state noise floor or a formal significance test. Hollow
+         markers indicate that the real value does not exceed the null value
+         under the optional descriptive screening rule.
 
-Merge rule: files sharing a label (replicate runs of the same cell) are pooled.
-Success rate is episode-weighted with the whisker recomputed from the pooled
-rate and total episode count (binomial SE = sqrt(p(1-p)/N)); KL mean/SD are
-pooled over the per-step sample counts (SD via the pooled second moment, so it
-is the spread of all steps together, not an average of SDs).
-
-Caveat on the KL whisker: the per-step KL samples within an episode are
-correlated, so sd/sqrt(n) understates the true uncertainty. It is drawn as a
-spread indicator, not an inferential interval.
+Merge rule: only files with matching recorded scientific settings are pooled.
+Objects, geometries, tasks, reference budgets, simulator settings, goals and
+other recorded configuration remain separate. Compatible independent seeds are
+pooled; duplicate episode seed identities are rejected. Old files without
+geometry metadata remain explicitly unknown, never inferred as high_high.
+Success rate is episode-weighted and recomputed from the pooled success count
+and total episode count. By default, its whisker is a Wilson 95% interval. KL is
+also episode-balanced: first summarize the measured steps inside each episode,
+then give every episode equal weight. This avoids giving a long timeout episode
+more influence than a short successful one, and uses episodes—not correlated
+adjacent control steps—as the uncertainty units. Pass --weighting step and
+--success_error se to reproduce the legacy pooled-step / binomial-SE display.
 
 Usage:
     python analysis/plot_kl_divergence_dir.py                          # latest kl_divergence_eval_* dir
     python analysis/plot_kl_divergence_dir.py results/kl_divergence_eval_12345
     python analysis/plot_kl_divergence_dir.py --stat median --direction reverse
+    python analysis/plot_kl_divergence_dir.py --weighting step  # legacy
     python analysis/plot_kl_divergence_dir.py --drop_below_null
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -61,7 +69,119 @@ _FALLBACK_MARKER = "P"
 
 NULL_COLOR = "#BBBBBB"
 
-_LABEL_RE = re.compile(r"^(M\d+)_n(\d+)_i(\d+)(_null)?$")
+_LABEL_RE = re.compile(r"^(?:(.+)_)?(M\d+)_n(\d+)_i(\d+)(_null)?$")
+
+# Everything else in config participates in the compatibility key. This
+# fail-closed policy keeps future scientific knobs separate automatically.
+_REPLICATE_OR_SWEEP_KEYS = {
+    "n_samples", "n_iterations", "null_control", "seed", "root_seed",
+    "n_episodes", "ref_n_samples", "ref_n_iterations",
+    "comparison_ref_n_samples", "comparison_ref_n_iterations",
+    "geometry", "object", "record_kl_moments",
+}
+
+
+def _canonical(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _fingerprint(value: object) -> str:
+    return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()[:12]
+
+
+def _finite_values(values) -> list[float]:
+    """JSON null represents a sanitized invalid measurement, not a zero."""
+    result = []
+    for value in values or []:
+        if value is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number):
+            result.append(number)
+    return result
+
+
+def _describe_record(path: Path, data: dict) -> dict | None:
+    label = data.get("label")
+    if label is None:
+        return None
+    match = _LABEL_RE.fullmatch(str(label))
+    if match is None:
+        print(f"  ! skipping {path.name}: unsupported KL cell label {label!r}")
+        return None
+
+    cfg = data.get("config", {})
+    agg = data.get("aggregate", {})
+    prefix, model, ns, ni, null_suffix = match.groups()
+    ns, ni, is_null = int(ns), int(ni), null_suffix is not None
+    for field, expected in (("n_samples", ns), ("n_iterations", ni),
+                            ("null_control", is_null)):
+        if field in cfg and cfg[field] != expected:
+            raise ValueError(f"{path.name}: label disagrees with config.{field}")
+    if data.get("model", model) != model:
+        raise ValueError(f"{path.name}: label disagrees with recorded model")
+    top_geometry, cfg_geometry = data.get("geometry"), cfg.get("geometry")
+    if top_geometry and cfg_geometry and top_geometry != cfg_geometry:
+        raise ValueError(f"{path.name}: top-level/config geometry disagree")
+    geometry = top_geometry or cfg_geometry or "unknown (legacy)"
+    if prefix and geometry != "unknown (legacy)" and prefix != geometry:
+        raise ValueError(f"{path.name}: label disagrees with recorded geometry")
+    object_name = data.get("object") or cfg.get("object") or "unknown"
+    if data.get("object") and cfg.get("object") and data["object"] != cfg["object"]:
+        raise ValueError(f"{path.name}: top-level/config object disagree")
+    task = data.get("task", agg.get("task_name", "unknown"))
+    if data.get("task") and agg.get("task_name") and data["task"] != agg["task_name"]:
+        raise ValueError(f"{path.name}: task metadata disagree")
+    schema = int(data.get("schema_version", 1))
+    base = {
+        "schema_version": schema, "task": task, "model": model,
+        "geometry": geometry, "object": object_name,
+        "config": {k: v for k, v in cfg.items() if k not in _REPLICATE_OR_SWEEP_KEYS},
+    }
+    # New results retain the requested large-reference budget even in null
+    # runs. In older null files that budget is unknown: infer it only when the
+    # directory has exactly one otherwise-compatible real reference budget.
+    comparison = (cfg.get("comparison_ref_n_samples"),
+                  cfg.get("comparison_ref_n_iterations"))
+    if schema >= 2 and None in comparison:
+        raise ValueError(f"{path.name}: schema {schema} requires comparison_ref_* metadata")
+    if comparison == (None, None) and not is_null:
+        comparison = (cfg.get("ref_n_samples"), cfg.get("ref_n_iterations"))
+    return {
+        "path": path, "data": data, "label": label, "model": model,
+        "n_samples": ns, "n_iterations": ni, "null": is_null,
+        "task_name": task, "geometry": geometry, "object": object_name,
+        "schema_version": schema, "base": base, "comparison": comparison,
+    }
+
+
+def _episode_identity_aliases(data: dict) -> list[set[tuple]]:
+    """Seed aliases for each episode; repeated seeds are not new evidence.
+
+    Environment seeds alone identify a shared randomized task within an
+    otherwise-compatible cell. Deliberately repeated same-seed runs need a
+    separate repeated-measures analysis, not ordinary episode pooling.
+    """
+    cfg = data.get("config", {})
+    root_seed = cfg.get("seed", cfg.get("root_seed"))
+    episodes = data.get("episodes", []) or []
+    n_ep = int(data.get("aggregate", {}).get("n_episodes", len(episodes)) or 0)
+    if episodes and len(episodes) != n_ep:
+        raise ValueError("episode list length disagrees with aggregate.n_episodes")
+    identities = []
+    for index in range(n_ep):
+        ep = episodes[index] if episodes else {}
+        aliases = set()
+        if ep.get("environment_seed") is not None:
+            aliases.add(("environment_seed", int(ep["environment_seed"])))
+        if root_seed is not None:
+            aliases.add(("root_seed_episode", int(root_seed),
+                         int(ep.get("episode_index", index))))
+        identities.append(aliases)
+    return identities
 
 
 def _latest_dir() -> Path:
@@ -97,48 +217,97 @@ def _pool_stats(acc: dict) -> tuple[float | None, float | None, int]:
 
 
 def merge_dir(directory: Path) -> tuple[dict[str, dict], list[Path]]:
-    """Pool every per-cell JSON in *directory* into one entry per label.
+    """Pool compatible per-cell JSONs without mixing scientific settings.
 
-    Returns (cells, files) where cells[label] holds the fields the plotting
-    needs: model, n_samples, n_iterations, null, task_name, n_episodes,
-    success_rate, success_rate_se, mean_step_ms, the two KL directions and the
-    ESS diagnostics.
+    Labels remain dictionary keys when unique; conflicting labels are suffixed
+    with a stable family ID. ``family_id`` rather than the display label is the
+    authoritative grouping and null-pairing key. Missing legacy metadata never
+    matches new-schema metadata. Duplicate seed identities raise ValueError.
     """
     files = sorted(p for p in directory.glob("*.json") if p.name != "meta.json")
     if not files:
         raise FileNotFoundError(f"No per-cell *.json files found in {directory}")
 
-    acc: dict[str, dict] = {}
+    records = []
     for path in files:
-        d = load(path)
-        label = d.get("label")
-        if label is None:
-            continue
-        m = _LABEL_RE.match(label)
-        if m is None:
-            print(f"  ! skipping {path.name}: label {label!r} is not "
-                  f"<model>_n<samples>_i<iters>[_null]")
-            continue
+        record = _describe_record(path, load(path))
+        if record is not None:
+            records.append(record)
+
+    real_budgets: dict[str, set[tuple]] = {}
+    for r in records:
+        if not r["null"]:
+            real_budgets.setdefault(_canonical(r["base"]), set()).add(r["comparison"])
+
+    acc: dict[tuple, dict] = {}
+    for r in records:
+        path, d, label = r["path"], r["data"], r["label"]
+        comparison = r["comparison"]
+        if r["null"] and comparison == (None, None):
+            candidates = real_budgets.get(_canonical(r["base"]), set())
+            if len(candidates) == 1:
+                comparison = next(iter(candidates))
+                print(f"  ! {path.name}: legacy null requested-reference budget "
+                      f"inferred from the single compatible real budget {comparison}")
+            elif len(candidates) > 1:
+                print(f"  ! {path.name}: ambiguous legacy reference budget; null remains unpaired")
+
+        family_settings = {**r["base"], "comparison_ref": comparison}
+        family_id = _fingerprint(family_settings)
+        key = (family_id, r["n_samples"], r["n_iterations"], r["null"])
 
         cfg = d.get("config", {})
         agg = d.get("aggregate", {})
-        a = acc.setdefault(label, {
-            "model":        m.group(1),
-            "n_samples":    int(m.group(2)),
-            "n_iterations": int(m.group(3)),
-            "null":         m.group(4) is not None,
-            "task_name":    agg.get("task_name", d.get("task", "unknown")),
+        a = acc.setdefault(key, {
+            "label":        label,
+            "family_id":    family_id,
+            "family_settings": family_settings,
+            "geometry":     r["geometry"],
+            "object":       r["object"],
+            "schema_version": r["schema_version"],
+            "model":        r["model"],
+            "n_samples":    r["n_samples"],
+            "n_iterations": r["n_iterations"],
+            "null":         r["null"],
+            "task_name":    r["task_name"],
             "ref_n_samples":    cfg.get("ref_n_samples"),
             "ref_n_iterations": cfg.get("ref_n_iterations"),
+            "comparison_ref_n_samples": comparison[0],
+            "comparison_ref_n_iterations": comparison[1],
+            "action_dim":       cfg.get("action_dim"),
             "n_episodes":   0,
             "n_success":    0.0,
             "step_ms":      0.0,
             "series":       {k: {"n": 0, "sum": 0.0, "sumsq": 0.0}
                              for k in ("forward", "reverse",
                                        "ess_ref", "ess_deg", "mu_dist")},
+            "episode_series": {k: {"mean": [], "median": []}
+                               for k in ("forward", "reverse")},
             "files":        0,
+            "source_paths": [],
+            "seen_payloads": set(),
+            "seen_episode_aliases": set(),
         })
+        payload_id = _fingerprint(d)
+        if payload_id in a["seen_payloads"]:
+            raise ValueError(f"Duplicate result payload in {path.name}; copied files "
+                             "must not be counted as independent episodes")
+        a["seen_payloads"].add(payload_id)
+        aliases_by_episode = _episode_identity_aliases(d)
+        for aliases in aliases_by_episode:
+            repeated = aliases & a["seen_episode_aliases"]
+            if repeated:
+                raise ValueError(
+                    f"Duplicate episode seed identity in {path.name}: {sorted(repeated)}. "
+                    "Same-seed repeats require separate repeated-measures analysis; "
+                    "do not pool them as independent episodes."
+                )
+            a["seen_episode_aliases"].update(aliases)
+        if aliases_by_episode and any(not aliases for aliases in aliases_by_episode):
+            print(f"  ! {path.name}: legacy episode seeds unavailable; independence "
+                  "cannot be verified beyond exact-payload duplicate detection")
         a["files"] += 1
+        a["source_paths"].append(str(path))
 
         n_ep = int(agg.get("n_episodes", 0) or 0)
         a["n_episodes"] += n_ep
@@ -161,22 +330,48 @@ def merge_dir(directory: Path) -> tuple[dict[str, dict], list[Path]]:
             t["sum"]   += mean * n
             t["sumsq"] += n * (sd * sd + mean * mean)
 
-        # Medians cannot be pooled from summaries; recover them from the raw
-        # per-step arrays when the cell kept them (it does by default).
-        for r in d.get("per_step", []) or []:
+        # Recover one KL summary per episode from the raw arrays. Episodes are
+        # the uncertainty units for episode-balanced analysis (independence
+        # remains an experimental-design assumption). Raw
+        # values are also retained for the legacy step-weighted median.
+        per_step = d.get("per_step", []) or []
+        for r in per_step:
             for key, field in (("forward", "kl_forward"), ("reverse", "kl_reverse")):
-                vals = r.get(field) or []
+                vals = _finite_values(r.get(field))
                 a.setdefault("raw", {}).setdefault(key, []).extend(
-                    float(v) for v in vals if np.isfinite(v)
+                    vals
                 )
+                if vals:
+                    a["episode_series"][key]["mean"].append(float(np.mean(vals)))
+                    a["episode_series"][key]["median"].append(float(np.median(vals)))
+
+        # Compatibility fallback for a compact result that kept per-episode KL
+        # summaries but omitted raw per-step arrays.
+        if not per_step:
+            for ep in d.get("episodes", []) or []:
+                for key, field in (("forward", "kl_forward"),
+                                   ("reverse", "kl_reverse")):
+                    s = ep.get(field) or {}
+                    for stat in ("mean", "median"):
+                        vals = _finite_values([s.get(stat)])
+                        a["episode_series"][key][stat].extend(vals)
 
     cells: dict[str, dict] = {}
-    for label, a in acc.items():
+    label_counts: dict[str, int] = {}
+    for a in acc.values():
+        label_counts[a["label"]] = label_counts.get(a["label"], 0) + 1
+    for a in acc.values():
+        label = a["label"]
         n_ep = a["n_episodes"]
         w    = n_ep if n_ep else 1
         sr   = a["n_success"] / w
         cell = {
             "label":        label,
+            "family_id":    a["family_id"],
+            "family_settings": a["family_settings"],
+            "geometry":     a["geometry"],
+            "object":       a["object"],
+            "schema_version": a["schema_version"],
             "model":        a["model"],
             "n_samples":    a["n_samples"],
             "n_iterations": a["n_iterations"],
@@ -184,7 +379,11 @@ def merge_dir(directory: Path) -> tuple[dict[str, dict], list[Path]]:
             "task_name":    a["task_name"],
             "ref_n_samples":    a["ref_n_samples"],
             "ref_n_iterations": a["ref_n_iterations"],
+            "comparison_ref_n_samples": a["comparison_ref_n_samples"],
+            "comparison_ref_n_iterations": a["comparison_ref_n_iterations"],
+            "action_dim":       a["action_dim"],
             "n_files":      a["files"],
+            "source_paths": a["source_paths"],
             "n_episodes":   n_ep,
             "success_rate": sr,
             "success_rate_se":
@@ -196,17 +395,60 @@ def merge_dir(directory: Path) -> tuple[dict[str, dict], list[Path]]:
             cell[key] = {"mean": mean, "sd": sd, "n": n}
         for key, vals in (a.get("raw") or {}).items():
             cell[key]["median"] = float(np.median(vals)) if vals else None
-        cells[label] = cell
+        cell["episode_series"] = a["episode_series"]
+        cell_key = label if label_counts[label] == 1 else f"{label}@{a['family_id']}"
+        cells[cell_key] = cell
 
-    return cells, files
+    return cells, [r["path"] for r in records]
 
 
-def kl_value(cell: dict, direction: str, stat: str) -> tuple[float | None, float]:
+def group_families(cells: dict[str, dict]) -> dict[str, dict[str, dict]]:
+    """Partition merged cells for separate, scientifically compatible plots."""
+    groups: dict[str, dict[str, dict]] = {}
+    for key, cell in cells.items():
+        groups.setdefault(cell["family_id"], {})[key] = cell
+    return groups
+
+
+def success_error(cell: dict, method: str) -> tuple[float, float]:
+    """Asymmetric (lower, upper) error around the cell's success-rate point."""
+    p = float(cell["success_rate"])
+    n = int(cell["n_episodes"])
+    if method == "none" or n <= 0:
+        return 0.0, 0.0
+    if method == "se":
+        e = float(cell["success_rate_se"])
+        return min(e, p), min(e, 1.0 - p)
+
+    # Wilson score interval, 95%. Unlike the Wald p ± SE interval, it does not
+    # collapse to zero width when a small pilot observes 0/N or N/N successes.
+    z = 1.959963984540054
+    z2 = z * z
+    den = 1.0 + z2 / n
+    centre = (p + z2 / (2.0 * n)) / den
+    half = z / den * math.sqrt(p * (1.0 - p) / n + z2 / (4.0 * n * n))
+    lo, hi = max(0.0, centre - half), min(1.0, centre + half)
+    return p - lo, hi - p
+
+
+def kl_value(cell: dict, direction: str, stat: str,
+             weighting: str = "episode") -> tuple[float | None, float]:
     """(value, ±error) for a cell's KL under the chosen direction and statistic.
 
-    The error is the SE of the pooled per-step mean (sd/sqrt(n)); it is zero for
-    the median, which has no comparable closed form here.
+    Episode weighting (default) gives every episode one vote and uses the
+    between-episode SE. Step weighting reproduces the legacy pooled-step mean.
+    The median has no comparable closed-form SE here, so its error is zero.
     """
+    if weighting == "episode":
+        vals = ((cell.get("episode_series") or {}).get(direction) or {}).get(stat) or []
+        if not vals:
+            return None, 0.0
+        a = np.asarray(vals, dtype=float)
+        value = float(np.mean(a)) if stat == "mean" else float(np.median(a))
+        error = (float(np.std(a, ddof=1) / math.sqrt(a.size))
+                 if stat == "mean" and a.size > 1 else 0.0)
+        return value, error
+
     s = cell.get(direction) or {}
     if stat == "median":
         return s.get("median"), 0.0
@@ -216,29 +458,64 @@ def kl_value(cell: dict, direction: str, stat: str) -> tuple[float | None, float
 
 def pair_with_null(cells: dict[str, dict]) -> tuple[list[dict], list[dict]]:
     """Split into (real cells, null cells) and attach each real cell's null
-    partner — the same (model, n_samples, n_iterations) run with --null_control.
+    partner, requiring the same scientific family and degraded compute budget.
     """
     reals = [c for c in cells.values() if not c["null"]]
     nulls = [c for c in cells.values() if c["null"]]
-    by_key = {(c["model"], c["n_samples"], c["n_iterations"]): c for c in nulls}
+    def key(c):
+        return (c.get("family_id"), c.get("task_name"), c.get("geometry"),
+                c["model"], c["n_samples"], c["n_iterations"])
+    by_key = {key(c): c for c in nulls}
     for c in reals:
-        c["null_cell"] = by_key.get((c["model"], c["n_samples"], c["n_iterations"]))
-    reals.sort(key=lambda c: (c["n_iterations"], c["n_samples"]))
-    nulls.sort(key=lambda c: (c["n_iterations"], c["n_samples"]))
+        c["null_cell"] = by_key.get(key(c))
+    reals.sort(key=lambda c: (c.get("family_id", ""), c["n_iterations"], c["n_samples"]))
+    nulls.sort(key=lambda c: (c.get("family_id", ""), c["n_iterations"], c["n_samples"]))
     return reals, nulls
 
 
-def above_null(cell: dict, direction: str, stat: str) -> bool | None:
-    """True/False if the cell clears its own estimator-noise floor, None if it
-    has no null partner. "Clears" = real KL exceeds the null KL by more than the
-    two errors combined; with --stat median (no error bars) it is a plain
-    comparison.
-    """
+def kl_se_available(cell: dict, direction: str, stat: str,
+                    weighting: str = "episode") -> bool:
+    """Zero returned by kl_value need not mean an estimated zero uncertainty."""
+    if stat != "mean":
+        return False
+    if weighting == "episode":
+        vals = ((cell.get("episode_series") or {}).get(direction) or {}).get("mean")
+        return len(_finite_values(vals)) >= 2
+    return int((cell.get(direction) or {}).get("n") or 0) >= 2
+
+
+def null_unavailable_reason(cell: dict, direction: str, stat: str,
+                            weighting: str = "episode") -> str | None:
+    """Explain unavailable diagnostics separately from a negative comparison."""
     null = cell.get("null_cell")
     if null is None:
+        return "no compatible null cell"
+    if (kl_value(cell, direction, stat, weighting)[0] is None or
+            kl_value(null, direction, stat, weighting)[0] is None):
+        return "no valid KL comparison"
+    if stat == "mean" and weighting == "episode":
+        if not all(kl_se_available(c, direction, stat, weighting) for c in (cell, null)):
+            return "insufficient replication (<2 valid episodes)"
+    return None
+
+
+def above_null(cell: dict, direction: str, stat: str,
+               weighting: str = "episode") -> bool | None:
+    """Descriptive independent-run null comparison; not a significance test.
+
+    True means real KL exceeds null KL by more than the two displayed errors
+    combined; None means no valid comparison or insufficient replication. Mean
+    episode mode needs at least two valid episodes on each side: a placeholder
+    zero SE from a single episode must not make the diagnostic pass.
+    With --stat median (no error bars)
+    this is only a point comparison. Independent runs need not visit the same
+    states, so False does not establish that model differences are absent.
+    """
+    if null_unavailable_reason(cell, direction, stat, weighting) is not None:
         return None
-    v,  e  = kl_value(cell, direction, stat)
-    nv, ne = kl_value(null, direction, stat)
+    null = cell["null_cell"]
+    v,  e  = kl_value(cell, direction, stat, weighting)
+    nv, ne = kl_value(null, direction, stat, weighting)
     if v is None or nv is None:
         return None
     return v - e > nv + ne
@@ -255,33 +532,40 @@ def _sample_colors(n_values: list[int]) -> dict[int, tuple]:
             for i, n in enumerate(n_values)}
 
 
-def _scatter_panel(ax, reals, direction, stat, colors, drop_below_null):
-    """Success rate vs. KL, one marker per cell. Cells that do not clear their
-    null floor are drawn hollow (or omitted when *drop_below_null*)."""
+def _scatter_panel(ax, reals, direction, stat, weighting, success_error_method,
+                   colors, drop_below_null):
+    """Success rate vs. KL, with optional descriptive null screening."""
     plotted = 0
     for c in reals:
-        v, e = kl_value(c, direction, stat)
+        v, e = kl_value(c, direction, stat, weighting)
         if v is None:
             continue
-        ok = above_null(c, direction, stat)
+        ok = above_null(c, direction, stat, weighting)
         if ok is False and drop_below_null:
             continue
 
         color  = colors[c["n_samples"]]
         marker = ITER_MARKERS.get(c["n_iterations"], _FALLBACK_MARKER)
-        # Hollow = indistinguishable from this config's own estimator noise.
+        # Hollow = not above the independent-run diagnostic by this rule.
         face   = color if ok is not False else "none"
+        unavailable = null_unavailable_reason(c, direction, stat, weighting)
+        if unavailable:
+            face = "none" if c.get("null_cell") is None else "#DDDDDD"
 
+        ylo, yhi = success_error(c, success_error_method)
         ax.errorbar(
             v, c["success_rate"] * 100.0,
             xerr=e if e > 0 else None,
-            yerr=c["success_rate_se"] * 100.0,
+            yerr=np.array([[ylo], [yhi]]) * 100.0 if (ylo or yhi) else None,
             fmt="none", ecolor="#666666", elinewidth=1.0,
             capsize=3.0, capthick=1.0, zorder=3,
         )
         ax.plot(v, c["success_rate"] * 100.0, marker=marker, markersize=9,
                 markerfacecolor=face, markeredgecolor=color,
                 markeredgewidth=1.8, linestyle="none", zorder=4)
+        if c.get("null_cell") is None:
+            ax.plot(v, c["success_rate"] * 100.0, marker="x", markersize=5,
+                    color=color, linestyle="none", zorder=5)
         ax.annotate(
             f"n={c['n_samples']}, i={c['n_iterations']}",
             (v, c["success_rate"] * 100.0),
@@ -299,7 +583,8 @@ def _scatter_panel(ax, reals, direction, stat, colors, drop_below_null):
         mticker.FuncFormatter(lambda v, _: f"{v:g}")
     )
     ax.tick_params(axis="x", which="minor", labelsize=8)
-    ax.set_xlabel(f"KL divergence — {direction} ({stat} over measured steps)",
+    weighting_label = "episode-balanced" if weighting == "episode" else "step-weighted"
+    ax.set_xlabel(f"KL divergence — {direction} ({stat}, {weighting_label})",
                   fontsize=11)
     ax.set_ylabel("Success rate  (%)", fontsize=11)
     ax.set_ylim(-5, 105)
@@ -315,8 +600,11 @@ def _scatter_panel(ax, reals, direction, stat, colors, drop_below_null):
                    label=str(n))
         for n in sorted(colors)
     ]
+    # Single-episode smoke points often lie at 0%; fixed lower-corner legends
+    # would hide the point and its unavailable-diagnostic marker completely.
+    legend_edge = "upper" if np.median([c["success_rate"] for c in reals]) <= 0.5 else "lower"
     leg1 = ax.legend(handles=handles, title="n_samples", title_fontsize=9,
-                     fontsize=9, loc="lower left", framealpha=0.9)
+                     fontsize=9, loc=f"{legend_edge} left", framealpha=0.9)
     leg1.get_frame().set_linewidth(0.5)
     ax.add_artist(leg1)
 
@@ -327,28 +615,46 @@ def _scatter_panel(ax, reals, direction, stat, colors, drop_below_null):
                    markeredgecolor="#555555", label=str(i))
         for i in iters
     ]
-    if any(above_null(c, direction, stat) is False for c in reals):
+    if any(above_null(c, direction, stat, weighting) is False for c in reals):
         shape_handles.append(
             plt.Line2D([], [], marker="o", linestyle="none", markersize=8,
                        markerfacecolor="none", markeredgecolor="#555555",
-                       markeredgewidth=1.8, label="below null floor")
+                       markeredgewidth=1.8, label="not above null diagnostic")
+        )
+    reasons = {null_unavailable_reason(c, direction, stat, weighting) for c in reals}
+    if "insufficient replication (<2 valid episodes)" in reasons:
+        shape_handles.append(
+            plt.Line2D([], [], marker="o", linestyle="none", markersize=8,
+                       markerfacecolor="#DDDDDD", markeredgecolor="#555555",
+                       label="null diagnostic: insufficient episodes")
+        )
+    if "no compatible null cell" in reasons:
+        shape_handles.append(
+            plt.Line2D([], [], marker="x", linestyle="none", markersize=8,
+                       color="#555555", label="no compatible null cell")
+        )
+    if "no valid KL comparison" in reasons:
+        shape_handles.append(
+            plt.Line2D([], [], marker="o", linestyle="none", markersize=8,
+                       markerfacecolor="#DDDDDD", markeredgecolor="#555555",
+                       label="null diagnostic: no valid KL comparison")
         )
     leg2 = ax.legend(handles=shape_handles, title="n_iterations",
-                     title_fontsize=9, fontsize=9, loc="lower right",
+                     title_fontsize=9, fontsize=9, loc=f"{legend_edge} right",
                      framealpha=0.9)
     leg2.get_frame().set_linewidth(0.5)
     return plotted
 
 
-def _null_panel(ax, reals, direction, stat, colors):
+def _null_panel(ax, reals, direction, stat, weighting, colors):
     """Real KL vs. that config's null-control KL, one cluster per config."""
     centres = np.arange(len(reals))
     bar_w   = 0.38
 
     for i, c in enumerate(reals):
-        v, e   = kl_value(c, direction, stat)
+        v, e   = kl_value(c, direction, stat, weighting)
         null   = c.get("null_cell")
-        nv, ne = kl_value(null, direction, stat) if null else (None, 0.0)
+        nv, ne = kl_value(null, direction, stat, weighting) if null else (None, 0.0)
         color  = colors[c["n_samples"]]
 
         if v is not None:
@@ -371,7 +677,7 @@ def _null_panel(ax, reals, direction, stat, colors):
                         ha="center", fontsize=8, rotation=90, color="#888888")
 
     ax.set_yscale("log")
-    ax.set_ylabel(f"KL — {direction} ({stat})", fontsize=11)
+    ax.set_ylabel(f"KL — {direction} ({stat}, {weighting})", fontsize=11)
     ax.set_xticks(centres)
     ax.set_xticklabels([f"n={c['n_samples']}\ni={c['n_iterations']}"
                         for c in reals], fontsize=9)
@@ -385,15 +691,18 @@ def _null_panel(ax, reals, direction, stat, colors):
                    label="vs. reference planner"),
         plt.Line2D([], [], marker="s", linestyle="none", markersize=9,
                    markerfacecolor=NULL_COLOR, markeredgecolor="#888888",
-                   label="null control (noise floor)"),
+                   label="independent-run null diagnostic"),
     ]
     legend = ax.legend(handles=handles, fontsize=9, loc="upper right",
                        framealpha=0.9)
     legend.get_frame().set_linewidth(0.5)
 
 
-def plot(reals, direction: str, stat: str, title: str, out_path: Path,
+def plot(reals, direction: str, stat: str, weighting: str,
+         success_error_method: str, title: str, out_path: Path,
          drop_below_null: bool):
+    if len({c.get("family_id") for c in reals}) > 1:
+        raise ValueError("Cannot plot incompatible scientific families together")
     have_null = any(c.get("null_cell") for c in reals)
     n_rows    = 2 if have_null else 1
 
@@ -409,61 +718,92 @@ def plot(reals, direction: str, stat: str, title: str, out_path: Path,
 
     colors = _sample_colors(sorted({c["n_samples"] for c in reals}))
 
-    plotted = _scatter_panel(axes[0], reals, direction, stat, colors,
-                             drop_below_null)
+    plotted = _scatter_panel(
+        axes[0], reals, direction, stat, weighting, success_error_method,
+        colors, drop_below_null,
+    )
     axes[0].set_title(title, fontsize=12, fontweight="bold", pad=10)
     if not plotted:
         raise ValueError(
             "Nothing left to plot — every cell was dropped. Re-run without "
-            "--drop_below_null to see the cells and their null floors."
+            "--drop_below_null to see the cells and their null diagnostics."
         )
 
     if have_null:
-        _null_panel(axes[1], reals, direction, stat, colors)
+        _null_panel(axes[1], reals, direction, stat, weighting, colors)
+
+    kl_note = ("KL whiskers: +/-1 SE across episodes (when estimable)."
+               if weighting == "episode" else "KL whiskers: +/-1 SE across measured steps.")
+    if stat == "median":
+        kl_note = "Median KL uncertainty is not estimated."
+    sr_note = {"wilson": "SR whiskers: Wilson 95% CI.",
+               "se": "SR whiskers: +/-1 SE.",
+               "none": "SR intervals are not shown."}[success_error_method]
+    fig.supxlabel(f"{kl_note}  {sr_note}", fontsize=8, color="#555555")
 
     # Format follows --out's extension (the default path is .pdf).
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved: {out_path}")
 
 
 # ---------------------------------------------------------------------------
-def _print_table(reals, direction, stat):
+def _print_table(reals, direction, stat, weighting):
     print(f"\n  {'cell':<18} {'eps':>4} {'succ':>7} {'KL':>12} {'±SE':>9} "
-          f"{'null KL':>12} {'ESS deg':>8} {'ESS ref':>8}  verdict")
+          f"{'null KL':>12} {'ESS deg':>8} {'ESS ref':>8}  diagnostic")
     for c in reals:
-        v, e   = kl_value(c, direction, stat)
+        v, e   = kl_value(c, direction, stat, weighting)
         null   = c.get("null_cell")
-        nv, _  = kl_value(null, direction, stat) if null else (None, 0.0)
-        ok     = above_null(c, direction, stat)
-        verdict = {True: "above floor", False: "BELOW FLOOR", None: "no null cell"}[ok]
+        nv, _  = kl_value(null, direction, stat, weighting) if null else (None, 0.0)
+        ok     = above_null(c, direction, stat, weighting)
+        verdict = null_unavailable_reason(c, direction, stat, weighting)
+        if verdict is None:
+            verdict = "above null diagnostic" if ok else "not above null diagnostic"
+        se_text = f"{e:.3g}" if kl_se_available(c, direction, stat, weighting) else "n/a"
 
         ess_d = (c.get("ess_deg") or {}).get("mean")
         ess_r = (c.get("ess_ref") or {}).get("mean")
-        # ESS near 1 means one particle carries all the weight; ESS near N means
-        # the weights are uniform and the induced distribution has collapsed
-        # back onto the proposal. Either end makes the covariance uninformative.
+        # ESS near 1 means concentrated weights; ESS near N means near-uniform
+        # weights. These are diagnostic flags, not proof that a covariance is
+        # invalid. ESS is not a hard upper bound on covariance rank.
         flags = []
         if ess_d is not None and ess_d < 2.0:
             flags.append("ESS_deg~1")
         if ess_d is not None and ess_d > 0.9 * c["n_samples"]:
             flags.append("ESS_deg~N")
+        d = c.get("action_dim")
+        if d is not None and ess_d is not None and ess_d <= d:
+            flags.append("ESS_deg<=d")
+        if d is not None and c["n_samples"] <= d:
+            flags.append("raw_cov_rank<=N-1<d")
         if flags:
             verdict += "  [" + ", ".join(flags) + "]"
 
         print(f"  {c['label']:<18} {c['n_episodes']:>4d} "
               f"{c['success_rate']*100:>6.1f}% "
               f"{v if v is not None else float('nan'):>12.4g} "
-              f"{e:>9.3g} "
+              f"{se_text:>9} "
               f"{(nv if nv is not None else float('nan')):>12.4g} "
               f"{(ess_d if ess_d is not None else float('nan')):>8.2f} "
               f"{(ess_r if ess_r is not None else float('nan')):>8.2f}  {verdict}")
 
 
+def family_output_path(base: Path, family: dict, multiple: bool) -> Path:
+    """Keep the old single-family filename; disambiguate multi-family output."""
+    if not multiple:
+        return base
+    geometry = re.sub(r"[^A-Za-z0-9_-]+", "_", family["geometry"]).strip("_")
+    suffix = base.suffix or ".pdf"
+    stem = base.stem if base.suffix else base.name
+    return base.with_name(f"{stem}_{geometry}_{family['family_id']}{suffix}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Plot a directory of KL-divergence sweep JSONs: success "
-                    "rate vs. KL, with the null-control floor."
+                    "rate vs. KL, with independent-run null diagnostics. "
+                    "Incompatible recorded settings produce separate figures."
     )
     parser.add_argument(
         "results_dir", nargs="?", type=Path,
@@ -477,17 +817,37 @@ def main():
     )
     parser.add_argument(
         "--stat", choices=["mean", "median"], default="mean",
-        help="Aggregation over the measured steps. The per-step KL is "
-             "heavy-tailed across contact vs. free-flight states, so the median "
-             "is often the more honest summary.",
+        help="Statistic within each episode. Per-step KL is often heavy-tailed "
+             "across contact vs. free-flight states, so median is a useful "
+             "robustness view.",
+    )
+    parser.add_argument(
+        "--weighting", choices=["episode", "step"], default="episode",
+        help="How KL samples contribute to a cell. 'episode' (default) first "
+             "summarizes each episode and gives episodes equal weight; 'step' "
+             "reproduces the legacy pooled-per-step calculation.",
+    )
+    parser.add_argument(
+        "--success_error", choices=["wilson", "se", "none"], default="wilson",
+        help="Success-rate uncertainty: Wilson 95%% interval (default), the "
+             "legacy symmetric ±1 SE, or no y-error bars.",
     )
     parser.add_argument(
         "--drop_below_null", action="store_true",
-        help="Omit cells whose KL does not clear their own null-control floor, "
-             "instead of drawing them hollow.",
+        help="Optional descriptive filter: omit cells not above their "
+             "independent-run null diagnostic, instead of drawing them hollow. "
+             "This is not a significance test.",
+    )
+    parser.add_argument(
+        "--geometry", action="append", default=None,
+        help="Only plot this recorded canonical geometry (e.g. duck_high_high). "
+             "Repeat to select several. Missing legacy geometry is never inferred.",
     )
     parser.add_argument("--out", type=Path, default=None,
-                        help="Output PDF path. Defaults to <dir>/<dir name>_plot.pdf")
+                        help="Output path (default PDF). Multiple compatible families "
+                             "append geometry and configuration IDs to this filename.")
+    parser.add_argument("--title_note", default="",
+                        help="Optional visible figure note, e.g. 'Integration pilot: 3 episodes/cell'.")
     args = parser.parse_args()
 
     directory = args.results_dir or _latest_dir()
@@ -495,37 +855,62 @@ def main():
 
     cells, files = merge_dir(directory)
     print(f"  Merged {len(files)} file(s) into {len(cells)} cell(s)")
-
-    reals, nulls = pair_with_null(cells)
-    if not reals:
+    if args.geometry:
+        cells = {key: c for key, c in cells.items() if c["geometry"] in args.geometry}
+        if not cells:
+            raise ValueError(f"No cells match --geometry {args.geometry}")
+    families = group_families(cells)
+    real_families = {fid: group for fid, group in families.items()
+                     if any(not c["null"] for c in group.values())}
+    if not real_families:
         raise ValueError(
             "No non-null cells found. The sweep writes both, but a run of only "
             "--null_control cells has no real KL to plot."
         )
 
-    direction = args.direction
-    if direction == "auto":
-        meta = directory / "meta.json"
-        direction = (load(meta).get("kl_direction", "forward")
-                     if meta.exists() else "forward")
+    null_only = len(families) - len(real_families)
+    if null_only:
+        print(f"  ! {null_only} null-only family/families have no compatible real cells")
+    print(f"  Producing {len(real_families)} separate scientific-family figure(s)")
+    meta = directory / "meta.json"
+    legacy_direction = load(meta).get("kl_direction", "forward") if meta.exists() else "forward"
+    for family_id, group in sorted(real_families.items()):
+        reals, nulls = pair_with_null(group)
+        first = reals[0]
+        direction = args.direction
+        if direction == "auto":
+            direction = first["family_settings"]["config"].get("kl_direction", legacy_direction)
+        if direction not in ("forward", "reverse"):
+            raise ValueError(f"Invalid recorded KL direction {direction!r}")
+        print(f"\n  Family {family_id}: {first['task_name']}, "
+              f"{first['geometry']}, {first['model']}")
+        print(f"  Direction: {direction} ({args.stat}, {args.weighting}-weighted)")
+        print(f"  Real cells: {len(reals)}   null cells: {len(nulls)}")
+        if any(c.get("null_cell") is None for c in reals):
+            print("  ! Some cells lack a compatible independent-run null diagnostic")
+        if any(c["n_episodes"] < 2 for c in reals):
+            print("  ! Single-episode diagnostic: not a success-rate conclusion")
+        if args.stat == "median":
+            print("  ! Median KL uncertainty is not estimated (SE n/a); null screening "
+                  "is only a descriptive comparison of point estimates")
+        elif any(not kl_se_available(c, direction, args.stat, args.weighting) for c in reals):
+            print("  ! KL SE n/a means insufficient valid samples, not zero uncertainty")
+        if first["geometry"] == "unknown (legacy)":
+            print("  ! Legacy geometry is unrecorded; these results are not verified high_high data")
+        _print_table(reals, direction, args.stat, args.weighting)
 
-    print(f"  Direction: {direction} ({args.stat})")
-    print(f"  Real cells: {len(reals)}   null cells: {len(nulls)}")
-    if not nulls:
-        print("  ! No null-control cells — the estimator-noise floor is unknown, "
-              "so no cell can be verified as reporting a real difference.")
-    _print_table(reals, direction, args.stat)
-
-    task_name = reals[0]["task_name"]
-    model     = reals[0]["model"]
-    ref_ns    = reals[0].get("ref_n_samples")
-    ref_ni    = reals[0].get("ref_n_iterations")
-    title = f"Success rate vs. planner KL divergence — {task_name} ({model})"
-    if ref_ns:
-        title += f"\nreference planner: {ref_ns} samples x {ref_ni} iterations"
-
-    out_path = args.out or directory / f"{directory.name}_plot.pdf"
-    plot(reals, direction, args.stat, title, out_path, args.drop_below_null)
+        ref_ns = first.get("comparison_ref_n_samples")
+        ref_ni = first.get("comparison_ref_n_iterations")
+        title = (f"Success rate vs. planner KL — {first['task_name']}\n"
+                 f"{first['geometry']} | {first['model']} | config {family_id}")
+        if ref_ns:
+            title += f"\nreference: {ref_ns} samples x {ref_ni} iterations"
+        if args.title_note:
+            title = f"{args.title_note}\n{title}"
+        out_base = args.out or directory / f"{directory.name}_plot.pdf"
+        out_path = family_output_path(out_base, first, len(real_families) > 1)
+        plot(reals, direction, args.stat, args.weighting, args.success_error,
+             title, out_path, args.drop_below_null)
 
 
 if __name__ == "__main__":
