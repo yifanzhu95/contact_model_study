@@ -138,7 +138,7 @@ One row = one experiment. All columns are optional except `task`.
   column irrelevant to a row's planner (e.g. `alpha` on an mppi row) is
   silently ignored, and a blank cell leaves that field at its own default.
   Use the planner dataclass field names directly: `n_samples`,
-  `time_horizon`, `step_time`, `noise_sigma`, `resample_interval`,
+  `n_iterations`, `time_horizon`, `step_time`, `noise_sigma`, `resample_interval`,
   `warm_start`, `nconmax`, `njmax`, `time_constrained`, `plan_budget_ms`;
   MPPI's `temperature`; CEM's `n_elites`/`elite_frac`/`alpha`/`min_sigma`;
   predictive sampler's `include_nominal`. `delta` is special-cased to a
