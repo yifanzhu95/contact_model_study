@@ -128,6 +128,9 @@ def _failed_result(job: dict, exc: BaseException):
         elapsed_seconds = 0.0,
         planner         = job.get("planner", "mppi"),
         final_goal_errs = None,
+        # The episode never ran, so there is no sampled goal to report; the
+        # requested difficulty is still known (None means "the task's default").
+        goal_difficulty = job.get("goal_difficulty"),
         end_reason      = "error",
         error           = f"{type(exc).__name__}: {exc}",
     )

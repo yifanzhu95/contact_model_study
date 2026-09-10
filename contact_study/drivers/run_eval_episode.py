@@ -449,6 +449,8 @@ def run_eval_episode(
         mean_step_ms     = float(step_arr.mean()) if len(step_arr) else 0.0,
         std_step_ms      = float(step_arr.std())  if len(step_arr) else 0.0,
         final_goal_errs  = final_goal_errs,
+        # The goal in effect at the end — the one final_goal_errs measures against.
+        **rollout_task.goal_spec(),
         time_out         = time_out,
         end_reason       = end_reason,
         n_steps_taken    = n_steps_taken,
@@ -480,7 +482,7 @@ def main():
     p.add_argument("--n_iterations", type=int,  default=None,
                    help="Optimizer iterations per plan() call (default: the "
                         "planner's own — 1 for mppi/predictive_sampler, 3 for cem).")
-    p.add_argument("--noise_sigma", type=float, default=0.1)#0.2,)#0.1 # for M3)
+    p.add_argument("--noise_sigma", type=float, default=0.04)#0.2,)#0.1 # for M3)
     p.add_argument("--delta",       type=float, default=None,#0.1,
                    help="Per-step delta clip magnitude (action units); "
                         "pass 'none' to disable the delta clamp entirely.")
@@ -503,7 +505,7 @@ def main():
                         "point MPPI's --convergence_tol tests for, so the two "
                         "together can run to the cap.")
     # --- MPPI-only ---------------------------------------------------------
-    p.add_argument("--temperature", type=float, default=7.468)#30.0)#20.0 <- cube
+    p.add_argument("--temperature", type=float, default=0.004)#30.0)#20.0 <- cube
     p.add_argument("--convergence_tol", type=float, default=None,
                    help="Iterate until the returned action settles — "
                         "sum_u (u_i - u_i+1)^2 < tol — instead of running a fixed "

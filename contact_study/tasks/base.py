@@ -208,6 +208,39 @@ class BaseTask(abc.ABC):
         """
         return {}
 
+    def goal_spec(self) -> dict:
+        """The goal this instance is CURRENTLY targeting, as JSON-ready scalars.
+
+        Keyed to match the EpisodeResult fields it fills, so a driver can splice
+        it straight into the record:
+
+            EpisodeResult(..., **rollout_task.goal_spec())
+
+        Read at the END of an episode: under multi-goal mode
+        (fin_ep_on_success=False) the goal is resampled on every success, so this
+        describes the last goal drawn — the same one final_goal_errs is measured
+        against. The full sequence of switches lives in the recorded trajectory.
+
+        The generic implementation covers every task that names its goal the way
+        grasp_reorient (target_pos/target_quat/goal_difficulty) or peg_in_hole
+        (goal_pos) does; anything absent stays None. Override for a task whose
+        goal is shaped differently.
+        """
+        pos  = getattr(self, "target_pos", None)
+        if pos is None:
+            pos = getattr(self, "goal_pos", None)
+        quat = getattr(self, "target_quat", None)
+        diff = getattr(self, "goal_difficulty", None)
+
+        def _vec(v):
+            return None if v is None else [float(x) for x in np.asarray(v).ravel()]
+
+        return {
+            "goal_difficulty": None if diff is None else int(diff),
+            "goal_pos":        _vec(pos),
+            "goal_quat":       _vec(quat),
+        }
+
     def has_failed(self, mjd: mujoco.MjData) -> bool:
         """Check whether the episode has failed (e.g. object fell). Override per task."""
         return False

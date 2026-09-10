@@ -562,6 +562,7 @@ def run_async_eval_episode(
         n_plans          = n_plans,
         mean_latency_ms  = float(lat_arr.mean()) if len(lat_arr) else 0.0,
         std_latency_ms   = float(lat_arr.std())  if len(lat_arr) else 0.0,
+        **rollout_task.goal_spec(),
         mean_staleness_ms    = float(np.mean(staleness)) if staleness else 0.0,
         missed_ticks         = missed_ticks,
         tape_exhausted_ticks = tape_exhausted_ticks,

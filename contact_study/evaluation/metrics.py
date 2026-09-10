@@ -55,6 +55,20 @@ class EpisodeResult:
     # ||q_final - q_0|| — displacement from the START pose, not goal error.
     final_goal_errs:   dict[str, float] | None = None
 
+    # --- which goal the episode was actually asked to reach -----------------
+    # BaseTask.goal_spec() read at the END of the episode, i.e. the goal that
+    # final_goal_errs is measured against. In multi-goal mode
+    # (fin_ep_on_success=False) the goal is resampled on every success, so these
+    # describe the LAST goal drawn, not the only one — the trajectory record
+    # holds every switch. goal_difficulty is the level sample_new_goal
+    # dispatched on (grasp_reorient 0-9); goal_pos/goal_quat (wxyz) are the
+    # target object pose. All None for a task that has no such goal, and on
+    # records written before these fields existed — an old record is NOT
+    # difficulty 1 just because that is the task default.
+    goal_difficulty:   int | None = None
+    goal_pos:          list[float] | None = None
+    goal_quat:         list[float] | None = None
+
     # --- how the episode ended ---------------------------------------------
     # The control loop leaves by exactly one of three doors, and `success` alone
     # cannot tell them apart: a False success is "ran out of time" on one task
