@@ -63,7 +63,7 @@ The combined figure contains:
 - all finite valid KL measurements;
 - converged-reference measurements only.
 
-Both panels first average within each episode and then give each eligible episode equal weight. Success rate always uses every original outcome in the corresponding source cell. The export includes PNG, SVG, a validation JSON, a short README, and a byte-verified ZIP archive.
+Both panels first average within each episode and then give each eligible episode equal weight. Success rate always uses every original outcome in the corresponding source cell. The export includes PNG, SVG, a validation JSON, a short README, and a byte-verified ZIP archive. Shared metadata uses portable input names and content hashes rather than machine-specific absolute paths.
 
 ## Interpretation limits
 

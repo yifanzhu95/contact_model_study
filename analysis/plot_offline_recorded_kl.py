@@ -410,9 +410,15 @@ def build(source_dir, manifest_path, batch_dir, outdir, episodes_per_cell=None):
             ["git", "status", "--porcelain", "--untracked-files=all"],
             cwd=ANALYSIS.parent, text=True,
         ).strip()),
-        "source_directory": str(Path(source_dir).resolve()),
-        "input_manifest": str(Path(manifest_path).resolve()),
-        "batch_directory": str(Path(batch_dir).resolve()),
+        # Portable labels plus content hashes are more useful in a shared
+        # export than machine-specific absolute paths.
+        "source_directory_name": Path(source_dir).resolve().name,
+        "input_manifest_name": Path(manifest_path).name,
+        "input_manifest_sha256": sha256_file(manifest_path),
+        "batch_directory_name": Path(batch_dir).resolve().name,
+        "batch_manifest_sha256": sha256_file(
+            Path(batch_dir) / "execution_manifest.json"
+        ),
         "batch_status_at_export": batch["status"],
         "available_common_completed_prefix": available,
         "episodes_per_configuration": count,
