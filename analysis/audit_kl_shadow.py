@@ -3,7 +3,7 @@
 Uses the worker's normal arguments plus --audit_report. Extra array downloads
 make this a diagnostic run, not a timing benchmark. This checks explicitly
 listed buffers and host inputs, not all backend-private state or bitwise
-repeatability. Use separate processes to compare repeated real/null runs.
+repeatability. Use separate processes to compare repeated default real runs.
 """
 
 from __future__ import annotations
@@ -42,8 +42,8 @@ def main():
     args = parser.parse_args()
     args.geometry = worker.resolve_kl_geometry(args.task, args.geometry)
     worker.validate_kl_args(args)
-    if not args.sync_reference_mean:
-        parser.error("this audit requires synchronized reference means")
+    if worker.reference_init_mode(args) != "zero":
+        parser.error("this audit requires the default per-state zero reference")
     args.record_precision = 0
     observations = []
     constructed = 0
@@ -79,7 +79,7 @@ def main():
             if self.audit_reference:
                 deg = self.audit_degraded
                 assert_same(deg.audit_input, before, "Reference input differs from degraded input")
-                np.testing.assert_array_equal(pre_mean, deg.audit_pre_mean)
+                np.testing.assert_array_equal(pre_mean, np.zeros_like(pre_mean))
                 owned_before = {name: getattr(deg, name).numpy().copy() for name in owned}
                 counters_before = (deg._plan_count, deg._resample_count)
             action = super().plan(data)
@@ -92,7 +92,7 @@ def main():
                 if counters_before != (deg._plan_count, deg._resample_count):
                     raise AssertionError("Shadow advanced degraded sampling counters")
             else:
-                self.audit_input, self.audit_pre_mean = before, pre_mean
+                self.audit_input = before
             observations.append({"episode": self.audit_episode,
                                  "role": "reference" if self.audit_reference else "degraded",
                                  "plan_index": self._plan_count - 1,

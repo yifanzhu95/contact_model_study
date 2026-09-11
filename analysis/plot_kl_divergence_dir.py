@@ -1,11 +1,16 @@
 """plot_kl_divergence_dir.py
 
-Directory plotter for the planner-approximation-quality sweep — reads a whole
+Directory plotter for the repository's online closed-loop
+planner-approximation-quality sweep — reads a whole
 directory of per-cell JSONs written by experiments/hpc/kl_divergence_eval.slurm
 (results/kl_divergence_eval_<id>/<model>_n<samples>_i<iters>[_null].json) and
 turns them into the figure that sweep exists to produce: success rate vs. the
 KL divergence between the higher-compute planner's weighted first-action
 distribution and the degraded planner's distribution, each Gaussian-approximated.
+
+Recorded-log replay is a separate workflow documented in
+analysis/README_offline_recorded_kl.md; those inputs and their different
+state-sampling protocol are intentionally not accepted here.
 
 Unlike the other sweeps in analysis/, this one is NOT a clustered bar chart of
 M1-M4: every cell uses the same contact model, and the swept axis is optimizer
@@ -44,6 +49,7 @@ Usage:
     python analysis/plot_kl_divergence_dir.py results/kl_divergence_eval_12345
     python analysis/plot_kl_divergence_dir.py --stat median --direction reverse
     python analysis/plot_kl_divergence_dir.py --weighting step  # legacy
+    python analysis/plot_kl_divergence_dir.py --reference_filter converged
     python analysis/plot_kl_divergence_dir.py --drop_below_null
 """
 
@@ -76,6 +82,8 @@ _LABEL_RE = re.compile(r"^(?:(.+)_)?(M\d+)_n(\d+)_i(\d+)(_null)?$")
 _REPLICATE_OR_SWEEP_KEYS = {
     "n_samples", "n_iterations", "null_control", "seed", "root_seed",
     "n_episodes", "ref_n_samples", "ref_n_iterations",
+    "ref_iteration_mode", "ref_convergence_tol", "ref_max_iterations",
+    "ref_temperature",
     "comparison_ref_n_samples", "comparison_ref_n_iterations",
     "geometry", "object", "record_kl_moments",
 }
@@ -102,6 +110,164 @@ def _finite_values(values) -> list[float]:
         if math.isfinite(number):
             result.append(number)
     return result
+
+
+def _validate_converged_payload(path: Path, data: dict) -> None:
+    """Fail closed before applying the convergence-only selection.
+
+    The filter has a scientific meaning only for convergence-terminated
+    reference solves whose recorded flags can be checked against the stopping
+    rule. It must not silently treat missing, non-boolean, or internally
+    inconsistent metadata as an empty selection.
+    """
+    cfg = data.get("config", {})
+    if cfg.get("ref_iteration_mode") != "convergence":
+        raise ValueError(
+            f"{path.name}: converged-only plotting requires "
+            "config.ref_iteration_mode='convergence'"
+        )
+    tol = cfg.get("ref_convergence_tol")
+    cap = cfg.get("ref_max_iterations")
+    if (isinstance(tol, bool) or not isinstance(tol, (int, float))
+            or not math.isfinite(float(tol)) or float(tol) <= 0.0):
+        raise ValueError(
+            f"{path.name}: converged-only plotting requires a finite positive "
+            "config.ref_convergence_tol"
+        )
+    if (isinstance(cap, bool) or not isinstance(cap, int) or cap < 2):
+        raise ValueError(
+            f"{path.name}: converged-only plotting requires an integer "
+            "config.ref_max_iterations >= 2"
+        )
+    tol = float(tol)
+
+    per_step = data.get("per_step")
+    if not isinstance(per_step, list) or not per_step:
+        raise ValueError(
+            f"{path.name}: converged-only plotting requires per-step "
+            "reference_converged metadata"
+        )
+
+    selected = {"forward": [], "reverse": []}
+    for episode_index, record in enumerate(per_step):
+        flags = record.get("reference_converged")
+        iterations = record.get("reference_n_iterations")
+        residuals = record.get("reference_convergence_residual")
+        if flags is None:
+            raise ValueError(
+                f"{path.name}: converged-only plotting requires per-step "
+                "reference_converged metadata"
+            )
+        if not isinstance(flags, list) or any(type(flag) is not bool for flag in flags):
+            raise ValueError(
+                f"{path.name}: per_step[{episode_index}].reference_converged "
+                "must contain only booleans"
+            )
+        aligned = {
+            "reference_n_iterations": iterations,
+            "reference_convergence_residual": residuals,
+            "kl_forward": record.get("kl_forward"),
+            "kl_reverse": record.get("kl_reverse"),
+        }
+        for field, values in aligned.items():
+            if not isinstance(values, list) or len(values) != len(flags):
+                raise ValueError(
+                    f"{path.name}: per_step[{episode_index}].{field} and "
+                    "reference_converged lengths disagree"
+                )
+
+        for index, (flag, count, residual) in enumerate(
+            zip(flags, iterations, residuals)
+        ):
+            if isinstance(count, bool) or not isinstance(count, int):
+                raise ValueError(
+                    f"{path.name}: per_step[{episode_index}] reference iteration "
+                    f"count {index} must be an integer"
+                )
+            if not 2 <= count <= cap:
+                raise ValueError(
+                    f"{path.name}: per_step[{episode_index}] reference iteration "
+                    f"count {count} is outside [2, {cap}]"
+                )
+            if (isinstance(residual, bool)
+                    or not isinstance(residual, (int, float))
+                    or not math.isfinite(float(residual))
+                    or float(residual) < 0.0):
+                raise ValueError(
+                    f"{path.name}: per_step[{episode_index}] convergence residual "
+                    f"{index} must be finite and nonnegative"
+                )
+            residual = float(residual)
+            if flag != (residual < tol):
+                raise ValueError(
+                    f"{path.name}: per_step[{episode_index}] convergence flag "
+                    f"{index} disagrees with residual {residual:g} and "
+                    f"tolerance {tol:g}"
+                )
+            if not flag and count != cap:
+                raise ValueError(
+                    f"{path.name}: per_step[{episode_index}] non-converged solve "
+                    f"{index} stopped at {count}, before cap {cap}"
+                )
+
+        for direction, field in (("forward", "kl_forward"),
+                                 ("reverse", "kl_reverse")):
+            selected[direction].extend(_finite_values([
+                value for value, flag in zip(record[field], flags) if flag
+            ]))
+
+    summaries = data.get("kl_converged_only")
+    if not isinstance(summaries, dict):
+        raise ValueError(
+            f"{path.name}: converged-only plotting requires top-level "
+            "kl_converged_only summaries"
+        )
+    for direction, values in selected.items():
+        summary = summaries.get(direction)
+        if not isinstance(summary, dict):
+            raise ValueError(
+                f"{path.name}: kl_converged_only.{direction} is missing"
+            )
+        expected = {
+            "n": len(values),
+            "mean": float(np.mean(values)) if values else None,
+            "sd": float(np.std(values)) if values else None,
+            "median": float(np.median(values)) if values else None,
+            "p25": float(np.percentile(values, 25)) if values else None,
+            "p75": float(np.percentile(values, 75)) if values else None,
+            "p95": float(np.percentile(values, 95)) if values else None,
+        }
+        summary_n = summary.get("n")
+        if (isinstance(summary_n, bool) or not isinstance(summary_n, int)
+                or summary_n != expected["n"]):
+            raise ValueError(
+                f"{path.name}: kl_converged_only.{direction}.n disagrees "
+                "with per-step convergence flags"
+            )
+        for field in ("mean", "sd", "median", "p25", "p75", "p95"):
+            if field not in summary:
+                if field in {"mean", "sd"}:
+                    raise ValueError(
+                        f"{path.name}: kl_converged_only.{direction}.{field} "
+                        "is missing"
+                    )
+                continue
+            actual, target = summary[field], expected[field]
+            if target is None:
+                consistent = actual is None
+            else:
+                consistent = (
+                    not isinstance(actual, bool)
+                    and isinstance(actual, (int, float))
+                    and math.isfinite(float(actual))
+                    and math.isclose(float(actual), target,
+                                     rel_tol=1e-10, abs_tol=1e-12)
+                )
+            if not consistent:
+                raise ValueError(
+                    f"{path.name}: kl_converged_only.{direction}.{field} "
+                    "disagrees with per-step convergence flags"
+                )
 
 
 def _describe_record(path: Path, data: dict) -> dict | None:
@@ -216,7 +382,7 @@ def _pool_stats(acc: dict) -> tuple[float | None, float | None, int]:
     return mean, math.sqrt(var), n
 
 
-def merge_dir(directory: Path) -> tuple[dict[str, dict], list[Path]]:
+def merge_dir(directory: Path, reference_filter: str = "all") -> tuple[dict[str, dict], list[Path]]:
     """Pool compatible per-cell JSONs without mixing scientific settings.
 
     Labels remain dictionary keys when unique; conflicting labels are suffixed
@@ -224,6 +390,8 @@ def merge_dir(directory: Path) -> tuple[dict[str, dict], list[Path]]:
     authoritative grouping and null-pairing key. Missing legacy metadata never
     matches new-schema metadata. Duplicate seed identities raise ValueError.
     """
+    if reference_filter not in {"all", "converged"}:
+        raise ValueError("reference_filter must be 'all' or 'converged'")
     files = sorted(p for p in directory.glob("*.json") if p.name != "meta.json")
     if not files:
         raise FileNotFoundError(f"No per-cell *.json files found in {directory}")
@@ -242,6 +410,8 @@ def merge_dir(directory: Path) -> tuple[dict[str, dict], list[Path]]:
     acc: dict[tuple, dict] = {}
     for r in records:
         path, d, label = r["path"], r["data"], r["label"]
+        if reference_filter == "converged":
+            _validate_converged_payload(path, d)
         comparison = r["comparison"]
         if r["null"] and comparison == (None, None):
             candidates = real_budgets.get(_canonical(r["base"]), set())
@@ -314,9 +484,11 @@ def merge_dir(directory: Path) -> tuple[dict[str, dict], list[Path]]:
         a["n_success"]  += float(agg.get("success_rate", 0.0)) * n_ep
         a["step_ms"]    += float(agg.get("mean_step_ms", 0.0)) * n_ep
 
+        kl_summary = (d.get("kl_converged_only", {})
+                      if reference_filter == "converged" else d.get("kl", {}))
         sources = {
-            "forward":  d.get("kl", {}).get("forward"),
-            "reverse":  d.get("kl", {}).get("reverse"),
+            "forward":  kl_summary.get("forward"),
+            "reverse":  kl_summary.get("reverse"),
             "ess_ref":  d.get("diagnostics", {}).get("ess_ref"),
             "ess_deg":  d.get("diagnostics", {}).get("ess_deg"),
             "mu_dist":  d.get("diagnostics", {}).get("mu_dist"),
@@ -337,7 +509,15 @@ def merge_dir(directory: Path) -> tuple[dict[str, dict], list[Path]]:
         per_step = d.get("per_step", []) or []
         for r in per_step:
             for key, field in (("forward", "kl_forward"), ("reverse", "kl_reverse")):
-                vals = _finite_values(r.get(field))
+                raw_values = r.get(field) or []
+                if reference_filter == "converged":
+                    flags = r["reference_converged"]
+                    vals = _finite_values([
+                        value for value, converged in zip(raw_values, flags)
+                        if converged
+                    ])
+                else:
+                    vals = _finite_values(raw_values)
                 a.setdefault("raw", {}).setdefault(key, []).extend(
                     vals
                 )
@@ -351,6 +531,8 @@ def merge_dir(directory: Path) -> tuple[dict[str, dict], list[Path]]:
             for ep in d.get("episodes", []) or []:
                 for key, field in (("forward", "kl_forward"),
                                    ("reverse", "kl_reverse")):
+                    if reference_filter == "converged":
+                        field = f"kl_converged_only_{key}"
                     s = ep.get(field) or {}
                     for stat in ("mean", "median"):
                         vals = _finite_values([s.get(stat)])
@@ -801,7 +983,8 @@ def family_output_path(base: Path, family: dict, multiple: bool) -> Path:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Plot a directory of KL-divergence sweep JSONs: success "
+        description="Plot a directory of online closed-loop KL-divergence "
+                    "sweep JSONs: success "
                     "rate vs. KL, with independent-run null diagnostics. "
                     "Incompatible recorded settings produce separate figures."
     )
@@ -826,6 +1009,11 @@ def main():
         help="How KL samples contribute to a cell. 'episode' (default) first "
              "summarizes each episode and gives episodes equal weight; 'step' "
              "reproduces the legacy pooled-per-step calculation.",
+    )
+    parser.add_argument(
+        "--reference_filter", choices=["all", "converged"], default="all",
+        help="Use every finite planner-valid KL measurement (default), or only "
+             "measurements whose convergence-based reference met its tolerance.",
     )
     parser.add_argument(
         "--success_error", choices=["wilson", "se", "none"], default="wilson",
@@ -853,7 +1041,7 @@ def main():
     directory = args.results_dir or _latest_dir()
     print(f"Loading directory: {directory}")
 
-    cells, files = merge_dir(directory)
+    cells, files = merge_dir(directory, args.reference_filter)
     print(f"  Merged {len(files)} file(s) into {len(cells)} cell(s)")
     if args.geometry:
         cells = {key: c for key, c in cells.items() if c["geometry"] in args.geometry}
@@ -864,8 +1052,8 @@ def main():
                      if any(not c["null"] for c in group.values())}
     if not real_families:
         raise ValueError(
-            "No non-null cells found. The sweep writes both, but a run of only "
-            "--null_control cells has no real KL to plot."
+            "No non-null cells found. A directory containing only explicit "
+            "--null_control diagnostics has no real KL to plot."
         )
 
     null_only = len(families) - len(real_families)
@@ -884,7 +1072,8 @@ def main():
             raise ValueError(f"Invalid recorded KL direction {direction!r}")
         print(f"\n  Family {family_id}: {first['task_name']}, "
               f"{first['geometry']}, {first['model']}")
-        print(f"  Direction: {direction} ({args.stat}, {args.weighting}-weighted)")
+        print(f"  Direction: {direction} ({args.stat}, {args.weighting}-weighted, "
+              f"reference_filter={args.reference_filter})")
         print(f"  Real cells: {len(reals)}   null cells: {len(nulls)}")
         if any(c.get("null_cell") is None for c in reals):
             print("  ! Some cells lack a compatible independent-run null diagnostic")
@@ -904,7 +1093,25 @@ def main():
         title = (f"Success rate vs. planner KL — {first['task_name']}\n"
                  f"{first['geometry']} | {first['model']} | config {family_id}")
         if ref_ns:
-            title += f"\nreference: {ref_ns} samples x {ref_ni} iterations"
+            ref_temperature = first["family_settings"]["config"].get(
+                "comparison_ref_temperature"
+            )
+            temperature_note = (f", T={ref_temperature:g}"
+                                if ref_temperature is not None else "")
+            ref_mode = first["family_settings"]["config"].get(
+                "comparison_ref_iteration_mode", "fixed"
+            )
+            if ref_mode == "convergence":
+                tol = first["family_settings"]["config"].get(
+                    "comparison_ref_convergence_tol"
+                )
+                title += (f"\nreference: {ref_ns} samples, tol {tol:g}, "
+                          f"cap {ref_ni} iterations{temperature_note}")
+            else:
+                title += (f"\nreference: {ref_ns} samples x {ref_ni} iterations"
+                          f"{temperature_note}")
+        if args.reference_filter == "converged":
+            title += " | converged reference solves only"
         if args.title_note:
             title = f"{args.title_note}\n{title}"
         out_base = args.out or directory / f"{directory.name}_plot.pdf"

@@ -23,8 +23,23 @@ def test_worker_scientific_defaults_match_cluster_template():
     defaults = worker.build_parser().parse_args([])
     for name in ("model", "geometry", "goal_difficulty", "time_horizon", "step_time",
                  "temperature", "noise_sigma", "kl_every", "kl_shrinkage",
-                 "ref_n_samples", "ref_n_iterations", "execute", "settle"):
+                 "ref_n_samples", "ref_n_iterations", "ref_convergence_tol",
+                 "ref_max_iterations", "ref_temperature", "reference_init",
+                 "execute", "settle"):
         assert getattr(defaults, name) == getattr(explicit, name), name
+
+
+def test_cluster_default_grid_contains_only_40_real_cells():
+    script = Path(worker.__file__).with_name("kl_divergence_eval.slurm")
+    output = subprocess.check_output(
+        ["bash", str(script), "--dry-run-all"], text=True
+    )
+    commands = [line for line in output.splitlines()
+                if "run_kl_divergence_cell.py" in line]
+    assert len(commands) == 40
+    assert all("--no-null_control" in command for command in commands)
+    assert all("--reference_init zero" in command for command in commands)
+    assert all("--ref_temperature 50.0" in command for command in commands)
 
 
 def test_raw_moments_reproduce_kl_without_new_particles():
@@ -74,23 +89,32 @@ def test_final_command_is_scored_and_shadow_never_controls(monkeypatch, ending):
         def __init__(self): self.value = np.ones((2, 2)) * 0.03
         def numpy(self): return self.value.copy()
         def assign(self, x): self.value[:] = x
+        def zero_(self): self.value[:] = 0
     class Planner:
         def __init__(self, **kw):
             self.horizon, self.nu, self.substeps = 2, 2, 16
             self.control_dt, self.robot_qpos_adr = 0.064, 0
             self.pc, self.U_wp = SimpleNamespace(ctrl_relative_to_qpos=True), Buffer()
             self.last_plan_ok = True
+            self.last_n_iterations = 2
+            self.last_converged = True
+            self.last_convergence_residual = 1e-4
             self.ref = len(planners) == 1
             planners.append(self)
+        def reset(self):
+            self.U_wp.zero_()
         def plan(self, data):
             np.testing.assert_array_equal(data.qpos, [0, 0])
-            # The shadow must receive pre-solve U0, not the degraded solution.
-            np.testing.assert_array_equal(self.U_wp.value, np.full((2, 2), 0.03))
+            expected = np.zeros((2, 2)) if self.ref else np.full((2, 2), 0.03)
+            # The default shadow restarts from zero at every measured state.
+            np.testing.assert_array_equal(self.U_wp.value, expected)
             self.U_wp.value[:] = 9 if self.ref else 0.1
             return np.full(2, 9 if self.ref else 0.1)
     monkeypatch.setattr(worker, "MPPIController", Planner)
     monkeypatch.setattr(worker, "weighted_moments", lambda *a: (np.zeros(2), np.eye(2), 2))
-    planner_cfg = SimpleNamespace(noise_sigma=0.025, n_samples=16)
+    planner_cfg = SimpleNamespace(noise_sigma=0.025, n_samples=16,
+                                  temperature=50.0,
+                                  convergence_tol=1e-3, max_iterations=25)
     result, record = worker.run_kl_episode(args, SimpleNamespace(label="M3"),
                                          planner_cfg, planner_cfg, np.random.default_rng(0),
                                          "cube_high_high", None, 0)
@@ -100,6 +124,9 @@ def test_final_command_is_scored_and_shadow_never_controls(monkeypatch, ending):
     assert result.n_steps_taken == 1
     np.testing.assert_array_equal(sim.applied, [[0.1, 0.1]])
     assert record["steps"] == [0]
+    assert record["reference_n_iterations"] == [2]
+    assert record["reference_converged"] == [True]
+    assert record["reference_convergence_residual"] == [1e-4]
 
 
 def test_optional_moment_recording_preserves_estimator():

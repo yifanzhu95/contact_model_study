@@ -2,7 +2,7 @@
 #SBATCH --job-name=cont_modeling_kl_divergence_eval
 #SBATCH --output=logs/cont_modeling_kl_divergence_eval%A_%a.out
 #SBATCH --error=logs/cont_modeling_kl_divergence_eval%A_%a.err
-#SBATCH --array=0-79
+#SBATCH --array=0-39
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
@@ -12,17 +12,21 @@
 set -euo pipefail
 
 # Submission template; this file does not submit jobs itself.
-# 5 objects x 4 sample counts x 2 iteration counts x 2 comparison types = 80
-# independent cells. At 30 episodes/cell this is 2400 episodes, including 1200
-# null episodes. Each object's real cells produce 8 scatter points. Check
+# 5 objects x 4 sample counts x 2 iteration counts = 40 real cells. At 30
+# episodes/cell this is 1200 episodes. Optional null diagnostics are not part of
+# the default array. Each object's real cells produce 8 scatter points. Check
 # resources and benchmark high_high cells before explicitly submitting.
 #
 # Both planners use the same high_high scene/contact model. The smaller planner
 # controls the simulator; the higher-compute reference is a shadow. KL compares
 # Gaussian moment approximations of weighted FIRST-action candidates, not the
 # full sequence distribution or a proven optimal control distribution.
+# At each KL measurement, the reference proposal starts independently from
+# N(0, sigma), then updates only within that solve. It terminates when the
+# squared-L2 first-action change is below 1e-3 or at the 25-iteration cap.
 #
-# Null cells use equal compute and separate random sampling. They remain
+# Optional null cells use equal compute, the same pre-solve proposal, and
+# separate random sampling. They remain
 # independent closed-loop runs, so their visited states need not match real
 # cells. Their KL is a diagnostic comparison, not a pure matched-state noise
 # floor or a significance test.
@@ -92,10 +96,14 @@ GOAL_DIFFICULTY=1
 OBJECT_SWEEP=(cube duck ball spam tomato)
 N_SAMPLES_SWEEP=(16 64 256 1024)
 N_ITER_SWEEP=(1 2)
-NULL_SWEEP=(no yes)
+NULL_SWEEP=(no)
 
 REF_N_SAMPLES=4096
-REF_N_ITERATIONS=4
+REF_N_ITERATIONS=25
+REF_CONVERGENCE_TOL=1e-3
+REF_MAX_ITERATIONS=25
+REF_TEMPERATURE=50.0
+REFERENCE_INIT="zero"
 KL_EVERY=20
 KL_SHRINKAGE=0.001
 KL_DIRECTION="forward"
@@ -151,7 +159,11 @@ run_cell() {
         --outdir "$OUTDIR" --task "$TASK" --model "$MODEL"
         --geometry "$geometry" --n_samples "$samples"
         --n_iterations "$iterations" --ref_n_samples "$REF_N_SAMPLES"
-        --ref_n_iterations "$REF_N_ITERATIONS" "$null_flag"
+        --ref_n_iterations "$REF_N_ITERATIONS"
+        --ref_convergence_tol "$REF_CONVERGENCE_TOL"
+        --ref_max_iterations "$REF_MAX_ITERATIONS"
+        --ref_temperature "$REF_TEMPERATURE"
+        --reference_init "$REFERENCE_INIT" "$null_flag"
         --n_episodes "$N_EPISODES" --max_steps "$MAX_STEPS"
         --goal_difficulty "$GOAL_DIFFICULTY" --kl_every "$KL_EVERY"
         --kl_shrinkage "$KL_SHRINKAGE" --kl_direction "$KL_DIRECTION"

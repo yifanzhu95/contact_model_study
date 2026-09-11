@@ -6,6 +6,7 @@ import copy
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from analysis import plot_kl_divergence_dir as plot_module
@@ -56,6 +57,31 @@ def _record(*, geometry="cube_high_high", seed=0, null=False,
 
 def _write(directory: Path, name: str, data: dict):
     (directory / name).write_text(json.dumps(data), encoding="utf-8")
+
+
+def _with_convergence(record, *, flags=(True, False),
+                      iterations=(2, 25), residuals=(5e-4, 2e-3)):
+    """Add internally consistent convergence metadata to a compact fixture."""
+    record["config"].update({
+        "ref_iteration_mode": "convergence",
+        "ref_convergence_tol": 1e-3,
+        "ref_max_iterations": 25,
+    })
+    step = record["per_step"][0]
+    step["reference_converged"] = list(flags)
+    step["reference_n_iterations"] = list(iterations)
+    step["reference_convergence_residual"] = list(residuals)
+    summary = {}
+    for direction, field in (("forward", "kl_forward"),
+                             ("reverse", "kl_reverse")):
+        values = [value for value, flag in zip(step[field], flags) if flag]
+        summary[direction] = {
+            "n": len(values),
+            "mean": float(np.mean(values)) if values else None,
+            "sd": float(np.std(values)) if values else None,
+        }
+    record["kl_converged_only"] = summary
+    return record
 
 
 def test_objects_have_separate_families_and_own_nulls(tmp_path):
@@ -144,6 +170,83 @@ def test_sanitized_invalid_measurements_are_skipped_not_zeroed(tmp_path):
     cell = next(iter(cells.values()))
     assert kl_value(cell, "forward", "mean") == (3.0, 0.0)
     assert kl_value(cell, "reverse", "mean") == (None, 0.0)
+
+
+def test_converged_filter_uses_aligned_reference_flags(tmp_path):
+    record = _record(value=2.0)
+    record["per_step"][0]["kl_forward"] = [2.0, 20.0]
+    record["per_step"][0]["kl_reverse"] = [1.0, 10.0]
+    _with_convergence(record)
+    _write(tmp_path, "mixed_convergence.json", record)
+
+    cells, _ = merge_dir(tmp_path, reference_filter="converged")
+    cell = next(iter(cells.values()))
+    assert kl_value(cell, "forward", "mean") == (2.0, 0.0)
+    assert kl_value(cell, "reverse", "mean") == (1.0, 0.0)
+
+
+def test_converged_filter_rejects_misaligned_flags(tmp_path):
+    record = _with_convergence(_record())
+    record["per_step"][0]["reference_converged"] = [True]
+    _write(tmp_path, "bad_alignment.json", record)
+    with pytest.raises(ValueError, match="lengths disagree"):
+        merge_dir(tmp_path, reference_filter="converged")
+
+
+def test_converged_filter_rejects_missing_flags(tmp_path):
+    record = _with_convergence(_record())
+    record["per_step"][0].pop("reference_converged")
+    _write(tmp_path, "missing_flags.json", record)
+    with pytest.raises(ValueError, match="requires per-step reference_converged"):
+        merge_dir(tmp_path, reference_filter="converged")
+
+
+def test_converged_filter_rejects_compact_result_without_per_step_flags(tmp_path):
+    record = _with_convergence(_record())
+    record.pop("per_step")
+    _write(tmp_path, "compact_without_flags.json", record)
+    with pytest.raises(ValueError, match="requires per-step reference_converged"):
+        merge_dir(tmp_path, reference_filter="converged")
+
+
+def test_converged_filter_requires_boolean_flags(tmp_path):
+    record = _with_convergence(_record())
+    record["per_step"][0]["reference_converged"][0] = 1
+    _write(tmp_path, "non_boolean_flag.json", record)
+    with pytest.raises(ValueError, match="must contain only booleans"):
+        merge_dir(tmp_path, reference_filter="converged")
+
+
+def test_converged_filter_requires_convergence_iteration_mode(tmp_path):
+    record = _with_convergence(_record())
+    record["config"]["ref_iteration_mode"] = "fixed"
+    _write(tmp_path, "fixed_iterations.json", record)
+    with pytest.raises(ValueError, match="ref_iteration_mode='convergence'"):
+        merge_dir(tmp_path, reference_filter="converged")
+
+
+def test_converged_filter_requires_top_level_summary(tmp_path):
+    record = _with_convergence(_record())
+    record.pop("kl_converged_only")
+    _write(tmp_path, "missing_summary.json", record)
+    with pytest.raises(ValueError, match="top-level kl_converged_only"):
+        merge_dir(tmp_path, reference_filter="converged")
+
+
+@pytest.mark.parametrize("mutation, message", [
+    (lambda record: record["per_step"][0]["reference_convergence_residual"].__setitem__(0, 2e-3),
+     "disagrees with residual"),
+    (lambda record: record["per_step"][0]["reference_n_iterations"].__setitem__(1, 20),
+     "before cap"),
+    (lambda record: record["kl_converged_only"]["forward"].__setitem__("mean", 99.0),
+     "disagrees with per-step convergence flags"),
+])
+def test_converged_filter_rejects_inconsistent_metadata(tmp_path, mutation, message):
+    record = _with_convergence(_record())
+    mutation(record)
+    _write(tmp_path, "inconsistent.json", record)
+    with pytest.raises(ValueError, match=message):
+        merge_dir(tmp_path, reference_filter="converged")
 
 
 @pytest.mark.parametrize("real_means,null_means", [

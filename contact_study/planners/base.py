@@ -437,6 +437,12 @@ class SamplingPlanner(abc.ABC):
         # Optimizer iterations the last plan() actually ran — below the cap only
         # when the convergence test fired (MPPI's convergence_tol).
         self.last_n_iterations = 0
+        # Convergence diagnostics for the last plan(). ``None`` means the
+        # planner used a fixed iteration count rather than a convergence test.
+        # The residual is the final squared-L2 change in the returned action;
+        # it remains None until two successful updates have been compared.
+        self.last_converged: bool | None = None
+        self.last_convergence_residual: float | None = None
 
         # The full (H, nu) mean action sequence produced by the last plan(),
         # captured BEFORE the warm-start shift. Synchronous drivers only need
@@ -799,6 +805,8 @@ class SamplingPlanner(abc.ABC):
         self._begin_plan()
         self.last_plan_ok = False
         self.last_n_iterations = 0
+        self.last_converged = None if self._converge_tol is None else False
+        self.last_convergence_residual = None
         # tol=None is the fixed-iteration path: the loop runs `cap` times and
         # never pays the per-iteration device->host read of U[0].
         tol, cap = self._converge_tol, self._iteration_cap()
@@ -828,14 +836,20 @@ class SamplingPlanner(abc.ABC):
             u_now = self.U_wp.numpy()[0].copy()
             if u_prev is not None:
                 d = u_now - u_prev
-                if float(d @ d) < tol:
+                self.last_convergence_residual = float(d @ d)
+                if self.last_convergence_residual < tol:
+                    self.last_converged = True
                     break
             # u_prev is None on i == 0, so the test always compares two
             # consecutive updates — the convergence path runs >= 2 iterations.
             u_prev = u_now
 
         if self.pc.debug and tol is not None:
-            print(f"  [{self.name}] converged in {self.last_n_iterations}/{cap} iterations")
+            status = "converged" if self.last_converged else "reached cap"
+            residual = (f"{self.last_convergence_residual:.3e}"
+                        if self.last_convergence_residual is not None else "n/a")
+            print(f"  [{self.name}] {status} in {self.last_n_iterations}/{cap} iterations "
+                  f"(residual={residual}, tol={tol:.3e})")
 
         self.last_plan_ok = True
         return self._extract_action()         # u(t) <- get_action(theta, t)

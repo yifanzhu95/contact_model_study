@@ -1,9 +1,11 @@
 """run_kl_divergence_cell.py
 
-HPC worker for the planner-approximation-quality sweep — one degraded-planner
+HPC worker for the online closed-loop planner-approximation-quality sweep — one degraded-planner
 cell. Measures Gaussian KL between two planners' weighted first-action
-distributions under the same contact model but different compute, then pairs
+distributions under the same contact model and recorded planner settings, then pairs
 that with the success rate the degraded planner achieves on the eval sim.
+Recorded-log replay uses the separate workflow documented in
+analysis/README_offline_recorded_kl.md.
 
 The idea
 --------
@@ -40,31 +42,37 @@ covariance needs shrinkage and sensitivity checks at small sample counts.
 What runs each step
 -------------------
 Two MPPIControllers share one rollout task, state, horizon, step_time and
-noise_sigma, and differ only in compute (n_samples, n_iterations):
+noise_sigma. The acting temperature is a cell setting; the higher-compute
+reference has its own fixed temperature (50 by default), so a cell with a
+different acting temperature is not a pure compute-only comparison:
 
   * the DEGRADED planner plans every control step and drives the eval sim;
   * the higher-compute REFERENCE planner is a shadow that never controls. It runs
     only every --kl_every steps, because it is the expensive one.
 
-Before each reference solve, the reference planner's mean is seeded from the
-degraded planner's mean as it was BEFORE that step's solve, so both
-distributions start at identical (state, U0). This removes a stale reference
-mean as a comparison factor, but does not guarantee repeatable GPU solves or
-that the high-compute planner is optimal.
-Pass --no-sync_reference_mean to let the two means evolve independently
-instead, which measures accumulated policy divergence rather than
-instantaneous approximation error.
+At every measured state, the reference proposal restarts from N(0, sigma).
+Its mean is carried only between optimizer iterations within that one plan()
+call, then discarded before the next measured state. Under this per-state-zero
+protocol, measurements are independent of a stale reference
+mean and the reference never receives the degraded planner's saved mean.
 
-Null control (--null_control)
------------------------------
+For compatibility studies, --reference_init degraded_pre_solve reproduces the
+older same-U0 design and --reference_init persistent lets the reference mean
+evolve across measured states. Neither compatibility mode is the default.
+
+Optional null control (--null_control)
+--------------------------------------
 The degraded planner is degraded by having fewer samples, and fewer samples
 also make its moment estimates noisier — so measured KL rises with degradation
 partly for statistical rather than substantive reasons. With --null_control the
-reference planner is rebuilt with the DEGRADED planner's own settings (differing
-only in noise seed). This remains a SEPARATE closed-loop run. It diagnoses
+reference planner is rebuilt with the DEGRADED planner's own compute and
+temperature, and is seeded from the degraded pre-solve proposal (differing
+only in noise seed within that measured solve). This remains a SEPARATE
+closed-loop run and is disabled in the default SLURM array. It diagnoses
 finite-sample and optimization variability, but its visited states may differ
-from the real run. It is not a strictly matched noise floor or significance
-test, and should not be subtracted from real KL as a bias correction.
+from the real run. It also uses a different initialization protocol from the
+default zero-start real reference. It is not a strictly matched noise floor or
+significance test, and should not be subtracted from real KL as a bias correction.
 
 Known approximation (not corrected here)
 ----------------------------------------
@@ -90,7 +98,8 @@ happen on this task even when the mean ESS is healthy.
         --outdir results/kl_divergence_eval_run \
         --task grasp_reorient --model M3 --geometry cube_high_high \
         --n_samples 64 --n_iterations 1 \
-        --ref_n_samples 4096 --ref_n_iterations 4 \
+        --ref_n_samples 4096 --ref_convergence_tol 1e-3 \
+        --ref_max_iterations 25 --reference_init zero \
         --n_episodes 5 --kl_every 20
 """
 
@@ -134,6 +143,47 @@ from contact_study.evaluation.trajectory import (
 )
 
 
+REFERENCE_INIT_CHOICES = ("zero", "degraded_pre_solve", "persistent")
+
+
+def optional_positive_float(value: str) -> float | None:
+    """Parse a positive float, with ``none`` selecting fixed iterations."""
+    if value.lower() in {"none", "off", "fixed"}:
+        return None
+    number = float(value)
+    if not np.isfinite(number) or number <= 0.0:
+        raise argparse.ArgumentTypeError("must be positive and finite, or 'none'")
+    return number
+
+
+def reference_init_mode(args) -> str:
+    """Resolve the reference-start policy, including the legacy CLI alias."""
+    legacy = getattr(args, "sync_reference_mean", None)
+    requested = (args.reference_init if legacy is None else
+                 ("degraded_pre_solve" if legacy else "persistent"))
+    # The optional equal-compute null is only meaningful as a within-state
+    # stochastic replicate if both planners start from the same proposal.
+    # It is deliberately not part of the default zero-start sweep.
+    if getattr(args, "null_control", False):
+        return "degraded_pre_solve"
+    return requested
+
+
+def initialize_reference(ref, mode: str, degraded_pre_solve_mean=None) -> None:
+    """Prepare the shadow reference immediately before one measured solve."""
+    if mode == "zero":
+        # reset() zeros the whole proposal mean, resets adaptive parameters and
+        # restarts the plan cadence. The monotonically increasing resample
+        # counter is deliberately retained, so separate states get fresh noise.
+        ref.reset()
+    elif mode == "degraded_pre_solve":
+        if degraded_pre_solve_mean is None:
+            raise ValueError("degraded_pre_solve initialization requires a saved mean")
+        ref.U_wp.assign(degraded_pre_solve_mean)
+    elif mode != "persistent":
+        raise ValueError(f"Unknown reference initialization mode: {mode!r}")
+
+
 def resolve_kl_geometry(task: str, geometry: str) -> str:
     """Use explicit high/high geometry for the grasp-reorient compute study.
 
@@ -173,14 +223,16 @@ def result_filename(out: dict) -> str:
 def validate_kl_args(args) -> None:
     """Reject invalid numerical settings before starting expensive rollouts."""
     for name in ("n_episodes", "kl_every", "n_samples", "ref_n_samples",
-                 "n_iterations", "ref_n_iterations", "nconmax", "njmax"):
+                 "n_iterations", "ref_n_iterations", "ref_max_iterations",
+                 "nconmax", "njmax"):
         if getattr(args, name) < 1:
             raise ValueError(f"--{name} must be positive")
     for name in ("max_steps", "eval_substeps"):
         value = getattr(args, name)
         if value is not None and value < 1:
             raise ValueError(f"--{name} must be positive")
-    for name in ("noise_sigma", "temperature", "time_horizon", "step_time"):
+    for name in ("noise_sigma", "temperature", "ref_temperature",
+                 "time_horizon", "step_time"):
         value = getattr(args, name)
         if not np.isfinite(value) or value <= 0.0:
             raise ValueError(f"--{name} must be finite and positive")
@@ -190,6 +242,15 @@ def validate_kl_args(args) -> None:
             raise ValueError(f"--{name} must be finite and nonnegative")
     if not (0.0 < args.kl_shrinkage <= 1.0):
         raise ValueError("--kl_shrinkage must be in (0, 1]")
+    if (args.ref_convergence_tol is not None
+            and (not np.isfinite(args.ref_convergence_tol)
+                 or args.ref_convergence_tol <= 0.0)):
+        raise ValueError("--ref_convergence_tol must be positive and finite, or none")
+    if args.ref_convergence_tol is not None and args.ref_max_iterations < 2:
+        raise ValueError("--ref_max_iterations must be at least 2 with convergence")
+    mode = reference_init_mode(args)
+    if mode not in REFERENCE_INIT_CHOICES:
+        raise ValueError(f"--reference_init must be one of {REFERENCE_INIT_CHOICES}")
     if args.task == "grasp_reorient" and args.eval_sim == "drake":
         raise ValueError("The all-object KL workflow supports Pinocchio or "
                          "MuJoCo evaluation. The legacy Drake hand-only asset "
@@ -258,7 +319,8 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
             f"reference and degraded planners must share the schedule; got "
             f"deg=(H={deg.horizon}, nu={deg.nu}, substeps={deg.substeps}) "
             f"ref=(H={ref.horizon}, nu={ref.nu}, substeps={ref.substeps}). "
-            f"Only n_samples / n_iterations may differ."
+                "Sample/iteration budgets and MPPI temperature may differ, "
+                "but the schedule and action dimension must match."
         )
 
     # ---- EVAL task + "real" simulator -------------------------------------
@@ -298,6 +360,7 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
     n_steps = args.max_steps if args.max_steps is not None else cfg.max_steps
     steps_to_success: int | None = None
     sigma = float(deg_cfg.noise_sigma)
+    ref_init = reference_init_mode(args)
 
     # Records the DEGRADED planner — the one that actually controls. The
     # reference planner's shadow solve is not part of the episode.
@@ -319,6 +382,10 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
             "kl_every":        int(args.kl_every),
             "kl_shrinkage":    float(args.kl_shrinkage),
             "ref_n_samples":   int(ref_cfg.n_samples),
+            "ref_temperature": float(ref_cfg.temperature),
+            "reference_initialization": ref_init,
+            "ref_convergence_tol": ref_cfg.convergence_tol,
+            "ref_max_iterations": int(ref_cfg.max_iterations),
         },
     )
     # Which of the loop's three exits was taken; see EpisodeResult.end_reason.
@@ -329,6 +396,10 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
     invalid_kl_steps: list[int] = []
     step_times: list[float] = []
     ref_plan_times: list[float] = []
+    ref_iterations: list[int] = []
+    ref_converged: list[bool | None] = []
+    ref_residuals: list[float | None] = []
+    ref_solve_records: list[dict] = []
     moment_records: list[dict] = []
     ep_start = time.perf_counter()
 
@@ -352,10 +423,10 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
 
         measure = (t % args.kl_every == 0)
 
-        # Snapshot the degraded planner's mean BEFORE its solve, so the
-        # reference planner can be conditioned on the same starting point
-        # rather than on the degraded planner's own output.
-        U0 = deg.U_wp.numpy().copy() if (measure and args.sync_reference_mean) else None
+        # The compatibility protocol needs the degraded proposal from before
+        # its solve. The default zero protocol never reads or copies that mean.
+        U0 = (deg.U_wp.numpy().copy()
+              if measure and ref_init == "degraded_pre_solve" else None)
 
         # --- degraded planner: this is the one that controls ---------------
         plan_start = time.perf_counter()
@@ -366,25 +437,42 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
         if measure:
             mu_d, S_d, e_d, moments_d = measure_distribution(deg, args, sigma)
 
-            # --- reference planner: shadow solve at the same (state, U0) ---
-            if U0 is not None:
-                ref.U_wp.assign(U0)
+            # --- reference planner: shadow solve at the same physical state --
+            # Default protocol: start this individual measurement from
+            # N(0, sigma), retain the updated mean only across optimizer
+            # iterations inside ref.plan(), then discard it at the next reset.
+            initialize_reference(ref, ref_init, U0)
             ref_start = time.perf_counter()
             ref.plan(mjd)
             ref_plan_times.append((time.perf_counter() - ref_start) * 1e3)
             mu_r, S_r, e_r, moments_r = measure_distribution(ref, args, sigma)
+            n_ref_iter = int(ref.last_n_iterations)
+            did_converge = ref.last_converged
+            residual = ref.last_convergence_residual
 
             # Direction matters: each expectation is taken under its first
             # distribution. Both mean differences and covariance shape matter.
             f = gaussian_kl(mu_r, S_r, mu_d, S_d)
             r = gaussian_kl(mu_d, S_d, mu_r, S_r)
-            if deg.last_plan_ok and ref.last_plan_ok and np.isfinite(f) and np.isfinite(r):
+            valid = bool(deg.last_plan_ok and ref.last_plan_ok
+                         and np.isfinite(f) and np.isfinite(r))
+            ref_solve_records.append({
+                "step": t,
+                "valid_kl": valid,
+                "n_iterations": n_ref_iter,
+                "converged": did_converge,
+                "convergence_residual": residual,
+            })
+            if valid:
                 kl_fwd.append(f)
                 kl_rev.append(r)
                 ess_ref.append(e_r)
                 ess_deg.append(e_d)
                 mu_dist.append(float(np.linalg.norm(mu_r - mu_d)))
                 kl_steps.append(t)
+                ref_iterations.append(n_ref_iter)
+                ref_converged.append(did_converge)
+                ref_residuals.append(residual)
                 if args.record_kl_moments:
                     moment_records.append({"step": t, "degraded": moments_d,
                                            "reference": moments_r})
@@ -470,6 +558,14 @@ def run_kl_episode(args, contact_cfg, deg_cfg: MPPIConfig, ref_cfg: MPPIConfig,
         "ess_deg":   ess_deg,
         "mu_dist":   mu_dist,
         "reference_plan_ms": ref_plan_times,
+        # These three arrays align one-for-one with steps/kl_forward/kl_reverse.
+        # ``converged`` is None only for explicit fixed-iteration compatibility
+        # runs, where no convergence test exists.
+        "reference_n_iterations": ref_iterations,
+        "reference_converged": ref_converged,
+        "reference_convergence_residual": ref_residuals,
+        # Includes invalid KL attempts as well, for complete diagnostics.
+        "reference_solves": ref_solve_records,
         "invalid_steps": invalid_kl_steps,
     }
     if args.record_kl_moments:
@@ -512,8 +608,19 @@ def run_cell(args):
     # In null-control mode the "reference" is a second instance of the degraded
     # planner (different noise seed only). This independent closed-loop run is
     # a stochastic diagnostic, not an exactly state-matched noise floor.
-    ref_n_samples   = args.n_samples   if args.null_control else args.ref_n_samples
-    ref_n_iterations = args.n_iterations if args.null_control else args.ref_n_iterations
+    ref_n_samples = args.n_samples if args.null_control else args.ref_n_samples
+    # Null keeps equal compute with the degraded planner. The real reference
+    # uses convergence termination by default; its recorded iteration count is
+    # the cap, not a promise that every solve runs that many iterations.
+    ref_convergence_tol = None if args.null_control else args.ref_convergence_tol
+    ref_n_iterations = (args.n_iterations if args.null_control else
+                        (args.ref_max_iterations if ref_convergence_tol is not None
+                         else args.ref_n_iterations))
+    comparison_ref_iterations = (args.ref_max_iterations
+                                 if args.ref_convergence_tol is not None
+                                 else args.ref_n_iterations)
+    ref_init = reference_init_mode(args)
+    ref_temperature = args.temperature if args.null_control else args.ref_temperature
 
     label = f"{geometry}_{args.model}_n{args.n_samples}_i{args.n_iterations}"
     if args.null_control:
@@ -536,24 +643,32 @@ def run_cell(args):
     print(f"[{label}]  geometry={geometry} eval_sim={eval_sim.value} "
           f"goal_difficulty={effective_difficulty} "
           f"ccd_iterations={peek.mjm.opt.ccd_iterations} (unchanged)")
-    print(f"[{label}]  degraded : n_samples={args.n_samples} n_iterations={args.n_iterations}")
-    print(f"[{label}]  reference: n_samples={ref_n_samples} n_iterations={ref_n_iterations}"
-          + ("   (NULL CONTROL: same settings, different seed)" if args.null_control else ""))
+    print(f"[{label}]  degraded : n_samples={args.n_samples} "
+          f"n_iterations={args.n_iterations} temperature={args.temperature:g}")
+    ref_budget = (f"convergence_tol={ref_convergence_tol:g} "
+                  f"max_iterations={ref_n_iterations}"
+                  if ref_convergence_tol is not None
+                  else f"fixed_iterations={ref_n_iterations}")
+    print(f"[{label}]  reference: n_samples={ref_n_samples} {ref_budget} "
+          f"temperature={ref_temperature:g}"
+          + ("   (NULL CONTROL: same fixed compute, different seed)"
+             if args.null_control else ""))
     print(f"[{label}]  schedule : horizon={horizon} substeps={substeps} "
           f"rollout_dt={rollout_dt*1e3:.3f}ms  (shared by both planners)")
     print(f"[{label}]  KL       : first action (d={peek.mjm.nu}), every {args.kl_every} steps, "
           f"shrinkage={args.kl_shrinkage:g}, headline={args.kl_direction}, "
-          f"sync_reference_mean={args.sync_reference_mean}, execute={args.execute}")
+          f"reference_init={ref_init}, execute={args.execute}")
 
     delta_range = (-args.delta, args.delta) if args.delta is not None else (None, None)
 
-    def make_cfg(n_samples, n_iterations, seed):
+    def make_cfg(n_samples, n_iterations, seed, *, temperature,
+                 convergence_tol=None, max_iterations=10):
         return MPPIConfig(
             n_samples      = n_samples,
             n_iterations   = n_iterations,
             time_horizon   = args.time_horizon,
             step_time      = args.step_time,
-            temperature    = args.temperature,
+            temperature    = temperature,
             noise_sigma    = args.noise_sigma,
             warm_start     = False,
             resample_interval = 1,
@@ -562,6 +677,8 @@ def run_cell(args):
             nconmax        = args.nconmax,
             njmax          = args.njmax,
             seed           = seed,
+            convergence_tol = convergence_tol,
+            max_iterations = max_iterations,
             debug          = False,   # per-plan MPPI spam would swamp two planners
         )
 
@@ -589,8 +706,16 @@ def run_cell(args):
                     if args.null_control else child_seed(2, ep))
         rng = np.random.default_rng(env_seed)
 
-        deg_cfg = make_cfg(args.n_samples, args.n_iterations, deg_seed)
-        ref_cfg = make_cfg(ref_n_samples, ref_n_iterations, ref_seed)
+        deg_cfg = make_cfg(
+            args.n_samples, args.n_iterations, deg_seed,
+            temperature=args.temperature,
+        )
+        ref_cfg = make_cfg(
+            ref_n_samples, ref_n_iterations, ref_seed,
+            temperature=ref_temperature,
+            convergence_tol=ref_convergence_tol,
+            max_iterations=ref_n_iterations,
+        )
 
         result, rec = run_kl_episode(
             args, contact_cfg, deg_cfg, ref_cfg, rng, geometry, eval_sim, ep,
@@ -623,7 +748,23 @@ def run_cell(args):
     all_ed  = [x for r in records for x in r["ess_deg"]]
     all_md  = [x for r in records for x in r["mu_dist"]]
     all_ref_ms = [x for r in records for x in r["reference_plan_ms"]]
+    all_ref_iterations = [x for r in records for x in r["reference_n_iterations"]]
+    all_ref_converged = [x for r in records for x in r["reference_converged"]]
+    all_ref_residuals = [x for r in records
+                         for x in r["reference_convergence_residual"] if x is not None]
     n_invalid = sum(len(r["invalid_steps"]) for r in records)
+
+    # Same finite KL estimates, two reporting rules requested for the
+    # convergence-based reference: all valid measurements, and only those whose
+    # reference solve met the tolerance before/at the cap.
+    converged_fwd = [value for r in records
+                     for value, ok in zip(r["kl_forward"], r["reference_converged"])
+                     if ok is True]
+    converged_rev = [value for r in records
+                     for value, ok in zip(r["kl_reverse"], r["reference_converged"])
+                     if ok is True]
+    n_converged = sum(ok is True for ok in all_ref_converged)
+    n_not_converged = sum(ok is False for ok in all_ref_converged)
 
     headline = all_fwd if args.kl_direction == "forward" else all_rev
     headline_stats = _stats(headline)
@@ -657,7 +798,7 @@ def run_cell(args):
         "geometry": geometry,
         "object": peek.scene_variant.obj,
         "config": {
-            "kl_protocol": "first_action_v2_final_state_check",
+            "kl_protocol": f"first_action_v3_reference_{ref_init}_final_state_check",
             "record_kl_moments": args.record_kl_moments,
             "geometry": geometry,
             "object": peek.scene_variant.obj,
@@ -682,15 +823,28 @@ def run_cell(args):
             "n_iterations":     args.n_iterations,
             "ref_n_samples":    ref_n_samples,
             "ref_n_iterations": ref_n_iterations,
-            # Keep the intended high-compute comparison budget in null records
-            # too, so plots cannot attach a null to an incompatible reference.
+            "ref_iteration_mode": ("convergence" if ref_convergence_tol is not None
+                                   else "fixed"),
+            "ref_convergence_tol": ref_convergence_tol,
+            "ref_max_iterations": ref_n_iterations,
+            "ref_temperature": ref_temperature,
+            # Retain the intended high-compute comparison configuration as
+            # provenance even for an explicitly requested null. The null's
+            # distinct initialization protocol keeps it scientifically
+            # separate from the default real cell.
             "comparison_ref_n_samples": args.ref_n_samples,
-            "comparison_ref_n_iterations": args.ref_n_iterations,
+            "comparison_ref_n_iterations": comparison_ref_iterations,
+            "comparison_ref_iteration_mode": (
+                "convergence" if args.ref_convergence_tol is not None else "fixed"
+            ),
+            "comparison_ref_convergence_tol": args.ref_convergence_tol,
+            "comparison_ref_max_iterations": comparison_ref_iterations,
+            "comparison_ref_temperature": args.ref_temperature,
             "null_control":     args.null_control,
             "kl_every":         args.kl_every,
             "kl_shrinkage":     args.kl_shrinkage,
             "kl_direction":     args.kl_direction,
-            "sync_reference_mean": args.sync_reference_mean,
+            "reference_initialization": ref_init,
             "execute":          args.execute,
             "time_horizon":     args.time_horizon,
             "step_time":        args.step_time,
@@ -719,11 +873,24 @@ def run_cell(args):
             "forward": _stats(all_fwd),
             "reverse": _stats(all_rev),
         },
+        "kl_converged_only": {
+            "definition": "valid KL measurements whose reference solve met its tolerance",
+            "forward": _stats(converged_fwd),
+            "reverse": _stats(converged_rev),
+        },
         "diagnostics": {
             "ess_ref": _stats(all_er),
             "ess_deg": _stats(all_ed),
             "mu_dist": _stats(all_md),
             "reference_plan_ms": _stats(all_ref_ms),
+            "reference_n_iterations": _stats(all_ref_iterations),
+            "reference_convergence_residual": _stats(all_ref_residuals),
+            "n_reference_converged": n_converged,
+            "n_reference_not_converged": n_not_converged,
+            "reference_convergence_rate": (
+                n_converged / (n_converged + n_not_converged)
+                if n_converged + n_not_converged else None
+            ),
             "n_invalid_kl": n_invalid,
         },
         # The full EpisodeResult (end_reason / time_out / trajectory included),
@@ -734,7 +901,24 @@ def run_cell(args):
                 **seeds,
                 "kl_forward": _stats(r["kl_forward"]),
                 "kl_reverse": _stats(r["kl_reverse"]),
+                "kl_converged_only_forward": _stats([
+                    value for value, ok in zip(
+                        r["kl_forward"], r["reference_converged"]
+                    ) if ok is True
+                ]),
+                "kl_converged_only_reverse": _stats([
+                    value for value, ok in zip(
+                        r["kl_reverse"], r["reference_converged"]
+                    ) if ok is True
+                ]),
                 "reference_plan_ms": _stats(r["reference_plan_ms"]),
+                "reference_n_iterations": _stats(r["reference_n_iterations"]),
+                "n_reference_converged": sum(
+                    ok is True for ok in r["reference_converged"]
+                ),
+                "n_reference_not_converged": sum(
+                    ok is False for ok in r["reference_converged"]
+                ),
             }
             for e, r, seeds in zip(episodes, records, seed_records)
         ],
@@ -769,8 +953,18 @@ def build_parser() -> argparse.ArgumentParser:
     # --- the higher-compute reference planner -------------------------------
     p.add_argument("--ref_n_samples",    type=int, default=4096,
                    help="Reference planner sample count. Ignored with --null_control.")
-    p.add_argument("--ref_n_iterations", type=int, default=4,
-                   help="Reference planner iterations. Ignored with --null_control.")
+    p.add_argument("--ref_n_iterations", type=int, default=25,
+                   help="Fixed reference iterations when --ref_convergence_tol=none. "
+                        "Ignored by the default convergence-based reference and "
+                        "with --null_control.")
+    p.add_argument("--ref_convergence_tol", type=optional_positive_float,
+                   default=1e-3, metavar="FLOAT|none",
+                   help="Squared-L2 first-action convergence tolerance for the "
+                        "reference (default 1e-3). Use 'none' for explicit "
+                        "fixed-iteration compatibility mode.")
+    p.add_argument("--ref_max_iterations", type=int, default=25,
+                   help="Maximum reference iterations under convergence "
+                        "termination (default 25).")
     p.add_argument("--null_control", action=argparse.BooleanOptionalAction, default=False,
                    help="Rebuild the reference planner with the DEGRADED settings "
                         "(different seed only) in an independent diagnostic run.")
@@ -796,13 +990,15 @@ def build_parser() -> argparse.ArgumentParser:
                         "approximation); reverse swaps the arguments. BOTH "
                         "are always computed and stored — this only picks the "
                         "one printed and marked as headline.")
-    p.add_argument("--sync_reference_mean",
-                   action=argparse.BooleanOptionalAction, default=True,
-                   help="Seed the reference planner's mean from the degraded "
-                        "planner's pre-solve mean, so both are conditioned on the "
-                        "same (state, U0) and the KL is instantaneous "
-                        "approximation error. Disable to let the means evolve "
-                        "independently (accumulated policy divergence).")
+    p.add_argument("--reference_init", choices=REFERENCE_INIT_CHOICES, default="zero",
+                   help="Reference proposal at each measured state. 'zero' "
+                        "(default) restarts from N(0,sigma); 'degraded_pre_solve' "
+                        "reproduces the older same-U0 protocol; 'persistent' "
+                        "retains the reference mean across measured states.")
+    # Backward-compatible aliases for commands created before reference_init.
+    # New commands should use --reference_init explicitly.
+    p.add_argument("--sync_reference_mean", action=argparse.BooleanOptionalAction,
+                   default=None, help=argparse.SUPPRESS)
     p.add_argument("--execute", type=str, default="mean", choices=["mean", "sample"],
                    help="What the degraded planner executes. 'mean' matches every "
                         "other sweep in the study. 'sample' draws a particle from "
@@ -813,6 +1009,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--time_horizon", type=float, default=0.352)
     p.add_argument("--step_time",    type=float, default=0.064)
     p.add_argument("--temperature",  type=float, default=1.0)
+    p.add_argument("--ref_temperature", type=float, default=50.0,
+                   help="Reference MPPI temperature (default 50), independent "
+                        "of the acting planner's --temperature. Null diagnostics "
+                        "use the acting temperature to preserve equal settings.")
     p.add_argument("--noise_sigma",  type=float, default=0.025)
     p.add_argument("--delta",        type=float, default=None,
                    help="Per-step MPPI delta clip magnitude (action units); "

@@ -1,6 +1,9 @@
 # KL Divergence vs. Success Rate
 
-This workflow studies how a lower-compute MPPI planner's first-action
+This document describes the **online closed-loop KL workflow** in this
+repository. [Recorded-log replay](README_offline_recorded_kl.md) uses a separate
+workflow with a different state-sampling protocol. This workflow studies how a
+lower-compute MPPI planner's first-action
 distribution differs from a fixed higher-compute reference, and how that
 diagnostic relates to closed-loop task success. It measures planner behavior,
 not one-step physical state prediction error. It is not a causal test that KL
@@ -41,9 +44,11 @@ across objects; object-specific reporting remains necessary.
 ## What is compared
 
 The degraded and reference planners use the same contact model, task state,
-goal, cost settings, horizon, control period, temperature, and noise scale.
-Their sample counts and optimization iteration counts differ. The reference
-is a higher-compute numerical comparison, not a proven optimum. The evaluation
+goal, cost settings, horizon, control period, and noise scale. The acting
+temperature remains an independent cell setting; the reference defaults to a
+fixed temperature of 50. Their sample counts and iteration budgets also differ.
+Therefore, when the acting temperature is not 50, KL is not a pure compute-only
+comparison. The reference is a higher-compute numerical comparison, not a proven optimum. The evaluation
 simulator (Pinocchio by default) is distinct from this reference planner.
 
 At selected control steps, each MPPI planner produces weighted candidate
@@ -60,9 +65,13 @@ KL is directional, unbounded, and dimensionless (natural-log units, or nats).
 
 The degraded planner drives the evaluation simulator. The reference is a
 shadow and never supplies an applied command. At a measurement step both
-planners receive the same state; by default, reference optimization starts
-from the degraded planner's pre-optimization sequence mean. This does not
-force their optimized means or samples to agree.
+planners receive the same physical state. By default, every reference solve
+restarts its proposal from `N(0, sigma)`. The reference carries its updated
+mean only between optimizer iterations inside that one solve, then discards it
+before the next measured state. It never loads the degraded planner's mean.
+Explicit compatibility modes can reproduce the older same-pre-solve-mean or
+persistent-reference protocols; their results carry different protocol
+metadata and must not be pooled with the default.
 
 ## Files
 
@@ -93,8 +102,10 @@ The Python worker and SLURM template now share these scientific defaults:
 | Default object geometry | cube_high_high |
 | Goal difficulty | 1 |
 | Requested horizon / control period | 0.352 s / 0.064 s |
-| Temperature / proposal sigma | 1.0 / 0.025 |
-| Large reference | 4096 samples x 4 iterations |
+| Acting temperature / proposal sigma | 1.0 / 0.025 |
+| Reference temperature | 50 |
+| Large reference | 4096 samples, convergence tol. 0.001, cap 25 iterations |
+| Reference initialization | Zero mean independently at every measured state |
 | KL interval / shrinkage | 20 control steps / 0.001 |
 | Executed action | Degraded weighted mean |
 
@@ -106,7 +117,7 @@ five whole 0.064 s control intervals fit inside the requested 0.352 s.
 
 Every episode also scores the state after the last allowed control command.
 Success or a drop on that command is no longer mislabelled timeout. The
-`config.kl_protocol = first_action_v2_final_state_check` tag prevents the plotter
+`config.kl_protocol = first_action_v3_reference_zero_final_state_check` tag prevents the plotter
 from pooling this terminal-scoring rule with older result files. This changes
 only classification at the final-command boundary, not the applied controls.
 
@@ -119,7 +130,7 @@ installation points to another checkout, explicitly select the current one:
 export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
 ```
 
-The following real/null pair checks wiring only. Two control steps, one episode
+The following real-cell run checks wiring only. Two control steps, one episode
 and a reduced reference are not a success-rate experiment or a reference
 quality validation. The `duck` shorthand may be replaced by any listed object.
 
@@ -127,17 +138,8 @@ quality validation. The `duck` shorthand may be replaced by any listed object.
 python experiments/hpc/run_kl_divergence_cell.py \
     --outdir /tmp/kl_high_high_smoke --task grasp_reorient --model M3 \
     --geometry duck --n_samples 16 --n_iterations 1 \
-    --ref_n_samples 64 --ref_n_iterations 1 \
-    --n_episodes 1 --max_steps 2 --kl_every 1 \
-    --time_horizon 0.352 --step_time 0.064 \
-    --temperature 1.0 --noise_sigma 0.025 \
-    --eval_sim pinocchio --settle 1 --goal_difficulty 1 --seed 0 \
-    --no-record_trajectory --no-record_planner_dist
-
-python experiments/hpc/run_kl_divergence_cell.py \
-    --outdir /tmp/kl_high_high_smoke --task grasp_reorient --model M3 \
-    --geometry duck_high_high --n_samples 16 --n_iterations 1 \
-    --ref_n_samples 64 --ref_n_iterations 1 --null_control \
+    --ref_n_samples 64 --ref_convergence_tol 1e-3 \
+    --ref_max_iterations 2 --ref_temperature 50 --reference_init zero \
     --n_episodes 1 --max_steps 2 --kl_every 1 \
     --time_horizon 0.352 --step_time 0.064 \
     --temperature 1.0 --noise_sigma 0.025 \
@@ -159,7 +161,8 @@ A longer pilot with the intended reference settings can be started explicitly:
 python experiments/hpc/run_kl_divergence_cell.py \
     --outdir results/kl_high_high_pilot --task grasp_reorient --model M3 \
     --geometry cube_high_high --n_samples 256 --n_iterations 1 \
-    --ref_n_samples 4096 --ref_n_iterations 4 \
+    --ref_n_samples 4096 --ref_convergence_tol 1e-3 \
+    --ref_max_iterations 25 --ref_temperature 50 --reference_init zero \
     --n_episodes 3 --max_steps 1000 --kl_every 20 \
     --time_horizon 0.352 --step_time 0.064 \
     --temperature 1.0 --noise_sigma 0.025 \
@@ -167,12 +170,11 @@ python experiments/hpc/run_kl_divergence_cell.py \
     --no-record_trajectory --no-record_planner_dist --record_kl_moments
 ```
 
-Repeat the same command with `--null_control` for its independent null cell.
-Keep all shared settings identical. Three episodes remain a pilot, not a basis
-for ranking configurations or establishing a KL-success relationship.
+Three episodes remain a pilot, not a basis for ranking configurations or
+establishing a KL-success relationship.
 
-For a second configuration point, repeat both real and null commands with
-`--n_samples 16`; retain all other settings, including the seed and reference.
+For a second configuration point, repeat the real command with `--n_samples 16`;
+retain all other settings, including the seed and reference.
 Do not rerun the same completed cell/seed into that directory and pool it as
 additional independent evidence.
 
@@ -181,11 +183,20 @@ Plot this directory explicitly:
 ```bash
 python -m analysis.plot_kl_divergence_dir results/kl_high_high_pilot \
     --out results/kl_high_high_pilot/kl_vs_sr.pdf
+
+python -m analysis.plot_kl_divergence_dir results/kl_high_high_pilot \
+    --reference_filter converged \
+    --out results/kl_high_high_pilot/kl_vs_sr_converged_only.pdf
 ```
 
-The SLURM template defines 80 cells (array indices 0-79): five objects, four
-sample counts (16, 64, 256, 1024), two iteration counts (1, 2), and real/null.
-At 30 episodes/cell this is **2400 episodes**, including 1200 null episodes.
+The first figure includes every finite planner-valid KL measurement. The
+second uses the same results but retains only measurements whose reference
+solve met its convergence tolerance; it does not rerun either planner.
+
+The SLURM template defines 40 real cells (array indices 0-39): five objects,
+four sample counts (16, 64, 256, 1024), and two iteration counts (1, 2).
+At 30 episodes/cell this is **1200 episodes**. Null diagnostics are intentionally
+left out of the default array and can only be run explicitly.
 Each object contributes eight real configuration points. This template has
 not been launched as part of the smoke-check workflow.
 
@@ -228,10 +239,11 @@ Filenames include geometry and run-identifying information so different
 objects, settings and repeated runs do not silently overwrite a shared cell
 file. A directory-wide metadata file is not the authority for all cells.
 
-The requested large-reference budget is retained in null records as
-`comparison_ref_n_samples` and `comparison_ref_n_iterations`; the actual null
-reference still uses the degraded compute. This prevents null cells from
-accidentally attaching to studies with a different reference budget.
+For an explicitly requested null run, the shadow uses the degraded planner's
+sample count, fixed iteration count, temperature and pre-solve proposal, but a
+different noise seed. Because this same-proposal null protocol differs from the
+default real cell's zero-start reference protocol, it is a separate diagnostic,
+not a matched companion that should automatically be attached to the main plot.
 
 The plotter separates geometry and incompatible experiment settings into
 distinct plots. It must not merge a duck point with a cube point merely because
@@ -269,7 +281,7 @@ summaries. These can differ when episode lengths differ.
 The console prints KL SE as `n/a` rather than zero when it cannot be estimated.
 For the default episode-mean view, null screening also remains unavailable
 unless both the real and null cells contain at least two valid episodes.
-Meeting that minimum only enables the descriptive screening rule; it is not
+Reaching that minimum only enables the descriptive screening rule; it is not
 evidence of adequate statistical power or a formal significance test.
 
 `--weighting step --success_error se` selects the older pooled-step display;
@@ -280,31 +292,35 @@ rate but cannot contribute to the KL average; inspect their counts and reasons.
 
 ## Controls and numerical diagnostics
 
-### Common random numbers and independent null runs
+### Common random numbers and optional independent null runs
 
 Episode `k` uses the same environment/goal seed across compute cells. A real/null
 pair also uses the same degraded-planner seed. Environment, degraded-planner
 and reference-planner seeds are stored separately. This reduces deliberate
 random-condition imbalance but does not guarantee bitwise repeatability or
-identical closed-loop states. The September 7 short audit found small action
+identical closed-loop states. A short repeated-process audit found small action
 differences at the first degraded solve across processes with exactly matching
 input states and noise, before the first shadow solve. The checked degraded
 buffers and counters were unchanged by shadow execution. This narrows the
 earliest observed discrepancy to planning, without establishing its specific
 backend cause or making later closed-loop divergence harmless.
 
-Null replaces the high-compute reference with an independently sampled planner
-of the degraded planner's compute. Null remains a **separate closed-loop run**.
+Null is disabled in the default SLURM array. When requested explicitly,
+it replaces the high-compute reference with an independently sampled planner
+of the degraded planner's compute, temperature and pre-solve proposal. Null
+remains a **separate closed-loop run**.
 Thus a real/null pair creates four planner instances across two processes: a
 degraded controller and high-compute shadow in the real cell, then a new copy
 of the degraded controller and an equal-compute shadow in the null cell. The
 two degraded controllers are configured with matching seeds, but they are not
 the same in-memory controller and only the controller in its own cell is
 executed. No KL is computed across the real and null processes.
-It diagnoses differences that can occur even at equal compute, but finite
-sampling, trajectory differences and numerical effects may all contribute.
-It is not a pure matched-state noise floor. Do not subtract it as a calibrated
-noise correction or interpret a real/null screening marker as significance.
+It diagnoses differences that can occur even at equal compute and the same
+proposal within its own run, but finite sampling, trajectory differences and
+numerical effects may all contribute. Since the default real reference starts
+from zero instead, the null does not isolate a single difference from that real
+protocol. Do not subtract it as a calibrated noise correction or interpret it
+as a significance test.
 
 ### Episode-balanced aggregation
 
@@ -363,17 +379,21 @@ For a focused diagnosis before a longer run:
 ```bash
 python -m analysis.audit_kl_shadow \
     --geometry cube_high_high --model M3 --eval_sim pinocchio \
-    --n_samples 16 --n_iterations 1 --ref_n_samples 4096 --ref_n_iterations 4 \
+    --n_samples 16 --n_iterations 1 --ref_n_samples 4096 \
+    --ref_convergence_tol 1e-3 --ref_max_iterations 25 --reference_init zero \
     --n_episodes 1 --max_steps 8 --kl_every 1 --seed 20260907 \
     --record_trajectory --no-record_planner_dist --record_kl_moments \
     --audit_report results/kl_shadow_audit/real_a.json
 ```
 
-Use a new report path for each repeated process and add `--null_control` for a
-null audit. The audit checks exact equality of state/goal inputs and pre-solve
-means at paired solves, distinct mutable planner arrays, unchanged degraded
-arrays/counters across a shadow solve, and no consumption of the environment
-random stream by planner construction or planning. It saves per-call input,
+Use a new report path for each repeated default-real process. This focused
+audit intentionally rejects compatibility modes and `--null_control`; the
+optional null protocol uses a same-proposal rather than zero-reference check.
+The audit checks exact equality of state/goal inputs, a zero reference
+proposal before every measured solve, distinct mutable planner
+arrays, unchanged degraded arrays/counters across a shadow solve, and no
+consumption of the environment random stream by planner construction or
+planning. It saves per-call input,
 noise hashes and actions alongside the ordinary cell result. Extra device
 downloads make audit planning timings unsuitable for performance comparisons.
 Passing these checks does not certify backend-private state or cross-process
@@ -385,6 +405,16 @@ independent episodes in a success-rate figure.
 Planner-failure flags and nonfinite KL measurements are excluded and recorded
 under `invalid_steps`; each cell reports `n_invalid_kl`. Zero invalid KL samples
 only means these specific checks passed, not that all physics is converged.
+
+For the default reference, convergence compares consecutive optimized first
+actions using squared L2 change. A solve stops when that residual is below
+`1e-3`, or after 25 iterations. Every measurement records the iteration count,
+residual and convergence flag. The ordinary `kl` summary keeps every finite,
+planner-valid measurement; `kl_converged_only` additionally reports the subset
+whose reference solve met the tolerance. A converged solve is numerically stable
+under this update test, not proof of a globally optimal action. Excluding
+non-converged states can preferentially remove difficult states, so report both
+summaries and the retained fraction.
 
 The `opt.ccd_iterations=35` warning originates in GPU MuJoCo-Warp convex
 GJK/EPA collision detection used by the rollout path. It is **not** Pinocchio's
