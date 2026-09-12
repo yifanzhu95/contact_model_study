@@ -4,7 +4,7 @@
 #SBATCH --error=logs/cont_modeling_eval_%j.err
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=1
 #SBATCH --mem=16G
 #SBATCH --time=05:00:00
 

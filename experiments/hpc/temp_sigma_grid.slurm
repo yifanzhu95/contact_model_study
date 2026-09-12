@@ -2,8 +2,8 @@
 #SBATCH --job-name=cont_modeling_temp_sigma_grid
 #SBATCH --output=logs/cont_modeling_temp_sigma_grid_%A_%a.out
 #SBATCH --error=logs/cont_modeling_temp_sigma_grid_%A_%a.err
-#SBATCH --array=0-32%12     # (#OBJECTS * #MODELS * #N_ITERATIONS * #SAMPLE_COUNTS)
-                             # - 1; keep in sync with the arrays below. Note that
+#SBATCH --array=0-47%12     # (#OBJECTS * #MODELS * #N_ITERATIONS * #SAMPLE_COUNTS) - 1
+                             # keep in sync with the arrays below. Note that
                              # USE_CONVERGENCE=true COLLAPSES N_ITERATIONS to one
                              # value, so flipping that flag changes the required
                              # range (3*4*1*3 = 12 cells -> 0-11). Each task
@@ -20,7 +20,7 @@
                              # This request is UNIFORM across the array while
                              # n_samples now varies per cell, so it (and the GPU)
                              # must cover N_WORKERS x max(SAMPLE_COUNTS).
-#SBATCH --time=12:00:00      # one cell = #temperatures x #noise_sigmas x
+#SBATCH --time=16:00:00      # one cell = #temperatures x #noise_sigmas x
                              # N_EPISODES episodes (90 by default), run
                              # CONCURRENTLY N_WORKERS at a time, so the cost is
                              # about ceil(episodes / N_WORKERS) x the slowest
@@ -114,7 +114,7 @@ MAX_ITERATIONS=10                       # cap on that loop; must be >= 2
 # 2. THE GRID inside each cell. Comma-separated, expanded by the driver — bash
 #    never needs to know how many points these make.
 # ===========================================================================
-TEMPERATURES="50,25,12.5,6.25"                 # MPPI lambda: divides cost in the softmax
+TEMPERATURES="100,50,25,12.5,6.25"                 # MPPI lambda: divides cost in the softmax
 NOISE_SIGMAS="0.1"             # action-noise std dev; ONE value here
                                         # collapses this to a 1-D temperature sweep
 

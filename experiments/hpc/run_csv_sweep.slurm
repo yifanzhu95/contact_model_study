@@ -7,9 +7,9 @@
                                # on the sbatch command line win over this header.
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=1
 #SBATCH --mem=16G
-#SBATCH --time=05:00:00
+#SBATCH --time=12:00:00
 # ^ sized for ordinary synchronous rows. Rows using the new `driver=async` or
 # `time_constrained` columns are substantially slower: the async driver spends
 # each solve's latency as simulated time (so the sim runs *during* planning
