@@ -44,6 +44,17 @@ class EpisodeResult:
     elapsed_seconds:   float
     mean_step_ms:      float = 0.0
     std_step_ms:       float = 0.0
+
+    # --- effective planning horizon ---------------------------------------
+    # Rollout steps each plan() actually simulated (controller.last_n_steps) and
+    # the same in seconds (x controller.control_dt), meaned / std'd over every
+    # plan() in the episode. Equal to the configured horizon with std 0 unless
+    # --time_constrained truncated rollouts. 0.0 on records that predate them.
+    mean_eff_horizon_steps: float = 0.0
+    std_eff_horizon_steps:  float = 0.0
+    mean_eff_horizon_s:     float = 0.0
+    std_eff_horizon_s:      float = 0.0
+
     # Which sampling planner produced the episode ("mppi" | "cem" |
     # "predictive_sampler"). Defaulted so results written before the planner
     # became selectable still load via EpisodeResult.from_dict.

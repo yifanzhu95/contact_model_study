@@ -74,6 +74,7 @@ OUTCOME_COLS = ("n_episodes", "n_success", "success_rate",
                 "mean_steps_to_success", "mean_step_ms", "std_step_ms",
                 "n_timeout", "n_failed", "n_error", "error",
                 "mean_n_steps_taken", "mean_final_cost",
+                "mean_eff_horizon_steps", "mean_eff_horizon_s",
                 "mean_elapsed_s", "total_elapsed_min")
 
 # EpisodeResult's async-driver fields (contact_study/evaluation/metrics.py); all
@@ -191,6 +192,13 @@ def episode_columns(episodes: list[dict]) -> dict:
         "error":              errors[0][:120] if errors else "",
         "mean_n_steps_taken": _num(_mean([e.get("n_steps_taken") for e in episodes]), ".1f"),
         "mean_final_cost":    _num(_mean([e.get("final_cost") for e in episodes]), ".4f"),
+        # Effective planning horizon (blank on records written before the
+        # field existed); only differs from the configured horizon under
+        # --time_constrained.
+        "mean_eff_horizon_steps": _num(
+            _mean([e.get("mean_eff_horizon_steps") for e in episodes]), ".2f"),
+        "mean_eff_horizon_s": _num(
+            _mean([e.get("mean_eff_horizon_s") for e in episodes]), ".4f"),
         "mean_elapsed_s":     _num(_mean(elapsed), ".1f"),
         "total_elapsed_min":  _num(sum(v for v in elapsed if v is not None) / 60, ".1f"),
     }

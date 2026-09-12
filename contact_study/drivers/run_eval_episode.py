@@ -343,6 +343,9 @@ def run_eval_episode(
                  if getattr(planner_cfg, "convergence_tol", None) is not None else ""))
 
     step_times: list[float] = []
+    # Rollout steps each plan() actually simulated; < controller.horizon only
+    # when --time_constrained truncated the rollout.
+    horizon_steps: list[int] = []
     ep_start = time.perf_counter()
 
     for t in range(n_steps):
@@ -381,6 +384,7 @@ def run_eval_episode(
         action = controller.plan(mjd)
         plan_ms = (time.perf_counter() - plan_start) * 1e3
         step_times.append(plan_ms)
+        horizon_steps.append(int(controller.last_n_steps))
         if controller.pc.ctrl_relative_to_qpos:
             # Servo parameterization (mirrors the rollout): command the current
             # measured robot joint qpos plus the planned delta, re-read each step,
@@ -437,6 +441,12 @@ def run_eval_episode(
         end_reason = "success"
 
     step_arr = np.asarray(step_times)
+    hs_arr   = np.asarray(horizon_steps, dtype=float)
+    # The time-based horizon is the step count scaled by one constant, so its
+    # mean/std are the step stats scaled — computed that way rather than from
+    # hs_arr * control_dt, which leaves ~1e-17 float noise in a zero std.
+    hs_mean  = float(hs_arr.mean()) if len(hs_arr) else 0.0
+    hs_std   = float(hs_arr.std())  if len(hs_arr) else 0.0
     return EpisodeResult(
         task_name        = cfg.name,
         model_label      = contact_cfg.label,
@@ -448,6 +458,10 @@ def run_eval_episode(
         elapsed_seconds  = elapsed,
         mean_step_ms     = float(step_arr.mean()) if len(step_arr) else 0.0,
         std_step_ms      = float(step_arr.std())  if len(step_arr) else 0.0,
+        mean_eff_horizon_steps = hs_mean,
+        std_eff_horizon_steps  = hs_std,
+        mean_eff_horizon_s     = hs_mean * control_dt,
+        std_eff_horizon_s      = hs_std  * control_dt,
         final_goal_errs  = final_goal_errs,
         # The goal in effect at the end — the one final_goal_errs measures against.
         **rollout_task.goal_spec(),
@@ -637,7 +651,7 @@ def main():
             noise_sigma    = args.noise_sigma,
             step_substeps  = args.substeps,
             warm_start     = args.warm_start,   # off: match irisim_warp (keep the running mean, no shift)
-            use_full_graph = True,
+            use_full_graph = not args.time_constrained,
             delta_range    = delta,
             nconmax        = 50,
             njmax          = 300,

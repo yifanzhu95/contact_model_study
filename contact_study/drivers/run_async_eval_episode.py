@@ -387,6 +387,7 @@ def run_async_eval_episode(
     step_times:  list[float] = []   # raw measured plan() ms
     latency_ms:  list[float] = []   # charged latency, in ms of sim time
     staleness:   list[float] = []   # age of the applied command's state estimate
+    horizon_steps: list[int] = []   # rollout steps each plan() actually simulated
     missed_ticks = 0
     tape_exhausted_ticks = 0
     steps_to_success: int | None = None
@@ -427,6 +428,7 @@ def run_async_eval_episode(
             pending, measured_ms, lat_steps = timed_plan()
             step_times.append(measured_ms)
             latency_ms.append(lat_steps * eval_dt * 1e3)
+            horizon_steps.append(int(controller.last_n_steps))
             deadline = t + lat_steps
             # OUTSIDE timed_plan(): this loop spends the measured plan_ms as
             # simulated seconds, so recorder work inside that region would change
@@ -542,6 +544,12 @@ def run_async_eval_episode(
     final_qpos = sim.get_state().qpos
     step_arr = np.asarray(step_times)
     lat_arr  = np.asarray(latency_ms)
+    hs_arr   = np.asarray(horizon_steps, dtype=float)
+    # The time-based horizon is the step count scaled by one constant, so its
+    # mean/std are the step stats scaled — computed that way rather than from
+    # hs_arr * control_dt, which leaves ~1e-17 float noise in a zero std.
+    hs_mean  = float(hs_arr.mean()) if len(hs_arr) else 0.0
+    hs_std   = float(hs_arr.std())  if len(hs_arr) else 0.0
     # Multi-goal mode (fin_ep_on_success=False) never breaks on success, so it
     # always exits by exhaustion: time_out stays True, but the episode succeeded.
     time_out = end_reason == "timeout"
@@ -559,6 +567,10 @@ def run_async_eval_episode(
         elapsed_seconds  = elapsed,
         mean_step_ms     = float(step_arr.mean()) if len(step_arr) else 0.0,
         std_step_ms      = float(step_arr.std())  if len(step_arr) else 0.0,
+        mean_eff_horizon_steps = hs_mean,
+        std_eff_horizon_steps  = hs_std,
+        mean_eff_horizon_s     = hs_mean * control_dt,
+        std_eff_horizon_s      = hs_std  * control_dt,
         n_plans          = n_plans,
         mean_latency_ms  = float(lat_arr.mean()) if len(lat_arr) else 0.0,
         std_latency_ms   = float(lat_arr.std())  if len(lat_arr) else 0.0,
