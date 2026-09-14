@@ -22,6 +22,10 @@ detail up into the summary. Each output row carries
     mean_steps_to_success, mean_step_ms, std_step_ms    — the outcome
     n_timeout, n_failed, n_error, error                 — how the episodes ended
     mean_n_steps_taken, mean_final_cost,
+    mean_eff_horizon_steps, std_eff_horizon_steps,
+    mean_eff_horizon_s, std_eff_horizon_s               — effective planning
+                                                          horizon, over every
+                                                          plan() call in the row
     mean_final_<k>_err                                  — final-state detail
                                                           (pos/quat/vel for
                                                           grasp_reorient)
@@ -74,7 +78,8 @@ OUTCOME_COLS = ("n_episodes", "n_success", "success_rate",
                 "mean_steps_to_success", "mean_step_ms", "std_step_ms",
                 "n_timeout", "n_failed", "n_error", "error",
                 "mean_n_steps_taken", "mean_final_cost",
-                "mean_eff_horizon_steps", "mean_eff_horizon_s",
+                "mean_eff_horizon_steps", "std_eff_horizon_steps",
+                "mean_eff_horizon_s", "std_eff_horizon_s",
                 "mean_elapsed_s", "total_elapsed_min")
 
 # EpisodeResult's async-driver fields (contact_study/evaluation/metrics.py); all
@@ -155,6 +160,32 @@ def _mean(vals: list) -> float | None:
     return sum(vals) / len(vals) if vals else None
 
 
+def _pooled(episodes: list[dict], field: str) -> tuple[float | None, float | None]:
+    """(mean, std) of a per-plan() quantity over every plan() call in the row.
+
+    Each episode stores only its own mean_<field> / std_<field> (population
+    std over its n plan() calls), so the row-wide moments are rebuilt from
+    those: mean = sum(n_i * mu_i) / N and E[x^2] = sum(n_i * (sd_i^2 + mu_i^2)) / N.
+    n is n_plans for an async episode (one horizon sample per plan(), not per
+    tick) and n_steps_taken otherwise. Episodes without the field (records
+    written before it existed) or with no plan() calls are left out; (None,
+    None) when nothing is left.
+    """
+    n_tot = s1 = s2 = 0.0
+    for e in episodes:
+        mu, sd = e.get(f"mean_{field}"), e.get(f"std_{field}")
+        n = e.get("n_plans") or e.get("n_steps_taken") or 0
+        if mu is None or sd is None or n <= 0:
+            continue
+        n_tot += n
+        s1 += n * mu
+        s2 += n * (sd * sd + mu * mu)
+    if n_tot == 0:
+        return None, None
+    mean = s1 / n_tot
+    return mean, max(s2 / n_tot - mean * mean, 0.0) ** 0.5
+
+
 def axis_columns(rec: dict) -> dict:
     """The row's non-weight knobs, named as the input CSV named them.
 
@@ -183,6 +214,11 @@ def episode_columns(episodes: list[dict]) -> dict:
     reasons = [e.get("end_reason", "unknown") for e in episodes]
     errors  = [e["error"] for e in episodes if e.get("error")]
     elapsed = [e.get("elapsed_seconds") for e in episodes]
+    # Effective planning horizon, pooled over every plan() call in the row
+    # (blank on records written before the field existed); only differs from
+    # the configured horizon, with a non-zero std, under --time_constrained.
+    hs_mean, hs_std = _pooled(episodes, "eff_horizon_steps")
+    ht_mean, ht_std = _pooled(episodes, "eff_horizon_s")
 
     row = {
         "n_timeout":          reasons.count("timeout"),
@@ -192,13 +228,10 @@ def episode_columns(episodes: list[dict]) -> dict:
         "error":              errors[0][:120] if errors else "",
         "mean_n_steps_taken": _num(_mean([e.get("n_steps_taken") for e in episodes]), ".1f"),
         "mean_final_cost":    _num(_mean([e.get("final_cost") for e in episodes]), ".4f"),
-        # Effective planning horizon (blank on records written before the
-        # field existed); only differs from the configured horizon under
-        # --time_constrained.
-        "mean_eff_horizon_steps": _num(
-            _mean([e.get("mean_eff_horizon_steps") for e in episodes]), ".2f"),
-        "mean_eff_horizon_s": _num(
-            _mean([e.get("mean_eff_horizon_s") for e in episodes]), ".4f"),
+        "mean_eff_horizon_steps": _num(hs_mean, ".2f"),
+        "std_eff_horizon_steps":  _num(hs_std, ".2f"),
+        "mean_eff_horizon_s":     _num(ht_mean, ".4f"),
+        "std_eff_horizon_s":      _num(ht_std, ".4f"),
         "mean_elapsed_s":     _num(_mean(elapsed), ".1f"),
         "total_elapsed_min":  _num(sum(v for v in elapsed if v is not None) / 60, ".1f"),
     }
