@@ -2,14 +2,14 @@
 #SBATCH --job-name=cont_modeling_temp_sigma_grid
 #SBATCH --output=logs/cont_modeling_temp_sigma_grid_%A_%a.out
 #SBATCH --error=logs/cont_modeling_temp_sigma_grid_%A_%a.err
-#SBATCH --array=0-47%12     # (#OBJECTS * #MODELS * #N_ITERATIONS * #SAMPLE_COUNTS) - 1
-                             # keep in sync with the arrays below. Note that
-                             # USE_CONVERGENCE=true COLLAPSES N_ITERATIONS to one
-                             # value, so flipping that flag changes the required
-                             # range (3*4*1*3 = 12 cells -> 0-11). Each task
-                             # prints the total, and an id past the end errors out
-                             # instead of silently rerunning cell 0. The %N suffix
-                             # caps how many cells hold a GPU at once.
+#SBATCH --array=0-0          # placeholder — always overridden by
+                             # submit_temp_sigma_grid.sh, which sizes it to
+                             # (CSV data rows - 1) and adds the %N throttle
+                             # (how many cells hold a GPU at once). #SBATCH
+                             # options on the sbatch command line win over this
+                             # header. A hand `sbatch --array=...` past the end
+                             # of the CSV errors out (read_temp_sigma_cell.py)
+                             # instead of silently rerunning cell 0.
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=17   # >= N_WORKERS below: each worker drives one eval
@@ -18,22 +18,24 @@
                              # warp + mujoco + pinocchio/coal and carrying a CUDA
                              # context's host allocations. 16G OOM-kills a worker.
                              # This request is UNIFORM across the array while
-                             # n_samples now varies per cell, so it (and the GPU)
-                             # must cover N_WORKERS x max(SAMPLE_COUNTS).
+                             # n_samples varies per row of the cell CSV, so it
+                             # (and the GPU) must cover N_WORKERS x the LARGEST
+                             # n_samples in the CSV.
 #SBATCH --time=16:00:00      # one cell = #temperatures x #noise_sigmas x
                              # N_EPISODES episodes (90 by default), run
                              # CONCURRENTLY N_WORKERS at a time, so the cost is
                              # about ceil(episodes / N_WORKERS) x the slowest
                              # episode rather than their sum. Uniform across the
-                             # array, so it must cover the SLOWEST cell — the one
-                             # at max(N_ITERATIONS) x max(SAMPLE_COUNTS), several
-                             # times the cheapest. A timed-out cell resumes:
-                             # finished grid points are skipped on the next run
-                             # (see OUTDIR below).
+                             # array, so it must cover the SLOWEST row of the
+                             # cell CSV — largest n_iterations x n_samples x
+                             # (time_horizon / step_time), i.e. the most rollout
+                             # steps per plan() — several times the cheapest. A
+                             # timed-out cell resumes: finished grid points are
+                             # skipped on the next run (see OUTDIR below).
 
 # ===========================================================================
 # Temperature x noise_sigma grid — one (contact model, object, n_iterations,
-# n_samples) cell per GPU.
+# n_samples, time_horizon, step_time) cell per GPU, one cell per CSV row.
 #
 # The third sweep in this directory, and distinct from the other two:
 #
@@ -43,25 +45,34 @@
 #     search over cost weights, so it never draws an even surface over the two
 #     planner knobs.
 #
-# Here the array assigns each GPU a contact model, an object, an iteration
-# count and a sample count, and contact_study/drivers/run_temp_sigma_grid.py
-# walks the whole temperature x noise_sigma grid inside that cell using the same
-# EpisodePool run_bayes_opt.py uses. That split is the point: the useful MPPI
-# temperature scales with the magnitude of the task cost, which differs per
-# contact model and per object, so one grid per cell is the readable picture.
+# Here each array task is ONE ROW of a cell table (CELLS_CSV below, default
+# temp_sigma_cells.csv): a contact model, an object, an iteration count, a
+# sample count, and the planning horizon + control-step duration THAT cell runs
+# with. contact_study/drivers/run_temp_sigma_grid.py walks the whole
+# temperature x noise_sigma grid inside that cell using the same EpisodePool
+# run_bayes_opt.py uses. That split is the point: the useful MPPI temperature
+# scales with the magnitude of the task cost, which differs per contact model,
+# per object and per horizon, so one grid per cell is the readable picture.
 #
-# n_iterations and n_samples are CELL axes rather than grid axes because they
-# change what an episode COSTS, not only how it scores: one cell per value keeps
-# a cell's wall clock and VRAM constant instead of multiplying the inner grid,
-# and lets the cheap cells finish while the expensive ones are still running.
-# USE_CONVERGENCE below swaps the fixed iteration count for MPPI's
-# convergence-terminated mode, which collapses the N_ITERATIONS axis to one cell.
+# The cells are a CSV rather than bash arrays because the horizon and step
+# time are PER CELL, not a further axis: each (object, model, n_iterations,
+# n_samples) gets exactly one (time_horizon, step_time), which a mixed-radix
+# decode of independent lists cannot express. n_iterations and n_samples are
+# cell axes rather than grid axes because they change what an episode COSTS,
+# not only how it scores: one cell per value keeps a cell's wall clock and VRAM
+# constant instead of multiplying the inner grid, and lets the cheap cells
+# finish while the expensive ones are still running. The same holds for the
+# horizon and step time. USE_CONVERGENCE below swaps the fixed iteration count
+# for MPPI's convergence-terminated mode, which makes the CSV's n_iterations
+# column irrelevant.
 #
 # Every array task writes cell_*.json into ONE shared $OUTDIR, with ids offset
 # by the array index, so a single combine job merges the whole submission.
 #
-# Submit:   sbatch experiments/hpc/temp_sigma_grid.slurm
-# Resume:   sbatch --export=ALL,OUTDIR=/abs/path/to/previous experiments/hpc/temp_sigma_grid.slurm
+# Submit:   experiments/hpc/submit_temp_sigma_grid.sh [cells.csv] [label] [throttle]
+# Resume:   OUTDIR=/abs/path/to/previous experiments/hpc/submit_temp_sigma_grid.sh cells.csv
+#           (same CSV! the cell ids are row-offset, so a reordered CSV would
+#           resume the wrong cells)
 # Results:  results/temp_sigma_grid_<array job id>/cell_*.json
 #           + grid_summary_<array index>.json per cell (its ranked table)
 #           + combined_temp_sigma_grid_{rich,agg}.json from the combine job
@@ -76,26 +87,38 @@ ROOT_DIR="$PROJ_DIR"
 cd "$PROJ_DIR"
 
 # ===========================================================================
-# 1. THE CELLS: one (object, contact model, n_iterations, n_samples) per
-#    array task.
+# 1. THE CELLS: one CSV row per array task. Columns, all required:
+#
+#      object,model,n_iterations,n_samples,time_horizon,step_time
+#
+#    object       key of _OBJ_PARAMS in tasks/grasp_reorient.py (cube/duck/ball)
+#    model        M1..M4
+#    n_iterations MPPI optimizer iterations per plan(). IGNORED when
+#                 USE_CONVERGENCE=true below (rows differing only here then
+#                 just repeat the same configuration).
+#    n_samples    rollouts per iteration. THE VRAM AXIS across cells: the
+#                 --gpus/--mem request is uniform, so the largest value in the
+#                 CSV sets what a node must hold.
+#    time_horizon planning horizon in SECONDS
+#    step_time    control-step duration in SECONDS
+#
+#    read_temp_sigma_cell.py rejects a typo'd header, a blank value, and two
+#    rows naming the same (object, model, n_iterations, n_samples): the cell
+#    label and the analysis script's cell key do not include the horizon or
+#    step time, so such rows would merge into one result row.
+#
+#    CELLS_CSV is exported by submit_temp_sigma_grid.sh; override it by hand
+#    for a manual `sbatch --array=0-N temp_sigma_grid.slurm`.
 # ===========================================================================
 TASK="grasp_reorient"
-OBJECTS=("cube")          # keys of _OBJ_PARAMS in tasks/grasp_reorient.py; OBJECTS=("cube" "duck" "ball") 
-MODELS=("M1" "M2" "M3" "M4")
-N_ITERATIONS=(1 2 3)                    # MPPI optimizer iterations per plan().
-                                        # IGNORED (and collapsed to ONE cell) when
-                                        # USE_CONVERGENCE=true below.
-SAMPLE_COUNTS=(16 64 256 1024)             # rollouts per iteration. THE VRAM AXIS
-                                        # ACROSS cells: the --gpus/--mem request
-                                        # is uniform, so the largest value here
-                                        # sets what a node must hold.
+CELLS_CSV="${CELLS_CSV:-$PROJ_DIR/experiments/hpc/temp_sigma_cells.csv}"
 HAND_ACC="high"                         # collision-geometry fidelity; joined with
 OBJ_ACC="high"                          # the object into <obj>_<hand>_<obj>
 
 # Convergence-terminated MPPI: plan() keeps iterating until the returned action
 # settles -- sum_u (u_i - u_i+1)^2 < CONVERGENCE_TOL -- instead of running a
-# fixed count, so N_ITERATIONS has nothing to say and its axis collapses to a
-# single cell (remember to re-sync #SBATCH --array when flipping this).
+# fixed count, so the CSV's n_iterations column has nothing to say (drop the
+# duplicate rows it would otherwise distinguish, or they rerun the same cell).
 USE_CONVERGENCE=false                   # true | false
 CONVERGENCE_TOL=1e-4                    # only read when USE_CONVERGENCE=true.
                                         # CALIBRATE THIS: the test is on
@@ -110,6 +133,11 @@ CONVERGENCE_TOL=1e-4                    # only read when USE_CONVERGENCE=true.
                                         # iterations" per plan() call.
 MAX_ITERATIONS=10                       # cap on that loop; must be >= 2
 
+if [[ "$USE_CONVERGENCE" != "true" && "$USE_CONVERGENCE" != "false" ]]; then
+    echo "USE_CONVERGENCE must be true or false, got '$USE_CONVERGENCE'" >&2
+    exit 1
+fi
+
 # ===========================================================================
 # 2. THE GRID inside each cell. Comma-separated, expanded by the driver — bash
 #    never needs to know how many points these make.
@@ -120,7 +148,8 @@ NOISE_SIGMAS="0.1"             # action-noise std dev; ONE value here
 
 # ===========================================================================
 # 3. Episode settings — names match run_eval_episode.py, so a winning point
-#    replays by copy-pasting the flags the driver prints.
+#    replays by copy-pasting the flags the driver prints. The planning horizon
+#    and control-step duration are NOT here: they are per cell, in the CSV.
 # ===========================================================================
 PLANNER="mppi"                          # temperature is an MPPI-only field
 N_EPISODES=10                            # episodes per grid point -> success rate
@@ -128,15 +157,13 @@ N_WORKERS=16                            # episodes run CONCURRENTLY, one process
                                         # each. THE VRAM KNOB: every worker holds
                                         # its own CUDA context and MJWarp Data at
                                         # this cell's n_samples worlds, so the
-                                        # peak is N_WORKERS x max(SAMPLE_COUNTS).
-                                        # Lower it (with --cpus-per-task and
-                                        # --mem) on an OOM.
+                                        # peak is N_WORKERS x max n_samples in
+                                        # the CSV. Lower it (with --cpus-per-task
+                                        # and --mem) on an OOM.
 SEED=42                                  # THE constant episode seed: every grid
                                         # point is scored on the same episodes
                                         # (n_samples and n_iterations are cell
                                         # axes, up in section 1)
-TIME_HORIZON=0.352                      # planning horizon in SECONDS
-STEP_TIME=0.064                         # control-step duration in SECONDS
 EVAL_SIM="none"                         # none | mujoco | drake | pinocchio
 SETTLE=1.0
 
@@ -156,47 +183,19 @@ WEIGHTS=()
 OUTDIR="${OUTDIR:-$ROOT_DIR/results/temp_sigma_grid_${SLURM_ARRAY_JOB_ID:-manual}}"
 TASK_LABEL="${TASK_LABEL:-temp_sigma_grid}"
 
+module load miniconda
+eval "$(conda shell.bash hook)"
+conda activate contact_modeling
+
 # ===========================================================================
-# 5. Map this task's ID to one value per axis (mixed-radix decode, lowest-
-#    varying axis first -- consecutive task ids walk the objects).
+# 5. This task's cell = row $SLURM_ARRAY_TASK_ID of the CSV. The helper does
+#    the parsing (bash cannot read a CSV safely) and the range check; any
+#    failure exits non-zero, which `set -eo pipefail` turns into a failed task
+#    rather than a run of the wrong cell.
 # ===========================================================================
-# USE_CONVERGENCE decides the iteration count per plan() call, so a cell per
-# N_ITERATIONS value would just run the same configuration that many times.
-# Collapsing the array to a sentinel here (rather than special-casing the decode)
-# keeps TOTAL, the range check and the mixed-radix arithmetic below untouched.
-if [[ "$USE_CONVERGENCE" == "true" ]]; then
-    N_ITERATIONS=(converge)
-elif [[ "$USE_CONVERGENCE" != "false" ]]; then
-    echo "USE_CONVERGENCE must be true or false, got '$USE_CONVERGENCE'" >&2
-    exit 1
-fi
-
-AXES=(OBJECTS MODELS N_ITERATIONS SAMPLE_COUNTS)
-
-TOTAL=1
-for AX in "${AXES[@]}"; do
-    declare -n ARR="$AX"
-    TOTAL=$(( TOTAL * ${#ARR[@]} ))
-done
-
 T=${SLURM_ARRAY_TASK_ID:-0}
-if (( T >= TOTAL )); then
-    echo "cell $T is outside the grid (TOTAL=$TOTAL cells); set #SBATCH --array=0-$(( TOTAL - 1 ))" >&2
-    exit 1
-fi
-
-declare -A SEL
-for AX in "${AXES[@]}"; do
-    declare -n ARR="$AX"
-    N=${#ARR[@]}
-    SEL[$AX]=${ARR[$(( T % N ))]}
-    T=$(( T / N ))
-done
-
-OBJ="${SEL[OBJECTS]}"
-MODEL="${SEL[MODELS]}"
-N_ITER="${SEL[N_ITERATIONS]}"           # the "converge" sentinel when USE_CONVERGENCE
-N_SAMPLES="${SEL[SAMPLE_COUNTS]}"
+IFS=$'\t' read -r OBJ MODEL N_ITER N_SAMPLES TIME_HORIZON STEP_TIME < <(
+    python experiments/hpc/read_temp_sigma_cell.py "$CELLS_CSV" "$T")
 GEOMETRY="${OBJ}_${HAND_ACC}_${OBJ_ACC}"
 
 # How this cell decides its iteration count. --convergence_tol makes the driver
@@ -204,18 +203,14 @@ GEOMETRY="${OBJ}_${HAND_ACC}_${OBJ_ACC}"
 # passed together.
 if [[ "$USE_CONVERGENCE" == "true" ]]; then
     ITER_ARGS=(--convergence_tol "$CONVERGENCE_TOL" --max_iterations "$MAX_ITERATIONS")
-    ITER_DESC="converge<${CONVERGENCE_TOL} cap ${MAX_ITERATIONS}"
+    ITER_DESC="converge<${CONVERGENCE_TOL} cap ${MAX_ITERATIONS} (CSV n_iterations=${N_ITER} ignored)"
 else
     ITER_ARGS=(--n_iterations "$N_ITER")
     ITER_DESC="n_iterations=${N_ITER}"
 fi
 
-module load miniconda
-eval "$(conda shell.bash hook)"
-conda activate contact_modeling
-
-echo "cell ${SLURM_ARRAY_TASK_ID:-0} of $TOTAL: model=$MODEL object=$OBJ geometry=$GEOMETRY"
-echo "  planner: $ITER_DESC  n_samples=$N_SAMPLES"
+echo "cell $T (row $T of $CELLS_CSV): model=$MODEL object=$OBJ geometry=$GEOMETRY"
+echo "  planner: $ITER_DESC  n_samples=$N_SAMPLES  time_horizon=${TIME_HORIZON}s  step_time=${STEP_TIME}s"
 echo "  grid: T=[$TEMPERATURES] x sigma=[$NOISE_SIGMAS] x $N_EPISODES episodes -> $OUTDIR"
 
 # Per-control-step trajectory + planner-distribution recording (see
@@ -232,7 +227,7 @@ fi
 
 python -u -m contact_study.drivers.run_temp_sigma_grid \
     "${RECORD_ARGS[@]}" \
-    --array_index  "${SLURM_ARRAY_TASK_ID:-0}" \
+    --array_index  "$T" \
     --outdir       "$OUTDIR" \
     --task         "$TASK" \
     --geometry     "$GEOMETRY" \
@@ -258,7 +253,7 @@ python -u -m contact_study.drivers.run_temp_sigma_grid \
 # grid under `set -e`; combine can always be re-run by hand, see the README.
 # --export=ALL,... keeps the inherited environment: the bare --export=VAR=val
 # form propagates ONLY those vars, which breaks `module load` in the child job.
-if [[ "${SLURM_ARRAY_TASK_ID:-0}" == "0" ]]; then
+if [[ "$T" == "0" ]]; then
     # combine.slurm's #SBATCH --output is relative to ITS submission dir, which
     # for this nested call is $PROJ_DIR (cd'd to above), not experiments/hpc.
     mkdir -p "$PROJ_DIR/logs"

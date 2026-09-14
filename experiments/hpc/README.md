@@ -28,7 +28,7 @@ JSON. When the array finishes, a combine job merges every cell.
 | `param_search.slurm` | The array job. Defines the parameter grids inline, decodes the task id into one value per axis, runs the cell, and (from task 0) queues the combine job. **This is the only thing you submit.** |
 | `run_param_cell.py` | Worker. Runs `--n_episodes` episodes for one `--model` + `--weights` set (via `run_eval_episode`) and writes `cell_<id>.json`. |
 | `bayes_opt.slurm` | Array job over **objects × contact models**. Each cell runs its own `contact_study.drivers.run_bayes_opt` (scikit-optimize GP search over the cost weights + `noise_sigma`/`temperature`) into its own `results/bayes_opt_<arrayjobid>/<task>_<obj>_<model>_<planner>/`. Not a grid *search* — the array axes just fan out one independent optimization per pair. Needs `scikit-optimize` in the env; re-submitting with `OUTDIR_ROOT` pointing at a previous run resumes each cell from its `bo_state.json`. |
-| `temp_sigma_grid.slurm` | Array job over **objects × contact models × iteration counts × sample counts**, one cell per GPU. Each cell runs `contact_study.drivers.run_temp_sigma_grid` over the whole temperature × `noise_sigma` grid. See [its section](#temperature--noise-sigma-grid). |
+| `temp_sigma_grid.slurm` | Array job over the rows of a **cell CSV** (`temp_sigma_cells.csv`: object, contact model, `n_iterations`, `n_samples`, `time_horizon`, `step_time`), one cell per GPU. Each cell runs `contact_study.drivers.run_temp_sigma_grid` over the whole temperature × `noise_sigma` grid. Submit with `submit_temp_sigma_grid.sh`. See [its section](#temperature--noise-sigma-grid). |
 | `combine.slurm` | Runs the combiner after the array (queued automatically as an `afterok` dependency). |
 | `combine_results.py` | Merges all `cell_*.json` into `<prefix>_rich.json` + `<prefix>_agg.json` and prints a ranked top-N table. |
 
@@ -195,12 +195,16 @@ contact models and objects. MPPI's `temperature` divides the cost inside the
 softmax weighting, so the useful λ scales with the magnitude of the task cost —
 which differs per contact model and per object. The readable picture is
 therefore one grid per cell, not a single global optimum. The array also fans
-`n_iterations` and `n_samples` out across cells — see the bullets below.
+`n_iterations`, `n_samples` and the planning horizon / control-step duration
+out across cells — see the bullets below.
 
 | File | Role |
 |------|------|
-| `temp_sigma_grid.slurm` | The array job. Decodes `$SLURM_ARRAY_TASK_ID` into one **object**, one **contact model**, one **`n_iterations`** and one **`n_samples`** (mixed-radix, objects varying fastest, same block `bayes_opt.slurm` uses), then runs one cell. **This is the only thing you submit.** |
-| `contact_study/drivers/run_temp_sigma_grid.py` | The cell. Walks the whole temperature × `noise_sigma` grid for that one (model, object, iterations, samples), running episodes through the same `EpisodePool` as `run_bayes_opt.py`, and writes one `cell_<id>.json` per grid point. |
+| `temp_sigma_cells.csv` | The cell table: one row per array task, columns `object,model,n_iterations,n_samples,time_horizon,step_time` (all required). Ships with the 48-cell `cube × M1–M4 × {1,2,3} × {16,64,256,1024}` grid at `0.352 s / 0.064 s`; edit rows freely. |
+| `submit_temp_sigma_grid.sh` | Counts (and validates) the CSV's rows, then `sbatch`es `temp_sigma_grid.slurm` with `--array=0-(N-1)%throttle`. **This is what you run.** |
+| `temp_sigma_grid.slurm` | The array job. Reads row `$SLURM_ARRAY_TASK_ID` of the CSV (via `read_temp_sigma_cell.py`) and runs one cell. Global knobs — task, `HAND_ACC`/`OBJ_ACC`, the temperature / `noise_sigma` lists, episode settings, `USE_CONVERGENCE` — still live here. |
+| `read_temp_sigma_cell.py` | Helper the job script reads its row with: validates the header, bounds-checks the row, and rejects two rows naming the same `(object, model, n_iterations, n_samples)` (see below). |
+| `contact_study/drivers/run_temp_sigma_grid.py` | The cell. Walks the whole temperature × `noise_sigma` grid for that one row, running episodes through the same `EpisodePool` as `run_bayes_opt.py`, and writes one `cell_<id>.json` per grid point. |
 
 How it differs from the two sweeps above:
 
@@ -209,17 +213,28 @@ How it differs from the two sweeps above:
   (`TEMPERATURES`, `NOISE_SIGMAS`) passed straight to the driver, so bash never
   needs to know how many points they expand to, and one array task keeps a GPU
   busy for a whole grid instead of a single point.
-- `N_ITERATIONS` and `SAMPLE_COUNTS` are *cell* axes, not grid axes, because they
-  change what an episode **costs** rather than only how it scores: one cell per
-  value keeps a cell's wall clock and VRAM constant instead of multiplying the
-  inner grid. Note the `#SBATCH` resource request is uniform across the array, so
-  `--gpus`/`--mem`/`--time` must cover the most expensive cell —
-  `N_WORKERS × max(SAMPLE_COUNTS)` worlds at `max(N_ITERATIONS)` iterations.
+- `n_iterations`, `n_samples`, `time_horizon` and `step_time` are *cell* axes,
+  not grid axes, because they change what an episode **costs** rather than only
+  how it scores: one cell per value keeps a cell's wall clock and VRAM constant
+  instead of multiplying the inner grid. They live in a CSV rather than bash
+  arrays because the horizon and step time are **per cell**, not a further
+  axis: every `(object, model, n_iterations, n_samples)` row carries exactly one
+  `(time_horizon, step_time)`, which a mixed-radix decode of independent lists
+  cannot express. Note the `#SBATCH` resource request is uniform across the
+  array, so `--gpus`/`--mem`/`--time` must cover the most expensive row —
+  `N_WORKERS × max n_samples` worlds, at the largest
+  `n_iterations × time_horizon / step_time` (rollout steps per `plan()`).
+- Two rows with the same `(object, model, n_iterations, n_samples)` are
+  rejected up front: the driver's cell label and
+  `analysis/temp_sigma_grid_to_csv.py`'s cell key do not include the horizon
+  or step time, so such rows would merge into one result row. If you do want
+  several horizons for one cell, add `time_horizon`/`step_time` to
+  `cell_axes` in the driver and to `cell_key` in the analysis script first.
 - `USE_CONVERGENCE=true` switches MPPI to its convergence-terminated mode
   (`--convergence_tol`/`--max_iterations`): `plan()` iterates until the returned
-  action settles instead of running a fixed count, so `N_ITERATIONS` is ignored
-  and its axis **collapses to a single cell** — re-sync `#SBATCH --array` when
-  flipping the flag. Calibrate `CONVERGENCE_TOL` on one cell with `--debug`
+  action settles instead of running a fixed count, so the CSV's `n_iterations`
+  column is ignored — drop the rows that differ only in it, or they rerun the
+  same cell. Calibrate `CONVERGENCE_TOL` on one cell with `--debug`
   first (the planner prints `converged in k/cap iterations` per `plan()` call):
   a tolerance the update never reaches just runs every call to `MAX_ITERATIONS`
   at the cost of an extra device→host read per iteration.
@@ -230,15 +245,17 @@ How it differs from the two sweeps above:
 ### Usage
 
 ```bash
-sbatch experiments/hpc/temp_sigma_grid.slurm
+experiments/hpc/submit_temp_sigma_grid.sh                          # temp_sigma_cells.csv
+experiments/hpc/submit_temp_sigma_grid.sh my_cells.csv my_label 8  # label, %8 throttle
 ```
 
-Edit the `OBJECTS` / `MODELS` / `N_ITERATIONS` / `SAMPLE_COUNTS` arrays and
-**keep `#SBATCH --array` in sync** — it must be
-`0-((#OBJECTS * #MODELS * #N_ITERATIONS * #SAMPLE_COUNTS) - 1)`, with
-`#N_ITERATIONS` counted as 1 when `USE_CONVERGENCE=true`. An id past the end
-exits with a message naming the correct range rather than silently rerunning
-cell 0.
+Edit the cell CSV (or write a new one and pass its path); the wrapper sizes
+`#SBATCH --array` from the row count, so there is nothing to keep in sync. It
+also validates the CSV before submitting, so a typo'd header, a blank value or
+a duplicate cell is caught on the login node. A hand
+`sbatch --array=... --export=ALL,CELLS_CSV=... temp_sigma_grid.slurm` still
+works; an id past the end exits with a message naming the correct range rather
+than silently rerunning cell 0.
 
 Every array task writes into **one** shared directory,
 `results/temp_sigma_grid_<arrayjobid>/`, with cell ids offset by the array
@@ -260,16 +277,19 @@ cell that hit the wall clock picks up where it stopped. Point the resubmission
 at the old directory:
 
 ```bash
-sbatch --export=ALL,OUTDIR=/abs/path/to/results/temp_sigma_grid_1234567 \
-       experiments/hpc/temp_sigma_grid.slurm
+OUTDIR=/abs/path/to/results/temp_sigma_grid_1234567 \
+    experiments/hpc/submit_temp_sigma_grid.sh my_cells.csv
 ```
+
+Resume with the **same CSV**: cell ids are offset by the row index, so a
+reordered or shortened CSV would resume the wrong cells.
 
 To check one cell locally before submitting (2 points, 2 episodes):
 ```bash
 python -m contact_study.drivers.run_temp_sigma_grid \
     --task grasp_reorient --geometry duck_low_high --model M2 \
     --temperatures 20,40 --noise_sigmas 0.1 --n_episodes 2 \
-    --n_samples 64 --n_iterations 1 \
+    --n_samples 64 --n_iterations 1 --time_horizon 0.352 --step_time 0.064 \
     --n_workers 2 --outdir /tmp/tsgrid --no-record_trajectory --no-record_planner_dist
 # or the convergence-terminated variant (--n_iterations is then ignored):
 #   ... --convergence_tol 1e-4 --max_iterations 10
