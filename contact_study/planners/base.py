@@ -95,8 +95,18 @@ class PlannerConfig:
     debug:           bool  = True
     # Per-step delta clip (low, high). Either side may be None to leave that
     # side unconstrained (e.g. (None, 0.1) clips only the upper bound,
-    # (None, None) disables clipping entirely).
-    delta_range:     tuple[float | None, float | None] = (-0.1, 0.1)
+    # (None, None) — the default — disables clipping entirely).
+    #
+    # Off by default because the clamp is NOT a velocity limit: with
+    # ctrl_relative_to_qpos the command is ctrl = measured qpos + delta, so
+    # delta IS the position-servo error, and capping it caps the joint torque
+    # the hand can develop — i.e. how hard it can grip. Every driver that
+    # exposes --delta already defaults it to None (run_eval_episode.py,
+    # run_bayes_opt.py, the hpc cells), so this makes the dataclass default
+    # agree with them: a config built without an explicit delta_range now
+    # behaves the same as one built by those drivers with the flag omitted.
+    # Set it explicitly to re-enable the clamp.
+    delta_range:     tuple[float | None, float | None] = (None, None)
     use_full_graph:  bool  = True   # True=single mega CUDA graph, False=step+reset graphs
     seed:            int | None = None  # seed for deterministic noise sampling
     # plan() steps between noise resamples: 1=every step, None=sample once at

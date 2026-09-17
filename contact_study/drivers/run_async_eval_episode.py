@@ -133,7 +133,7 @@ from contact_study.utils.headless_gl import configure_headless_gl
 # rollout/eval split, the rollout timestep and the cost-weight overrides.
 from contact_study.drivers.run_eval_episode import (
     MODEL_FACTORIES, RESULTS_DIR, VIDEOS_DIR,
-    apply_cost_weight_overrides, default_eval_sim,
+    apply_cost_weight_overrides, apply_goal_difficulty, default_eval_sim,
 )
 
 EXECUTOR_MODES = ("zoh", "tape", "time")
@@ -148,6 +148,7 @@ def run_async_eval_episode(
     geometry:    str = DEFAULT_SCENE_VARIANT,
     planner:     str | None = None,
     cost_weight_overrides: dict | None = None,
+    goal_difficulty: int | None = None,
     settle_seconds: float = 0.0,
     eval_substeps: int | None = None,
     eval_sim:    EvalSimulatorKind | None = None,
@@ -171,6 +172,8 @@ def run_async_eval_episode(
     simulator, settle, goal sampling); only the control loop differs — see the
     module docstring.
 
+    goal_difficulty: optional goal-difficulty level for tasks that have one
+        (grasp_reorient levels 0-9); None keeps the task's own default.
     plan_latency_ms: impose this latency per plan() instead of measuring it.
         0 selects the degenerate synchronous mode. None (default) measures.
     latency_scale:   multiply the MEASURED latency (ignored when plan_latency_ms
@@ -205,6 +208,9 @@ def run_async_eval_episode(
 
     # ---- ROLLOUT task + planner ------------------------------------------
     rollout_task = get_task(task_name, geometry=geometry, role=TaskRole.ROLLOUT)
+    # Before load(): this is the instance sample_new_goal runs on.
+    if goal_difficulty is not None:
+        apply_goal_difficulty(rollout_task, goal_difficulty)
     mjm, mjd = rollout_task.load()
     cfg = rollout_task.config
     if cost_weight_overrides:
@@ -224,6 +230,9 @@ def run_async_eval_episode(
 
     # ---- EVAL task + "real" simulator ------------------------------------
     eval_task = get_task(task_name, geometry=geometry, role=TaskRole.EVAL)
+    # Never samples goals; set so both instances report the same difficulty.
+    if goal_difficulty is not None:
+        apply_goal_difficulty(eval_task, goal_difficulty)
     eval_task.load()
     if eval_sim is not None:
         eval_task.config.eval_sim = eval_sim
@@ -276,6 +285,7 @@ def run_async_eval_episode(
         extra_context={
             "task":            task_name,
             "geometry":        geometry,
+            "goal_difficulty": getattr(rollout_task, "goal_difficulty", None),
             "planner":         planner,
             "model_label":     contact_cfg.label,
             "eval_sim":        getattr(eval_task.config.eval_sim, "value", None),
@@ -377,6 +387,7 @@ def run_async_eval_episode(
     step_times:  list[float] = []   # raw measured plan() ms
     latency_ms:  list[float] = []   # charged latency, in ms of sim time
     staleness:   list[float] = []   # age of the applied command's state estimate
+    horizon_steps: list[int] = []   # rollout steps each plan() actually simulated
     missed_ticks = 0
     tape_exhausted_ticks = 0
     steps_to_success: int | None = None
@@ -417,6 +428,7 @@ def run_async_eval_episode(
             pending, measured_ms, lat_steps = timed_plan()
             step_times.append(measured_ms)
             latency_ms.append(lat_steps * eval_dt * 1e3)
+            horizon_steps.append(int(controller.last_n_steps))
             deadline = t + lat_steps
             # OUTSIDE timed_plan(): this loop spends the measured plan_ms as
             # simulated seconds, so recorder work inside that region would change
@@ -532,6 +544,12 @@ def run_async_eval_episode(
     final_qpos = sim.get_state().qpos
     step_arr = np.asarray(step_times)
     lat_arr  = np.asarray(latency_ms)
+    hs_arr   = np.asarray(horizon_steps, dtype=float)
+    # The time-based horizon is the step count scaled by one constant, so its
+    # mean/std are the step stats scaled — computed that way rather than from
+    # hs_arr * control_dt, which leaves ~1e-17 float noise in a zero std.
+    hs_mean  = float(hs_arr.mean()) if len(hs_arr) else 0.0
+    hs_std   = float(hs_arr.std())  if len(hs_arr) else 0.0
     # Multi-goal mode (fin_ep_on_success=False) never breaks on success, so it
     # always exits by exhaustion: time_out stays True, but the episode succeeded.
     time_out = end_reason == "timeout"
@@ -549,14 +567,14 @@ def run_async_eval_episode(
         elapsed_seconds  = elapsed,
         mean_step_ms     = float(step_arr.mean()) if len(step_arr) else 0.0,
         std_step_ms      = float(step_arr.std())  if len(step_arr) else 0.0,
-        median_step_ms   = float(np.median(step_arr)) if len(step_arr) else 0.0,
-        p95_step_ms      = float(np.percentile(step_arr, 95)) if len(step_arr) else 0.0,
-        max_step_ms      = float(step_arr.max()) if len(step_arr) else 0.0,
+        mean_eff_horizon_steps = hs_mean,
+        std_eff_horizon_steps  = hs_std,
+        mean_eff_horizon_s     = hs_mean * control_dt,
+        std_eff_horizon_s      = hs_std  * control_dt,
         n_plans          = n_plans,
         mean_latency_ms  = float(lat_arr.mean()) if len(lat_arr) else 0.0,
         std_latency_ms   = float(lat_arr.std())  if len(lat_arr) else 0.0,
-        median_latency_ms = float(np.median(lat_arr)) if len(lat_arr) else 0.0,
-        p95_latency_ms    = float(np.percentile(lat_arr, 95)) if len(lat_arr) else 0.0,
+        **rollout_task.goal_spec(),
         mean_staleness_ms    = float(np.mean(staleness)) if staleness else 0.0,
         missed_ticks         = missed_ticks,
         tape_exhausted_ticks = tape_exhausted_ticks,
@@ -658,6 +676,10 @@ def main():
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
+    p.add_argument("--goal_difficulty", type=int, default=None,
+                   help="Goal-difficulty level for tasks that have one "
+                        "(grasp_reorient levels 0-9; see run_eval_episode.py). "
+                        "Default: the task's own.")
     p.add_argument("--seed",        type=int,   default=42)
     p.add_argument("--n_episodes",  type=int,   default=1,
                    help="Number of episodes to run; reports the aggregate success rate.")
@@ -770,6 +792,7 @@ def main():
             video_path  = video_path,
             use_mp4     = use_mp4,
             cost_weight_overrides = overrides or None,
+            goal_difficulty = args.goal_difficulty,
             settle_seconds = args.settle,
             eval_substeps  = args.eval_substeps,
             eval_sim       = eval_sim,

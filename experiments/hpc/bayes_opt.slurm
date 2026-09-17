@@ -2,18 +2,18 @@
 #SBATCH --job-name=cont_modeling_bayes_opt
 #SBATCH --output=logs/cont_modeling_bayes_opt_%A_%a.out
 #SBATCH --error=logs/cont_modeling_bayes_opt_%A_%a.err
-#SBATCH --array=0-2       # (#OBJECTS * #MODELS) - 1; the %N suffix caps how many
+#SBATCH --array=0-1       # (#OBJECTS * #MODELS) - 1; the %N suffix caps how many
                              # cells hold a GPU at once. Each task prints the grid
                              # total, and an id past the end errors out instead of
                              # silently rerunning cell 0.
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
-#SBATCH --cpus-per-task=20    # >= N_WORKERS below: each worker drives one eval
+#SBATCH --cpus-per-task=17    # >= N_WORKERS below: each worker drives one eval
                              # sim on its own core.
 #SBATCH --mem=32G            # 4 SPAWNED interpreters, each re-importing warp +
                              # mujoco + pinocchio/coal and carrying a CUDA
                              # context's host allocations. 16G OOM-kills a worker.
-#SBATCH --time=48:00:00      # one cell = N_CALLS trials x N_EPISODES episodes.
+#SBATCH --time=24:00:00      # one cell = N_CALLS trials x N_EPISODES episodes.
                              # Episodes within a trial now run CONCURRENTLY (see
                              # N_WORKERS), so a trial costs about as long as its
                              # SLOWEST episode rather than their sum. Budget
@@ -39,7 +39,36 @@ TASK="grasp_reorient"
 # Each needs scenes/leap/env_leap_rollout_{obj}_{HAND_ACC}_{OBJ_ACC}.xml (and
 # env_leap_eval_{obj}.xml when EVAL_SIM is not "none").
 # OBJECTS=("cube" "duck" "spam" "tomato")
-OBJECTS=("cube" "duck" "ball")
+OBJECTS=("duck" "ball")
+
+# Goal difficulty PER OBJECT: which goal sampler this cell's episodes draw from
+# (grasp_reorient levels: 0 fixed 90 deg spin, 1 +/-90 deg spin, 2 +/-90 deg
+# about a random axis, 3 adjacent face + twist, 4 any other face + twist,
+# 5 180 deg flip, 6 adjacent face no twist, 7 roll to "O", 8 roll either way,
+# 9 roll to "B").
+#
+# The object is the grid axis, so one cell = one object = one level; the driver
+# takes a single --goal_difficulty and applies it to every trial and every
+# model, which is what keeps the per-model objectives MODEL_AGG folds
+# like-for-like. This map is the whole per-object story.
+#
+# It exists because the objects are not equally hard at a given level: a level
+# the cube reorients reliably can be one the duck never completes, and a BO cell
+# whose every trial fails scores a flat objective and teaches the GP nothing.
+# Drop that object to a level it can sometimes finish and the search gets a
+# gradient to follow again.
+#
+# Leave an object's entry EMPTY (or drop the key) to fall back to
+# GOAL_DIFFICULTY_ALL; leave that empty too for the task's own default. Keys
+# must be OBJECTS entries -- an unmatched key is silently unused, since only
+# this cell's object is ever read.
+declare -A GOAL_DIFFICULTY=(
+    [cube]="8"
+    [duck]="8"
+    [ball]="1"
+)
+GOAL_DIFFICULTY_ALL=""          # level for any object with no entry above;
+                                # empty -> the task's own default
 
 # Contact models: the keys of MODEL_FACTORIES in run_eval_episode.py.
 MODELS=("M1" "M2" "M3" "M4")
@@ -58,7 +87,7 @@ MODELS=("M1" "M2" "M3" "M4")
 #      trade is real: 2 joint cells replace 8 split ones, so the TOTAL GPU-hours
 #      are similar — it is the per-cell wall time that grows.
 JOINT_MODELS=1
-MODEL_AGG="worst"                # mean | worst. 'worst' (minimax) tunes the
+MODEL_AGG="mean"                # mean | worst. 'worst' (minimax) tunes the
                                 # weakest model; 'mean' lets a strong model
                                 # carry a weak one. JOINT_MODELS=1 only.
 
@@ -72,7 +101,7 @@ OBJ_ACC="high"
 #    trial replays by pasting them into that driver).
 # ---------------------------------------------------------------------------
 PLANNER="mppi"                  # mppi | cem | predictive_sampler
-N_EPISODES=4                    # episodes per trial; more averages out episode
+N_EPISODES=2                    # episodes per trial; more averages out episode
                                 # luck at a proportional cost in wall time
 N_WORKERS="16"                    # episodes to run CONCURRENTLY, one process each
                                 # (own planner + own eval sim). Empty = one per
@@ -90,7 +119,7 @@ SEED=64                         # THE constant episode seed (same episodes every
 N_SAMPLES=256
 TIME_HORIZON=0.352              # planning horizon in SECONDS (quantized to control steps)
 STEP_TIME=0.064                 # control-step duration in SECONDS (quantized to rollout steps)
-EVAL_SIM="none"                 # none | mujoco | drake | pinocchio
+EVAL_SIM="mujoco"                 # none | mujoco | drake | pinocchio
 SETTLE=1.0
 NCONMAX=50
 NJMAX=300
@@ -113,7 +142,7 @@ DELTA=""                        # per-step delta clip magnitude; empty disables 
 #    object) or 'name:lo:hi' for an explicit bracket. Leave the array empty to
 #    accept the driver's DEFAULT_OPT_WEIGHTS.
 # ---------------------------------------------------------------------------
-OPT_WEIGHTS=("w_quat:1.0:50.0" "w_pos_x:1.0:50.0" "w_pos_y:1.0:50.0" "w_pos_z:1.0:50.0" "w_contact:0.1:100.0" "w_joint:0.01:20.0" "w_fallen:100.0:300.0" "w_quat_term:100.0:300.0" "w_pos_term:100.0:300.0")
+OPT_WEIGHTS=("w_quat:0.01:100.0" "w_pos_x:0.01:100.0" "w_pos_y:0.01:100.0" "w_pos_z:0.01:100.0" "w_contact:0.01:100.0" "w_joint:0.01:100.0" "w_fallen:50.0:300.0" "w_quat_term:100.0:500.0" "w_pos_term:100.0:500.0")
 
 OPT_NOISE_SIGMA=0               # 1 -> search noise_sigma, 0 -> pin it to NOISE_SIGMA
 OPT_TEMPERATURE=1               # 1 -> search temperature, 0 -> pin it to TEMPERATURE
@@ -128,9 +157,9 @@ OPT_TEMPERATURE=1               # 1 -> search temperature, 0 -> pin it to TEMPER
 # OPT_TEMPERATURE=1. NOTE: this renames the search dimensions (temperature ->
 # temperature_M1, ...), so flipping it makes any existing bo_state.json
 # unresumable -- start such a cell in a fresh directory.
-PER_MODEL_TEMPERATURE=1
+PER_MODEL_TEMPERATURE=0
 NOISE_SIGMA_RANGE=(0.001 1.0)   # LO HI, log-uniform
-TEMPERATURE_RANGE=(0.001 1000.0)   # LO HI, log-uniform
+TEMPERATURE_RANGE=(0.001 100.0)   # LO HI, log-uniform
 NOISE_SIGMA=0.1                 # fixed value when OPT_NOISE_SIGMA=0
 TEMPERATURE=30.0                # fixed value when OPT_TEMPERATURE=0
 
@@ -139,8 +168,8 @@ TEMPERATURE=30.0                # fixed value when OPT_TEMPERATURE=0
 #    Both terms live in [0, 1], so the two weights are directly comparable.
 # ---------------------------------------------------------------------------
 W_SUCCESS=1.0
-W_COST=0.1
-ERR_CLIP=10.0                   # goal error clipped here, then divided by it
+W_COST=0.75
+ERR_CLIP=250.0                   # goal error clipped here, then divided by it
 
 # ---------------------------------------------------------------------------
 # 5. Optimizer (gp_minimize).
@@ -181,9 +210,9 @@ OUTDIR_ROOT="${OUTDIR_ROOT:-$ROOT_DIR/results/bayes_opt_${SLURM_ARRAY_JOB_ID:-ma
 # run -- the grid decode below still determines which object/model that index
 # actually optimizes, so the path you paste must belong to the same cell.
 declare -A RESUME_DIRS=(
-    [cube]="$ROOT_DIR/results/bayes_opt_23990896/grasp_reorient_cube_M1+M2+M3+M4_mppi"
-    [ball]="$ROOT_DIR/results/bayes_opt_23990896/grasp_reorient_ball_M1+M2+M3+M4_mppi"
-    [duck]="$ROOT_DIR/results/bayes_opt_23990896/grasp_reorient_duck_M1+M2+M3+M4_mppi"
+    [cube]=""
+    [ball]="$ROOT_DIR/results/bayes_opt_24823933/grasp_reorient_ball_M1+M2+M3+M4_mppi"
+    [duck]="$ROOT_DIR/results/bayes_opt_24823933/grasp_reorient_duck_M1+M2+M3+M4_mppi"
 )
 
 # ===========================================================================
@@ -268,6 +297,14 @@ else
 fi
 if (( DEBUG ));           then EXTRA_ARGS+=(--debug);            fi
 
+# This cell's goal difficulty: its object's entry, else GOAL_DIFFICULTY_ALL,
+# else no flag at all -- which is how the task's own default is requested.
+CELL_DIFFICULTY="${GOAL_DIFFICULTY[$OBJ]:-}"
+CELL_DIFFICULTY="${CELL_DIFFICULTY:-$GOAL_DIFFICULTY_ALL}"
+if [[ -n "$CELL_DIFFICULTY" ]]; then
+    EXTRA_ARGS+=(--goal_difficulty "$CELL_DIFFICULTY")
+fi
+
 # Keeping the flag inside the array means an empty OPT_WEIGHTS expands to
 # nothing at all, which is how the driver's own default subset is requested.
 WEIGHT_ARGS=()
@@ -293,7 +330,8 @@ conda activate contact_modeling
 
 echo "cell ${SLURM_ARRAY_TASK_ID:-0}/$(( TOTAL - 1 )): task=$TASK obj=$OBJ model=$MODEL"\
      "planner=$PLANNER geometry=$GEOMETRY n_calls=$N_CALLS n_episodes=$N_EPISODES"\
-     "episodes/trial=$(( ${#CELL_MODELS[@]} * N_EPISODES )) -> $OUTDIR"
+     "episodes/trial=$(( ${#CELL_MODELS[@]} * N_EPISODES ))"\
+     "goal_difficulty=${CELL_DIFFICULTY:-task-default} -> $OUTDIR"
 
 # Per-control-step trajectory + planner-distribution recording (see
 # contact_study/evaluation/trajectory.py). OFF for sweeps: at grasp_reorient's

@@ -135,6 +135,30 @@ def apply_cost_weight_overrides(task, overrides: dict) -> None:
     task.weights_wp = wp.array(weights_arr, dtype=wp.float32, device="cuda")
 
 
+def apply_goal_difficulty(task, difficulty: int) -> None:
+    """Override a task's goal-difficulty level on this (already built) instance.
+
+    The level picks which sampler GraspReorientTask.sample_new_goal dispatches
+    to; it is a class attribute, so this sets it per instance — "override on an
+    instance before the first episode", as the task documents. TaskConfig.
+    difficulty is refreshed too: the task copies it off the class attribute when
+    it builds its config, so it would otherwise report the stale default.
+
+    A task with no goal_difficulty cannot honour the request, and silently
+    ignoring it would run a whole sweep at the wrong setting — so that is an
+    error, not a no-op.
+    """
+    if not hasattr(task, "goal_difficulty"):
+        raise ValueError(
+            f"{type(task).__name__} has no goal_difficulty (task "
+            f"{getattr(task.config, 'name', '?')!r} does not support "
+            f"goal-difficulty levels)"
+        )
+    task.goal_difficulty = int(difficulty)
+    if task.config is not None:
+        task.config.difficulty = int(difficulty)
+
+
 def run_eval_episode(
     task_name:   str,
     contact_cfg: ContactModelConfig,
@@ -143,6 +167,7 @@ def run_eval_episode(
     geometry:    str = DEFAULT_SCENE_VARIANT,
     planner:     str | None = None,
     cost_weight_overrides: dict | None = None,
+    goal_difficulty: int | None = None,
     settle_seconds: float = 0.0,
     max_steps: int | None = None,
     plan_warmup: int = 0,
@@ -177,9 +202,9 @@ def run_eval_episode(
 
     cost_weight_overrides: optional {weight_name: value} merged into the rollout
         task's cost weights before planning (used by the weight grid search).
-    plan_warmup: throwaway plan() calls at the settled initial state before the
-        episode clock starts. This removes CUDA graph/JIT startup from latency
-        summaries in controlled benchmarks; zero preserves historical behavior.
+    goal_difficulty: optional goal-difficulty level for tasks that have one
+        (grasp_reorient levels 0-9, see its class docstring); None keeps the
+        task's own default.
     fin_ep_on_success: stop at first success (default); if False, resample a new
         goal on each success and keep going (multi-goal mode).
     record: what to log per control step (state, applied control, planner
@@ -201,6 +226,10 @@ def run_eval_episode(
 
     # ---- ROLLOUT task + planner ------------------------------------------
     rollout_task = get_task(task_name, geometry=geometry, role=TaskRole.ROLLOUT)
+    # Before load(): this is the instance sample_new_goal runs on, and the level
+    # has to be in place before the first goal is drawn below.
+    if goal_difficulty is not None:
+        apply_goal_difficulty(rollout_task, goal_difficulty)
     mjm, mjd = rollout_task.load()
     cfg = rollout_task.config
     if cost_weight_overrides:
@@ -222,6 +251,10 @@ def run_eval_episode(
 
     # ---- EVAL task + "real" simulator ------------------------------------
     eval_task = get_task(task_name, geometry=geometry, role=TaskRole.EVAL)
+    # The eval instance never samples goals; set it so both instances report the
+    # same TaskConfig.difficulty.
+    if goal_difficulty is not None:
+        apply_goal_difficulty(eval_task, goal_difficulty)
     eval_task.load()
     # eval_sim=None keeps the task's TaskConfig default; otherwise override it.
     if eval_sim is not None:
@@ -301,6 +334,7 @@ def run_eval_episode(
         extra_context={
             "task":        task_name,
             "geometry":    geometry,
+            "goal_difficulty": getattr(rollout_task, "goal_difficulty", None),
             "planner":     planner,
             "model_label": contact_cfg.label,
             "eval_sim":    getattr(eval_task.config.eval_sim, "value", None),
@@ -330,6 +364,9 @@ def run_eval_episode(
                  if getattr(planner_cfg, "convergence_tol", None) is not None else ""))
 
     step_times: list[float] = []
+    # Rollout steps each plan() actually simulated; < controller.horizon only
+    # when --time_constrained truncated the rollout.
+    horizon_steps: list[int] = []
     ep_start = time.perf_counter()
 
     for t in range(n_steps):
@@ -368,6 +405,7 @@ def run_eval_episode(
         action = controller.plan(mjd)
         plan_ms = (time.perf_counter() - plan_start) * 1e3
         step_times.append(plan_ms)
+        horizon_steps.append(int(controller.last_n_steps))
         if controller.pc.ctrl_relative_to_qpos:
             # Servo parameterization (mirrors the rollout): command the current
             # measured robot joint qpos plus the planned delta, re-read each step,
@@ -424,6 +462,12 @@ def run_eval_episode(
         end_reason = "success"
 
     step_arr = np.asarray(step_times)
+    hs_arr   = np.asarray(horizon_steps, dtype=float)
+    # The time-based horizon is the step count scaled by one constant, so its
+    # mean/std are the step stats scaled — computed that way rather than from
+    # hs_arr * control_dt, which leaves ~1e-17 float noise in a zero std.
+    hs_mean  = float(hs_arr.mean()) if len(hs_arr) else 0.0
+    hs_std   = float(hs_arr.std())  if len(hs_arr) else 0.0
     return EpisodeResult(
         task_name        = cfg.name,
         model_label      = contact_cfg.label,
@@ -435,10 +479,13 @@ def run_eval_episode(
         elapsed_seconds  = elapsed,
         mean_step_ms     = float(step_arr.mean()) if len(step_arr) else 0.0,
         std_step_ms      = float(step_arr.std())  if len(step_arr) else 0.0,
-        median_step_ms   = float(np.median(step_arr)) if len(step_arr) else 0.0,
-        p95_step_ms      = float(np.percentile(step_arr, 95)) if len(step_arr) else 0.0,
-        max_step_ms      = float(step_arr.max()) if len(step_arr) else 0.0,
+        mean_eff_horizon_steps = hs_mean,
+        std_eff_horizon_steps  = hs_std,
+        mean_eff_horizon_s     = hs_mean * control_dt,
+        std_eff_horizon_s      = hs_std  * control_dt,
         final_goal_errs  = final_goal_errs,
+        # The goal in effect at the end — the one final_goal_errs measures against.
+        **rollout_task.goal_spec(),
         time_out         = time_out,
         end_reason       = end_reason,
         n_steps_taken    = n_steps_taken,
@@ -461,16 +508,16 @@ def main():
     p.add_argument("--horizon",     type=int,   default=None,
                    help="Planning horizon in control steps (ignored when "
                         "--time_horizon is given).")
-    p.add_argument("--time_horizon", type=float, default=0.352,
+    p.add_argument("--time_horizon", type=float, default=0.352,#0.256,
                    help="Planning horizon in SECONDS; quantized down to whole "
                         "control steps. Overrides --horizon.")
-    p.add_argument("--step_time",   type=float, default=0.064,
+    p.add_argument("--step_time",   type=float, default=0.064,#0.032,
                    help="Control-step duration in SECONDS; quantized down to whole "
                         "rollout steps. Overrides --substeps.")
     p.add_argument("--n_iterations", type=int,  default=None,
                    help="Optimizer iterations per plan() call (default: the "
                         "planner's own — 1 for mppi/predictive_sampler, 3 for cem).")
-    p.add_argument("--noise_sigma", type=float, default=0.1)#0.2,)#0.1 # for M3)
+    p.add_argument("--noise_sigma", type=float, default=0.04)#0.2,)#0.1 # for M3)
     p.add_argument("--delta",       type=float, default=None,#0.1,
                    help="Per-step delta clip magnitude (action units); "
                         "pass 'none' to disable the delta clamp entirely.")
@@ -493,7 +540,7 @@ def main():
                         "point MPPI's --convergence_tol tests for, so the two "
                         "together can run to the cap.")
     # --- MPPI-only ---------------------------------------------------------
-    p.add_argument("--temperature", type=float, default=10.0)#30.0)#20.0 <- cube
+    p.add_argument("--temperature", type=float, default=0.004)#30.0)#20.0 <- cube
     p.add_argument("--convergence_tol", type=float, default=None,
                    help="Iterate until the returned action settles — "
                         "sum_u (u_i - u_i+1)^2 < tol — instead of running a fixed "
@@ -526,6 +573,14 @@ def main():
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
+    p.add_argument("--goal_difficulty", type=int, default=None,
+                   help="Goal-difficulty level for tasks that have one "
+                        "(grasp_reorient: 0 fixed 90 deg spin, 1 +/-90 deg spin, "
+                        "2 +/-90 deg about a random axis, 3 adjacent face + twist, "
+                        "4 any other face + twist, 5 180 deg flip, 6 adjacent face "
+                        "no twist, 7 roll to 'O', 8 roll either way, 9 roll to "
+                        "'B'). Default: "
+                        "the task's own.")
     p.add_argument("--seed",        type=int,   default=42)#64)
     p.add_argument("--n_episodes",  type=int,   default=1,
                    help="Number of episodes to run; reports the aggregate success rate.")
@@ -623,7 +678,7 @@ def main():
             noise_sigma    = args.noise_sigma,
             step_substeps  = args.substeps,
             warm_start     = args.warm_start,   # off: match irisim_warp (keep the running mean, no shift)
-            use_full_graph = True,
+            use_full_graph = not args.time_constrained,
             delta_range    = delta,
             nconmax        = 50,
             njmax          = 300,
@@ -660,6 +715,7 @@ def main():
             video_path  = video_path,
             use_mp4     = use_mp4,
             cost_weight_overrides = overrides or None,
+            goal_difficulty = args.goal_difficulty,
             settle_seconds = args.settle,
             max_steps      = args.max_steps,
             plan_warmup    = args.plan_warmup,

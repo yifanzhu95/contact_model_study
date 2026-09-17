@@ -11,6 +11,8 @@ using scikit-optimize's Gaussian-process minimizer (skopt.gp_minimize).
 Search space (all log-uniform by default):
   * the cost weights named by --opt_weights, bracketed multiplicatively around
     the task's own defaults, so the space auto-adapts per task/object;
+    --no-opt_cost_weights drops them entirely, pinning every weight to the
+    task's default and tuning only the planner knobs below;
   * noise_sigma, the sampling planner's action-noise standard deviation;
   * temperature, MPPI's softmax sharpness (dropped for planners that have no
     such field — make_planner_config filters by the config's declared fields).
@@ -57,6 +59,12 @@ Each trial then runs n_models x --n_episodes episodes at identical seeds, up to
 
 Add --per_model_temperature to let each of those models tune its own MPPI
 temperature (same bounds, one dimension each) while sharing the weight vector.
+
+--goal_difficulty pins which goal sampler the episodes draw from. It is a
+setting, not a search dimension: one level for the whole run, fixed across every
+trial and every model, so the models stay comparable. A run covers ONE object
+(--geometry names it), so per-object levels are chosen by whatever launches the
+runs — see experiments/hpc/bayes_opt.slurm, which keys them off its object axis.
 """
 
 from __future__ import annotations
@@ -330,6 +338,8 @@ class BOObjective:
         The seed is keyed by EPISODE ONLY, never by model: every model must be
         handed the identical initial states, goals and planner noise, or a
         per-model score difference could not be attributed to the contact model.
+        goal_difficulty is part of that: it is one level for the whole run, so
+        every model is scored on the same goal distribution.
         """
         args = self.args
         planner_kwargs = dict(
@@ -363,6 +373,7 @@ class BOObjective:
             seed_seq              = self.episode_seeds[ep],
             video_path            = None,
             cost_weight_overrides = overrides or None,
+            goal_difficulty       = args.goal_difficulty,
             settle_seconds        = args.settle,
             eval_substeps         = args.eval_substeps,
             eval_sim              = self.eval_sim,
@@ -546,6 +557,9 @@ class BOObjective:
             "eval_sim": args.eval_sim,
             "geometry": args.geometry,
             "settle":   args.settle,
+            # None = the task's own default, the same meaning the column
+            # carries in run_csv_cell.py's records.
+            "goal_difficulty": args.goal_difficulty,
             # -- BO-specific ---------------------------------------------------
             "planner":            self.planner,
             "objective":          objective,
@@ -654,19 +668,19 @@ def build_parser() -> argparse.ArgumentParser:
                         "single contact model. Cost is proportional: a trial is "
                         "n_models x --n_episodes episodes, which --n_workers runs "
                         "concurrently.")
-    p.add_argument("--model_agg",   type=str, default="worst", choices=["mean", "worst"],
+    p.add_argument("--model_agg",   type=str, default="mean", choices=["mean", "worst"],
                    help="How per-model objectives become the trial's score. 'mean' "
                         "optimizes average performance and lets a good model carry a "
                         "bad one; 'worst' (minimax) optimizes the worst model, which "
                         "is the stricter reading of 'weights that work for all of "
                         "them'. Ignored with a single --models entry.")
     p.add_argument("--planner",     type=str, default="mppi", choices=PLANNER_NAMES)
-    p.add_argument("--n_samples",   type=int, default=256)
+    p.add_argument("--n_samples",   type=int, default=256)#256)
     p.add_argument("--horizon",     type=int, default=None,
                    help="Planning horizon in control steps (ignored with --time_horizon).")
-    p.add_argument("--time_horizon", type=float, default=0.352,
+    p.add_argument("--time_horizon", type=float, default=0.256,
                    help="Planning horizon in SECONDS; quantized down to whole control steps.")
-    p.add_argument("--step_time",   type=float, default=0.064,
+    p.add_argument("--step_time",   type=float, default=0.032,
                    help="Control-step duration in SECONDS; quantized down to whole rollout steps.")
     p.add_argument("--n_iterations", type=int, default=None,
                    help="Optimizer iterations per plan() (default: the planner's own).")
@@ -688,7 +702,21 @@ def build_parser() -> argparse.ArgumentParser:
                    choices=["none", "mujoco", "drake", "pinocchio"],
                    help="Eval simulator: 'none' uses the task default, else override it.")
     p.add_argument("--settle",      type=float, default=1.0)
-    p.add_argument("--n_episodes",  type=int, default=4,
+    p.add_argument("--goal_difficulty", type=int, default=None,
+                   help="Goal-difficulty level: which goal sampler the episodes "
+                        "draw from. PINNED for the whole run — one level for "
+                        "every trial and every model, not a search dimension "
+                        "and not a per-model knob, so the per-model objectives "
+                        "--model_agg folds stay like-for-like. A run covers one "
+                        "object (--geometry), so vary this PER OBJECT from the "
+                        "launcher; experiments/hpc/bayes_opt.slurm keys it off "
+                        "its object axis. grasp_reorient levels: 0 fixed 90 deg "
+                        "spin, 1 +/-90 deg spin, 2 +/-90 deg about a random "
+                        "axis, 3 adjacent face + twist, 4 any other face + "
+                        "twist, 5 180 deg flip, 6 adjacent face no twist, "
+                        "7 roll to 'O', 8 roll either way, 9 roll to 'B'. "
+                        "Default: the task's own.")
+    p.add_argument("--n_episodes",  type=int, default=1,
                    help="Episodes per objective evaluation. More episodes average out "
                         "episode-specific luck at a proportional cost in wall time.")
     p.add_argument("--seed",        type=int, default=64,
@@ -712,7 +740,7 @@ def build_parser() -> argparse.ArgumentParser:
                                                     "w_pos_x:1.0:50.0",
                                                     "w_pos_y:1.0:50.0",
                                                     "w_pos_z:1.0:50.0",
-                                                    "w_contact:0.1:20.0",
+                                                    "w_contact:0.1:100.0",
                                                     "w_joint:0.1:20.0",
                                                     "w_fallen:100.0:300.0",
                                                     "w_quat_term:100.0:300.0",
@@ -725,10 +753,17 @@ def build_parser() -> argparse.ArgumentParser:
                         "error. Pass a bare 'name' to fall back to the "
                         f"multiplicative bracket, or the {' '.join(DEFAULT_OPT_WEIGHTS)} "
                         "subset for the old behavior.")
+    p.add_argument("--opt_cost_weights", action=argparse.BooleanOptionalAction, default=True,
+                   help="Search over the cost weights; --no-opt_cost_weights drops "
+                        "every weight dimension and pins them to the task's own "
+                        "defaults, leaving only the planner knobs (noise_sigma, "
+                        "temperature) in the space. Cannot be combined with an "
+                        "explicit --opt_weights, and needs at least one planner "
+                        "knob left to search.")
     p.add_argument("--opt_noise_sigma", action=argparse.BooleanOptionalAction, default=False,
                    help="Search over noise_sigma; --no-opt_noise_sigma pins it to "
                         "--noise_sigma instead.")
-    p.add_argument("--opt_temperature", action=argparse.BooleanOptionalAction, default=True,
+    p.add_argument("--opt_temperature", action=argparse.BooleanOptionalAction, default=False,
                    help="Search over MPPI's temperature; --no-opt_temperature pins it to "
                         "--temperature instead.")
     p.add_argument("--per_model_temperature", action=argparse.BooleanOptionalAction,
@@ -743,11 +778,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "--opt_temperature; ignored for a single model.")
     p.add_argument("--noise_sigma_range", type=float, nargs=2, default=(1e-3, 1.0),
                    metavar=("LO", "HI"))
-    p.add_argument("--temperature_range", type=float, nargs=2, default=(0.001, 100.0),
+    p.add_argument("--temperature_range", type=float, nargs=2, default=(0.001, 25.0),
                    metavar=("LO", "HI"))
-    p.add_argument("--noise_sigma", type=float, default=0.1,
+    p.add_argument("--noise_sigma", type=float, default=0.05,
                    help="Fixed noise_sigma when --no-opt_noise_sigma.")
-    p.add_argument("--temperature", type=float, default=30.0,
+    p.add_argument("--temperature", type=float, default=10.0,
                    help="Fixed temperature when --no-opt_temperature.")
 
     # --- objective ----------------------------------------------------------
@@ -755,13 +790,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Weight on the success rate (maximized).")
     p.add_argument("--w_cost",     type=float, default=0.1,
                    help="Weight on the normalized final goal error (minimized).")
-    p.add_argument("--err_clip",   type=float, default=25.0,
+    p.add_argument("--err_clip",   type=float, default=250.0,
                    help="Goal error is clipped here then divided by it, mapping the "
                         "cost term into [0, 1] so it cannot be dominated by one "
                         "catastrophic episode.")
 
     # --- optimizer ----------------------------------------------------------
-    p.add_argument("--n_calls",    type=int, default=500,
+    p.add_argument("--n_calls",    type=int, default=250,
                    help="Total trial budget, INCLUDING any trials restored by --resume.")
     p.add_argument("--n_initial_points", type=int, default=10,
                    help="Random trials before the GP takes over (reduced by the number "
@@ -804,7 +839,33 @@ def main():
             "pinned to --temperature by --no-opt_temperature"
         )
 
-    specs      = parse_weight_specs(args.opt_weights, default_weights)
+    # Checked before the search starts: apply_goal_difficulty raises inside the
+    # worker, where episode_pool would swallow it and score every episode as a
+    # plain failure — a whole cell of trials at -0.0 with no obvious cause.
+    if args.goal_difficulty is not None and not hasattr(peek_task, "goal_difficulty"):
+        raise ValueError(
+            f"--goal_difficulty was given, but task {args.task!r} has no "
+            f"goal-difficulty levels; every episode would raise and be scored "
+            f"as a failure"
+        )
+
+    if args.opt_cost_weights:
+        specs = parse_weight_specs(args.opt_weights, default_weights)
+    else:
+        # Weights pinned: no weight dimensions at all, so every trial runs the
+        # task's own cost_weights and only the planner knobs move. The space
+        # still has to contain something for the GP to search.
+        if args.opt_weights:
+            raise ValueError(
+                "--opt_weights lists weights to search, but --no-opt_cost_weights "
+                "pins them all to the task's defaults; drop one of the two"
+            )
+        if not (args.opt_noise_sigma or args.opt_temperature):
+            raise ValueError(
+                "--no-opt_cost_weights leaves an empty search space; enable "
+                "--opt_noise_sigma and/or --opt_temperature"
+            )
+        specs = []
     dims, names = build_space(specs, args)
 
     # Quantize the requested durations into the step counts the controller will
@@ -855,6 +916,8 @@ def main():
               f"same episode seeds; folded by --model_agg {args.model_agg}")
     print(f"  eval_sim={args.eval_sim}  geometry={args.geometry}  "
           f"n_episodes={args.n_episodes}  seed={args.seed} (constant)")
+    print(f"  goal_difficulty="
+          f"{'task default' if args.goal_difficulty is None else args.goal_difficulty}")
     print(f"  rollout_dt={rollout_dt*1e3:.3f}ms  step_time={args.step_time:g}s -> "
           f"{substeps} substeps  time_horizon={args.time_horizon:g}s -> {horizon} steps")
     print(f"  objective = -({args.w_success:g} * success_rate) + "
@@ -864,6 +927,8 @@ def main():
     print(f"  search space ({len(dims)} dims):")
     for d, name in zip(dims, names):
         print(f"      {name:<16} [{d.low:.5g}, {d.high:.5g}]  {d.prior}")
+    if not args.opt_cost_weights:
+        print(f"      cost weights     pinned to the task's defaults")
     if not args.opt_noise_sigma:
         print(f"      noise_sigma      pinned to {args.noise_sigma:g}")
     if not args.opt_temperature:
@@ -963,6 +1028,7 @@ def main():
         "planner":      planner,
         "geometry":     args.geometry,
         "eval_sim":     args.eval_sim,
+        "goal_difficulty": args.goal_difficulty,
         "n_episodes":   args.n_episodes,
         "seed":         args.seed,
         "bo_seed":      args.bo_seed,
@@ -1013,6 +1079,8 @@ def main():
         print(f"        --noise_sigma {best_params.get('noise_sigma', args.noise_sigma):g} \\")
         print(f"        --temperature {temp:g} \\")
         print(f"        --seed {args.seed} --settle {args.settle:g} \\")
+        if args.goal_difficulty is not None:
+            print(f"        --goal_difficulty {args.goal_difficulty} \\")
         print(f"        --weights {weight_flags}")
     print(f"\n  Saved -> {outdir}")
     print(f"{'='*70}")

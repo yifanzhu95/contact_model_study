@@ -263,6 +263,7 @@ def run_episode(
         elapsed_seconds  = elapsed,
         mean_step_ms     = float(step_arr.mean()) if len(step_arr) else 0.0,
         std_step_ms      = float(step_arr.std())  if len(step_arr) else 0.0,
+        **task.goal_spec(),
         time_out         = time_out,
         end_reason       = end_reason,
         n_steps_taken    = n_steps_taken,

@@ -211,6 +211,7 @@ def run_one_episode(
         final_cost       = float(np.linalg.norm(mjd.qpos - q0)), # THIS IS WRONG
         n_samples_used   = n_used,
         elapsed_seconds  = elapsed,
+        **task.goal_spec(),
         time_out         = end_reason == "timeout",
         end_reason       = end_reason,
         n_steps_taken    = n_steps_taken,

@@ -44,12 +44,17 @@ class EpisodeResult:
     elapsed_seconds:   float
     mean_step_ms:      float = 0.0
     std_step_ms:       float = 0.0
-    # Distribution summaries of controller.plan() latency.  The mean alone is
-    # easily distorted by occasional CUDA scheduling or contact-heavy spikes;
-    # median and P95 distinguish the typical cost from the slow tail.
-    median_step_ms:    float = 0.0
-    p95_step_ms:       float = 0.0
-    max_step_ms:       float = 0.0
+
+    # --- effective planning horizon ---------------------------------------
+    # Rollout steps each plan() actually simulated (controller.last_n_steps) and
+    # the same in seconds (x controller.control_dt), meaned / std'd over every
+    # plan() in the episode. Equal to the configured horizon with std 0 unless
+    # --time_constrained truncated rollouts. 0.0 on records that predate them.
+    mean_eff_horizon_steps: float = 0.0
+    std_eff_horizon_steps:  float = 0.0
+    mean_eff_horizon_s:     float = 0.0
+    std_eff_horizon_s:      float = 0.0
+
     # Which sampling planner produced the episode ("mppi" | "cem" |
     # "predictive_sampler"). Defaulted so results written before the planner
     # became selectable still load via EpisodeResult.from_dict.
@@ -60,6 +65,20 @@ class EpisodeResult:
     # the task has no continuous goal metric. Distinct from final_cost, which is
     # ||q_final - q_0|| — displacement from the START pose, not goal error.
     final_goal_errs:   dict[str, float] | None = None
+
+    # --- which goal the episode was actually asked to reach -----------------
+    # BaseTask.goal_spec() read at the END of the episode, i.e. the goal that
+    # final_goal_errs is measured against. In multi-goal mode
+    # (fin_ep_on_success=False) the goal is resampled on every success, so these
+    # describe the LAST goal drawn, not the only one — the trajectory record
+    # holds every switch. goal_difficulty is the level sample_new_goal
+    # dispatched on (grasp_reorient 0-9); goal_pos/goal_quat (wxyz) are the
+    # target object pose. All None for a task that has no such goal, and on
+    # records written before these fields existed — an old record is NOT
+    # difficulty 1 just because that is the task default.
+    goal_difficulty:   int | None = None
+    goal_pos:          list[float] | None = None
+    goal_quat:         list[float] | None = None
 
     # --- how the episode ended ---------------------------------------------
     # The control loop leaves by exactly one of three doors, and `success` alone
