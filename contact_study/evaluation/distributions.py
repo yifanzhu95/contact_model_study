@@ -5,9 +5,9 @@ distribution on the GPU: V_wp holds the clamped candidate sequences and the
 planner-specific state says how they were weighted. Summarizing the FIRST action
 of that cloud as a Gaussian (mu, Sigma) is what makes two planners comparable —
 it is how experiments/hpc/run_kl_divergence_cell.py measures the information a
-degraded contact model loses relative to a reference one, and it is what
-evaluation/trajectory.py records per control step so the same comparison can be
-made offline against a trajectory that has already been run.
+compute-degraded planner loses relative to a larger reference planner, and it
+is what evaluation/trajectory.py records per control step so the same comparison
+can be made offline against a trajectory that has already been run.
 
 `weighted_moments` and `gaussian_kl` moved here verbatim from the KL cell, so the
 numbers in existing results/kl_divergence_eval_* directories stay comparable.

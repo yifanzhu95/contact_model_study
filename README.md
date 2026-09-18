@@ -66,6 +66,13 @@ The retired `GeometryVariant` names (`accurate`, `convex_hull`,
 `primitive_union`, `linearized`) are still accepted and map to the default
 variant, so existing SLURM scripts keep working.
 
+The [KL-vs-success workflow](analysis/README_kl_divergence.md) intentionally
+uses a stricter selector: all five current objects (`cube`, `duck`, `ball`,
+`spam`, `tomato`) use `high_high` rollout geometry with their fixed evaluation
+scenes. In that worker only, object shorthand selects `high_high`, lower
+fidelities and legacy aliases are rejected, and plots separate object/config
+families. Other drivers retain the general scene-selection behavior above.
+
 ### Contact model variants
 
 | ID  | Description                                                        |
@@ -125,7 +132,8 @@ contact_study/
 │   └── measure_approx_error.py # Approximation error vs horizon
 │
 ├── analysis/
-│   └── plot_results.py         # All paper figures
+│   ├── plot_results.py         # All paper figures
+│   └── README_kl_divergence.md # KL-vs-success workflow and diagnostics
 │
 └── tests/
     ├── test_allegro.py
