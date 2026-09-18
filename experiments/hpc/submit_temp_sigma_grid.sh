@@ -14,7 +14,8 @@
 #                                                              # GPUs at once
 #   OUTDIR=/abs/path/to/previous ./submit_temp_sigma_grid.sh cells.csv   # resume
 #                                                              # (same CSV: cell
-#                                                              # ids are row-offset)
+#                                                              # files are named
+#                                                              # by row index)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
