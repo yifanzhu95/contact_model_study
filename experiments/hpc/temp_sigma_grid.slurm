@@ -21,21 +21,23 @@
                              # n_samples varies per row of the cell CSV, so it
                              # (and the GPU) must cover N_WORKERS x the LARGEST
                              # n_samples in the CSV.
-#SBATCH --time=16:00:00      # one cell = #temperatures x #noise_sigmas x
-                             # N_EPISODES episodes (90 by default), run
+#SBATCH --time=16:00:00      # one cell = THAT ROW's #temperatures x
+                             # #noise_sigmas x N_EPISODES episodes, run
                              # CONCURRENTLY N_WORKERS at a time, so the cost is
                              # about ceil(episodes / N_WORKERS) x the slowest
                              # episode rather than their sum. Uniform across the
-                             # array, so it must cover the SLOWEST row of the
-                             # cell CSV — largest n_iterations x n_samples x
-                             # (time_horizon / step_time), i.e. the most rollout
-                             # steps per plan() — several times the cheapest. A
-                             # timed-out cell resumes: finished grid points are
-                             # skipped on the next run (see OUTDIR below).
+                             # array, so it must cover the COSTLIEST row of the
+                             # cell CSV: its grid size (the two list columns are
+                             # per row) x its episode cost — largest
+                             # n_iterations x n_samples x (time_horizon /
+                             # step_time), i.e. the most rollout steps per
+                             # plan(). A timed-out cell resumes: finished grid
+                             # points are skipped on the next run (see OUTDIR).
 
 # ===========================================================================
 # Temperature x noise_sigma grid — one (contact model, object, n_iterations,
-# n_samples, time_horizon, step_time) cell per GPU, one cell per CSV row.
+# n_samples, time_horizon, step_time) cell per GPU, one cell per CSV row, each
+# row naming the temperature x noise_sigma grid to search inside it.
 #
 # The third sweep in this directory, and distinct from the other two:
 #
@@ -47,33 +49,36 @@
 #
 # Here each array task is ONE ROW of a cell table (CELLS_CSV below, default
 # temp_sigma_cells.csv): a contact model, an object, an iteration count, a
-# sample count, and the planning horizon + control-step duration THAT cell runs
-# with. contact_study/drivers/run_temp_sigma_grid.py walks the whole
-# temperature x noise_sigma grid inside that cell using the same EpisodePool
-# run_bayes_opt.py uses. That split is the point: the useful MPPI temperature
-# scales with the magnitude of the task cost, which differs per contact model,
-# per object and per horizon, so one grid per cell is the readable picture.
+# sample count, the planning horizon + control-step duration THAT cell runs
+# with, and the temperature x noise_sigma grid to search inside it.
+# contact_study/drivers/run_temp_sigma_grid.py walks that grid using the same
+# EpisodePool run_bayes_opt.py uses. That split is the point: the useful MPPI
+# temperature scales with the magnitude of the task cost, which differs per
+# contact model, per object and per horizon — which is also why the grid is a
+# per-row column rather than one list for the whole submission.
 #
-# The cells are a CSV rather than bash arrays because the horizon and step
-# time are PER CELL, not a further axis: each (object, model, n_iterations,
-# n_samples) gets exactly one (time_horizon, step_time), which a mixed-radix
-# decode of independent lists cannot express. n_iterations and n_samples are
-# cell axes rather than grid axes because they change what an episode COSTS,
-# not only how it scores: one cell per value keeps a cell's wall clock and VRAM
-# constant instead of multiplying the inner grid, and lets the cheap cells
-# finish while the expensive ones are still running. The same holds for the
-# horizon and step time. USE_CONVERGENCE below swaps the fixed iteration count
-# for MPPI's convergence-terminated mode, which makes the CSV's n_iterations
-# column irrelevant.
+# The cells are a CSV rather than bash arrays because the rows are not a full
+# cross product: a horizon worth searching at n_samples=1024 may not be worth
+# searching at 16, and the grid each cell deserves differs per row too — a
+# mixed-radix decode of independent lists can express none of that, while a
+# table is just the rows you want. n_iterations, n_samples, the horizon and the
+# step time are cell axes rather than grid axes because they change what an
+# episode COSTS, not only how it scores: one cell per combination keeps a cell's
+# wall clock and VRAM predictable instead of multiplying the inner grid, and
+# lets the cheap cells finish while the expensive ones are still running.
+# USE_CONVERGENCE below swaps the fixed iteration count for MPPI's
+# convergence-terminated mode, which makes the CSV's n_iterations column
+# irrelevant.
 #
-# Every array task writes cell_*.json into ONE shared $OUTDIR, with ids offset
-# by the array index, so a single combine job merges the whole submission.
+# Every array task writes cell_<row>_<point>.json into ONE shared $OUTDIR — the
+# row number is in the name, so rows whose grids differ in size cannot collide —
+# and a single combine job merges the whole submission.
 #
 # Submit:   experiments/hpc/submit_temp_sigma_grid.sh [cells.csv] [label] [throttle]
 # Resume:   OUTDIR=/abs/path/to/previous experiments/hpc/submit_temp_sigma_grid.sh cells.csv
-#           (same CSV! the cell ids are row-offset, so a reordered CSV would
-#           resume the wrong cells)
-# Results:  results/temp_sigma_grid_<array job id>/cell_*.json
+#           (same CSV! cell files are named by row index, so a reordered CSV
+#           would resume the wrong cells)
+# Results:  results/temp_sigma_grid_<array job id>/cell_<row>_<point>.json
 #           + grid_summary_<array index>.json per cell (its ranked table)
 #           + combined_temp_sigma_grid_{rich,agg}.json from the combine job
 # ===========================================================================
@@ -89,7 +94,8 @@ cd "$PROJ_DIR"
 # ===========================================================================
 # 1. THE CELLS: one CSV row per array task. Columns, all required:
 #
-#      object,model,n_iterations,n_samples,time_horizon,step_time
+#      object,model,n_iterations,n_samples,time_horizon,step_time,
+#      temperatures,noise_sigmas
 #
 #    object       key of _OBJ_PARAMS in tasks/grasp_reorient.py (cube/duck/ball)
 #    model        M1..M4
@@ -101,11 +107,23 @@ cd "$PROJ_DIR"
 #                 CSV sets what a node must hold.
 #    time_horizon planning horizon in SECONDS
 #    step_time    control-step duration in SECONDS
+#    temperatures THE GRID, first axis: MPPI lambda divides the cost in the
+#                 softmax, so the useful value scales with the magnitude of THIS
+#                 cell's task cost — which is why it is a per-row column and not
+#                 one list for the whole submission. A list, space- or
+#                 comma-separated ("100 50 25" or a quoted "100,50,25").
+#    noise_sigmas THE GRID, second axis: action-noise standard deviations, same
+#                 list syntax. ONE value collapses the cell to a 1-D temperature
+#                 sweep. The cell runs every (temperature, noise_sigma) pair, so
+#                 its wall clock is the product of the two lists' lengths.
 #
-#    read_temp_sigma_cell.py rejects a typo'd header, a blank value, and two
-#    rows naming the same (object, model, n_iterations, n_samples): the cell
-#    label and the analysis script's cell key do not include the horizon or
-#    step time, so such rows would merge into one result row.
+#    read_temp_sigma_cell.py rejects a typo'd header, a blank value, a grid
+#    value that is not a positive number (or is listed twice), and two rows
+#    naming the same (object, model, n_iterations, n_samples, time_horizon,
+#    step_time): those six are what the cell label and the analysis script's
+#    cell key identify a cell by, so such rows would merge into one result row —
+#    and differing grid lists do NOT separate them. Put every temperature of a
+#    cell's grid in that cell's one row.
 #
 #    CELLS_CSV is exported by submit_temp_sigma_grid.sh; override it by hand
 #    for a manual `sbatch --array=0-N temp_sigma_grid.slurm`.
@@ -139,15 +157,7 @@ if [[ "$USE_CONVERGENCE" != "true" && "$USE_CONVERGENCE" != "false" ]]; then
 fi
 
 # ===========================================================================
-# 2. THE GRID inside each cell. Comma-separated, expanded by the driver — bash
-#    never needs to know how many points these make.
-# ===========================================================================
-TEMPERATURES="100,50,25,12.5,6.25"                 # MPPI lambda: divides cost in the softmax
-NOISE_SIGMAS="0.1"             # action-noise std dev; ONE value here
-                                        # collapses this to a 1-D temperature sweep
-
-# ===========================================================================
-# 3. Episode settings — names match run_eval_episode.py, so a winning point
+# 2. Episode settings — names match run_eval_episode.py, so a winning point
 #    replays by copy-pasting the flags the driver prints. The planning horizon
 #    and control-step duration are NOT here: they are per cell, in the CSV.
 # ===========================================================================
@@ -174,9 +184,10 @@ WEIGHTS=()
 # e.g. WEIGHTS=("w_quat=20.0" "w_pos_x=7.5" "w_pos_y=15.0" "w_pos_z=5.0")
 
 # ===========================================================================
-# 4. Output. ONE directory for the whole array: cell ids are offset by the
-#    array index inside the driver, so tasks cannot collide and one
-#    combine_results.py run merges every cell.
+# 3. Output. ONE directory for the whole array: each point's file is named
+#    for its row and its place in that row's grid (cell_<row>_<point>.json)
+#    inside the driver, so tasks cannot collide — even when their grids differ
+#    in size — and one combine_results.py run merges every cell.
 #    Export OUTDIR to a FIXED path to resume a previous submission wholesale
 #    (the array job id changes on every sbatch); finished points are skipped.
 # ===========================================================================
@@ -188,13 +199,14 @@ eval "$(conda shell.bash hook)"
 conda activate contact_modeling
 
 # ===========================================================================
-# 5. This task's cell = row $SLURM_ARRAY_TASK_ID of the CSV. The helper does
+# 4. This task's cell = row $SLURM_ARRAY_TASK_ID of the CSV. The helper does
 #    the parsing (bash cannot read a CSV safely) and the range check; any
 #    failure exits non-zero, which `set -eo pipefail` turns into a failed task
 #    rather than a run of the wrong cell.
 # ===========================================================================
 T=${SLURM_ARRAY_TASK_ID:-0}
-IFS=$'\t' read -r OBJ MODEL N_ITER N_SAMPLES TIME_HORIZON STEP_TIME < <(
+IFS=$'\t' read -r OBJ MODEL N_ITER N_SAMPLES TIME_HORIZON STEP_TIME \
+        TEMPERATURES NOISE_SIGMAS < <(
     python experiments/hpc/read_temp_sigma_cell.py "$CELLS_CSV" "$T")
 GEOMETRY="${OBJ}_${HAND_ACC}_${OBJ_ACC}"
 
@@ -211,7 +223,7 @@ fi
 
 echo "cell $T (row $T of $CELLS_CSV): model=$MODEL object=$OBJ geometry=$GEOMETRY"
 echo "  planner: $ITER_DESC  n_samples=$N_SAMPLES  time_horizon=${TIME_HORIZON}s  step_time=${STEP_TIME}s"
-echo "  grid: T=[$TEMPERATURES] x sigma=[$NOISE_SIGMAS] x $N_EPISODES episodes -> $OUTDIR"
+echo "  grid (this row): T=[$TEMPERATURES] x sigma=[$NOISE_SIGMAS] x $N_EPISODES episodes -> $OUTDIR"
 
 # Per-control-step trajectory + planner-distribution recording (see
 # contact_study/evaluation/trajectory.py). OFF: at a task's max_steps it is

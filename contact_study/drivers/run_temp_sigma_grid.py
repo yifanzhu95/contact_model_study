@@ -1,8 +1,8 @@
 """Pooled temperature x noise_sigma grid search — one cell per GPU.
 
-A cell is one (contact model, object, n_iterations, n_samples): the SLURM script
-owns those four axes and hands this script a single value of each, and this
-script grids temperature x noise_sigma inside it.
+A cell is one (contact model, object, n_iterations, n_samples, time_horizon,
+step_time): the SLURM script owns those six axes and hands this script a single
+value of each, and this script grids temperature x noise_sigma inside it.
 
 The third sweep in this repo, and deliberately distinct from the other two:
 
@@ -14,14 +14,17 @@ The third sweep in this repo, and deliberately distinct from the other two:
     never produces an even, readable surface over two knobs.
 
 Here the SLURM script hands each array task one contact model, one object (via
---geometry), one --n_iterations and one --n_samples, and THIS script walks the
+--geometry), one --n_iterations, one --n_samples and one schedule
+(--time_horizon/--step_time), plus the grid to search, and THIS script walks the
 whole temperature x noise_sigma grid inside that cell, running its episodes
 through the same pool run_bayes_opt uses. That suits these two knobs in
 particular: the right MPPI temperature depends on the scale of the task cost,
-which differs per contact model and per object, so the useful picture is one grid
-per cell rather than a single global optimum. The iteration and sample counts are
-cell axes rather than grid axes because they change the cost of an episode rather
-than only its outcome: giving each its own GPU keeps one cell's wall clock
+which differs per contact model, per object and per horizon, so the useful
+picture is one grid per cell rather than a single global optimum — and the grid
+worth searching differs per cell, which is why the SLURM script reads it from
+the cell's own CSV row. The iteration count, sample count, horizon and step time
+are cell axes rather than grid axes because they change the cost of an episode
+rather than only its outcome: giving each its own GPU keeps one cell's wall clock
 roughly constant instead of multiplying the inner grid.
 
 --convergence_tol switches MPPI to its convergence-terminated mode (iterate until
@@ -32,11 +35,13 @@ Grid points are scored on the SAME episodes (--seed is constant, spawned once),
 so neighbouring temperatures differ only in the knob. Points are ranked by
 success rate, ties broken by mean steps-to-success.
 
-Each point writes results/<run>/cell_<id>.json in run_param_cell.py's schema, so
-experiments/hpc/combine_results.py merges a whole array unchanged. Cell ids are
-offset by --array_index, which is what lets every array task share one output
-directory. A point whose file already exists is skipped, so a requeued or
-timed-out cell resumes where it left off.
+Each point writes results/<run>/cell_<array index>_<point>.json in
+run_param_cell.py's schema, so experiments/hpc/combine_results.py merges a whole
+array unchanged. Naming the file after the array index is what lets every array
+task share one output directory: the cells of a submission may search grids of
+DIFFERENT sizes, so a running point-number offset would have one row's files
+overwrite another's. A point whose file already exists is skipped, so a requeued
+or timed-out cell resumes where it left off.
 
 Deliberately does NOT import from run_bayes_opt.py: that module imports skopt at
 module scope, and this job has no business requiring scikit-optimize.
@@ -88,6 +93,13 @@ RESULTS_DIR = Path(__file__).parents[2] / "results"
 # Model/Data at nworld=n_samples plus the (N, H, nu) sample block. Only used to
 # warn — the real cost depends on --n_samples/--nconmax/--njmax.
 MIN_VRAM_PER_WORKER_GB = 1.5
+
+# combo_index = array_index * this + point. The file name carries the two
+# numbers separately (see GridSearch.cell_path); this exists only so the id
+# stays a single int that sorts by (cell, point), which is all
+# experiments/hpc/combine_results.py asks of it. Grids this large are rejected
+# in main() rather than silently colliding with the next cell's ids.
+POINTS_PER_CELL_MAX = 1000
 
 
 # ---------------------------------------------------------------------------
@@ -163,9 +175,9 @@ def _device_free_gb() -> float | None:
 class GridSearch:
     """Runs the temperature x noise_sigma grid for one cell.
 
-    A cell is one (model, object, n_iterations, n_samples) — those four are the
-    SLURM array's axes and are fixed here; only temperature and noise_sigma vary
-    across `points`.
+    A cell is one (model, object, n_iterations, n_samples, time_horizon,
+    step_time) — those six are the SLURM array's axes and are fixed here; only
+    temperature and noise_sigma vary across `points`.
 
     Holds the per-episode seeds (computed ONCE, so every point is evaluated on
     the same episodes), the resolved schedule and the output directory.
@@ -195,9 +207,15 @@ class GridSearch:
         # every point's identity because all array tasks share one --outdir.
         # Under --convergence_tol the iteration count is decided per plan() call,
         # so the tolerance stands in for it (and args.n_iterations is ignored).
+        # The schedule is in here too: a cell is identified by its horizon and
+        # step time as much as by its iteration and sample counts, and without
+        # them two cells that differ only in the schedule share a label and the
+        # analysis folds them into one row.
         if args.convergence_tol is not None:
             self.cell_axes = {"convergence_tol": args.convergence_tol,
-                              "n_samples":       args.n_samples}
+                              "n_samples":       args.n_samples,
+                              "time_horizon":    args.time_horizon,
+                              "step_time":       args.step_time}
             self.max_iterations = (args.max_iterations if args.max_iterations is not None
                                    else planner_default(self.planner, "max_iterations"))
         else:
@@ -205,7 +223,15 @@ class GridSearch:
             n_iter = (args.n_iterations if args.n_iterations is not None
                       else planner_default(self.planner, "n_iterations"))
             self.cell_axes = {"n_iterations": n_iter,
-                              "n_samples":    args.n_samples}
+                              "n_samples":    args.n_samples,
+                              "time_horizon": args.time_horizon,
+                              "step_time":    args.step_time}
+
+        # The grid this cell was ASKED for, recorded on every point it writes:
+        # the lists are per cell now, so a cell killed before it could write its
+        # grid_summary cannot have its axes read off a sibling cell.
+        self.grid_temperatures = sorted({t for t, _ in points})
+        self.grid_noise_sigmas = sorted({s for _, s in points})
 
         # THE constant seeds. Spawned once and replayed for every grid point, so
         # two points differ only in their knobs — the whole reason a grid over
@@ -221,14 +247,20 @@ class GridSearch:
     def cell_id(self, i: int) -> int:
         """Globally unique id for grid point `i` of this array task.
 
-        Offsetting by the array index (rather than having the SLURM script do
-        the arithmetic) keeps the grid size in one place: bash never has to know
-        how many points the lists expand to.
+        Keyed on the ARRAY INDEX, not on a running count of points: every cell
+        of a submission shares one --outdir while searching a grid of its own
+        size, so `previous points + i` would hand two cells the same id.
         """
-        return self.args.array_index * len(self.points) + i
+        return self.args.array_index * POINTS_PER_CELL_MAX + i
 
     def cell_path(self, i: int) -> Path:
-        return self.outdir / f"cell_{self.cell_id(i):05d}.json"
+        """This point's file: cell_<array index>_<point>.json.
+
+        Both numbers in the name for the same reason cell_id uses the array
+        index — cells searching differently sized grids must not collide — and
+        because it makes a directory listing readable as rows x points.
+        """
+        return self.outdir / f"cell_{self.args.array_index:03d}_{i:03d}.json"
 
     # -- one episode's job description --------------------------------------
 
@@ -348,6 +380,13 @@ class GridSearch:
             "mean_step_ms":          float(np.mean(step_ms)),
             "std_step_ms":           float(np.mean(step_sd)),
             "mean_elapsed_s":        float(np.mean(elapsed)),
+            # The grid this cell set out to search, so a cell that died
+            # mid-way still names its own axes to the analysis script.
+            "grid": {
+                "temperatures": self.grid_temperatures,
+                "noise_sigmas": self.grid_noise_sigmas,
+                "n_points":     len(self.points),
+            },
             "mppi": {
                 "n_samples":         args.n_samples,
                 "time_horizon":      args.time_horizon,
@@ -583,10 +622,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     # --- output -------------------------------------------------------------
     p.add_argument("--array_index", type=int, default=0,
-                   help="This cell's SLURM_ARRAY_TASK_ID. Only used to offset the cell "
-                        "ids (id = array_index * n_points + point), so every array task "
-                        "can write into ONE shared --outdir without colliding and a "
-                        "single combine_results.py run merges the lot.")
+                   help="This cell's SLURM_ARRAY_TASK_ID. Only used to name the cell "
+                        "files (cell_<array_index>_<point>.json), so every array task "
+                        "can write into ONE shared --outdir without colliding — even "
+                        "though each searches a grid of its own size — and a single "
+                        "combine_results.py run merges the lot.")
     p.add_argument("--outdir",      type=str, default=None,
                    help="Directory for cell_*.json (auto-named under results/ if omitted). "
                         "Shared by every array task of a submission.")
@@ -621,6 +661,16 @@ def main():
     # Temperature outermost so a 1-D sigma collapse leaves the points in
     # temperature order — the order the ranked table and the cell ids follow.
     points = [(t, s) for t in temperatures for s in noise_sigmas]
+
+    if len(points) > POINTS_PER_CELL_MAX:
+        raise ValueError(
+            f"{len(temperatures)} temperatures x {len(noise_sigmas)} noise_sigmas "
+            f"= {len(points)} grid points in one cell, over the "
+            f"{POINTS_PER_CELL_MAX} that combo_index reserves per cell — ids "
+            f"would collide with array index {args.array_index + 1}'s. Split the "
+            f"grid across CSV rows (they may differ in horizon/step_time) or "
+            f"raise POINTS_PER_CELL_MAX."
+        )
 
     if planner != "mppi" and len(temperatures) > 1:
         raise ValueError(
@@ -705,8 +755,8 @@ def main():
     if overrides:
         print(f"  fixed weight overrides: {overrides}")
     print(f"  ranked by success rate, ties broken by mean steps-to-success")
-    print(f"  cell ids: {args.array_index} * {len(points)} + point "
-          f"-> cell_{args.array_index * len(points):05d}.json ...")
+    print(f"  cell files: cell_{args.array_index:03d}_000.json ... "
+          f"cell_{args.array_index:03d}_{len(points) - 1:03d}.json")
     print(f"  outdir: {outdir}")
     print(f"{'='*70}")
 

@@ -4,16 +4,18 @@ Summarize the output of experiments/hpc/temp_sigma_grid.slurm —
 contact_study/drivers/run_temp_sigma_grid.py — as ONE ROW PER CELL.
 
 A "cell" is what the SLURM array hands one GPU: one (object, contact model,
-n_iterations, n_samples). Inside it the driver walks the whole
-temperature x noise_sigma grid, writing one cell_<id>.json per GRID POINT plus a
+n_iterations, n_samples, time_horizon, step_time). Inside it the driver walks
+the temperature x noise_sigma grid THAT CELL asked for, writing one
+cell_<array index>_<point>.json per GRID POINT plus a
 grid_summary_<array index>.json for the cell. So the files are per grid point,
 while the question this CSV answers is per cell: *which temperature and
-noise_sigma should this object/model run at?*
+noise_sigma should this object/model run at, at this horizon?*
 
 Each row therefore carries
 
     job, array_index, task, object, geometry, model, planner, eval_sim
-    n_samples, n_iterations, convergence_tol, max_iterations   — the cell axes
+    n_samples, n_iterations, convergence_tol, max_iterations,
+    time_horizon, step_time                                    — the cell axes
     best_temperature, best_noise_sigma                         — the answer
     best_success_rate, best_n_success, best_mean_steps_to_success, ...
     has_tie, n_best_ties, tied_points, tie_broken_by           — see below
@@ -148,11 +150,16 @@ def object_of(rec: dict) -> str:
 def cell_key(rec: dict) -> tuple:
     """What makes two grid points members of the same cell.
 
-    The SLURM array's four axes (object and model, plus the iteration and sample
-    counts that live under `mppi`), qualified by task/geometry/planner so two
-    submissions merged into one directory cannot collapse into one row. NOT
-    array_index: a resumed submission re-runs under a new array job id, and the
-    same cell should stay one row.
+    The SLURM array's axes (object and model, plus the iteration and sample
+    counts and the schedule, which live under `mppi`), qualified by
+    task/geometry/planner so two submissions merged into one directory cannot
+    collapse into one row. NOT array_index: a resumed submission re-runs under a
+    new array job id, and the same cell should stay one row.
+
+    The horizon and step time are in here because a cell CSV may sweep them:
+    without them two rows differing only in their schedule would merge, and the
+    reported best temperature would be one of the two schedules' answers picked
+    by success rate.
     """
     m = rec.get("mppi") or {}
     return (
@@ -164,6 +171,8 @@ def cell_key(rec: dict) -> tuple:
         m.get("n_samples"),
         m.get("n_iterations"),
         m.get("convergence_tol"),
+        m.get("time_horizon"),
+        m.get("step_time"),
     )
 
 
@@ -233,23 +242,25 @@ def tie_columns(points: list[dict]) -> dict:
     }
 
 
-def grid_columns(points: list[dict], summary: dict | None,
-                 fallback: dict | None = None) -> dict:
+def grid_columns(points: list[dict], summary: dict | None) -> dict:
     """Coverage of the temperature x noise_sigma grid inside this cell.
 
     The temperatures/noise_sigmas columns are the values the cell was ASKED for
-    when a summary says so, and the values actually evaluated otherwise — so a
-    partial cell still names its axes, and `grid_status` says it is partial.
+    when something records them, and the values actually evaluated otherwise —
+    so a partial cell still names its axes, and `grid_status` says it is partial.
 
     A cell killed mid-grid never wrote a summary, which is exactly the cell whose
-    completeness matters most. TEMPERATURES/NOISE_SIGMAS are set once for the
-    whole submission in temp_sigma_grid.slurm, so `fallback` — any sibling cell's
-    summary from the same job — names the grid it was meant to cover.
+    completeness matters most; the driver therefore stamps the requested grid on
+    every POINT it writes (`grid`), and any surviving point answers for the cell.
+    No sibling cell is consulted: the grid is a per-row column of the cell CSV,
+    so another cell's summary would name a grid this one never ran.
     """
     temps  = sorted({(p.get("mppi") or {}).get("temperature") for p in points} - {None})
     sigmas = sorted({(p.get("mppi") or {}).get("noise_sigma") for p in points} - {None})
 
-    src = summary or fallback or {}
+    # A run from before `grid` was recorded has neither, and falls through to
+    # the evaluated values below.
+    src = summary or next((p["grid"] for p in points if p.get("grid")), {})
     want_t = src.get("temperatures") or temps
     want_s = src.get("noise_sigmas")  or sigmas
     expected = src.get("n_points")
@@ -271,8 +282,7 @@ def grid_columns(points: list[dict], summary: dict | None,
     }
 
 
-def summarize_cell(points: list[dict], summary: dict | None, job: str,
-                   fallback: dict | None = None) -> dict:
+def summarize_cell(points: list[dict], summary: dict | None, job: str) -> dict:
     """One CSV row: identity, cell axes, the winning point, ties, inputs."""
     best = points[0]
     m    = best.get("mppi") or {}
@@ -308,7 +318,7 @@ def summarize_cell(points: list[dict], summary: dict | None, job: str,
     }
 
     row.update(tie_columns(points))
-    row.update(grid_columns(points, summary, fallback))
+    row.update(grid_columns(points, summary))
 
     # How the cell did overall, not just at its best point: a cell whose every
     # point scores the same is telling you the knob does not bite here.
@@ -352,7 +362,8 @@ def print_cell_report(row: dict, points: list[dict], top_n: int) -> None:
     iters = row["convergence_tol"] and f"converge<{row['convergence_tol']}" \
         or f"n_iterations={row['n_iterations']}"
     print(f"\n{'-' * 78}")
-    print(f"  {row['object']} / {row['model']}   {iters}  n_samples={row['n_samples']}")
+    print(f"  {row['object']} / {row['model']}   {iters}  n_samples={row['n_samples']}"
+          f"  horizon={row['time_horizon']}s  step={row['step_time']}s")
     print(f"{'-' * 78}")
     print(f"  {row['n_points']} grid point(s), {row['grid_status']}, "
           f"{row['n_episodes']} episodes each, seed={row['seed']}, "
@@ -433,12 +444,10 @@ def main():
         print(f"{'=' * 78}")
 
         job = root.stem if root.is_file() else root.name
-        # Any cell's summary: they all record the submission's single grid.
-        fallback = next(iter(summaries.values()), None)
         for key in sorted(cells, key=lambda k: tuple(str(v) for v in k)):
             points = cells[key]
             idx = points[0].get("array_index")
-            row = summarize_cell(points, summaries.get(idx), job, fallback)
+            row = summarize_cell(points, summaries.get(idx), job)
             for col in row:
                 if col.startswith("w_") and col not in weight_cols:
                     weight_cols.append(col)
@@ -455,9 +464,12 @@ def main():
             row.setdefault(col, "")
 
     # Grouped for reading, not ranked: neighbouring rows should be the same
-    # object/model at different iteration and sample counts.
+    # object/model at different iteration and sample counts, and the same cell
+    # at different schedules should sit together rather than pages apart.
     rows.sort(key=lambda r: (str(r["object"]), str(r["model"]),
-                             str(r["n_iterations"]), float(r["n_samples"] or 0)))
+                             str(r["n_iterations"]), float(r["n_samples"] or 0),
+                             float(r["time_horizon"] or 0),
+                             float(r["step_time"] or 0)))
 
     if args.output is not None:
         out = args.output
@@ -469,8 +481,9 @@ def main():
     print(f"\n{'=' * 78}")
     print(f"  {len(rows)} cell(s)")
     print(f"{'=' * 78}")
-    cols = ["object", "model", "n_iterations", "n_samples", "best_temperature",
-            "best_noise_sigma", "best_success_rate", "n_best_ties", "grid_status"]
+    cols = ["object", "model", "n_iterations", "n_samples", "time_horizon",
+            "step_time", "best_temperature", "best_noise_sigma",
+            "best_success_rate", "n_best_ties", "grid_status"]
     print("  " + "  ".join(f"{c:>17}" for c in cols))
     for row in rows:
         print("  " + "  ".join(f"{str(row[c])[-17:]:>17}" for c in cols))
