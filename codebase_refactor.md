@@ -1,5 +1,5 @@
 Purpose:
-    Codebase too big
+    The codebase has become to big to maintain a refactor is needed.
 
 New Structure:
 
@@ -133,6 +133,14 @@ Just a base class for other task types.
 *function* calcCosts(q,q_dot,u) $\rightarrow$ Numpy Array: Takes in a numpy array of states and actuations and calculates the cost associated with that sequence of states.
 
 *function* calcCosts_GPU(q,q_dot,u) $\rightarrow$ warp array: Takes in a warp array of states and actuations and calculates the cost associated with that sequence of states on the GPU.
+
+**Class LeapReorient**
+
+Just a base class for leap reorient task types.
+
+**Class CubeReorient**
+
+Specific, insance of LeapReorient for the cube reorient task.
 
 
 ## Drivers:
