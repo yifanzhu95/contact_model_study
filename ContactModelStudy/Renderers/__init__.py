@@ -5,6 +5,16 @@ no rendering code. Concrete renderers are imported directly from their modules
 so that importing this subpackage does not require a GL context.
 """
 
-from ContactModelStudy.Renderers.RendererBase import RendererBase, RendererBaseConfig
+from ContactModelStudy.Renderers.RendererBase import (
+    RendererBase,
+    RendererBaseConfig,
+    VideoRendererBase,
+    VideoRendererBaseConfig,
+)
 
-__all__ = ["RendererBase", "RendererBaseConfig"]
+__all__ = [
+    "RendererBase",
+    "RendererBaseConfig",
+    "VideoRendererBase",
+    "VideoRendererBaseConfig",
+]

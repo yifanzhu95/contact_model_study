@@ -130,9 +130,22 @@ Just a base class for other task types.
 
 *function* getModelPath() $\rightarrow$ string: Returns the path to the tasks MJCF model.
 
-*function* calcCosts(q,q_dot,u) $\rightarrow$ Numpy Array: Takes in a numpy array of states and actuations and calculates the cost associated with that sequence of states.
+*function* calcCosts(VectorizedSimulator) $\rightarrow$ Numpy Array: Takes in a vectorized simulator and gets the required state, actuation and other values needed to calculate the cost for each world. if subclasses need more infromation to avoid more calculations expand the signature. It should not reproduce the functionality on the CPU.
 
-*function* calcCosts_GPU(q,q_dot,u) $\rightarrow$ warp array: Takes in a warp array of states and actuations and calculates the cost associated with that sequence of states on the GPU.
+*function* isFailure(Simulator) $\rightarrow$ Boolean: Should take in a simulator and return weather the simulator has failed. If its a vecotrized simulator it should be a array of booleans and should be capturaable. 
+
+*function* isSuccess(Simulator) $\rightarrow$ Boolean: Should take in a simulator and return weather the simulator has succeded. If its a vecotrized simulator it should be a array of booleans and should be capturaable. 
+
+*function* alignRendererConfigWithTask(RendererConfig) $\rightarrow$ None: takes in a renderer config then assigns all of the parameters it needs to. 
+
+*function* setSimToInitialState(Simulator) $\rightarrow$ None: Takes in a simulator and sets the simulator to the inital state. If a vecotrized simulator it should call BroadcastState function should be capturable.
+
+*function* sampleNewGoal() $\rightarrow$ Numpy Array: Samples a new goal and returns it as a numpy array.
+
+*function* setGoal(goal) $\rightarrow$ None: sets the tasks goal to a goal.
+
+*function* setRendererToGoal(Renderer) $\rightarrow$ None: Takes in a Renderer and sets it to match the current goal.
+
 
 **Class LeapReorient**
 
@@ -194,21 +207,51 @@ Ignore for now
 
 ## Renderers:
 
-This directory contains the code to create the renderers.
+This directory contains the code to create different renderers.
 
 ### RenderBase.py
 
-This file should contain a renderer base class and a RandererBaseConfig.
+This file should contain a renderer base class, a RandererBaseConfig, a VideoRendererBase, and a VideoRendererBaseConfig.
 
 **Class RendererBase**
 
 This class is a base renderer.
 
-*function* init(Task,RendererBaseConfig) $\rightarrow$ RendererBase: instanitiates the renderer and takes any needed parameters from the config.
+*function* init(Task,RendererBaseConfig = None) $\rightarrow$ RendererBase: instanitiates the renderer and takes any needed parameters from the config.
 
 *function* RenderState(q) $\rightarrow$ None: Takes in the current state and renders the current image.
 
 *function* Close() $\rightarrow$ None: ends the current render.
+
+**Class RendererBaseConfig**
+
+This class is a basic class to hold the data needed to define a renderer. It should have the follwing attributes
+
+*Attribute* width = 640
+*Attribute* hight = 480
+*Attribute* fps = 30.0, max fps for interactive viewer constraint for video viewers.
+*Attribute* cam_name = str | None, should be none of a string. If none shoudl default to the XMLs default otherwise should use the named camera.
+*Attribute* cam_pos = None | NdArray, should be set either to none or should be a Numpy Array which describes to camera postions, if set to none it should use the XMLs default for the chosen camera
+*Attribute* cam_quat = None | NdArray, should be set either to none or should be a Numpy Array which describes to camera rotation as a quaterion, if set to none it should use the XMLs default for the chosen camera.
+*Attribute* cam_fovy = None | float, should be set either to none or should be a float which describes to camera's vertical feild of view, if set to none it should use the XMLs default for the chosen camera.
+
+**Class VideoRendererBase**
+
+This class is a base video renderer and should inherent from RendererBase.
+
+*function* getStepsPerFrame() $\rightarrow$ int: once instaiated should this function should refrence the task time step and calculate the number of steps between frames to best respect the desired fps.
+
+*function* Save(path) $\rightarrow$ None: saves the current video.
+
+*function* Reset() $\rightarrow$ None: clears the current video.
+
+**Class VideoRendererBaseConfig**
+
+This class is a basic class to hold the data needed to define a video renderer and should extend . It should add the follwing attributes on top of the one defined 
+
+*Attribute* output_path = string, this should just be the path to save the video to if save or close is invoked without a path.
+
+
 
 ### MuJoCoVideoRenderer.py
 

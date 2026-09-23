@@ -301,7 +301,8 @@ class VectorizedSimulator(Simulator):
 
         Args:
             u: Absolute actuator commands, ``(N, nu)``, or ``(nu,)`` to apply
-                the same command everywhere.
+                the same command everywhere. A backend may also accept a device
+                array of shape ``(N, nu)``, copied without a host round-trip.
 
         This is the single-control path; for a rollout use
         ``SetControlSequence``. Setting a control does not clear an active
@@ -315,8 +316,8 @@ class VectorizedSimulator(Simulator):
         ...
 
     # -- device state --------------------------------------------------------
-    def BroadcastState(self, q, q_dot=None) -> None:
-        """Seed every world from device-resident ``(nq,)``/``(nv,)`` arrays.
+    def BroadcastState(self, q, q_dot=None, u=None) -> None:
+        """Seed every world from device-resident ``(nq,)``/``(nv,)``/``(nu,)`` arrays.
 
         The capturable twin of ``SetState``. ``SetState`` takes host arrays, so
         it necessarily contains a host-to-device copy, and a CUDA graph cannot
@@ -327,6 +328,10 @@ class VectorizedSimulator(Simulator):
         Args:
             q: ``(nq,)`` device array of positions, broadcast to all worlds.
             q_dot: ``(nv,)`` device array of velocities. ``None`` zeroes them.
+            u: ``(nu,)`` device array of controls, or ``None`` to leave the
+                current controls alone. Part of a task's initial state on a
+                position-actuated system, where ``ctrl = 0`` is not "at rest"
+                but "drive every joint to zero".
 
         Deliberately does *not* run ``forward``: the first ``Step_GPU`` that
         follows recomputes everything derived anyway, and skipping it keeps the

@@ -39,12 +39,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from ContactModelStudy.Renderers.MujocoVideoRenderer import (  # noqa: E402
-    MujocoVideoRenderer,
-    MujocoVideoRendererConfig,
-)
+from ContactModelStudy.Renderers.MujocoVideoRenderer import MujocoVideoRenderer  # noqa: E402
+from ContactModelStudy.Renderers.RendererBase import VideoRendererBaseConfig  # noqa: E402
 from ContactModelStudy.Simulators.Mujoco import Mujoco  # noqa: E402
 from ContactModelStudy.Simulators.Simulator import SimulatorConfig  # noqa: E402
+from ContactModelStudy.Tasks.CubeReorient import CubeReorient  # noqa: E402
+from ContactModelStudy.Tasks.TaskBase import TaskRole  # noqa: E402
 
 SCENE = REPO_ROOT / "scenes" / "leap" / "env_leap_eval_cube.xml"
 
@@ -161,15 +161,19 @@ def main() -> int:
     targets = ctrl0.copy()
     targets[flexion] = ctrl0[flexion] + args.curl * (upper[flexion] - ctrl0[flexion])
 
-    cfg = MujocoVideoRendererConfig(
+    # The renderer takes the task, not a bare path: it reads the task's
+    # timestep to schedule frames, and the task's own camera when the CLI does
+    # not override one. The task's eval scene IS this script's SCENE.
+    render_task = CubeReorient(role=TaskRole.EVAL, timestep=args.timestep)
+    cfg = VideoRendererBaseConfig(
         width=args.width, height=args.height, fps=args.fps,
-        camera=None if args.camera.lower() == "none" else args.camera,
+        cam_name=None if args.camera.lower() == "none" else args.camera,
     )
-    renderer = MujocoVideoRenderer(str(SCENE), cfg)
+    renderer = MujocoVideoRenderer(render_task, cfg)
 
     steps_in = max(1, round(args.seconds / sim.timestep))
     steps_out = steps_in
-    every = cfg.steps_per_frame(sim.timestep)
+    every = renderer.getStepsPerFrame()
 
     print(f"scene      {SCENE.name}  (nq={sim.nq}, nv={sim.nv}, nu={sim.nu})")
     print(f"curling    {len(flexion)} of {sim.nu} actuators, {args.curl:.0%} of remaining range")

@@ -55,8 +55,8 @@ every existing script still runs while the port is in progress.
 
 | Module | Status | Ported from | Notes |
 | --- | --- | --- | --- |
-| `RendererBase.py` | DONE | `contact_study/sim/base.py` (`FrameClock`) | `RendererBase` + `RendererBaseConfig` |
-| `MujocoVideoRenderer.py` | DONE | `contact_study/sim/mujoco_sim.py` | Camera + frame capture + `Save` |
+| `RendererBase.py` | DONE | `contact_study/sim/base.py` (`FrameClock`) | 4 classes: base + video, each with a config |
+| `MujocoVideoRenderer.py` | DONE | `contact_study/sim/mujoco_sim.py` | Now a `VideoRendererBase` |
 | `MujocoInteractiveRenderer.py` | TODO | new | `mujoco.viewer`; no user input back into the sim |
 
 ### Drivers / Utils / other
@@ -282,8 +282,12 @@ pendulum for 200 steps to confirm the string path integrates real dynamics.
 
 ## What was done — Renderers/RendererBase.py and MujocoVideoRenderer.py
 
-The rendering that came out of `Mujoco.py` now has a home. A renderer owns its
-own `MjModel`, compiled from the task's MJCF, and is handed positions to draw:
+**Revised 2026-09-23** to match the updated plan, which split the renderer
+interface in two and gave the config real camera control. What follows describes
+the current code; the changes from the first version are called out at the end.
+
+A renderer draws a *state*, not a simulator. It owns its own `MjModel`, compiled
+from the task's MJCF, and is handed positions:
 
     renderer.RenderState(q)
 
@@ -291,98 +295,149 @@ So a renderer never touches a simulator, and one renderer can visualize any
 backend — including those with no graphics of their own (Pinocchio, XPBD) and a
 single world sampled out of a vectorized batch.
 
-**`RendererBaseConfig`** — `width`, `height`, `fps`, `camera`, plus a
-`steps_per_frame(timestep)` helper. `camera` names a camera defined in the
-scene's MJCF (the leap scenes define `demo-cam`); `None` is the free camera.
+### The four classes
 
-**`RendererBase`** — `__init__(task, config)`, abstract `RenderState(q)` and
-`Close()`, plus context-manager support.
+| Class | Role |
+| --- | --- |
+| `RendererBase` | Anything that draws a state: `RenderState(q)`, `Close()` |
+| `RendererBaseConfig` | `width`, `height`, `fps`, `cam_name`, `cam_pos`, `cam_quat`, `cam_fovy` |
+| `VideoRendererBase` | Adds `getStepsPerFrame()`, `Save(path)`, `Reset()` |
+| `VideoRendererBaseConfig` | Adds `output_path` |
 
-**`MujocoVideoRendererConfig`** — extends the base config with `output_path`.
-
-**`MujocoVideoRenderer`** — wraps `mujoco.Renderer`. `RenderState` places the
-scene and appends a frame; `Save(path)` writes it; `Close()` saves (if an
-`output_path` is set) and frees the context; `Reset()` drops frames between
-episodes; `frame_count` reports what is buffered.
+`MujocoVideoRenderer` now subclasses `VideoRendererBase`. An interactive viewer
+will subclass `RendererBase` directly, which is what the split is for.
 
 ### Decisions worth knowing about
 
-1. **`FrameClock` was not ported; `steps_per_frame` replaces it.** The old clock
-   lived inside the simulator and fired from within `step()`, which is exactly
-   the coupling this refactor removes. Now the caller paces capture::
+1. **Every camera field defaults to `None`, meaning "use what the MJCF says".**
+   That lets a config override one aspect — nudge the field of view — without
+   restating a pose the scene already gets right.
 
-       every = cfg.steps_per_frame(sim.timestep)
-       for i in range(n_steps):
-           sim.Step()
-           if i % every == 0:
-               renderer.RenderState(sim.GetState()[0])
+2. **Camera overrides resolve three ways.** With a `cam_name`, the model's
+   camera entry is patched in place, which is exact. With no name but some
+   override, a free `MjvCamera` is synthesized from the requested pose — a
+   camera cannot be added to a compiled model, and `MjvCamera` is parameterized
+   by lookat/azimuth/elevation rather than by pose, so the conversion happens in
+   `_freeCamera`. With neither, it is `-1`, MuJoCo's default framing.
 
-   Same property as before — playback speed independent of control frequency,
-   frame count bounded to `fps` per simulated second — with the scheduling in
-   one readable integer instead of a stateful class. `steps_per_frame` returns
-   at least 1, so an `fps` faster than the simulator can resolve captures every
-   step rather than asking for frames that do not exist.
+3. **The task fills in the config before the renderer is built**
+   *(revised 2026-09-23; this used to be the task handing out a whole config
+   via `getRendererConfig()`)*. The caller builds a config, passes it to
+   `task.alignRendererConfigWithTask(cfg)` — which sets only the fields the task
+   cares about, in place — and then constructs the renderer from it:
 
-2. **`RenderState` takes only `q`.** Per the plan, and correct: only positions
-   move geometry. Velocities affect nothing the camera can see.
+       cfg = VideoRendererBaseConfig(width=640, height=480)
+       task.alignRendererConfigWithTask(cfg)
+       renderer = MujocoVideoRenderer(task, cfg)
 
-3. **The task is duck-typed on `getModelPath()`.** `Renderers` does not import
-   `Tasks` — they are independent halves of the package and a renderer needs
-   exactly one string. A plain MJCF path is also accepted, which is what makes
-   this testable before the Tasks port lands.
+   A config passed to the renderer is used exactly as given; it is *not*
+   re-aligned, because the caller may have overridden the task's choice since
+   (the driver's `--camera` does exactly that). With `config=None` the renderer
+   builds a default config and has the task align it, so the task's camera is
+   still used when the caller has no settings of its own. A bare MJCF path has
+   nothing to align with and now simply gets the defaults — the old "config
+   required" error existed only because there was nothing to ask for one.
 
-4. **Camera names are validated at construction.** A bad name raises
-   immediately, listing the cameras the scene actually defines — MuJoCo's own
-   error does not, and failing on the first frame instead of at setup wastes a
-   whole episode.
+   The plan's Renderers section still says `RendererBase` calls the task's
+   `getRendererConfig`; that line predates the change and is yours to update.
 
-5. **The container comes from the extension, not a flag.** The old code had a
-   `use_mp4` flag that silently overrode whatever extension the caller passed.
-   Here `.mp4`/`.gif` is taken as truth, a missing extension becomes `.mp4`, and
-   anything else is rejected up front rather than after an episode of frames has
-   been rendered.
+4. **A base config is up-converted, not rejected.** A task publishes one camera
+   setup; a video renderer needs that plus an output path. `_coerceConfig`
+   copies the shared fields into the renderer's own `CONFIG_CLASS` so no task
+   has to know which renderer will consume its config.
 
-6. **`Save` returns the path written; an empty video returns `None`.** Not an
-   error — an episode that ended before the first frame deadline legitimately
-   captured nothing.
+5. **`getStepsPerFrame()` moved from the config to the renderer** and now reads
+   the *task's* timestep, per the plan, rather than taking one as an argument.
+   Its unit is one step of that timestep; a caller advancing several steps at a
+   time divides by that stride, which is what the driver does.
 
-7. **`Close()` is idempotent**, so a driver can close in a `finally` without
-   tracking whether it already did. `RenderState` on a closed renderer raises
-   rather than silently dropping the frame.
+6. **`Save` returns the written path** although the plan writes it as `-> None`.
+   It is a superset — callers that ignore it are unaffected — and the driver
+   logs it. Flagged rather than hidden.
 
-8. **Frames are buffered in memory, not streamed.** About 0.9 MB per frame at
-   640x480, so ~1.6 GB per 30 fps minute — documented on the class, with `Reset`
-   as the between-episode fix. Streaming would give up the single-pass encode.
+7. **`height`, not `hight`.** The plan's attribute list has the typo; the code
+   uses the correct spelling, consistent with `mujoco.Renderer`'s own argument.
+
+### Knock-on changes to Tasks
+
+The plan's renderer-config hook and the task-timestep requirement mean the task
+layer had to grow two things:
+
+  * **`TaskBase.timestep`** (constructor argument, default 0.002) — the physics
+    timestep the task is posed at. The task carries it because things other than
+    a simulator need it, and because a task's costs and initial state are only
+    meaningful at the rate they were tuned for. A simulator may still run at a
+    different one; this is the task's declared rate, not a constraint.
+  * **`TaskBase.alignRendererConfigWithTask(config)`** (was
+    `getRendererConfig()`) — a no-op by default; `LeapReorient` sets
+    `cam_name = "demo-cam"`, which every leap scene defines, and touches
+    nothing else.
+
+`Tasks` now imports `Renderers` for the config type, done lazily inside the
+method. It is a one-way dependency — `Renderers` still knows nothing about
+`Tasks`, and still duck-types `getModelPath`.
+
+### Call sites updated
+
+`Drivers/run_episodes.py` and `test_scripts/render_finger_curl.py` both moved to
+`VideoRendererBaseConfig` and `renderer.getStepsPerFrame()`. The driver's
+`--camera` now defaults to `None` meaning "use the task's camera", with an
+explicit name or `none` overriding it, and both tasks are constructed with the
+CLI `--timestep` so the renderer's frame scheduling agrees with the simulator.
 
 ### Verified
 
-Rendered `scenes/leap/env_leap_eval_cube.xml` under MuJoCo 3.6.0 with
-`MUJOCO_GL=egl`:
+Under MuJoCo 3.6.0 with `MUJOCO_GL=egl`, on `env_leap_eval_cube.xml`:
 
-  * 500 steps at dt=0.002 (1.0 s of sim) capturing every 17 steps produced
-    exactly 30 frames, and the written mp4 reads back as 30 frames at 30 fps —
-    one second of video for one second of sim, which is the property the old
-    `FrameClock` existed to guarantee;
-  * frames genuinely differ across the episode (the scene is moving, not a
-    static first frame repeated);
-  * both `.mp4` and `.gif` write and are non-empty; `output_path` is written on
-    context exit;
-  * named camera `demo-cam` and the free camera (`camera=None`) both render;
-  * a task object and a bare path both construct; bad camera name, missing
-    model, bad container, wrong `q` shape and render-after-close all raise with
-    messages naming the problem.
+  * the class hierarchy and both config field lists are as specified, and a
+    task's plain `RendererBaseConfig` up-converts to a
+    `VideoRendererBaseConfig`;
+  * `getStepsPerFrame()` tracks the task's timestep — 17 at dt=0.002/30 fps, 33
+    at dt=0.001/30 fps, 8 at dt=0.002/60 fps, and floors at 1 when fps outruns
+    the timestep;
+  * all six camera paths render distinct frames (named, free, `cam_pos`,
+    `cam_fovy`, `cam_quat`, free+pose), and — the strong test —
+    **overriding with the scene's own authored pos/quat/fovy reproduces the
+    un-overridden image bit for bit**, while a 2 cm camera nudge changes it;
+  * `Save` to `.mp4` and `.gif`, `Reset` (frame count to 0, then `Save`
+    returning `None`), `output_path` written on `Close`, and idempotent
+    `Close`;
+  * a bad `cam_name`, a task with no
+    `timestep`, and every invalid config value raise with messages naming the
+    problem;
+  * end to end: the driver writes 16 frames at 30 fps for 0.48 s of sim and 21
+    frames at 60 fps for 0.32 s — both correct for their cadence — and the curl
+    script still runs from its new `test_scripts/` home.
 
-**Note on the filename.** The plan's tree says `RendererBase.py` while its
-section header says `RenderBase.py`. Used `RendererBase.py`, matching the tree
-and the `RendererBase` class name, consistent with every other module where the
-filename is the class name. A rename is a one-liner if the other spelling was
-meant.
+### Verified — config alignment (2026-09-23)
+
+  * `alignRendererConfigWithTask` returns `None` and changes exactly one field
+    (`cam_name: None -> 'demo-cam'`), leaving width, height, fps, `cam_fovy` and
+    `output_path` as the caller set them; the base task's version changes
+    nothing, and the method is not abstract;
+  * `config=None` gives an aligned `VideoRendererBaseConfig`, and its frame is
+    **bit-identical** to one rendered from an explicit `cam_name="demo-cam"`;
+  * an override applied after aligning survives construction; a bare path with
+    no config gets plain defaults without error;
+  * the driver's default run uses the task's camera and `--camera none` the
+    free camera — the two videos differ; the curl script still runs.
+
+### Changed from the first version
+
+`RendererBaseConfig.camera` became `cam_name`; `cam_pos`/`cam_quat`/`cam_fovy`
+are new; `steps_per_frame(timestep)` on the config became `getStepsPerFrame()`
+on the renderer; `Save`/`Reset` are now declared on `VideoRendererBase`;
+`MujocoVideoRendererConfig` is gone, replaced by the shared
+`VideoRendererBaseConfig`; and `FrameClock` remains un-ported for the same
+reason as before — it lived inside the simulator and fired from within `step()`,
+which is exactly the coupling this refactor removes.
 
 ### Not done
 
 `MujocoInteractiveRenderer.py` — the third renderer in the plan, wrapping
-`mujoco.viewer`. Its `Close()` semantics differ (there is nothing to save) and
-it needs a real display, so it could not be verified in this environment.
+`mujoco.viewer`. It subclasses `RendererBase` rather than `VideoRendererBase`
+(nothing to save), and needs a real display, so it could not be verified in this
+environment.
 
 ## What was done — Simulators/VectorizedMujoco.py
 
@@ -494,112 +549,237 @@ it.
 
 ## What was done — Tasks/TaskBase.py, LeapReorient.py, CubeReorient.py
 
-The three-level hierarchy the updated plan calls for:
-`TaskBase` -> `LeapReorient` -> `CubeReorient`. A task owns its scene path, its
-initial conditions and its cost, and owns no simulator and no renderer — so the
-same task object scores a CPU rollout, a GPU batch or a recorded episode.
+**Revised 2026-09-23** to match the updated plan, which moved the cost onto the
+simulator and added outcome checks. What follows describes the current code; the
+changes from the first version are called out at the end.
 
-**`TaskBase`** — abstract `getModelPath`, `getInitialState`, `calcCosts`,
-`calcCosts_GPU`, plus a `TaskRole` enum (`EVAL` / `ROLLOUT`).
+The three-level hierarchy: `TaskBase` -> `LeapReorient` -> `CubeReorient`. A
+task owns its scene path, its initial conditions, its cost, and what counts as
+winning or losing. It owns no simulator and no renderer — it is handed a
+simulator and reads what it needs from it.
 
-**`LeapReorient`** — everything shared by the cube/ball/duck variants: the scene
-layout (16 hand joints, one free-joint object, four fingertip sites), the scene
-path templates, the index/goal/weight vectors, and both cost implementations. A
-subclass supplies only `OBJECT` and `objectParams()`.
+### Interface
 
-**`CubeReorient`** — the cube's table, carried over verbatim from
-`_OBJ_PARAMS["cube"]`.
+| Member | Kind | Notes |
+| --- | --- | --- |
+| `getModelPath()` | abstract | Scene for the task's `TaskRole` |
+| `getInitialState()` | abstract | `(q0, q_dot0, u0)` — not in the plan, see below |
+| `calcCosts(sim, terminal, out)` | abstract | **Device only**; takes a `VectorizedSimulator` |
+| `isFailure(sim, out)` | abstract | `bool` for a `Simulator`, capturable bool array for a vectorized one |
+| `isSuccess(sim, out)` | abstract | Same conventions |
+| `alignRendererConfigWithTask(config)` | concrete | Fills in a renderer config in place; no-op by default, `LeapReorient` sets `demo-cam` |
+| `setSimToInitialState(sim)` | concrete | Written once in the base on top of `getInitialState`; capturable when vectorized |
+| `sampleNewGoal(current_goal=None)` | abstract | Draws a goal as a rotation *of the current goal*; adopts nothing |
+| `setGoal(goal)` | abstract | Adopts a goal; cost and success test read it from then on |
+| `setRendererToGoal(renderer)` | abstract | Turns the renderer's goal marker, so videos show the goal |
+| `timestep` | attribute | The task's declared physics rate |
+
+`LeapReorient` also exposes `goalErrors(q, q_dot)` — the pos/quat/vel errors
+`isSuccess` thresholds — so a driver can report them. It is the success metric,
+not the cost.
 
 ### Decisions worth knowing about
 
-1. **`TaskBase.py` holds one class, not two.** The plan says "two class" but
-   then describes only `TaskBase`, the same copy-paste it has in
-   `SamplingBasedPlannerBase.py`. There is no parameter that is common to every
-   task and not already per-task, so a `TaskBaseConfig` would have had nothing
-   in it. `TaskRole` is in the file instead, which is what actually needed a
-   home.
+1. **The cost exists only on the device.** Per the plan, `calcCosts` takes a
+   simulator and "should not reproduce the functionality on the CPU", so the
+   host cost, `_cost_one`, `_forward_tips` and `calcCosts_GPU` are gone.
+   `calcCosts(sim)` reads `sim.DeviceState()` itself and launches one kernel.
+   Passing a CPU `Simulator` raises a `TypeError` that points at
+   `isSuccess`/`isFailure`, which is how a CPU episode is judged now.
 
-2. **`getInitialState()` was added to the interface.** Not in the plan's
-   function list, but every driver needs it and every task has it, so it belongs
-   on the interface rather than being reached for through a subclass attribute.
-   It returns `(q0, q_dot0, u0)` — the control is part of the initial condition
-   because a position-actuated hand left at `ctrl = 0` collapses before the
-   planner's first command lands.
+2. **`calcCosts` returns the device array, not numpy.** The plan writes
+   `-> Numpy Array`, but the planner calls it inside a captured CUDA graph, and
+   producing numpy would force a device-to-host sync that a graph cannot
+   record. `.numpy()` on the result gives the array the plan describes.
 
-3. **`TaskRole` makes eval-vs-rollout explicit.** The gap between the accurate
-   eval scene and the cheaper rollout scene is the thing the study measures, so
-   which one a task hands out is a constructor argument, never a default that
-   quietly picks the wrong one.
+3. **Outcome checks dispatch on the simulator type.** A `Simulator` gets a plain
+   `bool` from its host state; a `VectorizedSimulator` gets an `(N,)` `wp.bool`
+   array from a kernel. The kernels touch nothing on the host, and with `out=`
+   (or after the first call, which allocates a cached buffer) they record into
+   a CUDA graph — verified by capturing both, changing the state, and replaying.
 
-4. **`calcCosts` broadcasts over leading axes.** `(nq,)` gives a scalar,
-   `(T, nq)` gives `(T,)`, `(N, T, nq)` gives `(N, T)`, which covers "a sequence
-   of states" from the plan and a batch of rollouts with one implementation.
+4. **Thresholds reproduce the old task exactly**: success is position < 0.02 m,
+   orientation error `1 - dot^2` < 0.04, and object 6-D speed < 0.1 — the last
+   so a cube tumbling *through* the goal pose does not count. Failure is the
+   object below z = 0.0, the floor. That is deliberately **not** `fallen_z`
+   (0.08): `fallen_z` is the cost's drop *penalty*, set just under the palm,
+   and ending the episode there would stop runs the planner could still save.
 
-5. **Both costs take `site_xpos`.** The contact term needs fingertip world
-   positions, which are not derivable from `q` alone. `calcCosts` computes them
-   itself with `mj_kinematics` when they are not supplied — correct but slow, so
-   the hot path passes them. `calcCosts_GPU` *requires* them (normally
-   `sim.d.site_xpos`) and says so in the error: running forward kinematics on
-   the device needs an MJWarp model, which is the simulator's to own, not the
-   task's.
+5. **Non-finite states fail and never succeed — a deliberate departure.** The
+   old `has_failed` tested `xpos[2] < 0.0`, which is simply *false* for a NaN,
+   so a blown-up simulation was reported as still running. Now any NaN or inf in
+   positions or velocities is a failure. And because success only reads the
+   object, a NaN in a *hand* joint used to leave a world both "succeeded" and
+   "failed"; success now also requires a finite state, so the two are mutually
+   exclusive. Verified on every finite state that both checks match the old
+   logic exactly; the non-finite rows are the only differences.
 
-6. **The warp kernel is defined under a `try: import warp`.** The host cost
-   works without warp installed, so a CPU-only analysis session does not need a
-   CUDA toolchain.
+6. **Failure reads `qpos`, not the body's `xpos`.** For a free-joint body they
+   are the same point, and `qpos` is the post-step state where `xpos` is left
+   over from the step's forward pass.
 
-### Two quirks in the original cost, preserved deliberately
+7. **`getInitialState()` stays on the interface** though the plan's list does
+   not include it: every driver needs it, and the control belongs in the initial
+   condition because a position-actuated hand left at `ctrl = 0` collapses
+   before the planner's first command lands.
 
-Both are carried over rather than tidied, and both are documented at the point
-they appear:
+8. **`TaskBase.py` holds one class plus `TaskRole`.** The plan says "two class"
+   but describes only `TaskBase`; nothing is common to every task and not
+   already per-task, so a config would have been empty.
+
+### Initial state and goals (added 2026-09-23; goal API revised twice the same day)
+
+**`setSimToInitialState(sim)`** is written once, in `TaskBase`, on top of
+`getInitialState` — a subclass says where it starts, not how a simulator is put
+there. A single simulator gets `SetState` + `SetControl`. A vectorized one gets
+`BroadcastState` from device copies of `(q0, v0, u0)` uploaded on the first
+call, so every later call is pure kernel launches and records into a CUDA graph.
+`BroadcastState` gained an optional `u` for this: on a position-actuated hand
+the initial *control* is part of the initial state.
+
+**Goals** are three functions. Choosing and applying are separate, so one
+sampled goal can be handed to both the planner's rollout task and the
+evaluator's eval task:
+
+    g = eval_task.sampleNewGoal()
+    eval_task.setGoal(g);  rollout_task.setGoal(g)
+    eval_task.setRendererToGoal(renderer)
+
+  * `sampleNewGoal(current_goal=None)` returns `current_goal * r` for a rotation
+    `r` in the object's frame, chosen at `goal_difficulty`. With no argument it
+    rotates from the task's reference — the last goal adopted, or the starting
+    goal right after `setSimToInitialState`. It is pure apart from consuming
+    randomness: the task's goal, device buffers and reference are untouched.
+  * `setGoal(goal)` adopts it: normalizes, rebuilds the goal vector, writes it
+    into the existing device buffer **in place** (so a planner's captured graph
+    sees it on the next replay), and makes it the next sampling reference.
+  * `setRendererToGoal(renderer)` turns the renderer's `goal` mocap marker. The
+    renderer owns its own `MjData` and `RenderState` rewrites only positions,
+    so the orientation set here persists across frames.
+
+**`setSimToGoal` was removed**, per the plan. It turned the simulator's copy of
+the marker, which has no effect: in all 32 leap scenes the marker is a mocap body
+that collides with nothing and has zero mass, 200 steps with it at "R" and at "O"
+ended in bit-identical states, and nothing in the package read it back.
+
+#### Every goal is a rotation of the current goal
+
+The difficulty levels keep their old numbers, but all ten now rotate *from the
+current goal*. Levels 0, 1, 2 and 5 already did, and are unchanged — still
+identical to the old sampler. Levels 3, 4, 6, 7, 8 and 9 used to build their goal
+from the starting orientation (`canonical * face_rotation`) and now apply a
+rotation to the current goal instead:
+
+| Level | Old (from the start) | Now (from the current goal) |
+| --- | --- | --- |
+| 3 | one of 4 faces adjacent to the start's face, + twist | tip onto an adjacent face, + twist |
+| 4 | any of 5 faces other than the start's, + twist | turn to any of the 5 other faces, + twist |
+| 6 | adjacent to the start's face, no twist | tip onto an adjacent face, no twist |
+| 7 | always show "O" | roll -90 degrees about object X |
+| 8 | show "O" or "B" | roll +/-90 degrees about object X |
+| 9 | always show "B" | roll +90 degrees about object X |
+
+From the start, levels 7/8/9 still show "O"/either/"B" as their first goal;
+after that they keep rolling — level 7 cycles R -> O -> S -> B -> R.
+
+"Tip onto face `v`" is the object-frame rotation with `r(v) = up`: 90 degrees
+about `v x up` for an adjacent face, 180 degrees about an in-face axis for the
+opposite one, then an optional random 90-degree twist about `v`. The shown face
+is read off the quaternion (`_upAxis`), so the face tables, the face index and
+the face-from-quaternion bookkeeping of the previous version are all gone; the
+only sampler state left is the reference orientation.
+
+Consequences:
+
+1. **No level can re-issue its starting goal**, because every `r` is a nonzero
+   rotation. That resolves the open question about multi-goal mode counting
+   re-issued goals: level 8 multi-goal now runs B -> S -> O with successes at
+   steps 72 and 239 — two real reorientations — where before it produced
+   B -> B -> B with successes a few steps apart.
+2. **Levels 0 and 1 spin about the shown face's *signed* normal.** The old code
+   used the unsigned axis, which reverses "clockwise" on a face whose normal is
+   negative. The two agree whenever the shown face's normal is positive, which
+   for levels 0/1 is always (they never change face), so their sequences still
+   match the old sampler.
+3. **An episode's first goal is rotated from the start.** `setSimToInitialState`
+   moves the sampling reference back to the starting goal through a host-only
+   `_onInitialState` hook. It deliberately does not touch the *adopted* goal —
+   rewriting the device goal there would break capture — so the cost keeps the
+   previous goal until the driver's next `setGoal`, which it issues immediately.
+
+Verified:
+
+  * for each level, 300 consecutive goals where every step's rotation
+    `r = g^-1 * new` is exactly the level's (level 0: -90 degrees about the
+    signed up axis; 5: 180 degrees onto the opposite face; 6: exactly 90 degrees
+    onto an adjacent face; 7/8/9: +/-90 about object X; and so on), with **zero
+    repeats** at every level; levels 3, 4 and 6 reach every face by chaining;
+  * levels 0, 1, 2 and 5 still match the old `sample_new_goal` exactly;
+  * `sampleNewGoal(current_goal=B)` rotates from B, and six samples leave the
+    task's goal, reference and device vector untouched;
+  * after a reset, episode 2's first goal is rotated from the start (R -> O at
+    level 7) while the adopted goal is unchanged; `setSimToInitialState` still
+    replays correctly from a captured graph;
+  * a captured cost graph matches eager evaluation across four relative goals;
+    the renderer's marker follows the goal;
+  * the cost port is still bit-exact against the old kernel, and the planner
+    keeps 11.8 ms/plan.
+
+### Quirks in the original cost, preserved deliberately
 
 1. **`w_velo` scales position error, not velocity.** The old kernel computes an
-   object-velocity term `c_velo` and then never adds it to the cost, while
-   `weights[4]` — the slot named `w_velo` in `_COST_WEIGHT_KEYS` — multiplies
-   `c_pos`, the L2 position error. (The line carries a `#<- BIG CHANGE!!!!!!`
-   comment.) Renaming the key would silently change what every tuned weight set
-   in the study means. It is 0.0 for the cube either way.
+   object-velocity term and never adds it, while `weights[4]` — the slot named
+   `w_velo` — multiplies `c_pos`, the L2 position error. (The line carries a
+   `#<- BIG CHANGE!!!!!!` comment.) Renaming the key would silently change what
+   every tuned weight set in the study means. It is 0.0 for the cube.
+2. **Controls do not enter the cost** — `grasp_reorient_cost_wp` takes `ctrl`
+   and never reads it.
+3. The joint-velocity term indexes `qvel` with `robot_qpos_adr`. Identical here
+   (both blocks start at 0) but conflates a qpos and a qvel address.
 
-2. **`u` does not enter the cost.** `grasp_reorient_cost_wp` takes `ctrl` and
-   never reads it — this task does not penalize control effort. The argument
-   stays in the signature because `TaskBase` defines it and another task will
-   use it.
+### Knock-on changes
 
-A third, smaller one: the old kernel indexes `qvel` with `robot_qpos_adr` for
-the joint-velocity term. That is identical here (both robot blocks start at 0)
-but is conflating a qpos address with a qvel address; reproduced as-is so the
-two implementations cannot drift apart.
+  * **Planner** — `_rolloutBody` now calls `task.calcCosts(self.sim, terminal=...,
+    out=...)`; it no longer fetches device state itself.
+  * **Driver** — episodes are judged by `isSuccess`/`isFailure` on the eval
+    simulator, not by a cost (there is no host cost to call). A failure always
+    ends the episode; a success ends it unless `--no-stop-on-success`, matching
+    the old driver's `fin_ep_on_success=True` default. It reports `end_reason`,
+    `steps_to_success`, start/end `goalErrors`, and the planner's
+    `last_min_cost` trace as a progress signal — explicitly the rollout model's
+    cost, not an eval score.
 
 ### Verified
 
-Against the old implementation, on `env_leap_rollout_cube_high_high.xml`:
+  * `calcCosts(sim)` **still matches `grasp_reorient_cost_wp` bit-for-bit** —
+    max |Δ| = 0.000e+00 over 64 randomized states, running and terminal;
+  * `calcCosts` on a CPU `Mujoco` raises; `calcCosts_GPU` no longer exists;
+    `TaskBase`'s abstract set is exactly `calcCosts`, `getInitialState`,
+    `getModelPath`, `isFailure`, `isSuccess`;
+  * on a 32-world batch spanning every outcome (at goal; just inside and just
+    outside each of the three thresholds; below `fallen_z`; below the floor;
+    NaN and inf states): the vectorized and single-simulator paths agree on
+    every world, both match the old `is_success`/`has_failed` on every finite
+    state, and success and failure are never both true;
+  * both outcome checks record into a CUDA graph and replay correctly against a
+    changed state;
+  * the planner keeps its 11.8 ms/plan with the cost inside the captured graph,
+    and still closes the loop (object 0.0189 -> 0.0053 m from target).
 
-  * `init_qpos` and `init_ctrl` are **identical** to `_OBJ_PARAMS["cube"]`;
-    the index vector, the 24-element goal vector and the 12 weights all match
-    the old `initialize_task` construction exactly;
-  * **the ported GPU kernel matches `grasp_reorient_cost_wp` bit-for-bit** —
-    max |Δ| = 0.000e+00 over 64 randomized states for both the running and the
-    terminal cost, with costs spanning 19..129;
-  * the host cost matches the old kernel to 1.4e-07 relative — float32 vs
-    float64 and nothing more;
-  * `calcCosts` with internal forward kinematics matches the simulator's own
-    `site_xpos` to 2.4e-07;
-  * batch shapes `()`, `(5,)`, `(3, 4)` come out as specified, and mismatched
-    `q`/`q_dot` dims, a subclass with no `OBJECT`, a subclass with a missing
-    cost weight, a nonexistent geometry fidelity and a missing `site_xpos` on
-    the GPU path all raise with messages naming the problem;
-  * end to end: the task drives `Mujoco` for 100 steps (cost 20.9 -> 1.4 as the
-    hand settles onto its commanded grasp), a dropped object adds exactly
-    `w_fallen`, and `MujocoVideoRenderer` accepts the task object directly
-    through its `getModelPath` duck-type.
+### Changed from the first version
+
+The host `calcCosts(q, q_dot, u, terminal, site_xpos)` and `calcCosts_GPU(...)`
+merged into the device-only `calcCosts(sim, terminal, out)`. `isSuccess` and
+`isFailure` are new. The earlier "host cost matches the old kernel to 1.4e-07"
+verification no longer applies, since there is no host cost. The unused `_mjd`
+went with `_forward_tips`.
 
 ### Deferred: Tasks/XML_Files
 
 The plan puts the scene XML under `Tasks/XML_Files`. Not done: the leap scenes
-reference meshes and `<include>` files by relative path (`../leap_hand/...`,
-`textures/...`), so moving the XML without its asset tree stops it compiling.
-`LeapReorient.SCENES_DIR` points at the existing `scenes/` and is a single
-constant, so the move is a one-line change here plus copying the assets — worth
-doing as its own step rather than mixed into the task port.
+reference meshes and `<include>` files by relative path, so moving the XML
+without its asset tree stops it compiling. `LeapReorient.SCENES_DIR` is a single
+constant, so the move is one line plus copying the assets.
 
 ## What was done — SamplingBasedPlanners/
 
@@ -654,18 +834,39 @@ needs:
 
 ### Decisions worth knowing about
 
-1. **`Plan` returns an absolute command.** Under `control_mode="relative"` the
-   driver gets `q_robot + U[0]`, so it never has to know which
-   parameterization the planner used — it just calls `SetControl`.
+1. **`Plan` returns a ready-to-apply command.** Whatever the control mode, the
+   driver gets the actuator command itself — `U_0`, `u + U_0` or
+   `q_robot + U_0` — so it never has to know which parameterization the planner
+   used; it just calls `SetControl`.
 
-2. **Relative mode offsets by the measured pose at plan time, held across the
-   horizon.** The old `_assign_ctrl_relative_kernel` re-read *each world's
-   current* qpos at every rollout step. The two agree exactly at the first
-   control step — the action actually applied — and diverge further out, where
-   the old form tracks each world's drifting pose and this one does not.
-   Expressing the per-step version means reaching past `SetControlSequence`
-   into the backend's arrays, which is the coupling this refactor removes.
-   This is the one deliberate behavioural difference from the old planner.
+2. **Three control modes** *(revised 2026-09-23; this entry used to describe a
+   single "relative" mode that offset by the plan-time pose — the one
+   deliberate difference from the old planner, now gone)*. At rollout control
+   step `t`:
+
+   | Mode | Command | How it reaches the simulator |
+   | --- | --- | --- |
+   | `absolute` | `ctrl_t = U_t` | `SetControlSequence(V)` |
+   | `ctrl_relative` | `ctrl_t = ctrl_{t-1} + U_t`, from the control currently applied | precomputed on the device (`_cumsum_commands_kernel`), then `SetControlSequence(A)` |
+   | `pos_relative` *(default)* | `ctrl_t = q_t + U_t`, `q_t` each world's joints *at that step* | formed inside the rollout each control step (`_pos_relative_kernel`) and applied with `SetControl` |
+
+   `pos_relative` is the old planner's default (`_assign_ctrl_relative_kernel`)
+   and `ctrl_relative` its legacy `ctrl += delta` (`_assign_ctrl_kernel`); both
+   are **bit-identical** to those kernels. `pos_relative` cannot be precomputed
+   — its command depends on where each world has moved to — so for it the
+   planner sets the control every step instead of handing over a sequence. That
+   needed `VectorizedMujoco.SetControl` to accept a device array (a
+   device-to-device copy, capturable), mirroring `SetControlSequence`.
+
+   `ctrl_relative` needs the control currently applied, so `Plan` gained an
+   optional `u` (not in the plan's signature). Without it, the planner uses the
+   action it returned last; on the very first plan there is no such action, so
+   it raises rather than guess. The driver passes `u=sim.GetControl()` every
+   step, so an episode reset is never mistaken for a continuation.
+
+   The returned tape (`last_action_seq`) is exact for `absolute` and
+   `ctrl_relative`. For `pos_relative`, row 0 is exact and later rows assume the
+   robot holds its measured pose — the rollouts themselves re-read it.
 
 3. **The terminal cost replaces the last step's running cost**, rather than
    being added to it — matching the old `_launch_accumulate_costs(terminal=...)`,
@@ -691,7 +892,7 @@ On an RTX 4090, cube task, `N=256`, `H=8`, `substeps=4`:
     threshold);
   * `Plan` returns `(nu,)` float32; `last_action_seq` is `(H, nu)`;
     `last_plan_ok` tracks a real update;
-  * relative mode puts the action within 0.0065 rad of the measured joint
+  * (then-)relative mode puts the action within 0.0065 rad of the measured joint
     positions; absolute mode adds no offset; `delta_range=(-0.02, 0.02)` holds
     every returned delta inside the clip (max 0.00325) even at
     `noise_sigma=0.5`;
@@ -700,6 +901,29 @@ On an RTX 4090, cube task, `N=256`, `H=8`, `substeps=4`:
     `robot_qpos_adr` off the task's index vector;
   * bad `q`/`q_dot` shapes and every invalid config value raise with a message
     naming the problem.
+
+### Verified — control modes (2026-09-23)
+
+  * Driving the planner's **real** rollout body with fixed samples and
+    recording, in every world at every control step, the control actually held:
+    `absolute` matches `U_t` exactly, `ctrl_relative` matches
+    `u + sum_{k<=t} U_k` to 1.2e-07 (float32 vs float64), `pos_relative` matches
+    `q_t + U_t` exactly — with `q_t` re-read per step: the joints moved 0.089
+    rad over the horizon, which a plan-time offset would have been off by;
+  * `pos_relative` is bit-identical to the old `_assign_ctrl_relative_kernel`,
+    and `ctrl_relative` to the old `_assign_ctrl_kernel` applied step by step;
+  * returned action and tape follow each mode's formula;
+  * all three capture into a CUDA graph, 15-17x faster than eager, with graph
+    and eager rollout costs agreeing to ~2e-6 relative; the per-step
+    `SetControl` in `pos_relative` costs nothing measurable (11.7 ms/plan);
+  * `ctrl_relative` raises on a first plan with no `u`, and otherwise starts
+    from the action it returned last.
+
+Closed loop, 5 episodes each at `--substeps 32 --horizon 5 --temperature 5`:
+`pos_relative` 2/5, `ctrl_relative` 0/5, `absolute` 0/5. Those settings were
+found for position-relative control, so this does not rank the modes: in
+particular `ctrl_relative` sums its deltas over the horizon, so the same
+per-step noise spreads far wider, and would need its own `--noise-sigma`.
 
 ### MJWarp is not reproducible, and it is not the wrapper
 
@@ -779,9 +1003,15 @@ reality; `MujocoVideoRenderer` records it.
 1. **The planner and the evaluator load different scenes from the same task.**
    The planner gets `TaskRole.ROLLOUT` (with `--hand-acc` / `--obj-acc`
    fidelity), the evaluator gets `TaskRole.EVAL`. That gap is what the study
-   measures, so it is the default rather than something to switch on, and all
-   reported costs come from the *eval* task — performance on the accurate
+   measures, so it is the default rather than something to switch on, and the
+   episode outcome is judged by the *eval* task — performance on the accurate
    scene, not on the planner's own model of it.
+
+   *Revised 2026-09-23:* the outcome is now `isSuccess`/`isFailure` rather than
+   an eval cost, since the task no longer has a host-side cost. See the Tasks
+   section. The verification numbers below that quote an "eval cost" predate
+   that change; they were real at the time, but the driver no longer prints
+   them.
 
 2. **The first plan is reported separately from the rest.** It pays kernel
    compilation and graph capture — ~1.3 s against a ~12 ms steady state — so
@@ -902,6 +1132,15 @@ fingertips close on the cube and open back out.
   `MujocoConfig`, `XPBD.py` holds `XPBDConfig` — rather than one union config
   that every backend ignores most of. Needed before `Mujoco` can serve as the
   M1 ground-truth eval sim the old code used it for.
+- **The driver's default planning horizon is too short to reorient the cube.**
+  `--substeps 4 --horizon 8` plans 64 ms ahead; the old driver planned 352 ms
+  (`time_horizon`) with 64 ms control steps. With real goals, 0 of 3 episodes
+  succeeded at the defaults, and 0 of 3 with the old temperature/noise but the
+  short horizon; with `--substeps 32 --horizon 5` (320 ms) and temperature 5,
+  **2 of 5 succeeded** within 5.1 s (orientation error 0.5 -> 0.0087). The
+  defaults were not changed, because you have since edited the driver's other
+  defaults by hand (`--steps 4000`, `--noise-sigma 0.1`, `--temperature 10`)
+  and the schedule is yours to set alongside them.
 - **Package installation.** `pyproject.toml` has
   `include = ["contact_study*"]`, so `ContactModelStudy` is not installed by
   `pip install -e .`. It imports fine from the repository root. Add it to the

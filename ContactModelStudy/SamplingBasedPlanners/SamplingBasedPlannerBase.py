@@ -37,7 +37,7 @@ import warp as wp
 
 from ContactModelStudy.Simulators.VectorizedSimulator import VectorizedSimulator
 
-_CONTROL_MODES = ("absolute", "relative")
+_CONTROL_MODES = ("absolute", "ctrl_relative", "pos_relative")
 
 
 @dataclass
@@ -54,16 +54,25 @@ class SamplingBasedPlannerConfig:
         n_iterations: Optimizer iterations per ``Plan`` call.
         warm_start: Shift the mean one control step forward after each plan, so
             the next call starts from the tail of the last solution.
-        control_mode: How a sample becomes an actuator command.
-            ``"relative"`` (the study's default) treats the sequence as a delta
-            on the measured robot joint positions: ``ctrl = q_robot + U``.
-            ``"absolute"`` sends ``U`` straight through. See ``Plan`` for how
-            this differs from the old per-step formulation.
+        control_mode: How a planned value ``U_t`` becomes the command at
+            rollout control step ``t``:
+
+            * ``"absolute"`` — ``ctrl_t = U_t``. Planning happens directly in
+              the actuators' command space.
+            * ``"ctrl_relative"`` — ``ctrl_t = ctrl_{t-1} + U_t``, starting from
+              the control currently applied. The deltas accumulate over the
+              horizon (the old planner's legacy ``ctrl += delta`` mode).
+            * ``"pos_relative"`` (default) — ``ctrl_t = q_t + U_t``, where
+              ``q_t`` is each world's robot joint position *at that step*,
+              re-read every control step: a bounded servo relative to wherever
+              the world has got to (the old planner's default,
+              ``_assign_ctrl_relative_kernel``).
         delta_range: ``(low, high)`` clip applied to every sampled value before
             it becomes a command. Either side may be ``None`` to leave it
-            unbounded. Off by default: under ``"relative"`` the value *is* the
-            position-servo error, so clipping it caps how hard the hand can
-            grip.
+            unbounded. Off by default: under ``"pos_relative"`` the value *is*
+            the position-servo error, so clipping it caps how hard the hand can
+            grip. Under ``"absolute"`` it bounds the command itself; under
+            ``"ctrl_relative"``, the per-step change in it.
         seed: Seed for the noise. ``None`` draws one from fresh entropy.
         use_graph: Capture the rollout into a CUDA graph. This is most of the
             planner's speed — a rollout is thousands of small kernel launches,
@@ -76,7 +85,7 @@ class SamplingBasedPlannerConfig:
     noise_sigma: float = 0.01
     n_iterations: int = 1
     warm_start: bool = False
-    control_mode: str = "relative"
+    control_mode: str = "pos_relative"
     delta_range: tuple[float | None, float | None] = (None, None)
     seed: int | None = None
     use_graph: bool = True
@@ -105,7 +114,8 @@ class SamplingBasedPlannerBase(abc.ABC):
         U_wp: ``(H, nu)`` mean control sequence — the distribution parameter
             ``theta`` that ``Plan`` optimizes.
         V_wp: ``(N, H, nu)`` sampled sequences drawn from it.
-        A_wp: ``(N, H, nu)`` absolute commands handed to the simulator.
+        A_wp: ``(N, H, nu)`` commands for ``"ctrl_relative"``, precomputed
+            from ``V`` and handed to the simulator as a sequence.
         costs_wp: ``(N,)`` running-cost sums.
         terminal_costs_wp: ``(N,)`` terminal costs, kept separate so the running
             sum can be horizon-normalized without also scaling a single-step
@@ -126,7 +136,7 @@ class SamplingBasedPlannerBase(abc.ABC):
             simulator: The rollout engine. Its world count is the sample count
                 and its horizon is the planning horizon — the planner never
                 allocates worlds of its own.
-            task: Supplies ``calcCosts_GPU``, and (for ``"relative"`` control)
+            task: Supplies ``calcCosts``, and (for ``"pos_relative"`` control)
                 the robot-joint start address via its ``indices`` vector.
             config: Planner parameters. Defaults to
                 ``SamplingBasedPlannerConfig()``.
@@ -153,7 +163,7 @@ class SamplingBasedPlannerBase(abc.ABC):
                 f"warm_start needs a horizon of at least 2, got {self.horizon}"
             )
 
-        # Where the robot's joints start in qpos, for the relative control mode.
+        # Where the robot's joints start in qpos, for the pos_relative mode.
         # Slot 2 of the task's index vector, the same convention the old planner
         # used; 0 (robot joints lead qpos) when the task does not publish one.
         self.robot_qpos_adr = 0
@@ -196,10 +206,15 @@ class SamplingBasedPlannerBase(abc.ABC):
         self._clip_wp = wp.array(rng, dtype=wp.float32, device=dev)
         self._has_clip = not (low is None and high is None)
 
-        # Added to every sample to form the absolute command. Stays zero in
-        # "absolute" mode; refilled from the measured state each plan in
-        # "relative" mode.
-        self._offset_wp = wp.zeros(nu, dtype=wp.float32, device=dev)
+        # ctrl_relative: the control applied when planning starts, which the
+        # accumulated deltas are added to.
+        self._u_prev_wp = wp.zeros(nu, dtype=wp.float32, device=dev)
+        # pos_relative: one control step's commands, computed on the device from
+        # the rollout's current positions and handed to the simulator.
+        self._ctrl_step_wp = wp.zeros((N, nu), dtype=wp.float32, device=dev)
+        # Host copies of the two command bases, for forming the returned action.
+        self._u_prev: np.ndarray | None = None
+        self._q_robot = np.zeros(nu)
 
         # The rollout's start state, staged on the device. The host-to-device
         # copy into these happens once per plan, outside the graph; the graph
@@ -235,28 +250,28 @@ class SamplingBasedPlannerBase(abc.ABC):
         return None
 
     # -- the loop ------------------------------------------------------------
-    def Plan(self, q: np.ndarray, q_dot: np.ndarray) -> np.ndarray:
+    def Plan(self, q: np.ndarray, q_dot: np.ndarray, u: np.ndarray | None = None) -> np.ndarray:
         """Optimize from the measured state and return the next action.
 
         Args:
             q: Measured positions, ``(nq,)``.
             q_dot: Measured velocities, ``(nv,)``.
+            u: The control currently applied, ``(nu,)``. Only
+                ``"ctrl_relative"`` uses it — its deltas start from it. ``None``
+                falls back to the action this planner returned last, which is
+                right as long as that is what was applied; pass it whenever it
+                may not be, such as at the start of an episode. Not in the
+                plan's signature; ``ctrl_relative`` cannot work without it.
 
         Returns:
-            ``(nu,)`` absolute actuator command — what to hand
-            ``Simulator.SetControl``, already including the relative-mode
-            offset, so a driver never has to know which parameterization the
-            planner used.
+            ``(nu,)`` actuator command — what to hand
+            ``Simulator.SetControl``. Already resolved for the control mode, so
+            a driver never has to know which parameterization the planner used:
+            ``U_0``, ``u + U_0`` or ``q_robot + U_0``.
 
-        Note on ``"relative"`` mode: the offset is the robot's *measured joint
-        positions at plan time*, held constant across the horizon. The old
-        planner instead re-read each world's current qpos at every rollout step
-        (``_assign_ctrl_relative_kernel``). The two agree exactly at the first
-        control step — which is the action actually applied — and diverge over
-        the horizon, where the old form tracks each world's drifting pose and
-        this one does not. Expressing the per-step version would mean reaching
-        past ``SetControlSequence`` into the backend's own arrays, which is the
-        coupling this refactor removes.
+        Raises:
+            ValueError: On a bad shape, or under ``"ctrl_relative"`` when the
+                current control is unknown — no ``u`` and no previous action.
         """
         q = np.asarray(q, dtype=float).ravel()
         q_dot = np.asarray(q_dot, dtype=float).ravel()
@@ -265,7 +280,7 @@ class SamplingBasedPlannerBase(abc.ABC):
         if q_dot.shape != (self.nv,):
             raise ValueError(f"q_dot must have shape ({self.nv},), got {q_dot.shape}")
 
-        self._setOffset(q)
+        self._setCommandBase(q, u)
         self._sampleNoise()
         self.last_plan_ok = False
 
@@ -284,12 +299,29 @@ class SamplingBasedPlannerBase(abc.ABC):
         self.last_plan_ok = True
         return self._extractAction()
 
-    def _setOffset(self, q: np.ndarray) -> None:
-        """Set the command offset from the measured state for this plan."""
-        if self.config.control_mode == "absolute":
-            return
+    def _setCommandBase(self, q: np.ndarray, u: np.ndarray | None) -> None:
+        """Record what this plan's commands are relative to.
+
+        ``pos_relative`` needs the measured joint positions — only for the
+        returned action and tape; the rollout re-reads each world's own. And
+        ``ctrl_relative`` needs the control currently applied, uploaded for the
+        rollout's accumulation.
+        """
         a = self.robot_qpos_adr
-        self._offset_wp.assign(q[a:a + self.nu].astype(np.float32))
+        self._q_robot = q[a:a + self.nu].copy()
+        if self.config.control_mode != "ctrl_relative":
+            return
+        if u is not None:
+            u = np.asarray(u, dtype=float).ravel()
+            if u.shape != (self.nu,):
+                raise ValueError(f"u must have shape ({self.nu},), got {u.shape}")
+            self._u_prev = u.copy()
+        if self._u_prev is None:
+            raise ValueError(
+                "ctrl_relative needs the control currently applied: pass u= to "
+                "Plan (there is no previous action to fall back on)."
+            )
+        self._u_prev_wp.assign(self._u_prev.astype(np.float32))
 
     def _sampleNoise(self) -> None:
         """Redraw the whole ``(N, H, nu)`` perturbation block on the device.
@@ -307,13 +339,36 @@ class SamplingBasedPlannerBase(abc.ABC):
         self._resample_count += 1
 
     def _buildCommands(self) -> None:
-        """``A = V + offset``: turn sampled values into absolute commands."""
-        wp.launch(
-            _add_offset_kernel,
-            dim=(self.N, self.horizon, self.nu),
-            inputs=[self.V_wp, self._offset_wp],
-            outputs=[self.A_wp],
-        )
+        """Turn sampled values into commands, where that can be done up front.
+
+        ``absolute`` needs nothing — the samples *are* the commands.
+        ``ctrl_relative`` accumulates them onto the current control:
+        ``A_t = u + sum_{k<=t} V_k``. ``pos_relative`` cannot be precomputed —
+        each step's command depends on where the rollout has got to — so it is
+        formed inside the rollout, step by step.
+        """
+        if self.config.control_mode == "ctrl_relative":
+            wp.launch(
+                _cumsum_commands_kernel,
+                dim=(self.N, self.nu),
+                inputs=[self.V_wp, self._u_prev_wp, self.horizon],
+                outputs=[self.A_wp],
+            )
+
+    def _armControls(self) -> None:
+        """Hand the simulator this rollout's commands, as the mode requires.
+
+        Precomputable modes go in as a sequence the simulator steps through.
+        ``pos_relative`` clears any sequence instead, since the rollout body
+        sets each step's command itself.
+        """
+        mode = self.config.control_mode
+        if mode == "absolute":
+            self.sim.SetControlSequence(self.V_wp)
+        elif mode == "ctrl_relative":
+            self.sim.SetControlSequence(self.A_wp)
+        else:
+            self.sim.ClearControlSequence()
 
     def _rollout(self, q: np.ndarray, q_dot: np.ndarray) -> None:
         """Roll all ``N`` sampled sequences out in parallel and score them.
@@ -323,7 +378,7 @@ class SamplingBasedPlannerBase(abc.ABC):
         """
         self._q0_wp.assign(q.astype(np.float32))
         self._v0_wp.assign(q_dot.astype(np.float32))
-        self.sim.SetControlSequence(self.A_wp)
+        self._armControls()
 
         if not self.config.use_graph or self._graph_failed:
             self._rolloutBody()
@@ -347,16 +402,24 @@ class SamplingBasedPlannerBase(abc.ABC):
         self.sim.BroadcastState(self._q0_wp, self._v0_wp)
         self.costs_wp.zero_()
         self.terminal_costs_wp.zero_()
-
         state = self.sim.DeviceState()
+        pos_relative = self.config.control_mode == "pos_relative"
+
         for t in range(self.horizon):
+            if pos_relative:
+                # ctrl_t = q_t + V_t, from each world's joint positions as they
+                # stand at the start of this control step.
+                wp.launch(
+                    _pos_relative_kernel, dim=(self.N, self.nu),
+                    inputs=[self.V_wp, t, state.qpos, self.robot_qpos_adr],
+                    outputs=[self._ctrl_step_wp],
+                )
+                self.sim.SetControl(self._ctrl_step_wp)
             self.sim.Step_GPU(self.substeps)
             terminal = t == self.horizon - 1
-            self.task.calcCosts_GPU(
-                state.qpos, state.qvel, state.ctrl,
-                terminal=terminal, out=self._step_cost_wp,
-                site_xpos=state.site_xpos, device=self.device,
-            )
+            # The task reads the simulator's device state itself; `out` keeps
+            # the call allocation-free, which is what lets it be captured.
+            self.task.calcCosts(self.sim, terminal=terminal, out=self._step_cost_wp)
             wp.launch(
                 _accumulate_kernel, dim=self.N,
                 inputs=[self._step_cost_wp],
@@ -378,7 +441,7 @@ class SamplingBasedPlannerBase(abc.ABC):
         """
         self._rolloutBody()
         wp.synchronize()
-        self.sim.SetControlSequence(self.A_wp)
+        self._armControls()
         try:
             with wp.ScopedCapture() as capture:
                 self._rolloutBody()
@@ -407,10 +470,21 @@ class SamplingBasedPlannerBase(abc.ABC):
         the shift, so a driver that plays a tape out over a latency window gets
         a sequence aligned with the state it was planned from.
         """
-        seq = self.U_wp.numpy().copy()
-        offset = self._offset_wp.numpy()
-        self.last_action_seq = seq + offset
+        seq = self.U_wp.numpy().astype(float)
+        mode = self.config.control_mode
+        if mode == "absolute":
+            tape = seq
+        elif mode == "ctrl_relative":
+            tape = self._u_prev + np.cumsum(seq, axis=0)
+        else:
+            # Row 0 is exact — the rollout's first step reads the measured q.
+            # Later rows assume the robot holds q; the rollouts re-read it.
+            tape = self._q_robot + seq
+        self.last_action_seq = tape.astype(np.float32)
         action = self.last_action_seq[0].copy()
+        # The next ctrl_relative plan starts from this command, unless told
+        # otherwise with Plan(u=...).
+        self._u_prev = action.astype(float)
 
         if self.config.warm_start:
             wp.launch(
@@ -429,11 +503,12 @@ class SamplingBasedPlannerBase(abc.ABC):
             mean: ``(nu,)`` command to seed every row of the mean sequence with.
                 ``None`` zeroes it.
 
-        Zero is the right seed under ``"relative"`` control — the sequence is a
-        delta, so a zero mean means "hold the measured pose". Under
-        ``"absolute"`` it is not: a zero mean commands every joint to zero, and
-        on a grasping hand that opens it and drops the object on the first plan.
-        Seed it with the task's initial control there.
+        Zero is the right seed under both relative modes — the sequence is a
+        delta, so a zero mean means "hold the pose" (``pos_relative``) or "hold
+        the command" (``ctrl_relative``). Under ``"absolute"`` it is not: a zero
+        mean commands every joint to zero, and on a grasping hand that opens it
+        and drops the object on the first plan. Seed it with the task's initial
+        control there.
         """
         if mean is None:
             self.U_wp.zero_()
@@ -471,14 +546,36 @@ def _sample_noise_kernel(seed: int, sigma: float, eps: wp.array3d(dtype=float)):
 
 
 @wp.kernel
-def _add_offset_kernel(
-    V: wp.array3d(dtype=float),       # (N, H, nu)
-    offset: wp.array(dtype=float),    # (nu,)
+def _cumsum_commands_kernel(
+    V: wp.array3d(dtype=float),       # (N, H, nu)  per-step deltas
+    u_prev: wp.array(dtype=float),    # (nu,)       control applied at plan time
+    H: int,
     out: wp.array3d(dtype=float),     # (N, H, nu)  [out]
 ):
-    """Absolute command from a sampled value: out = V + offset."""
-    n, h, u = wp.tid()
-    out[n, h, u] = V[n, h, u] + offset[u]
+    """ctrl_relative commands: out[t] = u_prev + sum_{k<=t} V[k].
+
+    One thread per (world, actuator), running the sum along the horizon in
+    order — the same additions, in the same order, as applying ctrl += V[t]
+    one step at a time.
+    """
+    n, u = wp.tid()
+    acc = u_prev[u]
+    for t in range(H):
+        acc = acc + V[n, t, u]
+        out[n, t, u] = acc
+
+
+@wp.kernel
+def _pos_relative_kernel(
+    V: wp.array3d(dtype=float),       # (N, H, nu)
+    t: int,
+    qpos: wp.array2d(dtype=float),    # (N, nq)  each world's current positions
+    robot_adr: int,                   # robot-joint start index in qpos
+    out: wp.array2d(dtype=float),     # (N, nu)  [out]
+):
+    """pos_relative command for step t: out = q_t + V[t], per world."""
+    n, u = wp.tid()
+    out[n, u] = qpos[n, robot_adr + u] + V[n, t, u]
 
 
 @wp.kernel

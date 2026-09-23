@@ -43,10 +43,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from ContactModelStudy.Renderers.MujocoVideoRenderer import (  # noqa: E402
-    MujocoVideoRenderer,
-    MujocoVideoRendererConfig,
-)
+from ContactModelStudy.Renderers.MujocoVideoRenderer import MujocoVideoRenderer  # noqa: E402
+from ContactModelStudy.Renderers.RendererBase import VideoRendererBaseConfig  # noqa: E402
 from ContactModelStudy.SamplingBasedPlanners.MPPI import MPPI, MPPI_Config  # noqa: E402
 from ContactModelStudy.Simulators.Mujoco import Mujoco  # noqa: E402
 from ContactModelStudy.Simulators.Simulator import SimulatorConfig  # noqa: E402
@@ -75,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = p.add_argument_group("episode")
     g.add_argument("--n-episodes", type=int, default=1)
-    g.add_argument("--steps", type=int, default=100,
+    g.add_argument("--steps", type=int, default=4000,
                    help="control steps per episode")
     g.add_argument("--timestep", type=float, default=0.002,
                    help="physics timestep (s), used by both simulators")
@@ -83,6 +81,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="physics steps per control step; control rate is "
                         "1/(timestep*substeps)")
     g.add_argument("--seed", type=int, default=0)
+    g.add_argument("--goal-difficulty", type=int, default=8, choices=range(10),
+                   metavar="{0..9}",
+                   help="goal sampler; 8 (the old default) rolls to show 'O' or "
+                        "'B'. See LeapReorient.GOAL_DIFFICULTIES")
+    g.add_argument("--stop-on-success", action=argparse.BooleanOptionalAction, default=True,
+                   help="end the episode at the first success (the old driver's "
+                        "default); with --no-stop-on-success each success samples "
+                        "a new goal and the episode carries on to --steps")
 
     g = p.add_argument_group("planner")
     g.add_argument("--n-samples", type=int, default=256,
@@ -90,10 +96,13 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--horizon", type=int, default=8,
                    help="H: planning horizon in control steps")
     g.add_argument("--n-iterations", type=int, default=1)
-    g.add_argument("--noise-sigma", type=float, default=0.05)
-    g.add_argument("--temperature", type=float, default=1.0,
+    g.add_argument("--noise-sigma", type=float, default=0.1)
+    g.add_argument("--temperature", type=float, default=10.0,
                    help="MPPI lambda; smaller is greedier")
-    g.add_argument("--control-mode", default="relative", choices=["relative", "absolute"])
+    g.add_argument("--control-mode", default="pos_relative",
+                   choices=["pos_relative", "ctrl_relative", "absolute"],
+                   help="pos_relative: ctrl = q + U; ctrl_relative: ctrl = "
+                        "ctrl_prev + U; absolute: ctrl = U")
     g.add_argument("--delta", type=float, default=None,
                    help="symmetric per-step clip on the control delta; omitted "
                         "leaves it unclipped (the study's default)")
@@ -115,10 +124,29 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--fps", type=float, default=30.0)
     g.add_argument("--width", type=int, default=640)
     g.add_argument("--height", type=int, default=480)
-    g.add_argument("--camera", default="demo-cam", help="'none' for the free camera")
+    g.add_argument("--camera", default=None,
+                   help="camera defined in the scene; 'none' for the free "
+                        "camera. Omitted, the task's own camera is used")
     g.add_argument("--results", default=None, help="write a JSON summary here")
     g.add_argument("--debug", action="store_true", help="per-plan MPPI diagnostics")
     return p
+
+
+def _newGoal(task, eval_task, renderer) -> str:
+    """Sample one goal and give it to both tasks and the renderer.
+
+    The two task instances load different scenes but must chase one goal, so it
+    is sampled once — on the eval task, which owns the episode and its seed —
+    and set on both. Each new goal is a rotation of the previous one. The
+    renderer keeps its own copy of the scene, so it is told too, or the video's
+    goal marker would never move. Returns the letter of the face the goal shows.
+    """
+    goal = eval_task.sampleNewGoal()
+    eval_task.setGoal(goal)
+    task.setGoal(goal)
+    if renderer is not None:
+        eval_task.setRendererToGoal(renderer)
+    return eval_task.goalFace() if hasattr(eval_task, "goalFace") else "?"
 
 
 def run_episode(
@@ -127,31 +155,59 @@ def run_episode(
     """Run one closed-loop episode and return its summary.
 
     The planner sees the eval simulator's state and returns an absolute command;
-    the eval simulator holds that command for ``substeps`` physics steps. Costs
-    are reported with the *eval* task, so the number being tracked is
-    performance on the accurate scene, not on the planner's own model of it.
+    the eval simulator holds that command for ``substeps`` physics steps.
+
+    The episode is judged with the *eval* task's ``isSuccess`` / ``isFailure``,
+    evaluated on the start-of-step state as the old driver did. A failure always
+    ends it. A success ends it too unless ``--no-stop-on-success``, in which
+    case a fresh goal is sampled and the episode carries on — the old driver's
+    multi-goal mode.
     """
-    q0, v0, u0 = eval_task.getInitialState()
-    sim.SetState(q0, v0)
-    sim.SetControl(u0)
+    eval_task.setSimToInitialState(sim)
+    _, _, u0 = eval_task.getInitialState()
     # Under absolute control the mean IS the command, so a zero mean would open
     # the hand and drop the object on the first plan; seed it with the task's
-    # initial grasp. Under relative control the mean is a delta and zero
-    # correctly means "hold the measured pose".
-    planner.Reset(u0 if args.control_mode == "absolute" else None)
+    # initial grasp. Under both relative modes the mean is a delta, and zero
+    # correctly means "hold" — the pose, or the command.
+    reset_mean = u0 if args.control_mode == "absolute" else None
+    goals = [_newGoal(task, eval_task, renderer)]
+    planner.Reset(reset_mean)
     if renderer is not None:
         renderer.Reset()
 
-    every = max(1, round(1.0 / (args.fps * sim.timestep * args.substeps)))
-    costs, plan_ms = [], []
+    # The renderer schedules frames against the task's timestep, in units of
+    # one physics step; the loop advances `substeps` of them at a time.
+    every = 1
+    if renderer is not None:
+        every = max(1, round(renderer.getStepsPerFrame() / args.substeps))
+
+    goal_errors = getattr(eval_task, "goalErrors", None)
+    q_start, v_start = sim.GetState()
+    plan_ms, planner_cost, successes = [], [], []
+    end_reason, steps_taken = "timeout", args.steps
 
     for step in range(args.steps):
-        q, q_dot = sim.GetState()
-        costs.append(float(eval_task.calcCosts(q, q_dot)))
+        if eval_task.isFailure(sim):
+            end_reason, steps_taken = "failure", step
+            break
+        if eval_task.isSuccess(sim):
+            successes.append(step)
+            if args.stop_on_success:
+                end_reason, steps_taken = "success", step
+                break
+            goals.append(_newGoal(task, eval_task, renderer))
+            planner.Reset(reset_mean)
 
+        q, q_dot = sim.GetState()
         t0 = time.perf_counter()
-        u = planner.Plan(q, q_dot)
+        # The applied control is passed so ctrl_relative always accumulates from
+        # what the hand is actually commanded — at step 0 the task's initial
+        # grasp, not whatever the planner returned last episode.
+        u = planner.Plan(q, q_dot, u=sim.GetControl())
         plan_ms.append((time.perf_counter() - t0) * 1e3)
+        # The planner's best rollout cost, on its own (rollout) model. A
+        # progress signal, not a score: the eval task has no host-side cost.
+        planner_cost.append(float(getattr(planner, "last_min_cost", float("nan"))))
 
         sim.SetControl(u)
         sim.Step(args.substeps)
@@ -159,35 +215,41 @@ def run_episode(
             renderer.RenderState(sim.GetState()[0])
 
     q, q_dot = sim.GetState()
-    costs.append(float(eval_task.calcCosts(q, q_dot)))
     if renderer is not None:
         renderer.RenderState(q)
+    # A multi-goal run that timed out still succeeded if it reached any goal.
+    if end_reason == "timeout" and successes:
+        end_reason = "success"
 
-    obj_adr = int(task.indices[0])
-    target = np.asarray(task.params["target_pos"], float)
-    fallen_z = float(task.params["fallen_z"])
-    held = bool(q[obj_adr + 2] > fallen_z)
-
-    return {
+    summary = {
         "episode": episode,
-        "steps": args.steps,
-        "cost_start": costs[0],
-        "cost_end": costs[-1],
-        "cost_min": min(costs),
-        "cost_mean": float(np.mean(costs)),
-        "object_dist_start": float(np.linalg.norm(q0[obj_adr:obj_adr + 3] - target)),
-        "object_dist_end": float(np.linalg.norm(q[obj_adr:obj_adr + 3] - target)),
-        "object_height_end": float(q[obj_adr + 2]),
-        "held": held,
+        "end_reason": end_reason,
+        "success": bool(successes),
+        "steps_to_success": successes[0] if successes else None,
+        "goals_reached": len(successes),
+        "success_steps": successes,
+        "goals": goals,
+        "failed": end_reason == "failure",
+        "steps_taken": steps_taken,
+        "planner_min_cost": planner_cost,
+    }
+    if goal_errors is not None:
+        # Start errors are against the first goal; end errors against whichever
+        # goal was active when the episode stopped.
+        summary["goal_errors_start"] = goal_errors(q_start, v_start)
+        summary["goal_errors_end"] = goal_errors(q, q_dot)
+    if plan_ms:
         # The first plan of a run pays kernel compilation and CUDA-graph
         # capture — often 100x the steady-state cost — so it is reported
         # separately rather than being averaged into a figure that then
         # describes neither.
-        "plan_ms_first": float(plan_ms[0]),
-        "plan_ms_mean": float(np.mean(plan_ms[1:])) if len(plan_ms) > 1 else float(plan_ms[0]),
-        "plan_ms_max": float(np.max(plan_ms[1:])) if len(plan_ms) > 1 else float(plan_ms[0]),
-        "costs": costs,
-    }
+        rest = plan_ms[1:] or plan_ms
+        summary.update(
+            plan_ms_first=float(plan_ms[0]),
+            plan_ms_mean=float(np.mean(rest)),
+            plan_ms_max=float(np.max(rest)),
+        )
+    return summary
 
 
 def main(argv=None) -> int:
@@ -196,8 +258,13 @@ def main(argv=None) -> int:
     task_cls = TASKS[args.task]
     # Two views of the same task: the scene the planner predicts with, and the
     # accurate one it is scored on.
-    task = task_cls(role=TaskRole.ROLLOUT, hand_acc=args.hand_acc, obj_acc=args.obj_acc)
-    eval_task = task_cls(role=TaskRole.EVAL)
+    # Goals are sampled on the eval task (seeded, so a run is reproducible) and
+    # copied to the rollout task; see _newGoal.
+    task = task_cls(role=TaskRole.ROLLOUT, hand_acc=args.hand_acc,
+                    obj_acc=args.obj_acc, timestep=args.timestep,
+                    goal_difficulty=args.goal_difficulty)
+    eval_task = task_cls(role=TaskRole.EVAL, timestep=args.timestep,
+                         goal_difficulty=args.goal_difficulty, seed=args.seed)
 
     sim = Mujoco(eval_task.getModelPath(), SimulatorConfig(timestep=args.timestep))
     rollout_sim = VectorizedMujoco(
@@ -234,10 +301,14 @@ def main(argv=None) -> int:
             if args.n_episodes > 1:
                 p = Path(args.video)
                 video_path = str(p.with_name(f"{p.stem}_ep{episode}{p.suffix}"))
-            renderer = MujocoVideoRenderer(eval_task, MujocoVideoRendererConfig(
-                width=args.width, height=args.height, fps=args.fps,
-                camera=None if args.camera.lower() == "none" else args.camera,
-            ))
+            # The CLI's own settings, then whatever the task needs (its
+            # camera), then any CLI override of the task's choice — in that
+            # order, so an explicit --camera wins over the task.
+            cfg = VideoRendererBaseConfig(width=args.width, height=args.height, fps=args.fps)
+            eval_task.alignRendererConfigWithTask(cfg)
+            if args.camera is not None:
+                cfg.cam_name = None if args.camera.lower() == "none" else args.camera
+            renderer = MujocoVideoRenderer(eval_task, cfg)
         try:
             s = run_episode(episode, args, task, eval_task, sim, planner, renderer)
             if renderer is not None:
@@ -247,23 +318,31 @@ def main(argv=None) -> int:
                 renderer.Close()
 
         summaries.append(s)
-        print(f"\nepisode {episode}: cost {s['cost_start']:.3f} -> {s['cost_end']:.3f} "
-              f"(min {s['cost_min']:.3f})")
-        print(f"  object {s['object_dist_start']:.4f} -> {s['object_dist_end']:.4f} m "
-              f"from target, {'held' if s['held'] else 'DROPPED'} "
-              f"(z={s['object_height_end']:.4f})")
-        print(f"  plan {s['plan_ms_mean']:.1f} ms mean, {s['plan_ms_max']:.1f} ms max "
-              f"({1e3 / s['plan_ms_mean']:.0f} Hz), first {s['plan_ms_first']:.0f} ms "
-              f"(compile + graph capture)")
+        outcome = {"success": "SUCCESS", "failure": "FAILED", "timeout": "timeout"}[s["end_reason"]]
+        where = (f" at step {s['steps_to_success']}" if s["success"]
+                 else f" at step {s['steps_taken']}" if s["failed"] else "")
+        print(f"\nepisode {episode}: {outcome}{where}  ({s['steps_taken']}/{args.steps} steps)")
+        print(f"  goals {' -> '.join(s['goals'])}  ({s['goals_reached']} reached)")
+        if "goal_errors_end" in s:
+            e0, e1 = s["goal_errors_start"], s["goal_errors_end"]
+            print(f"  pos {e0['pos']:.4f} -> {e1['pos']:.4f} m   "
+                  f"quat {e0['quat']:.4f} -> {e1['quat']:.4f}   "
+                  f"vel {e1['vel']:.4f}")
+        if "plan_ms_mean" in s:
+            # Only the run's very first plan compiles kernels and captures the
+            # graph; later episodes reuse both.
+            note = " (compile + graph capture)" if episode == 0 else ""
+            print(f"  plan {s['plan_ms_mean']:.1f} ms mean, {s['plan_ms_max']:.1f} ms max "
+                  f"({1e3 / s['plan_ms_mean']:.0f} Hz), first {s['plan_ms_first']:.0f} ms{note}")
         if s.get("video"):
             print(f"  video {s['video']}")
 
     if args.n_episodes > 1:
-        held = sum(s["held"] for s in summaries)
-        print(f"\n{args.n_episodes} episodes: {held} held, "
-              f"mean final cost {np.mean([s['cost_end'] for s in summaries]):.3f}, "
-              f"mean final distance "
-              f"{np.mean([s['object_dist_end'] for s in summaries]):.4f} m")
+        n_ok = sum(s["success"] for s in summaries)
+        n_fail = sum(s["failed"] for s in summaries)
+        print(f"\n{args.n_episodes} episodes: {n_ok} succeeded, {n_fail} failed, "
+              f"{args.n_episodes - n_ok - n_fail} timed out  "
+              f"(success rate {n_ok / args.n_episodes:.0%})")
 
     if args.results:
         out = Path(args.results)

@@ -278,12 +278,23 @@ class VectorizedMujoco(VectorizedSimulator):
         return self.d.qpos.numpy(), self.d.qvel.numpy()
 
     # -- control -------------------------------------------------------------
-    def SetControl(self, u: np.ndarray) -> None:
+    def SetControl(self, u) -> None:
         """Set the held control for every world, ``(N, nu)`` or ``(nu,)``.
+
+        A host array is validated and uploaded. An ``(N, nu)`` warp array is
+        copied device-to-device instead — kernel work only, so it can sit inside
+        a captured CUDA graph. That is how a planner applies commands it had to
+        compute on the device mid-rollout, from the state the rollout reached.
 
         Does not clear an active sequence — the sequence still wins on the next
         step. Call ``ClearControlSequence`` first to hand control back to this.
         """
+        if isinstance(u, wp.array):
+            want = (self.N, self.nu)
+            if tuple(u.shape) != want:
+                raise ValueError(f"u warp array must have shape {want}, got {tuple(u.shape)}")
+            wp.copy(self.d.ctrl, u)
+            return
         self.d.ctrl.assign(self._to_worlds(u, self.nu, "u").astype(np.float32))
 
     def GetControl(self) -> np.ndarray:
@@ -314,7 +325,7 @@ class VectorizedMujoco(VectorizedSimulator):
         return self.d.time.numpy()
 
     # -- device state --------------------------------------------------------
-    def BroadcastState(self, q, q_dot=None) -> None:
+    def BroadcastState(self, q, q_dot=None, u=None) -> None:
         """Seed every world from device arrays; see ``VectorizedSimulator``."""
         wp.launch(_broadcast_kernel, dim=(self.N, self.nq),
                   inputs=[q], outputs=[self.d.qpos])
@@ -323,6 +334,9 @@ class VectorizedMujoco(VectorizedSimulator):
         else:
             wp.launch(_broadcast_kernel, dim=(self.N, self.nv),
                       inputs=[q_dot], outputs=[self.d.qvel])
+        if u is not None:
+            wp.launch(_broadcast_kernel, dim=(self.N, self.nu),
+                      inputs=[u], outputs=[self.d.ctrl])
 
     def DeviceState(self) -> DeviceState:
         """The live MJWarp arrays, for a cost function that runs on the device."""
