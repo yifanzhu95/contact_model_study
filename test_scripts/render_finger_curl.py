@@ -44,6 +44,7 @@ from ContactModelStudy.Renderers.RendererBase import VideoRendererBaseConfig  # 
 from ContactModelStudy.Simulators.Mujoco import Mujoco  # noqa: E402
 from ContactModelStudy.Simulators.Simulator import SimulatorConfig  # noqa: E402
 from ContactModelStudy.Tasks.CubeReorient import CubeReorient  # noqa: E402
+from ContactModelStudy.Tasks.LeapReorient import LeapReorientConfig  # noqa: E402
 from ContactModelStudy.Tasks.TaskBase import TaskRole  # noqa: E402
 
 SCENE = REPO_ROOT / "scenes" / "leap" / "env_leap_eval_cube.xml"
@@ -164,7 +165,7 @@ def main() -> int:
     # The renderer takes the task, not a bare path: it reads the task's
     # timestep to schedule frames, and the task's own camera when the CLI does
     # not override one. The task's eval scene IS this script's SCENE.
-    render_task = CubeReorient(role=TaskRole.EVAL, timestep=args.timestep)
+    render_task = CubeReorient(LeapReorientConfig(role=TaskRole.EVAL, timestep=args.timestep))
     cfg = VideoRendererBaseConfig(
         width=args.width, height=args.height, fps=args.fps,
         cam_name=None if args.camera.lower() == "none" else args.camera,

@@ -80,6 +80,11 @@ class SamplingBasedPlannerConfig:
             overhead. Falls back to eager launches, with a warning, if the
             capture cannot be made.
         debug: Print per-plan diagnostics.
+        return_uncertainty: Make ``Plan`` return ``(action, uncertainty)``
+            instead of just the action. ``uncertainty`` is ``(nu,)``: how
+            spread out the samples' first actions were, per actuator, under the
+            weights the planner used to form the action. What exactly that is
+            depends on the planner; see its ``_actionUncertainty``.
     """
 
     noise_sigma: float = 0.01
@@ -90,6 +95,7 @@ class SamplingBasedPlannerConfig:
     seed: int | None = None
     use_graph: bool = True
     debug: bool = False
+    return_uncertainty: bool = False
 
     def __post_init__(self) -> None:
         if self.noise_sigma <= 0.0:
@@ -175,9 +181,19 @@ class SamplingBasedPlannerBase(abc.ABC):
         self._noise_seed = int(self._rng.integers(0, 2**31 - 1))
         self._resample_count = 0
 
+        if (self.config.return_uncertainty
+                and type(self)._actionUncertainty is SamplingBasedPlannerBase._actionUncertainty):
+            raise NotImplementedError(
+                f"{type(self).__name__} cannot report an action uncertainty; "
+                f"set return_uncertainty=False"
+            )
+
         # Diagnostics a driver or an evaluation pass can read after a plan.
         self.last_action_seq: np.ndarray | None = None
         self.last_plan_ok: bool = False
+        #: ``(nu,)`` uncertainty of the last action, when ``return_uncertainty``
+        #: is set; NaN after a failed plan.
+        self.last_action_uncertainty: np.ndarray | None = None
 
         self._setupArrays()
 
@@ -249,8 +265,20 @@ class SamplingBasedPlannerBase(abc.ABC):
         """Restore any adaptive state. No-op unless a subclass has some."""
         return None
 
+    def _actionUncertainty(self) -> np.ndarray:
+        """``(nu,)`` uncertainty of the action the last update produced.
+
+        Called after the final ``_updateParams`` and before the warm-start
+        shift, so ``U_wp`` row 0 is the action about to be returned. A planner
+        that can report ``return_uncertainty`` overrides this; the base class
+        refuses the flag at construction otherwise.
+        """
+        raise NotImplementedError
+
     # -- the loop ------------------------------------------------------------
-    def Plan(self, q: np.ndarray, q_dot: np.ndarray, u: np.ndarray | None = None) -> np.ndarray:
+    def Plan(
+        self, q: np.ndarray, q_dot: np.ndarray, u: np.ndarray | None = None
+    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         """Optimize from the measured state and return the next action.
 
         Args:
@@ -268,6 +296,10 @@ class SamplingBasedPlannerBase(abc.ABC):
             ``Simulator.SetControl``. Already resolved for the control mode, so
             a driver never has to know which parameterization the planner used:
             ``U_0``, ``u + U_0`` or ``q_robot + U_0``.
+
+            With ``config.return_uncertainty`` set, a tuple ``(action,
+            uncertainty)`` instead, both ``(nu,)``. The uncertainty is in the
+            same units as the action, and is NaN when the plan failed.
 
         Raises:
             ValueError: On a bad shape, or under ``"ctrl_relative"`` when the
@@ -294,10 +326,20 @@ class SamplingBasedPlannerBase(abc.ABC):
                 # replaying the previous one would be acting on a failed solve.
                 self.U_wp.zero_()
                 self.last_action_seq = np.zeros((self.horizon, self.nu), dtype=np.float32)
-                return np.zeros(self.nu, dtype=np.float32)
+                return self._result(np.zeros(self.nu, dtype=np.float32),
+                                    np.full(self.nu, np.nan, dtype=np.float32))
 
         self.last_plan_ok = True
-        return self._extractAction()
+        # Before _extractAction, whose warm-start shift moves U_wp's row 0.
+        unc = self._actionUncertainty() if self.config.return_uncertainty else None
+        return self._result(self._extractAction(), unc)
+
+    def _result(self, action: np.ndarray, uncertainty: np.ndarray | None):
+        """``action``, or ``(action, uncertainty)`` when the config asks for it."""
+        if not self.config.return_uncertainty:
+            return action
+        self.last_action_uncertainty = uncertainty
+        return action, uncertainty
 
     def _setCommandBase(self, q: np.ndarray, u: np.ndarray | None) -> None:
         """Record what this plan's commands are relative to.

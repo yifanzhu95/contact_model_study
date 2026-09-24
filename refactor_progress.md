@@ -24,19 +24,19 @@ every existing script still runs while the port is in progress.
 | --- | --- | --- | --- |
 | `Simulator.py` | DONE | `contact_study/sim/base.py` | `Simulator` ABC + `SimulatorConfig` dataclass |
 | `VectorizedSimulator.py` | DONE | `contact_study/contact_models/api.py` | `VectorizedSimulator` ABC + `VectorizedSimulatorConfig` |
-| `Mujoco.py` | DONE | `contact_study/sim/mujoco_sim.py` | `Mujoco`; rendering left for `Renderers/` |
-| `VectorizedMujoco.py` | DONE | `contact_study/contact_models/api.py` (MJWarp path) | `VectorizedMujoco` + `VectorizedMujocoConfig` |
-| `ComFree.py` | TODO | `contact_study/contact_models/api.py` (M3 path) | |
-| `XPBD.py` | TODO | `contact_study/contact_models/xpbd_backend.py` | 863 lines; largest single port |
-| `Pinocchio.py` | TODO | `contact_study/contact_models/pinocchio_sim.py` | 1540 lines; largest file in the repo |
-| `Drake.py` | TODO | `contact_study/contact_models/drake_sim.py` | |
+| `Mujoco.py` | DONE | `contact_study/sim/mujoco_sim.py` | `Mujoco` + `MujocoConfig` (owns the contact fields) |
+| `VectorizedMujoco.py` | DONE | `contact_study/contact_models/api.py` (MJWarp path) | `VectorizedMujoco` + `VectorizedMujocoConfig` (same contact fields) |
+| `ComFree.py` | DONE | `contact_study/contact_models/api.py` (M3 path) | `ComFree` + `ComFreeConfig`; subclass of `VectorizedMujoco` |
+| `XPBD.py` | DONE | `contact_study/contact_models/xpbd_backend.py` | `XPBD` + `XPBDConfig`; subclass of `VectorizedMujoco` |
+| `Pinocchio.py` | DONE | `contact_study/contact_models/pinocchio_sim.py` | `Pinocchio` + `PinocchioConfig`; physics from the MJCF |
+| `Drake.py` | DONE | `contact_study/contact_models/drake_sim.py` | `Drake` + `DrakeConfig`; parses the task MJCF, not a URDF |
 
 ### Tasks
 
 | Module | Status | Ported from | Notes |
 | --- | --- | --- | --- |
-| `TaskBase.py` | DONE | `contact_study/tasks/base.py` | `TaskBase` + `TaskRole` |
-| `LeapReorient.py` | DONE | `contact_study/tasks/grasp_reorient.py` | Shared leap machinery + the cost |
+| `TaskBase.py` | DONE | `contact_study/tasks/base.py` | `TaskBase` + `TaskRole` + `TaskBaseConfig` |
+| `LeapReorient.py` | DONE | `contact_study/tasks/grasp_reorient.py` | Shared leap machinery + the cost; `LeapReorientConfig` |
 | `CubeReorient.py` | DONE | `contact_study/tasks/grasp_reorient.py` | The cube's numbers only |
 | `BallReorient.py` | TODO | `contact_study/tasks/grasp_reorient.py` | Split out of the shared reorient task |
 | `DuckReorient.py` | TODO | `contact_study/tasks/grasp_reorient.py` | Split out of the shared reorient task |
@@ -65,7 +65,11 @@ every existing script still runs while the port is in progress.
 | --- | --- | --- | --- |
 | `Drivers/run_episodes.py` | DONE | `contact_study/drivers/run_eval_episode.py` | Closed-loop MPC episodes + video + JSON |
 | `Drivers/run_episodes_parallel.py` | DEFER | `contact_study/drivers/run_async_eval_episode.py` | "Ignore for now" |
-| `Utils/EpisodeIO.py` | TODO | `contact_study/evaluation/json_io.py` | |
+| `Utils/MjcfModelInfo.py` | DONE | new (replaces the scattered MJCF readers) | MJCF parameters resolved by MuJoCo, shared by Pinocchio and Drake |
+| `Utils/EvalSimulators.py` | DONE | `Drivers/run_episodes.py` (moved out) | `makeEvalSim(name, xml, timestep)` + `EVAL_SIMS`; builds the MuJoCo / Pinocchio / Drake eval simulator by name |
+| `Utils/Quaternions.py` | DONE | `Tasks/LeapReorient.py` header (moved out) | `matToQuat`, `axisAngleQuat`, `quatMul` (wxyz) |
+| `Utils/EpisodeRecorder.py` | DONE | `contact_study/evaluation/json_io.py` (replaces the planned EpisodeIO) | `EpisodeRecorder` + `EpisodeReplayer`; used by `run_episodes.py` |
+| `Utils/ContactModelPresets.py` | DONE | `contact_study/contact_models/config.py` (M1-M4) | `GetContactModelSim(name, xml, N, **overrides)`; not yet wired into the driver |
 | `Experiments/` `Results/` `Logs/` `Tests/` `Videos/` | DEFER | — | "Ignore for now" |
 
 ## What was done — Simulators/Simulator.py
@@ -1057,6 +1061,617 @@ default.
   * `--no-video`, `--delta`, `--warm-start`, `--control-mode`, `--n-samples`,
     `--horizon`, `--temperature` and `--help` all behave.
 
+## What was done — Simulators/ComFree.py and XPBD.py
+
+Both backends run on MJWarp's model and data layout. They differ from it only
+in how the model is uploaded and how a step is taken. Each one is therefore a
+subclass of `VectorizedMujoco` and overrides four hooks:
+
+| Hook (on `VectorizedMujoco`) | MJWarp | ComFree | XPBD |
+| --- | --- | --- | --- |
+| `_putModel()` | `mjw.put_model` | `comfree_warp.put_model(stiffness, damping)` | inherited |
+| `_makeData(**kw)` | `mjw.make_data` | `comfree_warp.make_data` (adds scratch fields) | inherited |
+| `_stepPhysics()` | `mjw.step` | `comfree_warp.step` | XPBD substep loop + sensors |
+| `_forwardPhysics()` | `mjw.forward` | `comfree_warp.forward` | position phase + XPBD solve |
+
+These four hooks are the only places `VectorizedMujoco` now calls the physics
+engine. Controls, state, control sequences, `BroadcastState`, `DeviceState`
+and graph capture are inherited unchanged.
+
+### Configs
+
+- **`ComFreeConfig(VectorizedMujocoConfig)`** adds `stiffness=0.2` and
+  `damping=0.001`, the old `ComfreeParams` defaults. Both must be >= 0.
+- **`XPBDConfig(VectorizedMujocoConfig)`** adds `xpbd_substeps=1`,
+  `xpbd_iterations=2`, `relaxation=0.1` and `vmax_depenetration=1.0`, the old
+  `XPBDParams` defaults.
+  - The two counts carry an `xpbd_` prefix. Without it, `xpbd_substeps` would
+    clash with the inherited `substeps` (simulator steps per control step) and
+    `xpbd_iterations` with `iterations` (MuJoCo's solver iterations).
+
+### Which inherited contact fields matter
+
+I checked this against the comfree_warp source and the XPBD kernel:
+
+| Field | ComFree | XPBD |
+| --- | --- | --- |
+| `solimp_d`, `solimp_midpoint`, `solimp_power` | used (contact-row mass) | used (`efc_D`) |
+| `solimp_width` | **ignored**, hard-coded to 0.01 in comfree_warp | used |
+| `solref_timeconst`, `solref_dampratio` | ignored (only feed `aref`) | ignored (uses raw `efc_pos`) |
+| `solver`, `iterations`, `tolerance` | ignored (no iterative solve) | ignored (solver bypassed) |
+
+All of these fields are still written to the model, as in the old code.
+
+### XPBD port
+
+- The kernels and the pipeline order are copied from `xpbd_backend.py`
+  unchanged.
+- The `XPBDModel` and `XPBDData` wrapper classes are gone. `m` and `d` are
+  plain MJWarp model and data, and the scratch buffers are attributes of the
+  simulator.
+- The no-op `_forward_setup` and the `print_constraint_types` diagnostic were
+  dropped.
+- The old docstring called friction loss "bilateral (TODO: box clamp)". The
+  kernel already box-clamps it, so the new docstring says so.
+
+### Verification (`scratchpad/backends_check.py`, 25/26)
+
+- **Matches the old backend.** 16 worlds, 25 steps of random control at
+  dt = 4 ms, old `api` compared with the new class:
+
+  | Backend | Old vs old (run-to-run noise) | Old vs new |
+  | --- | --- | --- |
+  | MJWarp | 5.0e-3 | 5.0e-3 |
+  | ComFree | 2.5e-7 | 2.5e-7 |
+  | ComFree (k=0.5, b=0.01) | 0 | 0 |
+  | XPBD | 6.8e-7 | 1.4e-6 |
+
+- **The backends are distinct,** and changing ComFree's stiffness changes
+  the result.
+- **Parameters arrive.** Stiffness and damping reach the device model, and the
+  contact fields reach `mjm`. Bad values raise.
+- **Graph capture.** A captured rollout (BroadcastState, SetControlSequence,
+  32 steps) reproduces the eager rollout to within run-to-run noise. Timing
+  at N=256 over 32 steps:
+
+  | Backend | ms per rollout |
+  | --- | --- |
+  | MJWarp | 16.4 |
+  | ComFree | 9.3 |
+  | XPBD | 8.8 |
+  | XPBD, 2 substeps | 16.5 |
+
+- **The one failure is inherited.** With `xpbd_substeps=3` and
+  `xpbd_iterations=1` under noisy random control (σ = 0.3), the run goes NaN
+  within 25 steps, and it does so in the old backend too.
+  - At the nominal control, 1 to 4 substeps are all stable at both 2 ms and
+    4 ms.
+
+### Not done
+
+`run_episodes.py` still builds a `VectorizedMujoco` for its rollouts. It has no
+flag to choose ComFree or XPBD.
+
+## What was done — Simulators/Pinocchio.py, Drake.py and Utils/MjcfModelInfo.py
+
+### Goal
+
+The old eval simulators were set up by constants in the header of
+`contact_study/tasks/grasp_reorient.py` and by per-simulator config
+dataclasses. Many of those repeated values the MJCF already holds, and had to be
+kept equal to it by hand. Now every physical parameter comes from the MJCF, and
+the two configs hold only solver settings the MJCF can't express.
+
+### `Utils/MjcfModelInfo.py`
+
+Neither parser reads the MJCF correctly, so both simulators get their
+parameters from MuJoCo's compiler instead:
+
+- Pinocchio's parser ignores `<default>` classes, and `appendModel` drops
+  armature.
+- Drake 1.51's parser loses `kv` and sets actuator effort limits from
+  `ctrlrange`.
+
+`MjcfModelInfo.fromXml(path)` compiles the MJCF with MuJoCo and returns:
+
+- **joints:** type, qpos/qvel address, body, limited, range, margin, damping,
+  armature and frictionloss;
+- **actuators:** kp, kv, ctrl range and force range (`forcerange` intersected
+  with `actuatorfrcrange`). It raises on anything that isn't a unit-gear joint
+  position servo.
+- **geoms:** body, contype, conaffinity and friction;
+- **`allowed_pairs`:** MuJoCo's collision filter, reimplemented as bitmask,
+  same weld group, parent-child weld group, `<exclude>`, plus explicit
+  `<pair>`s.
+
+Geoms are matched across simulators by name, falling back to their order within
+the body when unnamed.
+
+### What happened to each old constant
+
+| Old (grasp_reorient.py / old configs) | Now |
+| --- | --- |
+| `_PID_KP`, `_PID_KD`, `_PIN_KD`, `_JOINT_DAMPING` | MJCF: actuator `kp`/`kv`, joint `damping` |
+| `_ARMATURE` (Pinocchio lost it in `appendModel`) | MJCF: `dof_armature`, written into the model; Drake gets it as rotor inertia |
+| `_DRAKE_PID_EFFORT`, `force_limit` | MJCF: `forcerange` / `actuatorfrcrange`; ±inf when unlimited |
+| `_PIN_ENFORCE_JOINT_LIMITS`, `_PIN_LIMIT_MARGIN` | MJCF: `limited`, `range`, `margin` |
+| `_PIN_JOINT_FRICTION` | MJCF: `frictionloss` (applied whenever > 0) |
+| `_FLOOR_HALFEXTENT_THRESH`, `use_mesh_geoms`, `parse_mjcf_excludes` | MJCF: contype, conaffinity, `<exclude>` through `allowed_pairs` |
+| `friction`, `use_mjcf_friction` | MJCF: `geom_friction`, max rule in Pinocchio |
+| `_MJ_CTRL_TO_URDF_JOINT`, the URDF, the channel lists | gone; joints are matched by name and the state is in MuJoCo layout |
+| `_PID_KI`, `zeta`, `use_direct_kd`, `gravity_comp`, `pid_plant_dt` | dropped |
+| ADMM settings, Baumgarte gains, convex hulls, max contacts | `PinocchioConfig` (same defaults) |
+| (Drake plant defaults) | `DrakeConfig`: contact model, discrete approximation, penetration allowance, stiction tolerance, SAP near-rigid threshold; all `None` = Drake default |
+| Panda3D viewer, goal marker, `set_goal_quat`, Drake `VideoWriter` | removed; `MujocoVideoRenderer.RenderState(sim.GetState()[0])` draws either simulator |
+| `PRINT_CONTACT_DEBUG` | dropped; `Pinocchio.Diagnostics()` keeps the counters |
+
+### Behaviour changes
+
+- **Servos match MuJoCo's formula.**
+  - Force = `clip(kp(clip(u, ctrlrange) − q) − kv·q̇, forcerange)`, and the
+    passive `−damping·q̇` is outside the clip.
+  - The old Pinocchio servo put all 0.31 of the damping outside the clip and
+    didn't clamp `u` to ctrlrange.
+  - The two are the same for this scene (no force limit, and `init_ctrl` is in
+    range).
+- **Drake now uses its built-in implicit PD** at the eval timestep, instead of
+  a `PidController` on a plant running at dt/2.
+- **Drake now parses the same MJCF as MuJoCo**, instead of
+  `leap_hand_right.urdf`.
+
+### Found while porting
+
+- **`pin.crba` must run before the constraint Cholesky.** The old code called
+  it for its kd formula, and the Cholesky silently depends on it. Without it,
+  the first joint-limit solve returns NaN.
+- **`CubeReorient`'s `init_qpos` puts `th_axl` at 2.526 rad**, past its MJCF
+  upper limit of 2.094. Each simulator pulls it back differently: MuJoCo and
+  Pinocchio similarly, Drake far harder, reaching 1.66 rad against their 1.90
+  at step 50. That makes the first ~50 steps differ between simulators. Not
+  changed.
+
+### Verification
+
+`scratchpad/pin_check.py` (15/15) and `eval_sims_check.py` (18/18):
+
+- **Inheritance.**
+  - Every joint's armature, damping and limits match the MJCF, in both
+    simulators.
+  - Servo kp and kv, and ctrl ranges, match too.
+  - Drake's rotor inertia, gear and effort limit (inf, not the ctrlrange value)
+    are correct, and per-geom friction matches.
+- **Collision pairs.**
+  - Pinocchio's pairs and Drake's collision candidates are both exactly
+    `allowed_pairs` (1754 pairs).
+  - This is the same set the old Pinocchio simulator used.
+  - Every pair MuJoCo reports at margin 10 is in the set.
+- **Pinocchio against the old simulator** (finger curl with the cube, 2 s):
+  - Within 1.9e-10 for the first 100 steps.
+  - 4.6e-3 over the whole run, which is less than the old simulator's own
+    drift when its start is nudged by 1e-15 (7.3e-3). ADMM hits its iteration
+    cap on about 13% of steps, which makes the run chaotic.
+  - Step time is unchanged at 0.70 ms.
+- **Holding `init_ctrl` for 2 s:** the cube ends 1.5–1.6 cm from where it
+  started in all three simulators, at z 0.0885 (MuJoCo) and 0.0890 (Pinocchio,
+  Drake).
+- **Free-space finger curl** (cube parked away, 25% curl, no hand contacts):
+  - Hand joints track MuJoCo to 0.0086 rad (Pinocchio) and 0.0042 rad (Drake).
+  - At a 60% curl the fingertips hit the palm and the index tip slides off the
+    thumb. MuJoCo takes a different path there, while Pinocchio and Drake agree
+    with each other (index finger within 0.034 rad).
+- **Driver:** `run_episodes.py --eval-sim {pinocchio,drake}` runs 300 steps and
+  writes correct videos. The orientation error falls from 0.50 to 0.16 in both.
+  `regress.py` still passes 12/12.
+
+## What was done — Task configs
+
+A task is now built from one config object, following the same pattern as
+`Simulator(xml, SimulatorConfig)`. The config holds everything that can differ
+between two instances of the same task, which is exactly what the constructors
+used to take as arguments:
+
+| Config | Fields |
+| --- | --- |
+| `TaskBaseConfig` (TaskBase.py) | `role`, `timestep`, `seed` |
+| `LeapReorientConfig(TaskBaseConfig)` (LeapReorient.py) | adds `hand_acc`, `obj_acc`, `scenes_dir`, `eval_steps_per_rollout_step`, `goal_difficulty` |
+
+- **Constructor.** `TaskBase.__init__(config=None)` checks `config` against
+  the class's `CONFIG_CLASS` (the renderers' convention) and defaults to
+  `CONFIG_CLASS()`. `CubeReorient` needs a `LeapReorientConfig`; handing it a
+  plain `TaskBaseConfig` raises `TypeError`.
+- **Validation moved into the configs' `__post_init__`:**
+  - timestep > 0;
+  - `role` is coerced to `TaskRole`;
+  - k is a positive integer;
+  - `goal_difficulty` is one of the ten levels;
+  - `scenes_dir=None` resolves to the repo's `scenes/`.
+- **What stays on the classes:** what's fixed for a kind of task (per-object
+  parameters, success thresholds, the camera).
+- **Access.** The tasks read `self.config.*`. `task.role` is a property over
+  `config.role`.
+  - `timestep`, `eval_timestep` and `rollout_timestep` stay attributes, because
+    they are derived.
+  - For a LEAP task, `config.timestep` is the eval timestep, and `task.timestep`
+    depends on the role.
+- **Call sites updated:** `run_episodes.py`, `test_scripts/render_finger_curl.py`,
+  the docstring examples, and the scratchpad checks.
+  - For example:
+    `CubeReorient(LeapReorientConfig(role=TaskRole.ROLLOUT, hand_acc="low"))`.
+
+Checked:
+
+- `scratchpad/task_config_check.py` passes 11/11: defaults, role coercion,
+  per-role timesteps, scene path, seeded goal sampling, validation, and the
+  type check.
+- `regress.py` still passes 12/12.
+- The driver and the finger-curl script both run.
+
+## What was done — Planner action uncertainty
+
+- **Flag:** `SamplingBasedPlannerConfig.return_uncertainty` (default `False`).
+  When it's set, `Plan` returns `(action, uncertainty)`, both `(nu,)`, instead
+  of the bare action. The value is also kept on `planner.last_action_uncertainty`.
+- **Base class:** it owns the plumbing. `Plan` calls a new
+  `_actionUncertainty()` hook after the last update and before the warm-start
+  shift.
+  - A planner that doesn't override the hook refuses the flag at construction
+    with `NotImplementedError`.
+  - A failed plan (every rollout NaN) returns a zero action and a NaN
+    uncertainty.
+- **MPPI's definition:** the weighted standard deviation of the samples' first
+  actions around the new mean, `sqrt(Σ w (V[n,0] − U[0])²)`, per actuator.
+  - It uses the same normalized weights that formed the action, and is computed
+    by one small kernel.
+  - Every control mode shifts all samples' first command by the same offset, so
+    this is also the spread of the commands, in the same units as the action.
+- **Limits:** close to `noise_sigma` when the weights are nearly uniform, and
+  close to 0 when one sample dominates.
+
+Checked in `scratchpad/uncertainty_check.py` (13/13):
+
+- The default return is unchanged.
+- The value matches a NumPy recomputation from `w_wp`, `V_wp` and `U_wp`.
+- Temperature 1e9 gives about `noise_sigma` (0.1003 against 0.1); temperature
+  1e-6 gives 0.
+- It works with warm start and in all three control modes.
+- A failed plan gives NaN.
+- A planner without the hook refuses the flag.
+- `regress.py` still passes 12/12.
+
+## What was done — Utils/EpisodeRecorder.py
+
+**`EpisodeRecorder(task, simulator, planner, **metadata)`** records a batch of
+episodes.
+
+- **Config snapshot:** at construction it captures the task, the eval
+  simulator, the planner and the planner's rollout simulator: each one's class
+  name and full config as JSON, and the task's model path. Any `**metadata`
+  (CLI args, notes) is kept with them.
+- **`recordStateAndAction(q, q_dot, U, sigma_U=None, planning_time=None)`**
+  appends one control step, starting an episode if none is active. It also
+  records the simulator's clock as `t`. A missing `sigma_U` or `planning_time`
+  is stored as NaN.
+- **`episodeFinished(finish_reason, **summary)`** closes the episode. The extra
+  keyword arguments go into that episode's summary entry, for example goals
+  reached or goal errors.
+- **`Save(path)`** writes the JSON summary to `path`, and each episode to
+  `<stem>_<8-hex id>.npy` beside it.
+  - The JSON holds the format version, the configs, a count of each finish
+    reason, and per episode its id, file, reason, step count, planning time
+    mean and max, and summary.
+  - An episode whose configs changed since construction stores its own copy.
+  - Each `.npy` is one structured array, a record per step with the fields
+    `t`, `q`, `q_dot`, `u`, `sigma_u` and `planning_time`. It loads without
+    pickle.
+  - `Save` refuses while an episode is in progress rather than silently
+    dropping it.
+- **`Clear()`** empties the buffer.
+- **`Combine(other)`** returns a new recorder with both recorders' episodes.
+  It refuses if either recorder is mid-episode, or if their configs differ, and
+  names the part that differs.
+
+**`EpisodeReplayer(path)`** reads a saved batch back.
+
+- It supports `len`, `[i]`, lookup with `episode(id)` and iteration over
+  episodes, and `iterStates()` yields `(episode_id, step, q, q_dot, u)` across
+  every episode.
+- Each episode comes back as a `RecordedEpisode` with the per-step arrays, its
+  finish reason, summary and configs.
+- Arrays are loaded when first asked for.
+
+Checked in `scratchpad/recorder_check.py` (18/18), using a real eval task, a
+Mujoco simulator and MPPI with uncertainty on:
+
+- Replayed states, actions and uncertainty equal what was recorded.
+- Missing values come back as NaN, and the sim clock increases.
+- All configs are present in the JSON.
+- `Combine` and `Save` refuse in the right cases.
+- `Clear` works.
+
+Not done yet:
+
+- **The driver** still writes its own `--results` JSON; the recorder isn't
+  wired in.
+- **`ContactModelPresets.py`** hasn't been started.
+
+## What was done — Utils/ContactModelPresets.py
+
+**`GetContactModelSim(name, xml, N=1, **overrides)`** builds a rollout simulator
+for one of the study's contact models.
+
+| Model | Simulator | Parameters (from the old `config.py`) |
+| --- | --- | --- |
+| M1 | `VectorizedMujoco` | Newton, 200 iterations, 1e-10; solimp (0.9999, 0.9999, 1e-4, 0.5, 2); solref (2·dt, 1.0) |
+| M2 | `VectorizedMujoco` | Newton, 25 iterations, 1e-6; the scene's own solref and solimp |
+| M3 | `ComFree` | stiffness 0.2, damping 0.001 (+ Newton, 25 iterations, 1e-6) |
+| M4 | `XPBD` | 1 substep, 2 iterations, relaxation 0.1, vmax 1.0 (+ Newton, 25 iterations, 1e-6) |
+
+- **Where the numbers live:** in `CONTACT_MODELS` at the top of the file, as
+  the spec asks. All four use pyramidal cones.
+- **M1's time constant** is stored as a multiple of the timestep
+  (`M1_SOLREF_TIMECONST_MULT = 2`) and resolved when the simulator is built,
+  never below 2·dt. This is the old clamp.
+- **Accepted names:** `"M1"`–`"M4"` in any case, or the old backend names
+  (`mujoco_hard`, `mujoco_soft`, `comfree`, `xpbd`).
+- **`**overrides`:**
+  - These are config fields: normally the run's shape (`timestep`,
+    `substeps`, `horizon`, `device`, `nconmax`, `njmax`).
+  - A preset parameter can also be overridden for a sweep, for example
+    `stiffness=0.5` on M3.
+  - An override always wins over the preset.
+  - A field the model's config doesn't have raises `TypeError`.
+- **M2–M4 solver settings:** they carry the old study's Newton, 25 iterations
+  and 1e-6, which it wrote onto every model. The leap scenes declare 100
+  iterations and 1e-8, so a plain `VectorizedMujoco` on those scenes, which is
+  what the driver builds now, is not quite M2.
+
+Checked in `scratchpad/presets_check.py` (14/14):
+
+- **Each preset matches the old study's model.** The uploaded model is
+  identical to what the old `api.put_model` built for `ContactModelConfig.M1()`
+  through `M4()`: solver options, geom solref and solimp, ComFree's stiffness
+  and damping, and XPBD's parameters.
+- **Trajectories match.** 25 steps of random control agree with the old
+  backend within its run-to-run noise.
+
+  | Model | Old vs new | Old vs old (noise) |
+  | --- | --- | --- |
+  | M1 | 3.8e-2 | 3.8e-2 |
+  | M2 | 8.1e-3 | 1.6e-2 |
+  | M3 | 5.8e-7 | 5.6e-7 |
+  | M4 | 4.8e-7 | 1.4e-6 |
+
+- **Names, M1's timestep scaling, override precedence and errors** all behave
+  as described.
+
+## Small change — nconmax / njmax in both MuJoCo configs
+
+- **`MujocoConfig` now has `nconmax` and `njmax`**, next to the ten contact
+  fields.
+  - `None` keeps the scene's own `<size>`, which is −1 by default, meaning a
+    dynamic arena.
+  - They're fixed at compile time and read-only on a compiled `MjModel`. So
+    when either is set, `Mujoco._compile` builds the model through `MjSpec`
+    and writes them before compiling; otherwise it compiles directly as
+    before.
+  - The rest of the model is unchanged, and a trajectory with roomy buffers is
+    identical.
+- **Validation:** `validateContactParams` checks that both are ≥ 1, so the CPU
+  and GPU configs reject bad values the same way.
+- **Corrected a docstring:** `VectorizedMujocoConfig` already had both fields,
+  but its docstring said they were totals across all worlds. MJWarp treats both
+  as **per world**: the contact buffer is `nconmax × N`, and `efc.J` is
+  `(N, njmax, nv)`. So they mean the same on CPU and GPU. The driver's help
+  text is fixed too.
+- **Why the driver prints `nefc overflow`:** MJWarp's automatic `njmax` for
+  the leap scenes is 64 per world, and a grasp needs about 76.
+
+Checked in `scratchpad/buffers_check.py` (12/12). `regress.py` still passes
+12/12.
+
+## What was done — run_episodes.py records with EpisodeRecorder
+
+- **One recorder per run:** `main` builds an `EpisodeRecorder(eval_task, sim,
+  planner, cli_args=vars(args), eval_sim=...)`. `run_episode` records every
+  control step's state, action, the planner's uncertainty and the planning
+  time, in seconds.
+- **Finishing an episode:** it's closed after the video is saved, as
+  `recorder.episodeFinished(end_reason, **summary)`. The summary keeps the
+  driver's own fields: goals, success steps, goal errors, `plan_ms_*`, planner
+  min cost, and the video path. It also adds `q_end`/`q_dot_end`, the state the
+  last action led to, which isn't among the recorded steps.
+- **`--results PATH`** is now written by `EpisodeRecorder.Save`: the JSON plus
+  one `.npy` per episode. It replaces the old hand-built JSON.
+  - It's saved in a `finally`, so an error or Ctrl-C keeps the finished
+    episodes.
+  - An episode cut off part-way is closed as `"interrupted"`, with the steps it
+    reached.
+- **New `--uncertainty/--no-uncertainty`** (default on) sets the planner's
+  `return_uncertainty`. With it off, σ is stored as NaN.
+- **Printing** was moved into `_printEpisode`; the output is unchanged.
+
+Two recorder changes this needed:
+
+- `episodeFinished` with no step recorded now records a zero-step episode
+  instead of raising, because an episode can end before its first action.
+- An empty episode's arrays are shaped from the eval simulator's
+  `nq`/`nv`/`nu`.
+
+Checked:
+
+- `scratchpad/driver_record_check.py` passes 8/8:
+  - a 2-episode run replays with 30 steps each;
+  - finite σ;
+  - clock steps of 16 ms;
+  - summary fields and metadata present;
+  - an interrupt during episode 2 saves 1 finished + 1 `interrupted` (4
+    steps);
+  - `--no-uncertainty` stores NaN.
+- The zero-step episode replays with shape `(0, 23)`.
+- `recorder_check.py` still passes 18/18.
+
+## Small change — settle time in run_episodes.py
+
+**`--settle SECONDS`** (default 1.0, the old drivers' default) lets the object
+drop into the palm and the hand close on it before planning starts.
+
+- **What happens:** after `setSimToInitialState`, which sets `u0`, the eval
+  simulator is stepped `round(settle / eval_dt)` times with the initial grasp
+  held.
+- **Filmed, not recorded:** it goes through `_advance`, so the video opens with
+  the settle. It isn't counted in `--steps`, and nothing is planned or recorded
+  during it.
+- **Scoring starts after it:** the episode's start state, and so
+  `goal_errors_start` and the first success and failure checks, is the settled
+  state. The summary gets `settle_s`.
+- **Validation:** a negative value is rejected.
+
+Checked with 20 steps:
+
+- The video is 1.367 s with a 1 s settle and 0.367 s without.
+- The first recorded step is at t = 1.000 with the settle and 0.000 without.
+- With the settle, the start position error is 0.0032 m instead of 0.0189 m,
+  because the cube has come to rest.
+
+## Small fixes — 2026-09-24
+
+Three requested changes, plus a driver bug found while testing them.
+
+### 1. Separate eval and rollout timesteps (`LeapReorient`)
+
+New constructor argument `eval_steps_per_rollout_step` (default 1). `timestep`
+is now the **eval** (fine) timestep; the rollout model runs at
+`timestep * eval_steps_per_rollout_step` — the old task's
+`rollout_dt = eval_dt * eval_substeps_per_rollout`. The task exposes
+`eval_timestep`, `rollout_timestep` and the ratio, and its `timestep` is the one
+for its own role, so a renderer scheduling frames off the eval task, and a
+simulator built from either task, each get the right one.
+
+The old grasp_reorient task used a **0.5 ms eval step with 8 per rollout step**
+(a 4 ms rollout step). The default of 1 keeps today's behaviour, where both run
+at 2 ms; the driver gained `--eval-steps-per-rollout-step` alongside
+`--timestep`.
+
+In the driver the eval simulator runs at the eval timestep and the rollout
+simulator at the rollout timestep, and each control step advances the eval
+simulator `substeps * eval_steps_per_rollout_step` fine steps, so both cover
+the same time. Verified: at the old timing, one control step is exactly 64 ms
+in both (128 fine steps vs 16 coarse ones); a non-integer or non-positive
+ratio raises. A 3-episode run at the old timing planned at ~20 Hz (a 4 ms
+rollout step halves the physics per plan) and succeeded once.
+
+**Driver defaults, since edited by you:** `--eval-steps-per-rollout-step`
+now defaults to 8 with `--timestep` still 2 ms, so the rollout model runs at
+**16 ms** per step. The old task paired 8 with a **0.5 ms** eval step (a 4 ms
+rollout step); to reproduce it, `--timestep 0.0005` is needed too. A 40-step run
+at the new defaults ran without trouble (41 Hz planning), but a 16 ms step is
+four times coarser than anything the old task used on this contact-rich scene.
+
+### 2. Contact and solver parameters for both MuJoCo simulators
+
+*(Restructured the same day at your request: there is no separate parameters
+class; `MujocoConfig` owns the fields and the `Mujoco` class owns the logic.)*
+
+  * **`MujocoConfig(SimulatorConfig)`** — the CPU simulator's own config, as
+    asked, owning the ten requested fields directly: `cone`, `solver`,
+    `iterations`, `tolerance`, `solimp_d`, `solimp_width`, `solimp_midpoint`,
+    `solimp_power`, `solref_timeconst`, `solref_dampratio`. All default to
+    `None`, meaning "keep the XML's", so a config changes only what it names.
+    Its `__post_init__` validates them through
+    `MujocoConfig.validateContactParams`. `Mujoco()` now defaults to it.
+  * **`Mujoco.applyContactParams(mjm, cfg)`** — a static method on the
+    simulator class that writes a config's overrides into a model; the `Mujoco`
+    constructor calls it.
+  * **`VectorizedMujocoConfig(VectorizedSimulatorConfig)`** declares the same
+    ten fields itself, keeping its cone default of `"pyramidal"` and its refusal
+    of anything else (now including `None`, which would let an XML's elliptic
+    cone through). It is validated by `MujocoConfig.validateContactParams` and
+    applied by `Mujoco.applyContactParams` — both static so they can be called
+    on it. The fields are therefore *declared* twice, but the logic that checks
+    and applies them exists once, so the CPU and GPU simulators cannot come to
+    mean different things by the same setting.
+
+Decisions worth knowing about:
+
+1. **`solref_dampratio`, not `sol_dampratio`.** The request spelled it
+   `sol_dampratio`; it is named to pair with `solref_timeconst` and to match the
+   old `MujocoSolverParams`. A rename is one line if the other was meant.
+2. **`solimp_d` sets both `dmin` and `dmax`**, flattening the impedance curve so
+   every contact gets that value whatever its depth — exactly what the old M1
+   preset did. `solimp_width`/`midpoint`/`power` shape the ramp between the
+   XML's own `dmin` and `dmax` when `solimp_d` is not set.
+3. **Each field applies independently**, to every geom and every explicit
+   `<pair>`: setting only `solref_timeconst` keeps the XML's damping ratio.
+   Joint limits and equality constraints keep their own solref/solimp.
+4. **`solref_timeconst` below `2 * timestep` warns but is applied**, as the old
+   `_apply_solref_override` did — a sweep probing the stiff limit gets the cell
+   it asked for. Only positive time constants are accepted; MuJoCo reads a
+   negative solref as direct stiffness/damping, a different parameterization.
+
+This resolves the open question about where backend-specific parameters live,
+and restores what the old eval simulator had by default: the M1 "stiff-limit"
+contact is now
+
+    MujocoConfig(timestep=dt, solimp_d=0.9999, solimp_width=1e-4,
+                 solimp_midpoint=0.5, solimp_power=2.0,
+                 solref_timeconst=2 * dt, solref_dampratio=1.0)
+
+The driver does not apply it — its eval simulator uses a plain
+`MujocoConfig`, so the XML's contact parameters, as before.
+
+Verified (and re-verified after the restructure, with identical results): all
+ten fields land in the CPU model *and* in the uploaded MJWarp model; defaults leave the XML's arrays and options untouched; **the M1 preset
+rebuilt from these fields is bit-identical to the old
+`_apply_hard_contact_preset`**; the fields change the physics (cube resting in
+the palm: ~0 mm deepest penetration with stiff contact vs 3.7 mm CPU / 5.7 mm
+GPU with `solimp_d=0.5, solref_timeconst=0.05`); every out-of-range value
+raises; the stability warning fires.
+
+### 3. The old grasp_reorient camera (`LeapReorient`)
+
+`alignRendererConfigWithTask` now sets `cam_name="demo-cam"` plus `cam_pos` and
+`cam_quat` for the old task's camera — the renderer moves its own copy of
+`demo-cam`; the scene XML is untouched (verified). The old camera was stored in
+Drake's frame convention (columns right, down, forward); a MuJoCo camera looks
+along its own -Z with +Y up, so `cam_quat` is built from
+`(right, up, -forward)`, derived from the same right/up vectors the old code
+used. `cam_fovy` is left alone: `demo-cam`'s 45 degrees, which is also the
+default the old MuJoCo renderer's free camera used.
+
+Verified: **the new view matches a render through the old `MujocoSimulator`
+camera code pixel for pixel** (mean difference 0.000; 1 pixel of 307,200
+differs, rounding in the old free-camera conversion), where the previous
+`demo-cam` view differed by 25.7 on average. It is a steep top-down view of the
+palm with the goal marker in the upper-left corner — where the scene XML's
+comment says the marker was placed for "the eval camera's frame".
+
+### Bug found: videos played back fast when a control step outlasts a frame
+
+The driver captured at most one frame per *control* step. With a control step
+longer than one frame period — any 64 ms schedule at 30 fps, including the
+schedule that succeeds on this task — frames went missing and the video played
+back fast: 5.12 s of simulation became 2.7 s of video. This affected every such
+video since the driver was written, including the earlier multi-goal run, and
+was not caught then.
+
+Fixed by capturing on the simulation clock: the eval simulator is advanced in
+pieces that end exactly on each frame deadline (`renderer.getStepsPerFrame()`
+eval steps apart), with a frame at t = 0 and the final state added only if it
+was not itself a deadline. Now 5.12 s -> 5.13 s of video, 0.96 s -> 1.00 s,
+1.92 s -> 2.00 s across three timing configurations; the small excess is the
+starting frame plus rounding `getStepsPerFrame` to whole steps.
+
+### Note on the regression scripts
+
+The session's accumulated verification scripts lived in a scratch directory
+that was cleared overnight. The key checks were rebuilt as one consolidated
+script and all pass: cost bit-exact against the old kernel; outcome checks
+agree between single and vectorized simulators and are mutually exclusive; goal
+levels 0/1/2/5 match the old sampler and level 8 never re-issues its goal; both
+relative control modes bit-identical to the old kernels; graph capture still
+>10x faster. None of this lives in the repository yet — worth a real test file
+once the `Tests/` directory is in play.
+
 ## End-to-end check — test_scripts/render_finger_curl.py
 
 A script that exercises the ported pieces together on the leap cube scene:
@@ -1122,16 +1737,6 @@ fingertips close on the cube and open back out.
 
 ## Open questions
 
-- **Where do the backend-specific parameters live?** Now a concrete gap:
-  `Mujoco` ignores integrator/solver/cone and takes whatever the XML declares,
-  and the M1 hard-contact preset that the old eval sim applied by default is
-  simply gone. Nothing in the new plan's file list holds the parameters in
-  `contact_study/contact_models/config.py` (hard-contact preset, ComFree
-  stiffness, XPBD iterations). Suggestion: each backend module owns its own
-  config dataclass extending `SimulatorConfig` — `Mujoco.py` holds
-  `MujocoConfig`, `XPBD.py` holds `XPBDConfig` — rather than one union config
-  that every backend ignores most of. Needed before `Mujoco` can serve as the
-  M1 ground-truth eval sim the old code used it for.
 - **The driver's default planning horizon is too short to reorient the cube.**
   `--substeps 4 --horizon 8` plans 64 ms ahead; the old driver planned 352 ms
   (`time_horizon`) with 64 ms control steps. With real goals, 0 of 3 episodes

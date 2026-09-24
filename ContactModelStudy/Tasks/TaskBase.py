@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import abc
 import enum
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
@@ -35,6 +37,40 @@ class TaskRole(str, enum.Enum):
     ROLLOUT = "rollout"
 
 
+@dataclass
+class TaskBaseConfig:
+    """The parameters that may differ between two instances of the same task.
+
+    Everything a task needs to be built, and that a caller may choose, lives
+    here. What is fixed for a kind of task (an object's cost weights, its
+    starting pose, the scene's camera) stays on the task class. A task subclass
+    with more choices extends this with its own config, and names that class
+    in ``CONFIG_CLASS``.
+
+    Attributes:
+        role: ``TaskRole.EVAL`` or ``TaskRole.ROLLOUT``, or the equivalent
+            string. Decides which scene ``getModelPath`` returns.
+        timestep: The physics timestep this task is posed at, in seconds. The
+            task carries it because things other than a simulator need it (a
+            video renderer schedules frames against it), and because a task's
+            costs and initial state are only meaningful at the rate they were
+            tuned for. A simulator is still free to run at another rate; this is
+            the task's declared rate, not a constraint on the caller.
+        seed: Seed for the task's randomness (goal sampling). ``None`` draws
+            from fresh entropy.
+    """
+
+    role: TaskRole | str = TaskRole.EVAL
+    timestep: float = 0.002
+    seed: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        self.role = TaskRole(self.role)
+        if self.timestep <= 0.0:
+            raise ValueError(f"timestep must be positive, got {self.timestep}")
+        self.timestep = float(self.timestep)
+
+
 class TaskBase(abc.ABC):
     """Base class for all tasks.
 
@@ -45,28 +81,41 @@ class TaskBase(abc.ABC):
     ``setSimToInitialState`` is provided here, on top of ``getInitialState``.
     """
 
-    def __init__(self, role: TaskRole | str = TaskRole.EVAL, timestep: float = 0.002):
-        """Create a task bound to one scene role.
+    #: The config class this task is built from. A subclass with more
+    #: parameters sets its own ``TaskBaseConfig`` subclass here.
+    CONFIG_CLASS = TaskBaseConfig
+
+    def __init__(self, config: TaskBaseConfig | None = None):
+        """Create a task from its config.
 
         Args:
-            role: ``TaskRole.EVAL`` or ``TaskRole.ROLLOUT``, or the equivalent
-                string. Decides which scene ``getModelPath`` returns.
-            timestep: The physics timestep this task is posed at, in seconds.
-                The task carries it because things other than a simulator need
-                it — a video renderer schedules frames against it — and because
-                a task's costs and initial state are only meaningful at the
-                rate they were tuned for. A simulator is still free to run at a
-                different one; this is the task's declared rate, not a
-                constraint on the caller.
+            config: The instance's parameters, an instance of ``CONFIG_CLASS``.
+                Defaults to ``CONFIG_CLASS()``.
+
+        Raises:
+            TypeError: If ``config`` is not a ``CONFIG_CLASS``, which would
+                leave the task without parameters it reads.
         """
-        self.role = TaskRole(role)
-        if timestep <= 0.0:
-            raise ValueError(f"timestep must be positive, got {timestep}")
-        self.timestep = float(timestep)
+        if config is None:
+            config = self.CONFIG_CLASS()
+        if not isinstance(config, self.CONFIG_CLASS):
+            raise TypeError(
+                f"{type(self).__name__} needs a {self.CONFIG_CLASS.__name__}, "
+                f"got {type(config).__name__}"
+            )
+        self.config = config
+        #: The timestep this task is posed at. Usually ``config.timestep``; a
+        #: subclass whose roles run at different rates may set it per role.
+        self.timestep = config.timestep
         # Device copies of the initial state, uploaded on first use and kept, so
         # later calls to setSimToInitialState allocate nothing and can be
         # recorded into a CUDA graph. Keyed by device.
         self._initial_state_buffers: dict = {}
+
+    @property
+    def role(self) -> TaskRole:
+        """Which scene this task hands out; see ``TaskBaseConfig.role``."""
+        return self.config.role
 
     # -- scene ---------------------------------------------------------------
     @abc.abstractmethod

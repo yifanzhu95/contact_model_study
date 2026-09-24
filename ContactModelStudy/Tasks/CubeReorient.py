@@ -23,7 +23,8 @@ class CubeReorient(LeapReorient):
 
     Example::
 
-        task = CubeReorient(role=TaskRole.ROLLOUT, hand_acc="high", obj_acc="high")
+        task = CubeReorient(LeapReorientConfig(role=TaskRole.ROLLOUT,
+                                               hand_acc="high", obj_acc="high"))
         sim = Mujoco(task.getModelPath())
         q0, v0, u0 = task.getInitialState()
         sim.SetState(q0, v0)

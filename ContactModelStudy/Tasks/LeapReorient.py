@@ -17,12 +17,15 @@ of the *current* goal; see ``GOAL_DIFFICULTIES``.
 from __future__ import annotations
 
 import abc
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
 from ContactModelStudy.Simulators.VectorizedSimulator import VectorizedSimulator
-from ContactModelStudy.Tasks.TaskBase import TaskBase, TaskRole
+from ContactModelStudy.Tasks.TaskBase import TaskBase, TaskBaseConfig, TaskRole
+from ContactModelStudy.Utils.Quaternions import axisAngleQuat, matToQuat, quatMul
 
 # Where the scene XML actually lives. The refactor plan puts these under
 # Tasks/XML_Files, but the leap scenes reference meshes and <include> files by
@@ -43,8 +46,20 @@ FINGERTIP_SITES = ("if_tip", "mf_tip", "rf_tip", "th_tip")
 OBJECT_BODY = "obj"
 OBJECT_JOINT = "obj_joint"
 
-#: Camera every leap scene defines, framed on the hand and the object.
+#: Camera every leap scene defines. The task repositions it (see below).
 CAMERA_NAME = "demo-cam"
+
+
+# The old grasp_reorient task's camera (_CAM_POS / _CAM_ROTMAT), rebuilt the same
+# way: looking down onto the palm from above and behind, horizon level.
+_OLD_CAM_POS = np.array([0.19, 0.01, 0.4])
+_old_right = np.array([0.0, 1.0, 0.0])
+_old_up = np.array([-1.0, 0.0, 0.5]) / np.linalg.norm([-1.0, 0.0, 0.5])
+_old_forward = -np.cross(_old_right, _old_up)            # viewing direction
+# The old code stored this as a Drake camera frame — columns (right, down,
+# forward). A MuJoCo camera looks along its own -Z with +Y up, so its frame is
+# (right, up, -forward); that is what cam_quat has to describe.
+_OLD_CAM_QUAT = matToQuat(np.column_stack([_old_right, _old_up, -_old_forward]))
 
 # Cost weights, in the order the cost indexes them. THE ORDER IS LOAD-BEARING.
 #
@@ -58,24 +73,6 @@ COST_WEIGHT_KEYS = (
     "w_joint", "w_joint_velo", "w_fallen",
     "w_quat_term", "w_pos_term", "w_fallen_term",
 )
-
-
-def _axis_angle_quat(axis, angle: float) -> np.ndarray:
-    """wxyz quaternion for a rotation of ``angle`` (rad) about unit ``axis``."""
-    c, s = np.cos(angle / 2.0), np.sin(angle / 2.0)
-    return np.array([c, s * axis[0], s * axis[1], s * axis[2]], dtype=float)
-
-
-def _quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """Hamilton product ``a * b`` of wxyz quaternions — MuJoCo's ``mju_mulQuat``."""
-    aw, ax, ay, az = a
-    bw, bx, by, bz = b
-    return np.array([
-        aw * bw - ax * bx - ay * by - az * bz,
-        aw * bx + ax * bw + ay * bz - az * by,
-        aw * by - ax * bz + ay * bw + az * bx,
-        aw * bz + ax * by - ay * bx + az * bw,
-    ])
 
 
 # The six signed object axes, in a fixed order so sampling is reproducible.
@@ -119,6 +116,53 @@ GOAL_DIFFICULTIES = {
 }
 
 
+@dataclass
+class LeapReorientConfig(TaskBaseConfig):
+    """The parameters that may differ between two LEAP reorientation tasks.
+
+    ``role`` and ``seed`` from ``TaskBaseConfig``. ``timestep`` there is the
+    *eval* (fine) timestep here; see ``eval_steps_per_rollout_step``.
+
+    Attributes:
+        hand_acc: Hand mesh fidelity in the rollout scene: "low", "med" or
+            "high". Ignored for the eval scene, which has only one fidelity.
+        obj_acc: Object mesh fidelity in the rollout scene (for the duck also
+            the foam variants, e.g. "foam16a").
+        scenes_dir: Root holding the scene XML. ``None`` means the repo's
+            ``scenes/``.
+        eval_steps_per_rollout_step: How many eval steps make one rollout step.
+            The planner's model runs at the coarser
+            ``timestep * eval_steps_per_rollout_step``, as in the old task's
+            ``rollout_dt = eval_dt * eval_substeps_per_rollout``, and to cover
+            the same span of time the eval simulator takes this many steps for
+            each one the rollout takes. The old grasp_reorient task used a
+            0.5 ms eval step and 8 (a 4 ms rollout step). The default of 1
+            keeps the two equal.
+        goal_difficulty: Which goal sampler ``sampleNewGoal`` uses; see
+            ``GOAL_DIFFICULTIES``. Defaults to 8, the old task's default.
+    """
+
+    hand_acc: str = "high"
+    obj_acc: str = "high"
+    scenes_dir: Optional[str | Path] = None
+    eval_steps_per_rollout_step: int = 1
+    goal_difficulty: int = 8
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        k = self.eval_steps_per_rollout_step
+        if int(k) != k or k < 1:
+            raise ValueError(
+                f"eval_steps_per_rollout_step must be a positive integer, got {k!r}")
+        self.eval_steps_per_rollout_step = int(k)
+        if self.goal_difficulty not in GOAL_DIFFICULTIES:
+            raise ValueError(
+                f"goal_difficulty must be one of {sorted(GOAL_DIFFICULTIES)}, "
+                f"got {self.goal_difficulty}")
+        self.goal_difficulty = int(self.goal_difficulty)
+        self.scenes_dir = Path(self.scenes_dir) if self.scenes_dir is not None else SCENES_DIR
+
+
 class LeapReorient(TaskBase):
     """Base class for LEAP-hand reorientation tasks.
 
@@ -141,53 +185,38 @@ class LeapReorient(TaskBase):
     #: terminal failure there would end episodes the planner could still save.
     FAILURE_Z = 0.0
 
-    def __init__(
-        self,
-        role: TaskRole | str = TaskRole.EVAL,
-        hand_acc: str = "high",
-        obj_acc: str = "high",
-        scenes_dir: str | Path | None = None,
-        timestep: float = 0.002,
-        goal_difficulty: int = 8,
-        seed: int | None = None,
-    ):
-        """Create the task for one scene role and geometry fidelity.
+    CONFIG_CLASS = LeapReorientConfig
+
+    def __init__(self, config: LeapReorientConfig | None = None):
+        """Create the task from its config.
 
         Args:
-            role: ``EVAL`` (accurate scene) or ``ROLLOUT`` (planner's scene).
-            hand_acc: Hand mesh fidelity in the rollout scene — "low", "med" or
-                "high". Ignored for the eval scene, which has only one fidelity.
-            obj_acc: Object mesh fidelity in the rollout scene.
-            scenes_dir: Root holding the scene XML. Defaults to the repo's
-                ``scenes/``.
-            timestep: Physics timestep this task is posed at.
-            goal_difficulty: Which goal sampler ``sampleNewGoal`` uses; see
-                ``GOAL_DIFFICULTIES``. Defaults to 8, the old task's default.
-            seed: Seed for goal sampling. ``None`` draws from fresh entropy.
+            config: The instance's parameters. Defaults to
+                ``LeapReorientConfig()``: the eval scene at 2 ms.
 
         Raises:
             NotImplementedError: If the subclass did not set ``OBJECT``.
-            ValueError: If ``goal_difficulty`` is not one of the ten levels.
         """
-        super().__init__(role, timestep=timestep)
+        super().__init__(config)
+        cfg = self.config
         if not self.OBJECT:
             raise NotImplementedError(
                 f"{type(self).__name__} must set OBJECT to a scene-variant object "
                 f"name (e.g. 'cube')."
             )
-        self.hand_acc = hand_acc
-        self.obj_acc = obj_acc
-        self.scenes_dir = Path(scenes_dir) if scenes_dir is not None else SCENES_DIR
+        #: The fine timestep the evaluation simulator integrates with.
+        self.eval_timestep = cfg.timestep
+        #: The coarse timestep the planner's rollout model integrates with.
+        self.rollout_timestep = cfg.timestep * cfg.eval_steps_per_rollout_step
+        # ``timestep``, which TaskBase and a renderer scheduling frames read, is
+        # the one belonging to this task's own scene.
+        self.timestep = (self.eval_timestep if cfg.role is TaskRole.EVAL
+                         else self.rollout_timestep)
 
         self.params = self.objectParams()
         self._validate_params()
 
-        if goal_difficulty not in GOAL_DIFFICULTIES:
-            raise ValueError(
-                f"goal_difficulty must be one of {sorted(GOAL_DIFFICULTIES)}, got {goal_difficulty}"
-            )
-        self.goal_difficulty = int(goal_difficulty)
-        self._rng = np.random.default_rng(seed)
+        self._rng = np.random.default_rng(cfg.seed)
         # The starting goal: the object's orientation at the start of an
         # episode, and the goal a fresh task holds.
         self._start_quat = self.params["target_quat"].copy()
@@ -256,14 +285,18 @@ class LeapReorient(TaskBase):
 
     # -- scene ---------------------------------------------------------------
     def alignRendererConfigWithTask(self, config) -> None:
-        """Point the renderer at the leap scenes' own camera.
+        """Frame the renderer the way the old grasp_reorient task did.
 
-        Every leap scene defines ``demo-cam``, positioned to frame the hand and
-        the grasped object. Only the camera name is set: pose and field of view
-        are left as the caller had them — ``None``, normally, meaning the
-        scene's values as authored — and so is everything else.
+        Sets ``cam_name`` to the scenes' ``demo-cam`` and moves it with
+        ``cam_pos`` / ``cam_quat`` to the old task's camera pose — the scene XML
+        is not touched; the renderer patches its own copy of the camera. The
+        field of view is left as the caller had it (``None``, normally, keeping
+        ``demo-cam``'s 45 degrees, which is also the default the old MuJoCo
+        renderer's free camera used), and so is everything else.
         """
         config.cam_name = CAMERA_NAME
+        config.cam_pos = _OLD_CAM_POS.copy()
+        config.cam_quat = _OLD_CAM_QUAT.copy()
 
     def getModelPath(self) -> str:
         """Path to this task's MJCF, chosen by ``role``."""
@@ -271,9 +304,9 @@ class LeapReorient(TaskBase):
             rel = EVAL_XML_TEMPLATE.format(obj=self.OBJECT)
         else:
             rel = ROLLOUT_XML_TEMPLATE.format(
-                obj=self.OBJECT, hand_acc=self.hand_acc, obj_acc=self.obj_acc
+                obj=self.OBJECT, hand_acc=self.config.hand_acc, obj_acc=self.config.obj_acc
             )
-        return self._resolve_path(self.scenes_dir / rel)
+        return self._resolve_path(self.config.scenes_dir / rel)
 
     def getInitialState(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """``(q0, q_dot0, u0)``: the object's table entry, at rest."""
@@ -376,16 +409,16 @@ class LeapReorient(TaskBase):
         """
         g = self._sample_ref if current_goal is None else self._unitQuat(current_goal)
         up = self._upVector(g)
-        d = self.goal_difficulty
+        d = self.config.goal_difficulty
 
         if d == 0:
-            r = _axis_angle_quat(up, -np.pi / 2.0)
+            r = axisAngleQuat(up, -np.pi / 2.0)
         elif d == 1:
-            r = _axis_angle_quat(up, self._rng.choice([np.pi / 2.0, -np.pi / 2.0]))
+            r = axisAngleQuat(up, self._rng.choice([np.pi / 2.0, -np.pi / 2.0]))
         elif d == 2:
             axis = np.zeros(3)
             axis[self._rng.integers(0, 3)] = 1.0
-            r = _axis_angle_quat(axis, self._rng.choice([np.pi / 2.0, -np.pi / 2.0]))
+            r = axisAngleQuat(axis, self._rng.choice([np.pi / 2.0, -np.pi / 2.0]))
         elif d == 3:
             r = self._turnTo(self._pick(self._adjacent(up)), up, twist=True)
         elif d == 5:
@@ -393,15 +426,15 @@ class LeapReorient(TaskBase):
         elif d == 6:
             r = self._turnTo(self._pick(self._adjacent(up)), up, twist=False)
         elif d == 7:
-            r = _axis_angle_quat(_X_AXIS, -np.pi / 2.0)
+            r = axisAngleQuat(_X_AXIS, -np.pi / 2.0)
         elif d == 8:
-            r = _axis_angle_quat(_X_AXIS, self._rng.choice([-np.pi / 2.0, np.pi / 2.0]))
+            r = axisAngleQuat(_X_AXIS, self._rng.choice([-np.pi / 2.0, np.pi / 2.0]))
         elif d == 9:
-            r = _axis_angle_quat(_X_AXIS, np.pi / 2.0)
+            r = axisAngleQuat(_X_AXIS, np.pi / 2.0)
         else:                                                # level 4
             others = self._adjacent(up) + [-up]
             r = self._turnTo(self._pick(others), up, twist=True)
-        return _quat_mul(g, r)
+        return quatMul(g, r)
 
     def setGoal(self, goal: np.ndarray) -> None:
         """Adopt ``goal``, a wxyz target orientation; see ``TaskBase.setGoal``.
@@ -503,10 +536,10 @@ class LeapReorient(TaskBase):
         if float(np.dot(v, up)) < -0.5:
             r = np.array([0.0, *self._inFaceAxis(up)])
         else:
-            r = _axis_angle_quat(np.cross(v, up), np.pi / 2.0)
+            r = axisAngleQuat(np.cross(v, up), np.pi / 2.0)
         if twist:
             angle = int(self._rng.integers(0, 4)) * (np.pi / 2)
-            r = _quat_mul(r, _axis_angle_quat(v, angle))
+            r = quatMul(r, axisAngleQuat(v, angle))
         return r
 
     def _mocapIdIn(self, mjm) -> int | None:
@@ -712,7 +745,7 @@ class LeapReorient(TaskBase):
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}(object={self.OBJECT!r}, role={self.role.value!r}, "
-            f"geometry={self.hand_acc}_{self.obj_acc})"
+            f"geometry={self.config.hand_acc}_{self.config.obj_acc}, dt={self.timestep:g})"
         )
 
 

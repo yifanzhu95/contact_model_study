@@ -23,18 +23,12 @@ import numpy as np
 import mujoco
 import warp as wp
 
+from ContactModelStudy.Simulators.Mujoco import Mujoco, MujocoConfig
 from ContactModelStudy.Simulators.VectorizedSimulator import (
     DeviceState,
     VectorizedSimulator,
     VectorizedSimulatorConfig,
 )
-
-_SOLVERS = {
-    "PGS": mujoco.mjtSolver.mjSOL_PGS,
-    "CG": mujoco.mjtSolver.mjSOL_CG,
-    "Newton": mujoco.mjtSolver.mjSOL_NEWTON,
-}
-
 
 @wp.kernel
 def _assign_ctrl_kernel(
@@ -61,33 +55,45 @@ def _broadcast_kernel(
 class VectorizedMujocoConfig(VectorizedSimulatorConfig):
     """Physics parameters for the MJWarp backend.
 
-    Inherits ``timestep``, ``substeps``, ``gravity``, ``horizon`` and ``device``.
-
-    The solver fields default to ``None``, meaning "leave whatever the XML
-    declares" — the same policy as the CPU ``Mujoco`` wrapper, so the two agree
-    about a scene unless told otherwise. Only ``timestep``, ``gravity`` and the
-    cone are written unconditionally.
+    ``timestep``, ``substeps``, ``gravity``, ``horizon`` and ``device`` from
+    ``VectorizedSimulatorConfig``, plus the same ten solver and contact
+    overrides and two buffer sizes as the CPU ``MujocoConfig``; see there for
+    what each one does. They are validated by
+    ``MujocoConfig.validateContactParams``, and the ten overrides are applied by
+    ``Mujoco.applyContactParams``, the same code the CPU simulator uses, so the
+    two simulators agree about a scene given the same settings. All ``None`` by
+    default except the cone.
 
     Attributes:
         cone: Friction cone. MJWarp implements only ``"pyramidal"`` on the GPU,
-            so this is written to the model at upload and anything else is
-            rejected. Named explicitly rather than assumed because it is a real
-            difference from reference MuJoCo: a scene authored with an elliptic
-            cone does not run unchanged here, and results should be reported as
-            pyramidal.
-        solver: ``"PGS"``, ``"CG"`` or ``"Newton"``. ``None`` keeps the XML's.
-        iterations: Solver iteration cap. ``None`` keeps the XML's.
-        tolerance: Solver convergence tolerance. ``None`` keeps the XML's.
-        nconmax: Contact buffer capacity across all worlds. ``None`` lets MJWarp
-            size it. Too small silently drops contacts in a contact-rich scene.
-        njmax: Constraint buffer capacity across all worlds. ``None`` lets
-            MJWarp size it.
+            so it defaults to that, is written to the model at upload, and
+            anything else — ``None`` included, which would leave an XML's
+            elliptic cone in place — is rejected. Named explicitly rather than
+            assumed because it is a real difference from reference MuJoCo: a
+            scene authored with an elliptic cone does not run unchanged here,
+            and results should be reported as pyramidal.
+        solver, iterations, tolerance, solimp_d, solimp_width, solimp_midpoint,
+        solimp_power, solref_timeconst, solref_dampratio: As ``MujocoConfig``.
+        nconmax: As ``MujocoConfig``: maximum contacts *per world*. On the GPU
+            it sizes the buffer MJWarp allocates in ``make_data``
+            (``nconmax * N`` contacts in all). ``None`` lets MJWarp choose. Too
+            small silently drops contacts in a contact-rich scene.
+        njmax: Maximum constraint rows *per world*, the same way. ``None`` lets
+            MJWarp choose, which for the leap scenes is only 64. That is too few
+            in a firm grasp: an overflow prints ``nefc overflow - please
+            increase njmax``.
     """
 
-    cone: str = "pyramidal"
+    cone: Optional[str] = "pyramidal"
     solver: Optional[str] = None
     iterations: Optional[int] = None
     tolerance: Optional[float] = None
+    solimp_d: Optional[float] = None
+    solimp_width: Optional[float] = None
+    solimp_midpoint: Optional[float] = None
+    solimp_power: Optional[float] = None
+    solref_timeconst: Optional[float] = None
+    solref_dampratio: Optional[float] = None
     nconmax: Optional[int] = None
     njmax: Optional[int] = None
 
@@ -99,12 +105,7 @@ class VectorizedMujocoConfig(VectorizedSimulatorConfig):
                 f"cone={self.cone!r}. Run an elliptic-cone scene on the CPU "
                 f"Mujoco simulator instead."
             )
-        if self.solver is not None and self.solver not in _SOLVERS:
-            raise ValueError(f"solver must be one of {tuple(_SOLVERS)}, got {self.solver!r}")
-        if self.iterations is not None and self.iterations < 1:
-            raise ValueError(f"iterations must be >= 1, got {self.iterations}")
-        if self.tolerance is not None and self.tolerance <= 0.0:
-            raise ValueError(f"tolerance must be positive, got {self.tolerance}")
+        MujocoConfig.validateContactParams(self)
 
 
 class VectorizedMujoco(VectorizedSimulator):
@@ -149,23 +150,20 @@ class VectorizedMujoco(VectorizedSimulator):
 
         self.mjm.opt.timestep = cfg.timestep
         self.mjm.opt.gravity[:] = cfg.gravity
-        # Not optional: MJWarp has no elliptic cone. Written even when the XML
-        # already says pyramidal, so the uploaded model cannot disagree.
-        self.mjm.opt.cone = mujoco.mjtCone.mjCONE_PYRAMIDAL
-        if cfg.solver is not None:
-            self.mjm.opt.solver = _SOLVERS[cfg.solver]
-        if cfg.iterations is not None:
-            self.mjm.opt.iterations = cfg.iterations
-        if cfg.tolerance is not None:
-            self.mjm.opt.tolerance = cfg.tolerance
+        # Before upload, and after the timestep the solref check reads. The
+        # cone is always "pyramidal" here (the config refuses anything else),
+        # so it is written even when the XML already says so, and the uploaded
+        # model cannot disagree.
+        Mujoco.applyContactParams(self.mjm, cfg)
 
-        self.m = mjw.put_model(self.mjm)
+        self._mjw = mjw
         kwargs = {}
         if cfg.nconmax is not None:
             kwargs["nconmax"] = cfg.nconmax
         if cfg.njmax is not None:
             kwargs["njmax"] = cfg.njmax
-        self.d = mjw.make_data(self.mjm, nworld=self.N, **kwargs)
+        self.m = self._putModel()
+        self.d = self._makeData(**kwargs)
 
         # Control sequences live here, uploaded once by SetControlSequence and
         # indexed per step by _assign_ctrl_kernel. Allocated once at
@@ -178,7 +176,27 @@ class VectorizedMujoco(VectorizedSimulator):
         self._sequence_active = False
         # Control index currently written into d.ctrl; -1 means "none yet".
         self._applied_index = -1
-        self._mjw = mjw
+
+    # -- backend hooks -------------------------------------------------------
+    # The only places the physics engine is called. ComFree and XPBD run on
+    # MJWarp's model and data layout and differ from it only here, so they
+    # subclass this simulator and override these four; controls, state,
+    # sequences and graph capture are shared.
+    def _putModel(self):
+        """Upload ``self.mjm`` to the device and return the device model."""
+        return self._mjw.put_model(self.mjm)
+
+    def _makeData(self, **kwargs):
+        """Allocate ``N`` worlds of device data for ``self.m``."""
+        return self._mjw.make_data(self.mjm, nworld=self.N, **kwargs)
+
+    def _stepPhysics(self) -> None:
+        """Advance every world by one timestep."""
+        self._mjw.step(self.m, self.d)
+
+    def _forwardPhysics(self) -> None:
+        """Recompute derived quantities (poses, contacts) without integrating."""
+        self._mjw.forward(self.m, self.d)
 
     # -- control sequences ---------------------------------------------------
     def SetControlSequence(self, U_n) -> None:
@@ -240,7 +258,7 @@ class VectorizedMujoco(VectorizedSimulator):
                     inputs=[self._U_wp, t, self.d.ctrl],
                 )
                 self._applied_index = t
-            self._mjw.step(self.m, self.d)
+            self._stepPhysics()
 
     # -- state ---------------------------------------------------------------
     def SetState(self, q: np.ndarray, q_dot: np.ndarray | None = None) -> None:
@@ -262,7 +280,7 @@ class VectorizedMujoco(VectorizedSimulator):
             else self._to_worlds(q_dot, self.nv, "q_dot").astype(np.float32)
         )
         self.d.qvel.assign(qvel)
-        self._mjw.forward(self.m, self.d)
+        self._forwardPhysics()
 
     def GetState(self) -> tuple[np.ndarray, np.ndarray]:
         """Return ``(q, q_dot)`` for all worlds, ``(N, nq)`` and ``(N, nv)``.

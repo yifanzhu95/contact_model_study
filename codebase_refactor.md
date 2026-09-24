@@ -88,7 +88,6 @@ This class is the base class for all parallel simulators. This class should exte
 *function* Step_GPU(steps=1) $\rightarrow$ None: Calls the model set function on the GPU.
 
 
-
 ### Mujoco.py: 
 
 Contains a class which is instance of a Simulator (non-vectorized) which runs standard CPU MuJoCo.
@@ -120,7 +119,16 @@ This directory should contain the code which define specific tasks and all of th
 
 ### TaskBase.py
 
-This file should contain two class. That class should be a empty class which is just a base class for other tasks.
+This file should contain three classes. One should be a TaskBase, a TaskRole, and a TaskBaseConfig.
+
+
+**Class TaskRole**
+
+Just an enum to to indicated wither a task is a rollout or an eval task.
+
+**Class TaskBaseConfig**
+
+This should be a config for each task which stroes the values which can change between task instances. This shoould cotain things like time step, the default path, seeds, ect. 
 
 **Class TaskBase**
 
@@ -155,6 +163,13 @@ Just a base class for leap reorient task types.
 
 Specific, insance of LeapReorient for the cube reorient task.
 
+**Class DuckReorient**
+
+Specific, insance of LeapReorient for the duck reorient task.
+
+**Class BallReorient**
+
+Specific, insance of LeapReorient for the ball reorient task.
 
 ## Drivers:
 
@@ -272,6 +287,39 @@ Wrapper to use the mujoco viewer for rendering functionalities.
 ## Utils:
 
 This directory just contains various utilities used throughout the code.
+
+### ContactModelPresets.py
+
+This script should contain the parameters for the different contact models used for rollouts; M1, M2, M3, M4. It has one function and the herder should have all of the parameters for those models. 
+
+*function* GetContactModelSim(Name) $\rightarrow$ Simulator: This is a helper function to generate the different models. It should take in a string representing the name of ther desirned ocntact model and return a simulator which uses that model. 
+
+### EpisodeRecorder.py
+
+This should a class which handels all of the recording and replaying for a episode.
+
+**Class EpisodeRecorder**
+
+This class handels the recording for a batch of episodes. This includes recording the Configs used for each episode, the states visited, the actions selected, the successes, the failures, the planning time, ect.
+
+*function* init(Task,Simulator,SamplingBasedPlanner,Other Parms ...) $\rightarrow$ EpisodeRecorder: This constructor should take in a refrence to the eval task, the eval simulator, and the planner. It will then grab refs to all of the objects ciritcal to the episode.
+
+*functiion* recordStateAndAction(q,q_dot,U,simga_U = None,planing_time=None) $\rightarrow$ none: This function takes in a state and a action (and optionally, the uncertaininty associated with that action and the planning time) and adds it to the recording buffer.
+
+*functiion* episodeFinished(finish_reason) $\rightarrow$ none: This function takes in a reason for the episode ending and ends the episode.
+
+*function* Save(Path) $\rightarrow$ none: This function simply saves the episodes and summery of the episodes as a JSON file. The states, actions, and uncertaininty should be saved in a single npy file for each episode and are given an unique ID.
+
+*function* Clear() $\rightarrow$ none: Clears the buffer
+
+*function* Combine(EpisodeRecorder) $\rightarrow$ EpisodeRecorder: Combines another epiosde recorder with itself and returns it as a new episode recorder. It checks that all of the configs are the same and requieres that both are not in the process of recording a active episode.
+
+**Class EpisodeReplayer**
+
+This class handels the replaying for a batch of episodes. It should allow for iterating over all of states and all of the episodes. 
+
+*function* init(path) $\rightarrow$ EpisodeReplayer: This constructor takes in a path to a record batch of episodes.
+
 
 ## Experiments:
 

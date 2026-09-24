@@ -67,7 +67,7 @@ class MPPI(SamplingBasedPlannerBase):
     Example::
 
         sim  = VectorizedMujoco(task.getModelPath(), cfg, N=1024)
-        task = CubeReorient(role=TaskRole.ROLLOUT)
+        task = CubeReorient(LeapReorientConfig(role=TaskRole.ROLLOUT))
         mppi = MPPI(sim, task, MPPI_Config(temperature=1.0, noise_sigma=0.05))
         u    = mppi.Plan(q, q_dot)
     """
@@ -86,6 +86,7 @@ class MPPI(SamplingBasedPlannerBase):
         self._sentinel = np.array([_COST_SENTINEL], dtype=np.float32)
         # [sum w^2, sum cost, n_valid] — filled only when debug is on.
         self._dbg_wp = wp.zeros(3, dtype=wp.float32, device=dev)
+        self._unc_wp = wp.zeros(self.nu, dtype=wp.float32, device=dev)
         self._dbg_ess = float("nan")
         self._dbg_avg_cost = float("nan")
         # Diagnostics from the last update.
@@ -127,6 +128,25 @@ class MPPI(SamplingBasedPlannerBase):
     def _resetParams(self) -> None:
         """Undo adaptive-temperature drift so a new episode starts from lambda."""
         self.lam = self.config.temperature
+
+    def _actionUncertainty(self) -> np.ndarray:
+        """Weighted standard deviation of the samples' first actions.
+
+        ``sigma[u] = sqrt(sum_n w[n] * (V[n,0,u] - U[0,u])^2)``, with the
+        normalized weights the last update used and ``U[0] = sum_n w[n] V[n,0]``
+        the mean it produced. Every control mode turns ``V[n,0]`` into a command
+        by adding the same offset to all samples, so this is also the spread of
+        the commands themselves.
+
+        Near zero when a few samples dominate the weights (a confident plan, or
+        a temperature so low that one sample wins). Near ``noise_sigma`` when
+        the weights are close to uniform (the costs could not tell the samples
+        apart).
+        """
+        wp.launch(_weighted_std_first_kernel, dim=self.nu,
+                  inputs=[self.w_wp, self.V_wp, self.U_wp, self.N],
+                  outputs=[self._unc_wp])
+        return self._unc_wp.numpy().copy()
 
     # -- the update ----------------------------------------------------------
     def _weightUpdate(self) -> tuple[float, float]:
@@ -286,3 +306,21 @@ def _weighted_mean_kernel(
     for n in range(N):
         val = val + w[n] * V[n, h, u]
     U[h, u] = val
+
+
+@wp.kernel
+def _weighted_std_first_kernel(
+    w: wp.array(dtype=float),        # (N,)  normalized weights
+    V: wp.array3d(dtype=float),      # (N, H, nu)
+    U: wp.array2d(dtype=float),      # (H, nu)  weighted mean of V
+    N: int,
+    out: wp.array(dtype=float),      # (nu,)  [out]
+):
+    """out[u] = sqrt(sum_n w[n] * (V[n,0,u] - U[0,u])^2): spread of the first step."""
+    u = wp.tid()
+    mean = U[0, u]
+    var = float(0.0)
+    for n in range(N):
+        d = V[n, 0, u] - mean
+        var = var + w[n] * d * d
+    out[u] = wp.sqrt(var)

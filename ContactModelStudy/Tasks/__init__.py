@@ -6,6 +6,6 @@ modules; only the base classes are re-exported here, so importing this
 subpackage pulls in neither MuJoCo nor Warp.
 """
 
-from ContactModelStudy.Tasks.TaskBase import TaskBase, TaskRole
+from ContactModelStudy.Tasks.TaskBase import TaskBase, TaskBaseConfig, TaskRole
 
-__all__ = ["TaskBase", "TaskRole"]
+__all__ = ["TaskBase", "TaskBaseConfig", "TaskRole"]
