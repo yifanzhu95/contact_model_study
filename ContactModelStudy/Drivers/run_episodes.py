@@ -2,9 +2,10 @@
 """Run closed-loop MPC episodes and report what happened.
 
 Wires the package together: a task supplies the scene, the initial state and
-the cost; a ``VectorizedMujoco`` rolls samples out on the GPU; ``MPPI`` plans
-against it; a CPU ``Mujoco`` stands in for reality; and a
-``MujocoVideoRenderer`` films it; an ``EpisodeRecorder`` keeps every step.
+the cost; one of the study's rollout contact models (M1-M4, see
+``Utils.ContactModelPresets``) rolls samples out on the GPU; ``MPPI`` plans
+against it; a CPU simulator stands in for reality; a ``MujocoVideoRenderer``
+films it; and an ``EpisodeRecorder`` keeps every step and owns the summaries.
 
 The planner and the evaluator load *different scenes from the same task* — the
 rollout scene the planner predicts with, and the accurate eval scene it is
@@ -16,13 +17,16 @@ Examples::
     python -m ContactModelStudy.Drivers.run_episodes
     python -m ContactModelStudy.Drivers.run_episodes --n-episodes 5 --steps 200
     python -m ContactModelStudy.Drivers.run_episodes --hand-acc low --no-video
+    python -m ContactModelStudy.Drivers.run_episodes --rollout-model M3
     python -m ContactModelStudy.Drivers.run_episodes --n-samples 512 --temperature 5 \\
         --results results/run.json
 
-``--results`` writes the ``EpisodeRecorder`` output: ``run.json`` (configs and
-one summary per episode) and one ``run_<id>.npy`` per episode holding every
-control step's state, action, action uncertainty and planning time. Read it
-back with ``ContactModelStudy.Utils.EpisodeRecorder.EpisodeReplayer``.
+Results are saved by default, to ``results/run_episodes_<date>_<time>.json``;
+``--results PATH`` picks the file and ``--no-results`` turns saving off. That
+is the ``EpisodeRecorder`` output: the JSON (configs and one summary per
+episode) and, unless ``--no-save-steps``, one ``<stem>_<id>.npy`` per episode
+holding every control step's state, action, action uncertainty and planning
+time. Read it back with ``ContactModelStudy.Utils.EpisodeRecorder.EpisodeReplayer``.
 
 Offscreen rendering needs a GL context; with no DISPLAY this defaults
 MUJOCO_GL to "egl".
@@ -36,8 +40,6 @@ import sys
 import time
 from pathlib import Path
 
-import numpy as np
-
 # Before any mujoco import: MUJOCO_GL is read once, when the GL backend is
 # first resolved. Only fills in a default, never overrides.
 if not os.environ.get("MUJOCO_GL") and not os.environ.get("DISPLAY"):
@@ -50,18 +52,30 @@ if str(_REPO_ROOT) not in sys.path:
 from ContactModelStudy.Renderers.MujocoVideoRenderer import MujocoVideoRenderer  # noqa: E402
 from ContactModelStudy.Renderers.RendererBase import VideoRendererBaseConfig  # noqa: E402
 from ContactModelStudy.SamplingBasedPlanners.MPPI import MPPI, MPPI_Config  # noqa: E402
-from ContactModelStudy.Simulators.VectorizedMujoco import (  # noqa: E402
-    VectorizedMujoco,
-    VectorizedMujocoConfig,
-)
+from ContactModelStudy.Tasks.BallReorient import BallReorient  # noqa: E402
 from ContactModelStudy.Tasks.CubeReorient import CubeReorient  # noqa: E402
+from ContactModelStudy.Tasks.DuckReorient import DuckReorient  # noqa: E402
 from ContactModelStudy.Tasks.LeapReorient import LeapReorientConfig  # noqa: E402
 from ContactModelStudy.Tasks.TaskBase import TaskRole  # noqa: E402
+from ContactModelStudy.Utils.ContactModelPresets import (  # noqa: E402
+    ALIASES,
+    CONTACT_MODELS,
+    GetContactModelSim,
+)
 from ContactModelStudy.Utils.EpisodeRecorder import EpisodeRecorder  # noqa: E402
 from ContactModelStudy.Utils.EvalSimulators import EVAL_SIMS, makeEvalSim  # noqa: E402
 
 #: Tasks this driver can run, by the name passed to --task.
-TASKS = {"cube_reorient": CubeReorient}
+TASKS = {"cube_reorient": CubeReorient, "duck_reorient": DuckReorient,
+         "ball_reorient": BallReorient}
+
+#: --results default: a fresh, time-stamped file under results/, chosen at start.
+_AUTO_RESULTS = "auto"
+
+#: Used when neither of a pair is given: --substeps / --ctrl-time-step and
+#: --horizon / --time-horizon.
+_DEFAULT_SUBSTEPS = 4
+_DEFAULT_HORIZON = 8
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -86,9 +100,13 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--eval-steps-per-rollout-step", type=int, default=8,
                    help="eval steps per rollout step (the old task used 8, with "
                         "a 0.5 ms eval timestep)")
-    g.add_argument("--substeps", type=int, default=4,
-                   help="rollout steps per control step; control rate is "
-                        "1/(rollout timestep * substeps)")
+    g.add_argument("--substeps", type=int, default=None,
+                   help=f"rollout steps per control step; control rate is "
+                        f"1/(rollout timestep * substeps). Give this or "
+                        f"--ctrl-time-step; neither means {_DEFAULT_SUBSTEPS}")
+    g.add_argument("--ctrl-time-step", type=float, default=0.064,
+                   help="control-step duration (s), rounded down to whole rollout "
+                        "timesteps; the alternative to --substeps")
     g.add_argument("--eval-sim", default="mujoco", choices=sorted(EVAL_SIMS),
                    help="simulator the episode is scored in (the rollouts always run "
                         "on MJWarp); every one runs the same eval MJCF")
@@ -107,13 +125,21 @@ def build_parser() -> argparse.ArgumentParser:
                         "a new goal and the episode carries on to --steps")
 
     g = p.add_argument_group("planner")
+    g.add_argument("--rollout-model", default="M2",
+                   choices=sorted(CONTACT_MODELS) + sorted(ALIASES), metavar="MODEL",
+                   help="contact model the planner rolls out with: M1 (stiff MJWarp), "
+                        "M2 (MJWarp soft, default), M3 (ComFree), M4 (XPBD)")
     g.add_argument("--n-samples", type=int, default=256,
                    help="N: rollout worlds, one per sampled control sequence")
-    g.add_argument("--horizon", type=int, default=8,
-                   help="H: planning horizon in control steps")
+    g.add_argument("--horizon", type=int, default=None,
+                   help=f"H: planning horizon in control steps. Give this or "
+                        f"--time-horizon; neither means {_DEFAULT_HORIZON}")
+    g.add_argument("--time-horizon", type=float, default=0.352,
+                   help="planning horizon (s), rounded down to whole control steps; "
+                        "the alternative to --horizon")
     g.add_argument("--n-iterations", type=int, default=1)
-    g.add_argument("--noise-sigma", type=float, default=0.1)
-    g.add_argument("--temperature", type=float, default=25.0,
+    g.add_argument("--noise-sigma", type=float, default=0.05)
+    g.add_argument("--temperature", type=float, default=0.25,
                    help="MPPI lambda; smaller is greedier")
     g.add_argument("--control-mode", default="pos_relative",
                    choices=["pos_relative", "ctrl_relative", "absolute"],
@@ -129,10 +155,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = p.add_argument_group("gpu buffers")
     g.add_argument("--nconmax", type=int, default=None,
-                   help="max contacts per rollout world; None lets MJWarp size it")
+                   help="max contacts per rollout world; omitted, the rollout "
+                        "config's default is used")
     g.add_argument("--njmax", type=int, default=None,
-                   help="max constraint rows per rollout world; None lets MJWarp "
-                        "size it (64 for the leap scenes, which overflows in a grasp)")
+                   help="max constraint rows per rollout world; omitted, the rollout "
+                        "config's default is used (MJWarp's own choice, 64 for the "
+                        "leap scenes, overflows in a grasp)")
 
     g = p.add_argument_group("output")
     g.add_argument("--video", default="videos/run_episodes.mp4",
@@ -144,51 +172,61 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--camera", default=None,
                    help="camera defined in the scene; 'none' for the free "
                         "camera. Omitted, the task's own camera is used")
-    g.add_argument("--results", default=None,
+    g.add_argument("--results", default="results/run_episodes.json",
                    help="save the recorded episodes: a JSON summary here, plus one "
-                        ".npy of per-step data per episode beside it")
-    g.add_argument("--uncertainty", action=argparse.BooleanOptionalAction, default=True,
+                        ".npy of per-step data per episode beside it. Defaults to "
+                        "results/run_episodes_<date>_<time>.json")
+    g.add_argument("--no-results", dest="results", action="store_const", const=None,
+                   help="save nothing")
+    g.add_argument("--save-steps", action=argparse.BooleanOptionalAction, default=False,
+                   help="save every step's state, action and uncertainty (the .npy "
+                        "files); with --no-save-steps only the JSON summary is saved")
+    g.add_argument("--uncertainty", action=argparse.BooleanOptionalAction, default=False,
                    help="have the planner report, and the recorder keep, the "
                         "uncertainty of each action")
     g.add_argument("--debug", action="store_true", help="per-plan MPPI diagnostics")
     return p
 
 
-def _newGoal(task, eval_task, renderer) -> str:
-    """Sample one goal and give it to both tasks and the renderer.
+def _newGoal(task, eval_task, renderer, recorder) -> None:
+    """Sample one goal and give it to both tasks, the renderer and the recorder.
 
     The two task instances load different scenes but must chase one goal, so it
     is sampled once — on the eval task, which owns the episode and its seed —
     and set on both. Each new goal is a rotation of the previous one. The
     renderer keeps its own copy of the scene, so it is told too, or the video's
-    goal marker would never move. Returns the letter of the face the goal shows.
+    goal marker would never move.
     """
     goal = eval_task.sampleNewGoal()
     eval_task.setGoal(goal)
     task.setGoal(goal)
+    recorder.recordGoal(goal)
     if renderer is not None:
         eval_task.setRendererToGoal(renderer)
-    return eval_task.goalFace() if hasattr(eval_task, "goalFace") else "?"
 
 
-def run_episode(
-    episode: int, args, task, eval_task, sim, planner, renderer, recorder
-) -> dict:
-    """Run one closed-loop episode, recording every control step, and summarize it.
+def run_episode(args, task, eval_task, sim, planner, renderer, recorder) -> str:
+    """Run one closed-loop episode, reporting it to ``recorder`` as it goes.
 
-    Each step's state, action, action uncertainty (when the planner reports
-    one) and planning time go to ``recorder``. The episode is left open there;
-    the caller finishes it with the returned summary, once the video is saved,
-    so the video's path can go in too.
+    Every control step's state, action, action uncertainty (when the planner
+    reports one) and planning time go to the recorder, as do each goal adopted
+    and each goal reached. The episode is left open; the caller finishes it
+    once the video is saved, so the video's path can go in too. The recorder
+    builds the summary; see ``EpisodeRecorder.GenerateSummary``.
 
     The planner sees the eval simulator's state and returns an absolute command;
-    the eval simulator holds that command for ``substeps`` physics steps.
+    the eval simulator holds that command for ``substeps`` rollout steps.
 
     The episode is judged with the *eval* task's ``isSuccess`` / ``isFailure``,
     evaluated on the start-of-step state as the old driver did. A failure always
     ends it. A success ends it too unless ``--no-stop-on-success``, in which
     case a fresh goal is sampled and the episode carries on — the old driver's
     multi-goal mode.
+
+    Returns:
+        Why the episode ended: ``"success"``, ``"failure"`` or ``"timeout"``.
+        A multi-goal episode that reached goals and then ran out of steps ends
+        in ``"timeout"``; its summary still reports it as a success.
     """
     eval_task.setSimToInitialState(sim)
     _, _, u0 = eval_task.getInitialState()
@@ -197,14 +235,15 @@ def run_episode(
     # initial grasp. Under both relative modes the mean is a delta, and zero
     # correctly means "hold" — the pose, or the command.
     reset_mean = u0 if args.control_mode == "absolute" else None
-    goals = [_newGoal(task, eval_task, renderer)]
+    _newGoal(task, eval_task, renderer, recorder)
     planner.Reset(reset_mean)
     if renderer is not None:
         renderer.Reset()
 
     # One control step advances the eval simulator this many of its own (fine)
-    # steps: `substeps` rollout steps, each eval_steps_per_rollout_step long.
-    eval_steps = args.substeps * eval_task.config.eval_steps_per_rollout_step
+    # steps: the planner's (resolved) substeps rollout steps, each
+    # eval_steps_per_rollout_step long.
+    eval_steps = planner.substeps * eval_task.config.eval_steps_per_rollout_step
     # Frames are due every `steps_per_frame` eval steps — on the simulation
     # clock, not the control clock. A control step can be longer than a frame
     # (64 ms vs 33 ms at 30 fps), so capturing once per control step would drop
@@ -232,26 +271,19 @@ def run_episode(
     # the initial grasp command, which setSimToInitialState applied and which
     # is held here. Filmed like the rest, so the video opens with it; nothing is
     # planned or recorded until it is over, and it does not count as a step.
-    settle_steps = int(round(args.settle / eval_task.timestep))
-    _advance(settle_steps)
+    _advance(int(round(args.settle / eval_task.timestep)))
 
-    goal_errors = getattr(eval_task, "goalErrors", None)
-    # The episode starts from the settled state: start errors and the first
-    # success/failure checks are taken on it.
-    q_start, v_start = sim.GetState()
-    plan_ms, planner_cost, successes = [], [], []
-    end_reason, steps_taken = "timeout", args.steps
-
-    for step in range(args.steps):
+    end_reason = "timeout"
+    for _ in range(args.steps):
         if eval_task.isFailure(sim):
-            end_reason, steps_taken = "failure", step
+            end_reason = "failure"
             break
         if eval_task.isSuccess(sim):
-            successes.append(step)
+            recorder.recordSuccess()
             if args.stop_on_success:
-                end_reason, steps_taken = "success", step
+                end_reason = "success"
                 break
-            goals.append(_newGoal(task, eval_task, renderer))
+            _newGoal(task, eval_task, renderer, recorder)
             planner.Reset(reset_mean)
 
         q, q_dot = sim.GetState()
@@ -262,78 +294,38 @@ def run_episode(
         out = planner.Plan(q, q_dot, u=sim.GetControl())
         dt = time.perf_counter() - t0
         u, sigma = out if isinstance(out, tuple) else (out, None)
-        plan_ms.append(dt * 1e3)
         recorder.recordStateAndAction(q, q_dot, u, sigma, planning_time=dt)
-        # The planner's best rollout cost, on its own (rollout) model. A
-        # progress signal, not a score: the eval task has no host-side cost.
-        planner_cost.append(float(getattr(planner, "last_min_cost", float("nan"))))
 
         sim.SetControl(u)
         _advance(eval_steps)
 
-    q, q_dot = sim.GetState()
     # End on the final state, unless that state was itself a frame deadline and
     # is already the last frame — a duplicate would stretch playback by a frame.
     if renderer is not None and eval_clock[0] % steps_per_frame != 0:
-        renderer.RenderState(q)
-    # A multi-goal run that timed out still succeeded if it reached any goal.
-    if end_reason == "timeout" and successes:
-        end_reason = "success"
-
-    summary = {
-        "episode": episode,
-        "end_reason": end_reason,
-        "success": bool(successes),
-        "steps_to_success": successes[0] if successes else None,
-        "goals_reached": len(successes),
-        "success_steps": successes,
-        "goals": goals,
-        "failed": end_reason == "failure",
-        "steps_taken": steps_taken,
-        "planner_min_cost": planner_cost,
-        "settle_s": settle_steps * eval_task.timestep,
-        # The recorded steps hold the states actions were planned from; the
-        # state the last action led to is only here.
-        "q_end": q.tolist(),
-        "q_dot_end": q_dot.tolist(),
-    }
-    if goal_errors is not None:
-        # Start errors are against the first goal; end errors against whichever
-        # goal was active when the episode stopped.
-        summary["goal_errors_start"] = goal_errors(q_start, v_start)
-        summary["goal_errors_end"] = goal_errors(q, q_dot)
-    if plan_ms:
-        # The first plan of a run pays kernel compilation and CUDA-graph
-        # capture — often 100x the steady-state cost — so it is reported
-        # separately rather than being averaged into a figure that then
-        # describes neither.
-        rest = plan_ms[1:] or plan_ms
-        summary.update(
-            plan_ms_first=float(plan_ms[0]),
-            plan_ms_mean=float(np.mean(rest)),
-            plan_ms_max=float(np.max(rest)),
-        )
-    return summary
+        renderer.RenderState(sim.GetState()[0])
+    return end_reason
 
 
 def _printEpisode(episode: int, s: dict, args) -> None:
-    """One episode's result, as printed after it finishes."""
-    outcome = {"success": "SUCCESS", "failure": "FAILED", "timeout": "timeout"}[s["end_reason"]]
+    """One episode's result, from the recorder's summary of it."""
+    outcome = ("SUCCESS" if s["success"] else "FAILED" if s["failed"]
+               else s["finish_reason"])
     where = (f" at step {s['steps_to_success']}" if s["success"]
-             else f" at step {s['steps_taken']}" if s["failed"] else "")
-    print(f"\nepisode {episode}: {outcome}{where}  ({s['steps_taken']}/{args.steps} steps)")
-    print(f"  goals {' -> '.join(s['goals'])}  ({s['goals_reached']} reached)")
-    if "goal_errors_end" in s:
-        e0, e1 = s["goal_errors_start"], s["goal_errors_end"]
+             else f" at step {s['n_steps']}" if s["failed"] else "")
+    print(f"\nepisode {episode}: {outcome}{where}  ({s['n_steps']}/{args.steps} steps)")
+    print(f"  goals {' -> '.join(g or '?' for g in s['goals'])}  ({s['goals_reached']} reached)")
+    e0, e1 = s.get("goal_errors_start"), s.get("goal_errors_end")
+    if e0 and e1:
         print(f"  pos {e0['pos']:.4f} -> {e1['pos']:.4f} m   "
               f"quat {e0['quat']:.4f} -> {e1['quat']:.4f}   "
               f"vel {e1['vel']:.4f}")
-    if "plan_ms_mean" in s:
+    if s.get("plan_s_mean"):
         # Only the run's very first plan compiles kernels and captures the
         # graph; later episodes reuse both.
         note = " (compile + graph capture)" if episode == 0 else ""
-        print(f"  plan {s['plan_ms_mean']:.1f} ms mean, {s['plan_ms_max']:.1f} ms max "
-              f"({1e3 / s['plan_ms_mean']:.0f} Hz), first {s['plan_ms_first']:.0f} ms{note}")
+        mean_ms, max_ms, first_ms = (1e3 * s[k] for k in ("plan_s_mean", "plan_s_max", "plan_s_first"))
+        print(f"  plan {mean_ms:.1f} ms mean, {max_ms:.1f} ms max "
+              f"({1e3 / mean_ms:.0f} Hz), first {first_ms:.0f} ms{note}")
     if s.get("video"):
         print(f"  video {s['video']}")
 
@@ -343,6 +335,19 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.settle < 0:
         parser.error(f"--settle must be >= 0, got {args.settle}")
+    # Each pair is one setting given two ways; the rollout config rejects both
+    # being set, but saying so here names the flags rather than the fields.
+    for a, b in (("substeps", "ctrl_time_step"), ("horizon", "time_horizon")):
+        if getattr(args, a) is not None and getattr(args, b) is not None:
+            parser.error(f"give --{a.replace('_', '-')} or --{b.replace('_', '-')}, not both")
+    if args.substeps is None and args.ctrl_time_step is None:
+        args.substeps = _DEFAULT_SUBSTEPS
+    if args.horizon is None and args.time_horizon is None:
+        args.horizon = _DEFAULT_HORIZON
+    if args.results == _AUTO_RESULTS:
+        # Time-stamped so runs never overwrite one another, and so the per-step
+        # files of different runs, which sit side by side, never mix.
+        args.results = str(_REPO_ROOT / "results" / f"run_episodes_{time.strftime('%Y%m%d_%H%M%S')}.json")
 
     task_cls = TASKS[args.task]
     # Two views of the same task: the scene the planner predicts with, and the
@@ -363,13 +368,14 @@ def main(argv=None) -> int:
     # Each simulator at its own task's timestep: the eval sim fine, the rollout
     # model coarse (they are equal when k == 1).
     sim = makeEvalSim(args.eval_sim, eval_task.getModelPath(), eval_task.timestep)
-    rollout_sim = VectorizedMujoco(
-        task.getModelPath(),
-        VectorizedMujocoConfig(
-            timestep=task.timestep, substeps=args.substeps, horizon=args.horizon,
-            nconmax=args.nconmax, njmax=args.njmax,
-        ),
-        N=args.n_samples,
+    # Buffer sizes are passed only when given on the command line: passing
+    # None would override the config's defaults with "let MJWarp choose".
+    buffers = {k: v for k, v in (("nconmax", args.nconmax), ("njmax", args.njmax))
+               if v is not None}
+    rollout_sim = GetContactModelSim(
+        args.rollout_model, task.getModelPath(), N=args.n_samples,
+        timestep=task.timestep, substeps=args.substeps, ctrl_time_step=args.ctrl_time_step,
+        horizon=args.horizon, time_horizon=args.time_horizon, **buffers,
     )
     delta_range = (None, None) if args.delta is None else (-args.delta, args.delta)
     planner = MPPI(rollout_sim, task, MPPI_Config(
@@ -382,17 +388,20 @@ def main(argv=None) -> int:
     recorder = EpisodeRecorder(eval_task, sim, planner, cli_args=vars(args),
                                eval_sim=args.eval_sim)
 
-    control_hz = 1.0 / (task.timestep * args.substeps)
+    rcfg = rollout_sim.config
+    control_hz = 1.0 / rcfg.control_timestep
     print(f"task       {args.task}  (rollout {args.hand_acc}_{args.obj_acc})")
     print(f"eval scene {Path(eval_task.getModelPath()).name}  (on {args.eval_sim})")
-    print(f"rollout    {Path(task.getModelPath()).name}")
+    print(f"rollout    {Path(task.getModelPath()).name}  (contact model {args.rollout_model}: "
+          f"{type(rollout_sim).__name__})")
     print(f"planner    {planner!r}")
     print(f"timesteps  eval {eval_task.timestep * 1e3:g} ms, rollout "
           f"{task.timestep * 1e3:g} ms ({k} eval steps per rollout step)")
-    print(f"control    {control_hz:.1f} Hz  ({args.steps} steps = "
+    print(f"control    {control_hz:.1f} Hz: {rcfg.resolved_substeps} rollout steps = "
+          f"{rcfg.control_timestep * 1e3:g} ms per control step  ({args.steps} steps = "
           f"{args.steps / control_hz:.2f} s per episode)")
+    print(f"horizon    {rcfg.resolved_horizon} control steps = {rcfg.horizon_duration * 1e3:g} ms")
 
-    summaries = []
     try:
         for episode in range(args.n_episodes):
             renderer = None
@@ -410,31 +419,32 @@ def main(argv=None) -> int:
                 if args.camera is not None:
                     cfg.cam_name = None if args.camera.lower() == "none" else args.camera
                 renderer = MujocoVideoRenderer(eval_task, cfg)
+            extra = {"episode": episode, "settle_s": args.settle}
             try:
-                s = run_episode(episode, args, task, eval_task, sim, planner, renderer, recorder)
+                end_reason = run_episode(args, task, eval_task, sim, planner, renderer, recorder)
                 if renderer is not None:
-                    s["video"] = str(renderer.Save(video_path))
+                    extra["video"] = str(renderer.Save(video_path))
             finally:
                 if renderer is not None:
                     renderer.Close()
-            recorder.episodeFinished(s["end_reason"], **s)
-
-            summaries.append(s)
-            _printEpisode(episode, s, args)
+            recorder.episodeFinished(end_reason, **extra)
+            _printEpisode(episode, recorder.GenerateSummary(-1), args)
 
         if args.n_episodes > 1:
-            n_ok = sum(s["success"] for s in summaries)
-            n_fail = sum(s["failed"] for s in summaries)
-            print(f"\n{args.n_episodes} episodes: {n_ok} succeeded, {n_fail} failed, "
-                  f"{args.n_episodes - n_ok - n_fail} timed out  "
-                  f"(success rate {n_ok / args.n_episodes:.0%})")
+            b = recorder.GenerateSummary()
+            n = b["n_episodes"]
+            print(f"\n{n} episodes: {b['n_success']} succeeded, {b['n_failed']} failed, "
+                  f"{n - b['n_success'] - b['n_failed']} timed out  "
+                  f"(success rate {b['success_rate']:.0%})")
     finally:
         # Also on an error or Ctrl-C, so the episodes already finished are kept.
         # An episode cut off part-way is closed as "interrupted" rather than lost.
         if recorder.recording:
             recorder.episodeFinished("interrupted")
         if args.results and len(recorder):
-            print(f"\nresults {recorder.Save(args.results)}  ({len(recorder)} episodes)")
+            out = recorder.Save(args.results, save_steps=args.save_steps)
+            what = "" if args.save_steps else ", summary only"
+            print(f"\nresults {out}  ({len(recorder)} episodes{what})")
 
     rollout_sim.Close()
     return 0

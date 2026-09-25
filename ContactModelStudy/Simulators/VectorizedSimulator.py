@@ -32,36 +32,72 @@ from pathlib import Path
 
 import numpy as np
 
-from ContactModelStudy.Simulators.Simulator import Simulator, SimulatorConfig
+from typing import Optional
+
+from ContactModelStudy.Simulators.Simulator import (
+    Simulator,
+    SimulatorConfig,
+    _exclusive,
+    _floorSteps,
+)
 
 
 @dataclass
 class VectorizedSimulatorConfig(SimulatorConfig):
     """Physics parameters for a vectorized simulator.
 
-    Inherits ``timestep``, ``substeps`` and ``gravity`` from
-    ``SimulatorConfig`` and adds the two things a parallel backend needs that a
-    single-world one does not: where the worlds live, and how long the control
-    sequences driving them are.
+    Inherits ``timestep``, the control step (``substeps`` or
+    ``ctrl_time_step``) and ``gravity`` from ``SimulatorConfig`` and adds the
+    two things a parallel backend needs that a single-world one does not: where
+    the worlds live, and how long the control sequences driving them are.
+
+    The horizon can be given two ways, like the control step: as a count of
+    control steps (``horizon``) or as a duration (``time_horizon``). Set at
+    most one; setting both raises. Setting neither means a horizon of 1.
+    ``resolved_horizon`` is the count actually used.
 
     The world count ``N`` is deliberately *not* here — it is a ``__init__``
     argument, because it determines how much device memory gets allocated and
     so belongs at construction rather than in a config that gets copied around.
 
     Attributes:
-        horizon: Length ``H`` of the control sequences passed to
-            ``SetControlSequence``. Fixed at construction so device buffers are
-            allocated once; a sequence of any other length is rejected.
+        horizon: Length ``H``, in control steps, of the control sequences passed
+            to ``SetControlSequence``. Fixed at construction so device buffers
+            are allocated once; a sequence of any other length is rejected.
+        time_horizon: Planning horizon in seconds, the alternative to
+            ``horizon``. Rounded *down* to whole control steps (of
+            ``control_timestep``, so after the control step is resolved), and
+            at least one.
         device: Compute device for the worlds, e.g. ``"cuda"`` or ``"cpu"``.
     """
 
-    horizon: int = 1
+    horizon: Optional[int] = None
+    time_horizon: Optional[float] = None
     device: str = "cuda"
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        if self.horizon < 1:
+        _exclusive(self, "horizon", "time_horizon")
+        if self.horizon is not None and self.horizon < 1:
             raise ValueError(f"horizon must be >= 1, got {self.horizon}")
+        if self.time_horizon is not None and self.time_horizon <= 0.0:
+            raise ValueError(f"time_horizon must be positive, got {self.time_horizon}")
+        self._resolveHorizon(warn=True)
+
+    def _resolveHorizon(self, warn: bool = False) -> int:
+        if self.time_horizon is not None:
+            return _floorSteps(self.time_horizon, self.control_timestep, "time_horizon", warn)
+        return 1 if self.horizon is None else int(self.horizon)
+
+    @property
+    def resolved_horizon(self) -> int:
+        """Control steps in a plan: ``horizon``, or ``time_horizon`` in control steps."""
+        return self._resolveHorizon()
+
+    @property
+    def horizon_duration(self) -> float:
+        """Seconds of simulated time a plan covers (``resolved_horizon * control_timestep``)."""
+        return self.resolved_horizon * self.control_timestep
 
 
 @dataclass
@@ -143,8 +179,8 @@ class VectorizedSimulator(Simulator):
 
     @property
     def horizon(self) -> int:
-        """Control-sequence length ``H``, from the config."""
-        return self.config.horizon
+        """Control-sequence length ``H``, resolved from the config."""
+        return self.config.resolved_horizon
 
     def _to_worlds(self, x: np.ndarray, dim: int, name: str) -> np.ndarray:
         """Coerce ``x`` to ``(N, dim)``, broadcasting an un-batched input.
@@ -229,7 +265,7 @@ class VectorizedSimulator(Simulator):
         # steps, so each entry is held for `substeps` of them. That is what
         # makes a control sequence a zero-order hold at the control rate rather
         # than a new command every integration step.
-        i = min(self._sequence_index // self.config.substeps, self.horizon - 1)
+        i = min(self._sequence_index // self.config.resolved_substeps, self.horizon - 1)
         self._sequence_index += 1
         return i
 

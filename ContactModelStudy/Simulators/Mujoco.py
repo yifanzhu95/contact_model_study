@@ -90,7 +90,7 @@ class MujocoConfig(SimulatorConfig):
                      solref_timeconst=2 * dt, solref_dampratio=1.0)
     """
 
-    cone: Optional[str] = None
+    cone: Optional[str] = "elliptic"
     solver: Optional[str] = None
     iterations: Optional[int] = None
     tolerance: Optional[float] = None
@@ -100,8 +100,8 @@ class MujocoConfig(SimulatorConfig):
     solimp_power: Optional[float] = None
     solref_timeconst: Optional[float] = None
     solref_dampratio: Optional[float] = None
-    nconmax: Optional[int] = None
-    njmax: Optional[int] = None
+    nconmax: Optional[int] = 100#
+    njmax: Optional[int] = 300#
 
     def __post_init__(self) -> None:
         super().__post_init__()

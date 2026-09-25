@@ -20,14 +20,45 @@ Each subclass remaps internally; callers never see backend-specific indices.
 from __future__ import annotations
 
 import abc
+import math
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
 # Recognized as an XML document rather than a path when a model source string
 # starts with one of these (after stripping leading whitespace).
 _XML_PREFIXES = ("<?xml", "<mujoco", "<robot", "<sdf", "<!--")
+
+# Slack when a duration is floored to whole steps, so a duration that is an
+# exact multiple of the step in decimal (0.032 s of 4 ms steps) is not lost to
+# binary rounding (0.032 / 0.004 = 7.999999999999999).
+_RATIO_TOL = 1e-9
+
+
+def _floorSteps(duration: float, unit: float, name: str, warn: bool) -> int:
+    """Whole ``unit`` steps in ``duration``, rounded down, and at least 1.
+
+    Rounding down keeps the realized duration at or under the requested one,
+    as the old planner's ``resolve_schedule`` did. A duration shorter than one
+    step is clamped to one step, with a warning when ``warn`` is set.
+    """
+    n = int(math.floor(duration / unit + _RATIO_TOL))
+    if n < 1:
+        if warn:
+            warnings.warn(f"{name}={duration:g}s is shorter than one step of {unit:g}s; "
+                          f"using 1 step ({unit:g}s).", stacklevel=4)
+        return 1
+    return n
+
+
+def _exclusive(cfg, a: str, b: str) -> None:
+    """Raise unless at most one of the two fields ``a`` and ``b`` is set."""
+    if getattr(cfg, a) is not None and getattr(cfg, b) is not None:
+        raise ValueError(f"set {a} or {b}, not both (got {a}={getattr(cfg, a)!r}, "
+                         f"{b}={getattr(cfg, b)!r})")
 
 
 @dataclass
@@ -39,32 +70,55 @@ class SimulatorConfig:
     solver, ComFree's stiffness, XPBD's iteration count) belongs on that
     backend's own config, so this object stays reusable across M1-M4.
 
+    The control step can be given two ways: as a step count (``substeps``) or
+    as a duration (``ctrl_time_step``). Set at most one; setting both raises.
+    Setting neither means one step per control step. Both fields keep what was
+    asked for; ``resolved_substeps`` is the count actually used.
+
     Attributes:
         timestep: Integration timestep in seconds. The *fine* step; one call to
             ``Step()`` advances exactly this much.
-        substeps: Fine steps per control step. Only drivers use this, to convert
-            a control period into a ``Step`` count; ``Step`` itself is unaware
-            of it.
+        substeps: Fine steps per control step. Only drivers and planners use
+            this, to turn a control period into a ``Step`` count; ``Step``
+            itself is unaware of it.
+        ctrl_time_step: Control-step duration in seconds, the alternative to
+            ``substeps``. Rounded *down* to whole timesteps, so the realized
+            control step never exceeds it, and at least one timestep.
         gravity: Gravity vector in world coordinates (m/s^2).
     """
 
     timestep: float = 0.002
-    substeps: int = 1
+    substeps: Optional[int] = None
+    ctrl_time_step: Optional[float] = None
     gravity: tuple[float, float, float] = (0.0, 0.0, -9.81)
 
     def __post_init__(self) -> None:
         if self.timestep <= 0.0:
             raise ValueError(f"timestep must be positive, got {self.timestep}")
-        if self.substeps < 1:
+        _exclusive(self, "substeps", "ctrl_time_step")
+        if self.substeps is not None and self.substeps < 1:
             raise ValueError(f"substeps must be >= 1, got {self.substeps}")
+        if self.ctrl_time_step is not None and self.ctrl_time_step <= 0.0:
+            raise ValueError(f"ctrl_time_step must be positive, got {self.ctrl_time_step}")
         if len(self.gravity) != 3:
             raise ValueError(f"gravity must have 3 components, got {len(self.gravity)}")
         self.gravity = tuple(float(g) for g in self.gravity)
+        self._resolveSubsteps(warn=True)        # warns once, here, if it clamps
+
+    def _resolveSubsteps(self, warn: bool = False) -> int:
+        if self.ctrl_time_step is not None:
+            return _floorSteps(self.ctrl_time_step, self.timestep, "ctrl_time_step", warn)
+        return 1 if self.substeps is None else int(self.substeps)
+
+    @property
+    def resolved_substeps(self) -> int:
+        """Fine steps per control step: ``substeps``, or ``ctrl_time_step`` in steps."""
+        return self._resolveSubsteps()
 
     @property
     def control_timestep(self) -> float:
-        """Seconds of simulated time in one control step (``timestep * substeps``)."""
-        return self.timestep * self.substeps
+        """Seconds of simulated time in one control step (``timestep * resolved_substeps``)."""
+        return self.timestep * self.resolved_substeps
 
 
 class Simulator(abc.ABC):

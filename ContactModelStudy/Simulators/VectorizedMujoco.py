@@ -94,8 +94,8 @@ class VectorizedMujocoConfig(VectorizedSimulatorConfig):
     solimp_power: Optional[float] = None
     solref_timeconst: Optional[float] = None
     solref_dampratio: Optional[float] = None
-    nconmax: Optional[int] = None
-    njmax: Optional[int] = None
+    nconmax: Optional[int] = 100#None
+    njmax: Optional[int] = 300#None
 
     def __post_init__(self) -> None:
         super().__post_init__()

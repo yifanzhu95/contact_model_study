@@ -10,9 +10,13 @@ batch and one ``.npy`` file per episode::
     results/run_b71d0e44.npy
 
 Each ``.npy`` holds a structured array, one record per control step, with the
-fields ``t``, ``q``, ``q_dot``, ``u``, ``sigma_u`` and ``planning_time``. A
-missing ``sigma_u`` or ``planning_time`` is stored as NaN. It loads with plain
+fields ``t``, ``q``, ``q_dot``, ``u``, ``sigma_u``, ``planning_time`` and
+``planner_cost``. A missing value is stored as NaN. It loads with plain
 ``np.load`` and needs no pickle.
+
+The recorder also owns each episode's summary: ``GenerateSummary`` derives it
+from what was recorded (steps, goals, successes, the start and end states and
+their goal errors, planning times), so a driver never assembles one itself.
 
 ``EpisodeReplayer`` reads a saved batch back: by episode, or state by state
 across the whole batch.
@@ -31,8 +35,12 @@ from typing import Any, Iterator
 import numpy as np
 
 #: Version of the saved layout, written into the JSON, so a reader can tell a
-#: file it does not understand.
-FORMAT_VERSION = 1
+#: file it does not understand. Version 2 added the per-step ``planner_cost``.
+FORMAT_VERSION = 2
+_READABLE_VERSIONS = (1, 2)
+
+#: Per-step fields of the ``.npy`` records, besides the state and action ones.
+_STEP_FIELDS = ("t", "q", "q_dot", "u", "sigma_u", "planning_time", "planner_cost")
 
 
 def _jsonable(obj: Any) -> Any:
@@ -54,20 +62,56 @@ def _jsonable(obj: Any) -> Any:
     return obj
 
 
+def _taskEntry(task) -> dict:
+    """A task's class, scene, config, and the timestep it actually runs at.
+
+    ``timestep`` is kept apart from ``config.timestep`` because the two differ
+    for a rollout task, whose scene runs at a coarser step than the config's
+    (eval) one.
+    """
+    return {"class": type(task).__name__, "role": _jsonable(getattr(task, "role", None)),
+            "model_path": task.getModelPath(), "timestep": float(task.timestep),
+            "config": _jsonable(task.config)}
+
+
+def _simEntry(sim) -> dict:
+    """A simulator's class and config, plus the schedule its config resolves to.
+
+    The config keeps what was asked for (``substeps`` or ``ctrl_time_step``,
+    ``horizon`` or ``time_horizon``), so the whole-step values actually used
+    are recorded beside it, under ``resolved``.
+    """
+    cfg = sim.config
+    resolved = {name: _jsonable(getattr(cfg, name))
+                for name in ("resolved_substeps", "control_timestep",
+                             "resolved_horizon", "horizon_duration")
+                if hasattr(cfg, name)}
+    entry = {"class": type(sim).__name__, "config": _jsonable(cfg)}
+    if hasattr(sim, "N"):
+        entry["N"] = sim.N
+    if resolved:
+        entry["resolved"] = resolved
+    return entry
+
+
 def _configSnapshot(task, simulator, planner, metadata: dict) -> dict:
-    """What produced an episode: every config, the classes, and the scene."""
+    """What produced an episode: both tasks, both simulators and the planner.
+
+    The eval side is what the recorder was given. The rollout side is read off
+    the planner: the task it plans against (``planner.task``) and the
+    simulator it rolls out on (``planner.sim``).
+    """
     snap = {
-        "task": {"class": type(task).__name__, "model_path": task.getModelPath(),
-                 "config": _jsonable(task.config)},
-        "simulator": {"class": type(simulator).__name__, "config": _jsonable(simulator.config)},
+        "eval_task": _taskEntry(task),
+        "eval_simulator": _simEntry(simulator),
         "planner": {"class": type(planner).__name__, "config": _jsonable(planner.config)},
     }
+    rollout_task = getattr(planner, "task", None)
+    if rollout_task is not None:
+        snap["rollout_task"] = _taskEntry(rollout_task)
     rollout = getattr(planner, "sim", None)
     if rollout is not None:
-        snap["rollout_simulator"] = {
-            "class": type(rollout).__name__, "N": getattr(rollout, "N", None),
-            "config": _jsonable(rollout.config),
-        }
+        snap["rollout_simulator"] = _simEntry(rollout)
     if metadata:
         snap["metadata"] = _jsonable(metadata)
     return snap
@@ -85,8 +129,20 @@ class _Episode:
     u: list = field(default_factory=list)
     sigma_u: list = field(default_factory=list)
     planning_time: list = field(default_factory=list)
+    planner_cost: list = field(default_factory=list)
+    #: ``(step, goal, label)`` for every goal adopted during the episode.
+    goals: list = field(default_factory=list)
+    #: Steps at which a goal was reached.
+    success_steps: list = field(default_factory=list)
+    #: Goal errors of the first recorded state, against the first goal.
+    start_errors: dict | None = None
+    #: State and goal errors when the episode finished.
+    q_end: list | None = None
+    q_dot_end: list | None = None
+    end_errors: dict | None = None
     finish_reason: str | None = None
-    summary: dict = field(default_factory=dict)
+    #: Caller-supplied extras (a video path, the settle time, ...).
+    extra: dict = field(default_factory=dict)
 
     @property
     def n_steps(self) -> int:
@@ -102,7 +158,7 @@ class _Episode:
         dtype = np.dtype([
             ("t", np.float64), ("q", np.float64, (nq,)), ("q_dot", np.float64, (nv,)),
             ("u", np.float64, (nu,)), ("sigma_u", np.float64, (nu,)),
-            ("planning_time", np.float64),
+            ("planning_time", np.float64), ("planner_cost", np.float64),
         ])
         out = np.empty(self.n_steps, dtype=dtype)
         for name in dtype.names:
@@ -114,8 +170,12 @@ class _Episode:
 class EpisodeRecorder:
     """Records a batch of episodes run by one task, simulator and planner.
 
-    An episode starts with its first ``recordStateAndAction`` and ends with
+    An episode starts with its first ``record...`` call and ends with
     ``episodeFinished``; one recorder holds any number of finished episodes.
+    The driver reports the steps (``recordStateAndAction``) and the two events
+    only it sees (``recordGoal``, ``recordSuccess``). Everything else in an
+    episode's summary is read off the task, simulator and planner by the
+    recorder itself; see ``GenerateSummary``.
     The configs are captured at construction and again at the start of every
     episode. An episode whose configs differ from the recorder's keeps its own
     copy in the saved summary.
@@ -123,13 +183,15 @@ class EpisodeRecorder:
     Example::
 
         rec = EpisodeRecorder(eval_task, sim, planner, cli_args=vars(args))
+        rec.recordGoal(goal)
         for step in range(n_steps):
             q, q_dot = sim.GetState()
             t0 = time.perf_counter()
             u, sigma = planner.Plan(q, q_dot)
             rec.recordStateAndAction(q, q_dot, u, sigma, time.perf_counter() - t0)
             ...
-        rec.episodeFinished("success")
+        rec.episodeFinished("timeout")
+        print(rec.GenerateSummary(-1))
         rec.Save("results/run.json")
     """
 
@@ -139,8 +201,9 @@ class EpisodeRecorder:
         Args:
             task: The eval task the episodes are scored against.
             simulator: The eval simulator the states come from.
-            planner: The planner choosing the actions. Its rollout simulator,
-                ``planner.sim``, is recorded too.
+            planner: The planner choosing the actions. The rollout task and
+                rollout simulator it plans with (``planner.task``,
+                ``planner.sim``) are recorded too.
             **metadata: Anything else worth keeping with the batch (CLI
                 arguments, a git hash, a note), saved under ``metadata``.
         """
@@ -161,6 +224,17 @@ class EpisodeRecorder:
     def _snapshot(self) -> dict:
         return _configSnapshot(self.task, self.simulator, self.planner, self.metadata)
 
+    def _current(self) -> _Episode:
+        """The episode being recorded, starting one if there is none."""
+        if self._active is None:
+            self._active = _Episode(id=uuid.uuid4().hex[:8], configs=self._snapshot())
+        return self._active
+
+    def _goalErrors(self, q, q_dot) -> dict | None:
+        """The task's goal errors for a state, when the task defines them."""
+        fn = getattr(self.task, "goalErrors", None)
+        return None if fn is None else _jsonable(fn(q, q_dot))
+
     # -- recording -----------------------------------------------------------
     @property
     def recording(self) -> bool:
@@ -177,11 +251,14 @@ class EpisodeRecorder:
                 reported one. Stored as NaN otherwise.
             planning_time: Seconds the plan took. Stored as NaN if not given.
 
-        The simulator's clock is recorded alongside, as ``t``.
+        Also recorded, read off the objects the recorder holds: the simulator's
+        clock as ``t``, and the planner's best rollout cost for this plan as
+        ``planner_cost`` (NaN if the planner reports none). The goal errors of
+        an episode's first step are its start errors.
         """
-        if self._active is None:
-            self._active = _Episode(id=uuid.uuid4().hex[:8], configs=self._snapshot())
-        ep = self._active
+        ep = self._current()
+        if ep.n_steps == 0:
+            ep.start_errors = self._goalErrors(q, q_dot)
         u = np.asarray(U, dtype=np.float64).ravel()
         ep.t.append(float(np.asarray(getattr(self.simulator, "time", np.nan)).ravel()[0]))
         ep.q.append(np.asarray(q, dtype=np.float64).ravel())
@@ -190,34 +267,135 @@ class EpisodeRecorder:
         ep.sigma_u.append(np.full(u.shape, np.nan) if sigma_U is None
                           else np.asarray(sigma_U, dtype=np.float64).ravel())
         ep.planning_time.append(np.nan if planning_time is None else float(planning_time))
+        ep.planner_cost.append(float(getattr(self.planner, "last_min_cost", np.nan)))
 
-    def episodeFinished(self, finish_reason: str, **summary) -> None:
+    def recordGoal(self, goal, label: str | None = None) -> None:
+        """Note that the task has adopted ``goal``, from the current step on.
+
+        Args:
+            goal: The goal, as the task's ``setGoal`` took it.
+            label: A short name for it. Defaults to the task's ``goalFace()``
+                when it has one (the letter a LEAP goal shows).
+        """
+        if label is None and hasattr(self.task, "goalFace"):
+            label = self.task.goalFace(goal)
+        ep = self._current()
+        ep.goals.append((ep.n_steps, _jsonable(np.asarray(goal)), label))
+
+    def recordSuccess(self) -> None:
+        """Note that the current goal was reached, at the current step."""
+        ep = self._current()
+        ep.success_steps.append(ep.n_steps)
+
+    def episodeFinished(self, finish_reason: str, **extra) -> None:
         """End the current episode.
 
         Args:
-            finish_reason: Why it ended, e.g. ``"success"``, ``"failure"`` or
-                ``"timeout"``.
-            **summary: Anything else to save in the episode's summary entry
-                (goals reached, goal errors, and so on).
+            finish_reason: Why it ended, e.g. ``"success"``, ``"failure"``,
+                ``"timeout"`` or ``"interrupted"``.
+            **extra: Things only the caller knows, kept in the episode's
+                summary as they are (a video path, a settle time, ...).
+
+        The simulator's state at this point is recorded as the end state, with
+        its goal errors against the goal then current.
 
         With no step recorded since the last episode, this records an episode
         of zero steps: one that ended before its first action (it started out
         failed, or already at its goal) is still an episode.
         """
-        if self._active is None:
-            self._active = _Episode(id=uuid.uuid4().hex[:8], configs=self._snapshot())
-        self._active.finish_reason = str(finish_reason)
-        self._active.summary = _jsonable(summary)
-        self.episodes.append(self._active)
+        ep = self._current()
+        q, q_dot = self.simulator.GetState()
+        ep.q_end = _jsonable(np.asarray(q).ravel())
+        ep.q_dot_end = _jsonable(np.asarray(q_dot).ravel())
+        ep.end_errors = self._goalErrors(q, q_dot)
+        if ep.start_errors is None:                 # zero steps: it started here
+            ep.start_errors = ep.end_errors
+        ep.finish_reason = str(finish_reason)
+        ep.extra = _jsonable(extra)
+        self.episodes.append(ep)
         self._active = None
 
+    # -- summaries -----------------------------------------------------------
+    def GenerateSummary(self, episode: int | None = None) -> dict:
+        """Summarize one finished episode, or the whole batch.
+
+        Args:
+            episode: Index of a finished episode (negative counts from the end,
+                so ``-1`` is the latest). ``None`` summarizes the batch.
+
+        An episode's summary has:
+
+        * ``id``, ``finish_reason``, ``failed``, ``n_steps``;
+        * ``goals`` (their labels, in order), ``goals_reached``,
+          ``success_steps``, ``steps_to_success`` and ``success``. An episode
+          succeeded if it reached any goal, however it then ended;
+        * ``goal_errors_start`` / ``goal_errors_end``, when the task defines
+          ``goalErrors``: the first state against the first goal, and the final
+          state against the goal then current;
+        * ``q_end`` / ``q_dot_end``, the state the last action led to, which
+          the per-step records do not include;
+        * ``plan_s_first``, ``plan_s_mean``, ``plan_s_max``: planning time.
+          The first plan of a run pays for kernel compilation and graph
+          capture, so mean and max leave it out when there is more than one;
+        * whatever was passed to ``episodeFinished`` as ``extra``.
+
+        The batch summary has the counts (``n_episodes``, ``finish_reasons``,
+        ``n_success``, ``n_failed``, ``success_rate``) and every episode's
+        summary under ``episodes``.
+        """
+        if episode is None:
+            eps = [self.GenerateSummary(i) for i in range(len(self.episodes))]
+            reasons = [e["finish_reason"] for e in eps]
+            n = len(eps)
+            n_ok = sum(e["success"] for e in eps)
+            return {
+                "n_episodes": n,
+                "finish_reasons": {r: reasons.count(r) for r in sorted(set(reasons))},
+                "n_success": n_ok,
+                "n_failed": sum(e["failed"] for e in eps),
+                "success_rate": n_ok / n if n else None,
+                "episodes": eps,
+            }
+
+        ep = self.episodes[episode]
+        succ = list(ep.success_steps)
+        pt = np.asarray(ep.planning_time, dtype=float)
+        finite = pt[np.isfinite(pt)]
+        rest = finite[1:] if finite.size > 1 else finite
+        summary = {
+            "id": ep.id,
+            "finish_reason": ep.finish_reason,
+            "failed": ep.finish_reason == "failure",
+            "n_steps": ep.n_steps,
+            "goals": [label for _step, _goal, label in ep.goals],
+            "goals_reached": len(succ),
+            "success_steps": succ,
+            "steps_to_success": succ[0] if succ else None,
+            "success": bool(succ),
+            "goal_errors_start": ep.start_errors,
+            "goal_errors_end": ep.end_errors,
+            "q_end": ep.q_end,
+            "q_dot_end": ep.q_dot_end,
+            "plan_s_first": float(finite[0]) if finite.size else None,
+            "plan_s_mean": float(rest.mean()) if rest.size else None,
+            "plan_s_max": float(rest.max()) if rest.size else None,
+        }
+        summary.update(ep.extra)
+        return summary
+
     # -- output --------------------------------------------------------------
-    def Save(self, path: str | Path) -> Path:
+    def Save(self, path: str | Path, save_steps: bool = True) -> Path:
         """Write the summary JSON to ``path`` and one ``.npy`` per episode beside it.
 
         Each episode's arrays go to ``<stem>_<episode id>.npy`` in the same
         directory, and the JSON names each file. Only finished episodes are
         saved.
+
+        Args:
+            path: Where to write the JSON.
+            save_steps: Write the per-step ``.npy`` files. With ``False`` only
+                the JSON is written, with its configs and summaries, and each
+                episode's ``file`` is ``null``.
 
         Returns:
             The path of the JSON written.
@@ -232,31 +410,20 @@ class EpisodeRecorder:
                 "an episode is still being recorded; call episodeFinished first")
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        batch = self.GenerateSummary()
         entries = []
-        for ep in self.episodes:
-            npy = f"{path.stem}_{ep.id}.npy"
-            np.save(path.parent / npy, ep.toArray(self._dims()))
-            pt = np.asarray(ep.planning_time, dtype=float)
-            entry = {
-                "id": ep.id,
-                "file": npy,
-                "finish_reason": ep.finish_reason,
-                "n_steps": ep.n_steps,
-                "planning_time_mean": float(np.nanmean(pt)) if np.isfinite(pt).any() else None,
-                "planning_time_max": float(np.nanmax(pt)) if np.isfinite(pt).any() else None,
-                "summary": ep.summary,
-            }
+        for ep, summary in zip(self.episodes, batch.pop("episodes")):
+            npy = None
+            if save_steps:
+                npy = f"{path.stem}_{ep.id}.npy"
+                np.save(path.parent / npy, ep.toArray(self._dims()))
+            entry = {"id": ep.id, "file": npy, "finish_reason": ep.finish_reason,
+                     "n_steps": ep.n_steps, "summary": summary}
             if ep.configs != self.configs:
                 entry["configs"] = ep.configs
             entries.append(entry)
-        reasons = [ep.finish_reason for ep in self.episodes]
-        doc = {
-            "format_version": FORMAT_VERSION,
-            "configs": self.configs,
-            "n_episodes": len(self.episodes),
-            "finish_reasons": {r: reasons.count(r) for r in sorted(set(reasons))},
-            "episodes": entries,
-        }
+        doc = {"format_version": FORMAT_VERSION, "configs": self.configs,
+               **batch, "episodes": entries}
         path.write_text(json.dumps(doc, indent=2))
         return path
 
@@ -302,30 +469,41 @@ class RecordedEpisode:
         finish_reason: Why it ended.
         summary: The extra summary saved with it.
         configs: The configs it was run with.
-        t, q, q_dot, u, sigma_u, planning_time: Per-step arrays, one row per
-            control step, as recorded.
+        n_steps: Control steps in the episode.
+        t, q, q_dot, u, sigma_u, planning_time, planner_cost: Per-step
+            arrays, one row per control step, as recorded. ``planner_cost`` is
+            all NaN for a version-1 file, which did not record it. All ``None``
+            when the batch was saved without its steps (``save_steps=False``);
+            the summary is still there.
     """
 
     id: str
     finish_reason: str
     summary: dict
     configs: dict
-    t: np.ndarray
-    q: np.ndarray
-    q_dot: np.ndarray
-    u: np.ndarray
-    sigma_u: np.ndarray
-    planning_time: np.ndarray
+    n_steps: int
+    t: np.ndarray | None
+    q: np.ndarray | None
+    q_dot: np.ndarray | None
+    u: np.ndarray | None
+    sigma_u: np.ndarray | None
+    planning_time: np.ndarray | None
+    planner_cost: np.ndarray | None
+
+    @property
+    def has_steps(self) -> bool:
+        """Whether the per-step arrays were saved."""
+        return self.q is not None
 
     def __len__(self) -> int:
-        return len(self.q)
+        return self.n_steps
 
 
 class EpisodeReplayer:
     """Reads back a batch saved by ``EpisodeRecorder.Save``.
 
     Iterating over it yields episodes. ``iterStates`` walks every step of every
-    episode instead::
+    episode instead, skipping episodes saved without their steps::
 
         rep = EpisodeReplayer("results/run.json")
         for ep in rep:
@@ -348,9 +526,9 @@ class EpisodeReplayer:
         self.path = Path(path)
         doc = json.loads(self.path.read_text())
         version = doc.get("format_version")
-        if version != FORMAT_VERSION:
+        if version not in _READABLE_VERSIONS:
             raise ValueError(f"{self.path} has format version {version}, "
-                             f"this reader understands {FORMAT_VERSION}")
+                             f"this reader understands {_READABLE_VERSIONS}")
         #: The configs the batch was recorded with.
         self.configs: dict = doc["configs"]
         self._entries: list[dict] = doc["episodes"]
@@ -369,11 +547,15 @@ class EpisodeReplayer:
         i = range(len(self._entries))[i]      # normalizes negatives, raises IndexError
         if i not in self._cache:
             e = self._entries[i]
-            arr = np.load(self.path.parent / e["file"])
+            if e.get("file") is None:                       # saved without steps
+                fields = {name: None for name in _STEP_FIELDS}
+            else:
+                arr = np.load(self.path.parent / e["file"])
+                fields = {name: (arr[name] if name in arr.dtype.names
+                                 else np.full(len(arr), np.nan)) for name in _STEP_FIELDS}
             self._cache[i] = RecordedEpisode(
                 id=e["id"], finish_reason=e["finish_reason"], summary=e.get("summary", {}),
-                configs=e.get("configs", self.configs),
-                **{name: arr[name] for name in arr.dtype.names},
+                configs=e.get("configs", self.configs), n_steps=int(e["n_steps"]), **fields,
             )
         return self._cache[i]
 
@@ -390,7 +572,9 @@ class EpisodeReplayer:
             yield self[i]
 
     def iterStates(self) -> Iterator[tuple[str, int, np.ndarray, np.ndarray, np.ndarray]]:
-        """``(episode_id, step, q, q_dot, u)`` for every step of every episode."""
+        """``(episode_id, step, q, q_dot, u)`` for every saved step of every episode."""
         for ep in self.iterEpisodes():
+            if not ep.has_steps:
+                continue
             for k in range(len(ep)):
                 yield ep.id, k, ep.q[k], ep.q_dot[k], ep.u[k]

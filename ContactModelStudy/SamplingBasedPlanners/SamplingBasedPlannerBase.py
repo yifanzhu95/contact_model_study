@@ -161,7 +161,7 @@ class SamplingBasedPlannerBase(abc.ABC):
         self.nu = simulator.nu
         self.nq = simulator.nq
         self.nv = simulator.nv
-        self.substeps = simulator.config.substeps
+        self.substeps = simulator.config.resolved_substeps
         self.device = simulator.config.device
 
         if self.config.warm_start and self.horizon < 2:

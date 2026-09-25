@@ -38,8 +38,8 @@ every existing script still runs while the port is in progress.
 | `TaskBase.py` | DONE | `contact_study/tasks/base.py` | `TaskBase` + `TaskRole` + `TaskBaseConfig` |
 | `LeapReorient.py` | DONE | `contact_study/tasks/grasp_reorient.py` | Shared leap machinery + the cost; `LeapReorientConfig` |
 | `CubeReorient.py` | DONE | `contact_study/tasks/grasp_reorient.py` | The cube's numbers only |
-| `BallReorient.py` | TODO | `contact_study/tasks/grasp_reorient.py` | Split out of the shared reorient task |
-| `DuckReorient.py` | TODO | `contact_study/tasks/grasp_reorient.py` | Split out of the shared reorient task |
+| `BallReorient.py` | DONE | `contact_study/tasks/grasp_reorient.py` | `_OBJ_PARAMS["ball"]`, verbatim |
+| `DuckReorient.py` | DONE | `contact_study/tasks/grasp_reorient.py` | `_OBJ_PARAMS["duck"]`, verbatim; foam rollout variants too |
 | `XML_Files/` | TODO | `scenes/leap/*.xml` | Scene XML moves in with the tasks |
 
 ### SamplingBasedPlanners
@@ -69,7 +69,7 @@ every existing script still runs while the port is in progress.
 | `Utils/EvalSimulators.py` | DONE | `Drivers/run_episodes.py` (moved out) | `makeEvalSim(name, xml, timestep)` + `EVAL_SIMS`; builds the MuJoCo / Pinocchio / Drake eval simulator by name |
 | `Utils/Quaternions.py` | DONE | `Tasks/LeapReorient.py` header (moved out) | `matToQuat`, `axisAngleQuat`, `quatMul` (wxyz) |
 | `Utils/EpisodeRecorder.py` | DONE | `contact_study/evaluation/json_io.py` (replaces the planned EpisodeIO) | `EpisodeRecorder` + `EpisodeReplayer`; used by `run_episodes.py` |
-| `Utils/ContactModelPresets.py` | DONE | `contact_study/contact_models/config.py` (M1-M4) | `GetContactModelSim(name, xml, N, **overrides)`; not yet wired into the driver |
+| `Utils/ContactModelPresets.py` | DONE | `contact_study/contact_models/config.py` (M1-M4) | `GetContactModelSim(name, xml, N, **overrides)`; the driver's `--rollout-model` |
 | `Experiments/` `Results/` `Logs/` `Tests/` `Videos/` | DEFER | — | "Ignore for now" |
 
 ## What was done — Simulators/Simulator.py
@@ -1532,6 +1532,245 @@ Checked with 20 steps:
 - The first recorded step is at t = 1.000 with the settle and 0.000 without.
 - With the settle, the start position error is 0.0032 m instead of 0.0189 m,
   because the cube has come to rest.
+
+## What was done — --rollout-model, and summaries owned by EpisodeRecorder
+
+**`--rollout-model {M1,M2,M3,M4}`** in `run_episodes.py`:
+
+- It builds the rollout simulator with `GetContactModelSim`. The old backend
+  names are accepted too.
+- It defaults to **M2**. That changes the default rollout slightly: M2 is
+  Newton with 25 iterations and 1e-6, the old study's values, where the plain
+  `VectorizedMujoco` the driver used before took the scene's 100 iterations
+  and 1e-8.
+- The header line shows which simulator class runs the model.
+
+**The driver no longer builds a summary.**
+
+- `run_episode` returns only the end reason.
+- It reports steps, goals (`recordGoal`, from `_newGoal`) and successes
+  (`recordSuccess`) to the recorder.
+- `main` finishes each episode with `episode`, `settle_s` and `video` as
+  extras, and prints from `recorder.GenerateSummary(-1)`. The batch line
+  prints from `GenerateSummary()`.
+
+**`EpisodeRecorder` additions:**
+
+- **What it now records itself:**
+  - each step's `planner_cost`, read from `planner.last_min_cost`, as a new
+    `.npy` field;
+  - start goal errors, at the first recorded step, against the first goal;
+  - the end state and end goal errors, read from the simulator at
+    `episodeFinished`, against the goal then current.
+- **`recordGoal(goal, label=None)`:** the label defaults to
+  `task.goalFace(goal)`.
+- **`recordSuccess()`.**
+- **`GenerateSummary(episode=None)`:** with an index, one episode's summary;
+  with `None`, the batch summary.
+  - The episode summary has: `id`, `finish_reason`, `failed`, `n_steps`,
+    `goals`, `goals_reached`, `success_steps`, `steps_to_success`, `success`,
+    `goal_errors_start/end`, `q_end`, `q_dot_end`, and
+    `plan_s_first/mean/max` (the first plan kept apart), plus the extras.
+  - The batch summary has: `n_episodes`, `finish_reasons`, `n_success`,
+    `n_failed`, `success_rate`, `episodes`.
+- **`Save`** writes the batch counts and each episode's `GenerateSummary` into
+  the JSON.
+
+**Changed semantics:**
+
+- A multi-goal episode that reached goals and then ran out of steps now keeps
+  `finish_reason="timeout"`, with `success=True` in its summary. Before, the
+  driver rewrote the reason to `"success"`.
+- Planning times are in seconds (`plan_s_*`) instead of `plan_ms_*`.
+
+**Format version 2** adds `planner_cost`. The replayer reads versions 1 and 2;
+a version-1 file gives NaN for `planner_cost`.
+
+Checked:
+
+- `summary_check.py` passes 11/11: multi-goal (goals, success at step 3,
+  timeout counted as a success), start and end errors, first plan kept apart,
+  extras, a zero-step failure, batch counts, the saved JSON equal to
+  `GenerateSummary`, per-step planner cost, and a version-1 file still
+  readable.
+- `recorder_check.py` 18/18 and `driver_record_check.py` 8/8 still pass.
+- The driver runs with M1–M4.
+- `regress.py` still passes 12/12.
+
+## Small change — results on by default, and --save-steps
+
+- **`--results` is on by default.** Its default is
+  `results/run_episodes_<YYYYmmdd_HHMMSS>.json`, resolved at start. The
+  timestamp means runs never overwrite each other, and one run's `.npy` files
+  never sit beside another run's JSON.
+  - `--results PATH` still picks the file.
+  - The new `--no-results` saves nothing.
+- **New `--save-steps/--no-save-steps`** (default on). With it off, only the
+  JSON (configs and summaries) is written.
+  - The recorder still keeps the steps in memory, because its summaries need
+    them.
+- **`EpisodeRecorder.Save(path, save_steps=True)`:** with `False` it writes no
+  `.npy` files, and each episode's `file` is `null`.
+- **The replayer** returns such episodes with `n_steps` from the JSON,
+  `has_steps=False` and every per-step array `None`. `iterStates` skips them.
+
+Checked:
+
+- All three driver modes run: the default writes a timestamped JSON and `.npy`
+  under `results/`; `--no-save-steps` writes the JSON only; `--no-results`
+  writes nothing.
+- A summary-only file replays with `len` 5, `has_steps=False` and no states.
+- `summary_check` 11/11 and `recorder_check` 18/18 still pass.
+
+## Small change — recorder saves both tasks
+
+- **The rollout task is recorded now.** `EpisodeRecorder`'s config snapshot
+  adds `rollout_task`, read off `planner.task`, beside the eval task it was
+  given.
+- **Renamed keys**, so every entry names its side: `configs` is now
+  `eval_task`, `eval_simulator`, `planner`, `rollout_task`,
+  `rollout_simulator`, `metadata`. It used to be `task` and `simulator`.
+- **Each task entry holds** `class`, `role`, `model_path`, `config`, and the
+  effective `timestep`. That last one differs from `config.timestep` for the
+  rollout task, which runs at `timestep * eval_steps_per_rollout_step`.
+- **Checked:**
+  - `recorder_check` now passes 19/19, with a new check for both tasks' role,
+    scene and timestep.
+  - `summary_check` still passes 11/11.
+  - A `--hand-acc low` driver run records `rollout_task` as
+    `env_leap_rollout_cube_low_high.xml` at 4 ms, and `eval_task` as
+    `env_leap_eval_cube.xml` at 0.5 ms.
+
+## What was done — two ways to set the control step and the horizon
+
+Each is now one setting that can be given two ways, as in the old
+`PlannerConfig`. **Set at most one of each pair; setting both raises
+`ValueError`.**
+
+| Config | Step count | Duration | Resolved (read-only) | Neither set |
+| --- | --- | --- | --- | --- |
+| `SimulatorConfig` | `substeps` | `ctrl_time_step` (s) | `resolved_substeps`, `control_timestep` | 1 substep |
+| `VectorizedSimulatorConfig` | `horizon` | `time_horizon` (s) | `resolved_horizon`, `horizon_duration` | horizon 1 |
+
+- **Resolution:**
+  - Durations are rounded down to whole steps, as the old `resolve_schedule`
+    did, with a 1e-9 slack so that 0.032 s at 4 ms gives 8, not 7.
+  - A duration shorter than one step is clamped to 1, with one warning at
+    construction.
+  - `time_horizon` is counted in *control* steps, so it is resolved after the
+    control step.
+- **Requested vs resolved:**
+  - The four fields keep exactly what was asked for, and the resolved counts
+    are properties.
+  - So a config never has both fields of a pair set, and can always be rebuilt
+    from its own fields.
+- **Readers moved to the resolved values:** `VectorizedSimulator.horizon`, the
+  control-sequence cursor, and the planner's `substeps`.
+- **`EpisodeRecorder`:** each simulator entry gains `resolved`, holding
+  `resolved_substeps`, `control_timestep`, `resolved_horizon` and
+  `horizon_duration`, next to the requested fields in `config`.
+- **Driver:**
+  - New `--ctrl-time-step` beside `--substeps`, and `--time-horizon` beside
+    `--horizon`.
+  - All four default to unset, and neither of a pair gives the old defaults, 4
+    and 8.
+  - Both of a pair is a parser error that names the flags.
+  - The eval steps per control step and the control rate now come from the
+    resolved values, and the header prints the resolved control step and
+    horizon in steps and milliseconds.
+
+Checked:
+
+- **`scratchpad/schedule_check.py` (19/19):** resolution, flooring,
+  float-exact multiples, clamping with its warning, each pair's rejection
+  (including on subclasses), presets passing both forms through, and a config
+  rebuilt from its own fields.
+- **Driver runs:**
+
+  | Flags | Control step | Horizon |
+  | --- | --- | --- |
+  | default | 4 × 4 ms = 16 ms | 8 × 16 ms = 128 ms |
+  | `--ctrl-time-step 0.032 --time-horizon 0.256` | 8 substeps (32 ms) | 8 steps; the recorded eval clock advances 0.032 s per step |
+  | `--substeps 2 --time-horizon 0.1` | 2 substeps (8 ms) | 12 steps = 96 ms |
+
+  `--horizon 8 --time-horizon 0.2` is rejected.
+- **Earlier checks:** regress 12/12, recorder 19/19, summary 11/11,
+  uncertainty 13/13 and presets 14/14 all pass. backends_check is 25/26, the
+  same known XPBD failure as before.
+
+## What was done — Tasks/DuckReorient.py and BallReorient.py
+
+Both follow `CubeReorient`: a `LeapReorient` subclass with `OBJECT` set, and
+`objectParams()` returning the old `_OBJ_PARAMS` entry exactly.
+
+- **Offsets kept visible:** the hand-applied offsets in `init_qpos` are
+  written as `value + offset`, as in the old table (for example
+  `th_axl + 1.0`, `x - 0.02`, `z + 0.05`).
+- **Target orientation:** identity for both, since the old task used the one
+  `_TARGET_QUAT` for every object. The duck starts about a quarter turn about z
+  away from it.
+- **Corrected old comments:**
+  - The old ball comment calls every number "the cube's". In fact only
+    `fallen_z` is; `init_ctrl` is the duck's; and the hand pose, target and
+    weights are the ball's own. The new docstring says what they are.
+  - The old duck comment says its hand block is still the cube's, but it
+    differs from the cube's.
+- **Driver:** `run_episodes.py --task {cube_reorient, duck_reorient,
+  ball_reorient}`. The duck's foam rollout scenes are reached through
+  `--obj-acc foam4|foam16a|foam16b|foam64`.
+
+Checked in `scratchpad/objects_check.py` (9/9):
+
+- **Parameters:** every number equals `_OBJ_PARAMS`, with `target_quat` equal
+  to `_TARGET_QUAT`, for duck, ball and cube.
+- **Scenes:** the eval scene and every rollout scene compile, with `obj_joint`
+  and the four tip sites: 15 for the duck, including the foam ones, and 3 for
+  the ball.
+- **Holding the start pose for 2 s on the eval scene:** each object stays held.
+
+  | Object | z after 2 s | Start z | Position error | Quaternion error |
+  | --- | --- | --- | --- | --- |
+  | duck | 0.0898 | 0.1382 | 0.036 m | 0.65 (starts off-goal) |
+  | ball | 0.0845 | 0.1347 | 0.025 m | — |
+
+- **Driver runs:** 40 steps each of duck, duck with `--hand-acc low --obj-acc
+  foam16a`, and ball all run and render with the goal marker. The
+  orientation error falls from 0.72 to 0.17 for the duck, and from 0.50 to 0.10
+  for the ball.
+
+**Not done:** building the old `GraspReorientTask` to compare goal vectors
+failed; its constructor raises `AttributeError: target_pos`. It isn't needed:
+the goal vector is built from `params` by the same code that `regress.py`
+checks bit-exact against the old cost.
+
+## Fix — nconmax/njmax defaults were overridden by the driver
+
+**The bug:** `run_episodes.py` always passed `nconmax=args.nconmax,
+njmax=args.njmax` to the rollout config. Both flags default to `None`, so the
+new config defaults (100 and 300, set in both `MujocoConfig` and
+`VectorizedMujocoConfig`) were overridden with "let MJWarp choose": 48
+contacts and 64 rows per world. That's why `nefc overflow` kept being printed.
+The CPU eval simulator (`makeEvalSim`) was unaffected.
+
+**The fix:** the driver now passes the two flags only when they're given, so the
+config defaults apply otherwise. With it, MJWarp allocates 100 contacts and 304
+rows per world (it pads `njmax` to a multiple of 16), and a 100-step run prints
+no overflow warnings. The results JSON shows 100/300 for both simulators.
+
+**The remaining warning** is a different one:
+`Warning: opt.ccd_iterations, currently set to 35, needs to be increased.`
+
+- About 1–2 per control step.
+- It's printed by MJWarp's GJK/EPA convex collision (`collision_gjk.py`), so
+  it comes from the GPU rollouts. It still appears with `--eval-sim
+  pinocchio`, and the CPU eval sim holding a grasp prints none.
+- Raising `ccd_iterations` to 100 or 200 doesn't help. About the same number
+  of warnings appear, now saying "currently set to 200". So those
+  collisions don't converge at any cap, rather than needing more
+  iterations.
+- Raising it also costs a full kernel recompile (about 31 s on the first
+  plan) and slower plans. So it's left at the scene's 35.
+- The old study's MJWarp runs printed the same warning.
 
 ## Small fixes — 2026-09-24
 
