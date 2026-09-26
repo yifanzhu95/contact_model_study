@@ -55,7 +55,7 @@ from ContactModelStudy.SamplingBasedPlanners.MPPI import MPPI, MPPI_Config  # no
 from ContactModelStudy.Tasks.BallReorient import BallReorient  # noqa: E402
 from ContactModelStudy.Tasks.CubeReorient import CubeReorient  # noqa: E402
 from ContactModelStudy.Tasks.DuckReorient import DuckReorient  # noqa: E402
-from ContactModelStudy.Tasks.LeapReorient import LeapReorientConfig  # noqa: E402
+from ContactModelStudy.Tasks.LeapReorient import COST_WEIGHT_KEYS, LeapReorientConfig  # noqa: E402
 from ContactModelStudy.Tasks.TaskBase import TaskRole  # noqa: E402
 from ContactModelStudy.Utils.ContactModelPresets import (  # noqa: E402
     ALIASES,
@@ -72,10 +72,15 @@ TASKS = {"cube_reorient": CubeReorient, "duck_reorient": DuckReorient,
 #: --results default: a fresh, time-stamped file under results/, chosen at start.
 _AUTO_RESULTS = "auto"
 
-#: Used when neither of a pair is given: --substeps / --ctrl-time-step and
-#: --horizon / --time-horizon.
-_DEFAULT_SUBSTEPS = 4
-_DEFAULT_HORIZON = 8
+#: Used when neither flag of a pair is given, as (flag to fill in, value):
+#: --substeps / --ctrl-time-step and --horizon / --time-horizon. Giving either
+#: flag of a pair replaces the default; giving both is an error. The flags
+#: themselves default to "not given", so the default of one form never
+#: collides with the other form given on the command line.
+_PAIR_DEFAULTS = {
+    ("substeps", "ctrl_time_step"): ("ctrl_time_step", 0.064),
+    ("horizon", "time_horizon"): ("time_horizon", 0.352),
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -92,7 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = p.add_argument_group("episode")
     g.add_argument("--n-episodes", type=int, default=1)
-    g.add_argument("--steps", type=int, default=4000,
+    g.add_argument("--steps", type=int, default=1000,
                    help="control steps per episode")
     g.add_argument("--timestep", type=float, default=0.0005,
                    help="eval (fine) physics timestep (s); the rollout model runs "
@@ -103,8 +108,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--substeps", type=int, default=None,
                    help=f"rollout steps per control step; control rate is "
                         f"1/(rollout timestep * substeps). Give this or "
-                        f"--ctrl-time-step; neither means {_DEFAULT_SUBSTEPS}")
-    g.add_argument("--ctrl-time-step", type=float, default=0.064,
+                        f"--ctrl-time-step; neither means --ctrl-time-step "
+                        f"{_PAIR_DEFAULTS[('substeps', 'ctrl_time_step')][1]}")
+    g.add_argument("--ctrl-time-step", type=float, default=None,
                    help="control-step duration (s), rounded down to whole rollout "
                         "timesteps; the alternative to --substeps")
     g.add_argument("--eval-sim", default="mujoco", choices=sorted(EVAL_SIMS),
@@ -119,6 +125,10 @@ def build_parser() -> argparse.ArgumentParser:
                    metavar="{0..9}",
                    help="goal sampler; 8 (the old default) rolls to show 'O' or "
                         "'B'. See LeapReorient.GOAL_DIFFICULTIES")
+    g.add_argument("--cost-weight", action="append", default=None, metavar="NAME=VALUE",
+                   help="override one of the object's cost weights, e.g. "
+                        "--cost-weight w_quat=30; repeat for more. Names: "
+                        + ", ".join(COST_WEIGHT_KEYS))
     g.add_argument("--stop-on-success", action=argparse.BooleanOptionalAction, default=True,
                    help="end the episode at the first success (the old driver's "
                         "default); with --no-stop-on-success each success samples "
@@ -129,17 +139,18 @@ def build_parser() -> argparse.ArgumentParser:
                    choices=sorted(CONTACT_MODELS) + sorted(ALIASES), metavar="MODEL",
                    help="contact model the planner rolls out with: M1 (stiff MJWarp), "
                         "M2 (MJWarp soft, default), M3 (ComFree), M4 (XPBD)")
-    g.add_argument("--n-samples", type=int, default=256,
+    g.add_argument("--n-samples", type=int, default=64,
                    help="N: rollout worlds, one per sampled control sequence")
     g.add_argument("--horizon", type=int, default=None,
                    help=f"H: planning horizon in control steps. Give this or "
-                        f"--time-horizon; neither means {_DEFAULT_HORIZON}")
-    g.add_argument("--time-horizon", type=float, default=0.352,
+                        f"--time-horizon; neither means --time-horizon "
+                        f"{_PAIR_DEFAULTS[('horizon', 'time_horizon')][1]}")
+    g.add_argument("--time-horizon", type=float, default=None,
                    help="planning horizon (s), rounded down to whole control steps; "
                         "the alternative to --horizon")
     g.add_argument("--n-iterations", type=int, default=1)
-    g.add_argument("--noise-sigma", type=float, default=0.05)
-    g.add_argument("--temperature", type=float, default=0.25,
+    g.add_argument("--noise-sigma", type=float, default=0.2)
+    g.add_argument("--temperature", type=float, default=40.0,
                    help="MPPI lambda; smaller is greedier")
     g.add_argument("--control-mode", default="pos_relative",
                    choices=["pos_relative", "ctrl_relative", "absolute"],
@@ -330,24 +341,48 @@ def _printEpisode(episode: int, s: dict, args) -> None:
         print(f"  video {s['video']}")
 
 
-def main(argv=None) -> int:
+def parseArgs(argv=None) -> argparse.Namespace:
+    """Parse and check the command line, filling in the defaults that depend on it.
+
+    Everything ``main`` rejects before building anything is rejected here, as
+    a parser error (``SystemExit``), so a caller can validate a command line
+    without running it. ``args.cost_weights`` holds the parsed
+    ``--cost-weight`` overrides as a dict, or ``None``.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
+    args.cost_weights = None
+    if args.cost_weight:
+        args.cost_weights = {}
+        for item in args.cost_weight:
+            name, sep, value = item.partition("=")
+            if not sep:
+                parser.error(f"--cost-weight wants NAME=VALUE, got {item!r}")
+            if name not in COST_WEIGHT_KEYS:
+                parser.error(f"--cost-weight: unknown weight {name!r}; names are "
+                             + ", ".join(COST_WEIGHT_KEYS))
+            try:
+                args.cost_weights[name] = float(value)
+            except ValueError:
+                parser.error(f"--cost-weight {name}: {value!r} is not a number")
     if args.settle < 0:
         parser.error(f"--settle must be >= 0, got {args.settle}")
     # Each pair is one setting given two ways; the rollout config rejects both
     # being set, but saying so here names the flags rather than the fields.
-    for a, b in (("substeps", "ctrl_time_step"), ("horizon", "time_horizon")):
+    for (a, b), (field, value) in _PAIR_DEFAULTS.items():
         if getattr(args, a) is not None and getattr(args, b) is not None:
             parser.error(f"give --{a.replace('_', '-')} or --{b.replace('_', '-')}, not both")
-    if args.substeps is None and args.ctrl_time_step is None:
-        args.substeps = _DEFAULT_SUBSTEPS
-    if args.horizon is None and args.time_horizon is None:
-        args.horizon = _DEFAULT_HORIZON
+        if getattr(args, a) is None and getattr(args, b) is None:
+            setattr(args, field, value)
     if args.results == _AUTO_RESULTS:
         # Time-stamped so runs never overwrite one another, and so the per-step
         # files of different runs, which sit side by side, never mix.
         args.results = str(_REPO_ROOT / "results" / f"run_episodes_{time.strftime('%Y%m%d_%H%M%S')}.json")
+    return args
+
+
+def main(argv=None) -> int:
+    args = parseArgs(argv)
 
     task_cls = TASKS[args.task]
     # Two views of the same task: the scene the planner predicts with, and the
@@ -358,11 +393,11 @@ def main(argv=None) -> int:
     task = task_cls(LeapReorientConfig(
         role=TaskRole.ROLLOUT, timestep=args.timestep, hand_acc=args.hand_acc,
         obj_acc=args.obj_acc, eval_steps_per_rollout_step=k,
-        goal_difficulty=args.goal_difficulty,
+        goal_difficulty=args.goal_difficulty, cost_weights=args.cost_weights,
     ))
     eval_task = task_cls(LeapReorientConfig(
         role=TaskRole.EVAL, timestep=args.timestep, eval_steps_per_rollout_step=k,
-        goal_difficulty=args.goal_difficulty, seed=args.seed,
+        goal_difficulty=args.goal_difficulty, seed=args.seed, cost_weights=args.cost_weights,
     ))
 
     # Each simulator at its own task's timestep: the eval sim fine, the rollout

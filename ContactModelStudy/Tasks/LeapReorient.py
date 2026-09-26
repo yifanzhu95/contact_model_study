@@ -140,6 +140,9 @@ class LeapReorientConfig(TaskBaseConfig):
             keeps the two equal.
         goal_difficulty: Which goal sampler ``sampleNewGoal`` uses; see
             ``GOAL_DIFFICULTIES``. Defaults to 8, the old task's default.
+        cost_weights: Overrides for the object's tuned cost weights, by name
+            (any of ``COST_WEIGHT_KEYS``). ``None``, or a weight left out, keeps
+            the object's own value.
     """
 
     hand_acc: str = "high"
@@ -147,9 +150,16 @@ class LeapReorientConfig(TaskBaseConfig):
     scenes_dir: Optional[str | Path] = None
     eval_steps_per_rollout_step: int = 1
     goal_difficulty: int = 8
+    cost_weights: Optional[dict] = None
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        if self.cost_weights is not None:
+            unknown = set(self.cost_weights) - set(COST_WEIGHT_KEYS)
+            if unknown:
+                raise ValueError(f"unknown cost weight(s) {sorted(unknown)}; "
+                                 f"valid names are {list(COST_WEIGHT_KEYS)}")
+            self.cost_weights = {k: float(v) for k, v in self.cost_weights.items()}
         k = self.eval_steps_per_rollout_step
         if int(k) != k or k < 1:
             raise ValueError(
@@ -214,6 +224,8 @@ class LeapReorient(TaskBase):
                          else self.rollout_timestep)
 
         self.params = self.objectParams()
+        if cfg.cost_weights:
+            self.params["cost_weights"] = {**self.params["cost_weights"], **cfg.cost_weights}
         self._validate_params()
 
         self._rng = np.random.default_rng(cfg.seed)

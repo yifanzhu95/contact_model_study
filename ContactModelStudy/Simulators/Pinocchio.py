@@ -98,8 +98,8 @@ class PinocchioConfig(SimulatorConfig):
     relative_tolerance: float = 1e-12
     solve_ncp: bool = True
     admm_update_rule: str = "spectral"
-    anderson_capacity: int = 20
-    baumgarte_kp: float = 10.0
+    anderson_capacity: int = 10#20
+    baumgarte_kp: float = 25.0
     baumgarte_kd: float = 0.0
     delassus_regularization: float = 1e-10
     use_convex_hulls: bool = True

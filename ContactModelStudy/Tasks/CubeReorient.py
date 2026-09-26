@@ -41,12 +41,13 @@ class CubeReorient(LeapReorient):
         they were applied by hand on top of a pose read out of the viewer, and
         keeping them visible is the only record of that.
 
-        ``th_axl`` (joint 13) is ``1.52604395 + 1.0``. Note this leaves the
-        thumb 0.9939 rad away from what ``init_ctrl`` commands for the same
-        joint, so the position servo pulls it there over the first few steps —
-        the initial state is *not* an equilibrium of the initial control. That
-        is inherited behaviour, flagged here because it looks like drift in any
-        "did the hand hold its pose?" check.
+        ``th_axl`` (joint 13) is ``1.52604395 + 0.35``. The old table had
+        ``+ 1.0``, which started the thumb at 2.526 rad, 0.43 rad past its
+        2.094 limit. ``+ 0.35`` starts it at 1.876, inside the range. It is
+        still 0.34 rad from what ``init_ctrl`` commands for that joint, so the
+        position servo pulls it there over the first few steps. The initial
+        state is *not* an equilibrium of the initial control, which looks like
+        drift in any "did the hand hold its pose?" check.
         """
         return {
             # 16 hand joints, then the cube's settled in-palm pos(3) + quat(4).

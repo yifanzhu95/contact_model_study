@@ -70,7 +70,9 @@ every existing script still runs while the port is in progress.
 | `Utils/Quaternions.py` | DONE | `Tasks/LeapReorient.py` header (moved out) | `matToQuat`, `axisAngleQuat`, `quatMul` (wxyz) |
 | `Utils/EpisodeRecorder.py` | DONE | `contact_study/evaluation/json_io.py` (replaces the planned EpisodeIO) | `EpisodeRecorder` + `EpisodeReplayer`; used by `run_episodes.py` |
 | `Utils/ContactModelPresets.py` | DONE | `contact_study/contact_models/config.py` (M1-M4) | `GetContactModelSim(name, xml, N, **overrides)`; the driver's `--rollout-model` |
-| `Experiments/` `Results/` `Logs/` `Tests/` `Videos/` | DEFER | — | "Ignore for now" |
+| `tests/` | DONE | the session's check scripts | 162 pytest tests; see below |
+| `test_scripts/profile_run_episodes.py` | DONE | the session's profiler | per-eval-sim time breakdown |
+| `Experiments/` `Results/` `Logs/` `Videos/` | DEFER | — | "Ignore for now" |
 
 ## What was done — Simulators/Simulator.py
 
@@ -1771,6 +1773,129 @@ no overflow warnings. The results JSON shows 100/300 for both simulators.
 - Raising it also costs a full kernel recompile (about 31 s on the first
   plan) and slower plans. So it's left at the scene's 35.
 - The old study's MJWarp runs printed the same warning.
+
+## What was done — unit tests in tests/, profiler in test_scripts/
+
+**`tests/`** (the repo's existing, empty lowercase folder, matching
+`results/` and `videos/`) holds 162 pytest tests. They were rebuilt from every
+check script this refactor used; the scratchpad copies had been wiped.
+
+```
+python -m pytest tests                 # all, about 66 s on the 4090
+python -m pytest tests -m "not slow"   # without the driver runs, about 41 s
+```
+
+| File | Tests | Covers |
+| --- | --- | --- |
+| `conftest.py` | — | Paths, `MUJOCO_GL=egl`, shared fixtures, curl controls, `matches_within_noise`; markers `gpu`, `legacy`, `slow`, auto-skipped when CUDA or the old package is missing |
+| `test_simulator_configs.py` | 40 | Control-step and horizon pairs; contact parameters on CPU and GPU; M1 preset bit-identical to the old one; nconmax/njmax |
+| `test_vectorized_backends.py` | 18 | MJWarp, ComFree and XPBD against the old backends, within noise; graph equals eager; config validation; XPBD substeps |
+| `test_contact_model_presets.py` | 10 | M1–M4 upload the old study's model exactly and match its trajectories; names, overrides, errors |
+| `test_eval_simulators.py` | 24 | `MjcfModelInfo`; Pinocchio and Drake inheritance, collision pairs, friction, state round trip; Pinocchio against the old simulator; all three hold the cube and track in free space |
+| `test_tasks.py` | 30 | Cost bit-exact against the old kernel; outcomes vectorized vs CPU; goal levels against the old sampler; task configs; cube, duck and ball parameters, scenes and holding; renderer camera |
+| `test_planner.py` | 11 | pos_relative and ctrl_relative against the old kernels; graph more than 10× faster; action uncertainty |
+| `test_episode_recorder.py` | 9 | Save and replay, configs, `.npy` layout, refusals, Combine and Clear, summary-only saves, `GenerateSummary`, version-1 files |
+| `test_run_episodes.py` | 20 | Driver end to end with explicit flags (`slow`): recording, interrupt, save flags, settle, M1–M4, eval sims, tasks, duration flags, parser errors, buffer defaults, video length |
+
+**Notes:**
+
+- **Comparisons with the old code:** a Pinocchio run passes the old solver
+  settings explicitly (Anderson 20, Baumgarte kp 10 and kd 0.5), because the
+  defaults have changed.
+- **Deliberate changes:** `DELIBERATE_CHANGES` in `test_tasks.py` lists
+  entries changed on purpose from the old parameter table. So far there's one:
+  the cube's `th_axl` start, now `+ 0.35`.
+- **Trajectories under noise:** trajectory-vs-old checks under heavy random
+  control use `matches_within_noise`. It compares the median over worlds
+  against the old backend's own run-to-run median, because one chaotic world
+  in 16 made M1 fail about 2 runs in 5. It still rejects a wrong stiffness and
+  a wrong model.
+
+**Two fixes found while writing them:**
+
+- **The driver's schedule defaults:** `--ctrl-time-step 0.064` and
+  `--time-horizon 0.352` were set as argparse defaults, so passing
+  `--substeps` or `--horizon` on its own always failed with "not both". All
+  four flags now default to "not given", and `_PAIR_DEFAULTS` fills in 0.064
+  and 0.352 only when neither flag of a pair is given. Plain runs are
+  unchanged.
+- **The CubeReorient docstring** now describes the `+ 0.35` `th_axl` start.
+
+**`test_scripts/profile_run_episodes.py`:**
+
+- Runs each eval simulator in its own process, with timers around every
+  driver call, and prints ms per control step and each part's share, leaving
+  out the first plan.
+- Options: `--eval-sims`, `--steps`, `--video`, `--cprofile` (a separate run
+  for hotspots), `--pinocchio-stages` (a Pinocchio step split by stage).
+  Anything after `--` goes to the driver.
+
+## What was done — experiments/: CSV-driven episode batches, local or on the HPC
+
+The old `experiments/` is in `old_experiments/`. This replaces its
+`hpc/run_csv_cell.py`, `run_csv_sweep.slurm`, `submit_csv_sweep.sh`,
+`combine_results.py` and `combine.slurm` with the new driver.
+
+| File | Role |
+| --- | --- |
+| `experiments/run_episode_batches.py` | One CSV row = one cell = one `run_episodes.py` run. `--cell N` runs one row in-process (HPC); no `--cell` runs every row in order, each as a subprocess so a failure is isolated. `--check`, `--count`, `--summarize`, `--overwrite`, `--stop-on-error`. |
+| `experiments/example_batches.csv` | Template: models, eval sims, fidelities, a duck foam scene, cost-weight overrides, a video row. |
+| `experiments/README.md` | How to use it. |
+| `experiments/hpc/run_episode_batches.slurm` | Job array: task *i* runs `--cell i`. `PROJ_DIR` defaults to the cluster checkout; `CSV` and `OUTDIR` come from the submit script. |
+| `experiments/hpc/submit_episode_batches.sh` | Runs `--check` (and refuses to submit an invalid CSV), sizes `--array` from `--count` with an optional throttle, and queues `summarize_batches.slurm` with `afterany`. |
+| `experiments/hpc/summarize_batches.slurm` | Builds `summary.csv` and `summary.json`. |
+
+**CSV columns:**
+
+- Any driver option, with underscores for dashes, mapped by reading
+  `run_episodes.build_parser()`. On/off flags take `true`/`false`.
+- `w_*` cost weights, plus `label` and `video`.
+- A blank cell means the driver default.
+- Unknown columns are an error. `results`, `video` paths and the raw
+  `cost_weight` option are set by the script.
+
+**Per cell:**
+
+- `cell_<row>_<label>.json` and `.npy` files: the recorder output.
+- `.status.json`: done or failed, the command line, wall time and error.
+- `.log`: the driver's output, when run locally.
+
+A `done` cell is skipped on a rerun, so runs resume.
+
+**Changes to existing code:**
+
+- **`LeapReorientConfig.cost_weights`:** optional per-weight overrides,
+  validated against `COST_WEIGHT_KEYS`. They're merged over `objectParams()`'s
+  weights and recorded in the results config.
+- **`run_episodes.py`:**
+  - New `--cost-weight NAME=VALUE`, repeatable.
+  - The checks that ran at the top of `main` moved into `parseArgs(argv)`
+    (settle, the schedule pairs and their defaults, cost weights, the
+    auto-results path), so a command line can be validated without running
+    it.
+
+**Checked:**
+
+- `--check` rejects a typo'd column, a `results` column, both flags of a
+  schedule pair, a bad bool and an unknown model.
+- **Locally:**
+  - Running every cell in order: a row naming a missing scene fails alone
+    while the others finish, and the cost-weight override is recorded.
+  - Resuming skips finished cells; `--cell` and `--overwrite` work; an
+    out-of-range `--cell` is refused.
+- **Simulated SLURM** (a fake `sbatch` that runs each array task locally with
+  `SLURM_*` set, plus no-op `module` and `conda`):
+  - The array is sized from the CSV (with the throttle) and every task writes
+    into one folder.
+  - The summary job, queued `afterany`, merges both cells.
+  - Resubmitting with `OUTDIR` resumes, and the default `OUTDIR` matches
+    between the submit script and the job.
+  - An invalid CSV submits nothing.
+  - This found a quoting bug in `summarize_batches.slurm` (an apostrophe
+    inside `${OUTDIR:?...}`), now fixed.
+- **Tests:** `tests/test_episode_batches.py` has 15 tests. The graph-capture
+  test now uses the median-over-worlds comparison, since its single-world
+  maximum was flaky. The full suite is 177 tests, all passing.
 
 ## Small fixes — 2026-09-24
 
