@@ -24,6 +24,22 @@ PROJ_DIR="${PROJ_DIR:-$(pwd)}"
 cd "$PROJ_DIR"
 mkdir -p logs
 
+# The checks below run Python on the login node, so it needs the same conda
+# env the jobs use. `module` is a shell function set up by login shells; a
+# script run with `bash` may not have it, so load the module system first when
+# it is missing. Both setups reference unset variables, so strict mode is
+# paused around them. CONDA_ENV picks another env.
+set +u
+if ! type module >/dev/null 2>&1; then
+    for init in /etc/profile.d/lmod.sh /etc/profile.d/modules.sh /usr/share/lmod/lmod/init/bash; do
+        [[ -f "$init" ]] && { source "$init"; break; }
+    done
+fi
+module load miniconda
+eval "$(conda shell.bash hook)"
+conda activate "${CONDA_ENV:-contact_modeling}"
+set -u
+
 python experiments/run_episode_batches.py "$CSV" --check --outdir /tmp/episode_batches_check > /tmp/episode_batches_check.$$ \
     || { cat /tmp/episode_batches_check.$$ >&2; echo "CSV has invalid rows; nothing submitted" >&2; exit 1; }
 N=$(python experiments/run_episode_batches.py "$CSV" --count)

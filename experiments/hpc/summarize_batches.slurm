@@ -2,7 +2,6 @@
 #SBATCH --job-name=episode_batches_summary
 #SBATCH --output=logs/episode_batches_summary_%j.out
 #SBATCH --error=logs/episode_batches_summary_%j.err
-#SBATCH --partition=gpu
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=4G
 #SBATCH --time=00:15:00
