@@ -69,7 +69,7 @@ def _taskEntry(task) -> dict:
     for a rollout task, whose scene runs at a coarser step than the config's
     (eval) one.
     """
-    return {"class": type(task).__name__, "role": _jsonable(getattr(task, "role", None)),
+    return {"class": _className(task), "role": _jsonable(getattr(task, "role", None)),
             "model_path": task.getModelPath(), "timestep": float(task.timestep),
             "config": _jsonable(task.config)}
 
@@ -86,12 +86,21 @@ def _simEntry(sim) -> dict:
                 for name in ("resolved_substeps", "control_timestep",
                              "resolved_horizon", "horizon_duration")
                 if hasattr(cfg, name)}
-    entry = {"class": type(sim).__name__, "config": _jsonable(cfg)}
-    if hasattr(sim, "N"):
+    entry = {"class": _className(sim), "config": _jsonable(cfg)}
+    if getattr(sim, "N", None) is not None:
         entry["N"] = sim.N
     if resolved:
         entry["resolved"] = resolved
     return entry
+
+
+def _className(obj) -> str:
+    """``obj``'s class name, or the ``class_name`` a stand-in reports for the real object.
+
+    A parallel driver records through stand-ins for a planner and simulator
+    that live in another process; they name the class they stand in for.
+    """
+    return getattr(obj, "class_name", None) or type(obj).__name__
 
 
 def _configSnapshot(task, simulator, planner, metadata: dict) -> dict:
@@ -104,7 +113,7 @@ def _configSnapshot(task, simulator, planner, metadata: dict) -> dict:
     snap = {
         "eval_task": _taskEntry(task),
         "eval_simulator": _simEntry(simulator),
-        "planner": {"class": type(planner).__name__, "config": _jsonable(planner.config)},
+        "planner": {"class": _className(planner), "config": _jsonable(planner.config)},
     }
     rollout_task = getattr(planner, "task", None)
     if rollout_task is not None:

@@ -123,20 +123,30 @@ def readRows(csv_path: Path) -> list[dict[str, str]]:
     return [{k: v for k, v in r.items() if k and v != ""} for r in rows]
 
 
-def checkColumns(csv_path: Path) -> None:
-    """Reject any column that is not a driver option, a cost weight or one of ours."""
+def checkColumns(csv_path: Path, own_columns=OWN_COLUMNS, managed=MANAGED_OPTIONS,
+                 required=()) -> None:
+    """Reject any column that is not a driver option, a cost weight or one of ours.
+
+    ``own_columns`` are columns the calling script reads itself, ``managed``
+    driver options it sets itself (so a CSV may not), and ``required`` columns
+    every CSV must have. Another script built on this one (the temperature /
+    noise grid) passes its own.
+    """
     with open(csv_path, newline="") as f:
         header = [h.strip() for h in next(csv.reader(f), []) if h.strip()]
     options = _driverOptions()
     bad = [h for h in header if h not in options and h not in COST_WEIGHT_KEYS
-           and h not in OWN_COLUMNS]
-    managed = [h for h in header if h in MANAGED_OPTIONS and h not in OWN_COLUMNS]
+           and h not in own_columns]
+    set_here = [h for h in header if h in managed and h not in own_columns]
+    missing = [c for c in required if c not in header]
     if bad:
         raise ValueError(f"unknown column(s) {bad}. Valid: driver options "
-                         f"{sorted(k for k in options if k not in MANAGED_OPTIONS)}, cost weights "
-                         f"{list(COST_WEIGHT_KEYS)}, and {list(OWN_COLUMNS)}.")
-    if managed:
-        raise ValueError(f"column(s) {managed} are set by this script, per cell")
+                         f"{sorted(k for k in options if k not in managed)}, cost weights "
+                         f"{list(COST_WEIGHT_KEYS)}, and {list(own_columns)}.")
+    if set_here:
+        raise ValueError(f"column(s) {set_here} are set by this script, per cell")
+    if missing:
+        raise ValueError(f"missing required column(s) {missing}")
     if len(set(header)) != len(header):
         raise ValueError(f"duplicate column names in {csv_path}")
 
@@ -147,12 +157,12 @@ def cellName(index: int, row: dict[str, str]) -> str:
     return f"cell_{index:04d}" + (f"_{label}" if label else "")
 
 
-def rowToArgv(row: dict[str, str], outdir: Path, name: str) -> list[str]:
-    """The ``run_episodes.py`` command line for one CSV row."""
+def rowToArgv(row: dict[str, str], outdir: Path, name: str, own_columns=OWN_COLUMNS) -> list[str]:
+    """The ``run_episodes.py`` command line for one CSV row, writing ``<outdir>/<name>.json``."""
     options = _driverOptions()
     argv: list[str] = []
     for column, value in row.items():
-        if column in OWN_COLUMNS:
+        if column in own_columns:
             continue
         if column in COST_WEIGHT_KEYS:
             argv += ["--cost-weight", f"{column}={value}"]

@@ -563,6 +563,43 @@ class SamplingBasedPlannerBase(abc.ABC):
         self.last_plan_ok = False
         self._resetParams()
 
+    # -- per-episode state -----------------------------------------------------
+    def SaveState(self) -> dict:
+        """Everything that carries over from one ``Plan`` to the next, as plain data.
+
+        That is: the mean sequence, the control a ``ctrl_relative`` plan starts
+        from, the last plan's outputs, and the noise stream's seed and position.
+        ``LoadState`` puts it back. Together they let one planner serve several
+        episodes in turn: save one episode's state, load another's, plan, and
+        swap back. The noise stream travels with it, so an episode's samples do
+        not depend on which other episodes shared the planner. A subclass with
+        adaptive state of its own extends both methods.
+        """
+        return {
+            "U": self.U_wp.numpy().copy(),
+            "u_prev": None if self._u_prev is None else self._u_prev.copy(),
+            "last_action_seq": None if self.last_action_seq is None else self.last_action_seq.copy(),
+            "last_plan_ok": self.last_plan_ok,
+            "noise_seed": self._noise_seed,
+            "resample_count": self._resample_count,
+        }
+
+    def LoadState(self, state: dict) -> None:
+        """Restore a state from ``SaveState``, in place.
+
+        The mean is written into the existing device buffer rather than
+        replacing it, so a captured rollout graph stays valid.
+        """
+        U = np.asarray(state["U"], dtype=np.float32)
+        if U.shape != (self.horizon, self.nu):
+            raise ValueError(f"state mean has shape {U.shape}, planner needs {(self.horizon, self.nu)}")
+        self.U_wp.assign(U)
+        self._u_prev = None if state["u_prev"] is None else np.asarray(state["u_prev"], dtype=float).copy()
+        self.last_action_seq = state["last_action_seq"]
+        self.last_plan_ok = bool(state["last_plan_ok"])
+        self._noise_seed = int(state["noise_seed"])
+        self._resample_count = int(state["resample_count"])
+
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}(N={self.N}, H={self.horizon}, nu={self.nu}, "

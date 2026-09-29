@@ -463,6 +463,19 @@ class LeapReorient(TaskBase):
             # this buffer's address, and must see the new goal on replay.
             self._gpu["goal"].assign(self.goal)
 
+    def reseed(self, seed: int | None) -> None:
+        """Restart goal sampling from ``seed``, without changing the config.
+
+        A parallel driver gives each episode its own goal stream this way, so
+        an episode's goals depend on its seed alone, not on which episodes
+        happened to run before it in the same process.
+        """
+        self._rng = np.random.default_rng(seed)
+
+    def getGoal(self) -> np.ndarray:
+        """The current target orientation, wxyz."""
+        return self.params["target_quat"].copy()
+
     def setRendererToGoal(self, renderer) -> None:
         """Turn ``renderer``'s goal marker to the current goal, so frames show it.
 

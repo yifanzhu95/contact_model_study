@@ -250,6 +250,15 @@ class TaskBase(abc.ABC):
         """
         ...
 
+    def getGoal(self) -> np.ndarray:
+        """The current goal, in the form ``setGoal`` takes.
+
+        ``task.setGoal(other.getGoal())`` makes ``task`` chase ``other``'s goal.
+        This is how a goal reaches a planner in another process. Tasks that
+        support it override this.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not expose its goal")
+
     @abc.abstractmethod
     def setRendererToGoal(self, renderer) -> None:
         """Bring ``renderer``'s depiction of the goal in line, so frames show it.

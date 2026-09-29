@@ -179,9 +179,13 @@ This directory contains the basic scripts to run episodes in the various ways
 
 Basic script which exposes most of the parameters as command line arguments. 
 
-### run_episodes_parallel.py
+### run_episodes_interwoven.py
 
-Ignore for now.
+This script, similar to run_episodes.py, is a basic script to run simulations in parrallel. Specifically, this should run two episodes in parallel. When one is running on the eval sim on CPU the other should be planning on the GPU. It continues this until one episode ends then starts a new episode and continues. 
+
+### run_episodes_pooled.py
+
+This script, similar to run_episodes.py, is a basic script to run simulations in parrallel. Specifically, this should pool epiosdes. It should uses a scheduler to alocate one or more GPUs and multiple CPUs to run planning and eval sims as needed. 
 
 ## SamplingBasedPlanners:
 

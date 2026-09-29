@@ -80,3 +80,65 @@ apply to every cell, so they must cover the most expensive row. To estimate a
 row's cost, run `test_scripts/profile_run_episodes.py -- <that row's flags>`.
 The project path defaults to the cluster checkout; set `PROJ_DIR` to use
 another.
+
+# Temperature × noise-sigma grid search
+
+`run_temp_sigma_grid.py` searches MPPI's `temperature` and `noise_sigma` for
+each cell of a CSV. The right temperature scales with the size of the task
+cost, which differs per contact model, object and horizon, so each row names
+its own grid.
+
+For every grid point, the cell runs `n_episodes` episodes through
+`run_episodes_interwoven.py`: while one episode plans on the GPU, the other
+steps its eval simulator on the CPU. Every point sees the same episodes,
+because goals and planner noise depend only on `(seed, episode)`. So points
+differ only in their two settings. Points are ranked by success rate, ties
+broken by mean steps to success.
+
+| | Command |
+| --- | --- |
+| Check a CSV (runs nothing) | `python experiments/run_temp_sigma_grid.py grid.csv --check` |
+| Every cell, in order | `python experiments/run_temp_sigma_grid.py grid.csv` |
+| One cell | `python experiments/run_temp_sigma_grid.py grid.csv --cell 2` |
+| Rebuild the summaries | `python experiments/run_temp_sigma_grid.py grid.csv --summarize --outdir <results dir>` |
+| Submit to the HPC | `experiments/hpc/submit_temp_sigma_grid.sh grid.csv [max concurrent]` |
+
+`example_temp_sigma_grid.csv` is a template.
+
+**The CSV.** It takes the same columns as the batch CSV (driver options,
+`w_*` weights, `label`, `video`), plus two required columns:
+
+- `temperatures`: the values to search, separated by spaces or commas
+  (quote a comma list), all positive, no repeats. They are the outer loop.
+- `noise_sigmas`: the same format. One value makes it a 1-D temperature sweep.
+
+`temperature` and `noise_sigma` themselves can't be columns, because the grid
+sets them.
+
+**Output**, in `results/temp_sigma_grid_<csv>_<job id or time>/`:
+
+- **One folder per cell** (`cell_<row>_<label>/`), containing:
+  - `point_<i>_T<t>_s<σ>.json` (and `.npy` files if `save_steps`) and
+    `.status.json` for each point;
+  - `grid_summary.json`, with the points ranked and the best one.
+- **At the top:**
+  - `summary.csv`: every point with its cell's settings and its rank;
+  - `best.csv`: each cell's best point.
+
+Each finished cell also prints its ranked table and a ready-to-paste
+`run_episodes.py` command for its best point.
+
+**Resuming.** A point marked done is skipped on a rerun into the same folder,
+so a cell that hits the wall clock picks up point by point. Resubmit with
+`OUTDIR=<that folder>`, and keep the same CSV.
+
+**On the HPC.** `hpc/submit_temp_sigma_grid.sh`, `hpc/run_temp_sigma_grid.slurm`
+and `hpc/summarize_temp_sigma_grid.slurm` mirror the batch scripts: one array
+task per row on its own GPU, validation first, and a summary job queued
+`afterany`.
+
+- **CPUs:** each task asks for 4, for the interwoven driver's planner and two
+  workers.
+- **Time:** a cell costs `#temperatures × #noise_sigmas × n_episodes`
+  episodes, so the time limit has to cover the widest row. Raise it with
+  `SBATCH_ARGS="--time=24:00:00"`.

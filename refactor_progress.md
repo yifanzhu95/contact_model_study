@@ -1897,6 +1897,119 @@ A `done` cell is skipped on a rerun, so runs resume.
   test now uses the median-over-worlds comparison, since its single-world
   maximum was flaky. The full suite is 177 tests, all passing.
 
+## What was done — Drivers/run_episodes_interwoven.py, run_episodes_pooled.py, EpisodePool.py
+
+These implement the two drivers added to the spec. Both use one engine,
+`Drivers/EpisodePool.py`:
+
+- **Planner processes** (`--planners-per-gpu` per GPU) hold the rollout
+  simulator and MPPI. They're stateless between requests: each request
+  carries its episode's `SaveState()` and goal.
+- **Worker processes** each own an eval simulator. They run the unchanged
+  episode loop (`runRecordedEpisode`) through a `RemotePlanner`.
+- **Scheduling** is two shared queues: episodes for workers, plan requests for
+  planners.
+- **The main process** merges each finished `_Episode` into one
+  `EpisodeRecorder` and saves one results file.
+- **Interwoven** is 1 planner and 2 workers. **Pooled** exposes `--gpus`,
+  `--planners-per-gpu` and `--workers`.
+
+**Supporting changes:**
+
+- **Planners:** `SamplingBasedPlannerBase.SaveState()/LoadState()` save and
+  restore the mean (in place, so the captured graph stays valid), `u_prev`,
+  the last plan's outputs, and the noise seed and position. MPPI adds `lam`.
+- **Tasks:** `TaskBase.getGoal()`, with the LEAP version returning the target
+  quaternion, and `LeapReorient.reseed(seed)`.
+- **Recorder:**
+  - It uses a stand-in's `class_name` when it has one.
+  - It writes `N` only when it isn't `None`, so a stand-in and the real
+    simulator record the same configs.
+- **`EvalSimulators`:** the table now gives classes, and there's a new
+  `evalSimConfig(name, dt)`.
+- **`run_episodes.py`:**
+  - Split into `buildTasks`, `rolloutSimOverrides`, `buildPlannerConfig`,
+    `runRecordedEpisode`, `printHeader`, `printBatch` and `saveResults`.
+  - `parseArgs(argv, parser, results_prefix)`.
+  - `run_episode` records `planner.last_plan_seconds` when the planner reports
+    it.
+  - `main` behaves as before.
+- **Seeds:** each episode gets goal and noise seeds from
+  `SeedSequence([seed, episode])`, so results don't depend on scheduling.
+- **Robustness:**
+  - Children ignore SIGINT and SIGTERM. The main process turns Ctrl-C or
+    SIGTERM into an abort, and workers stop at the next plan, closing their
+    episode as `interrupted`.
+  - While shutting down, the main process keeps reading messages. Without
+    that, a large finished episode blocked its worker's exit, and shutdown
+    took about 10 s; it now takes about 1 s.
+  - Output is line-buffered.
+  - A planner that fails to start stops the run in about 2 s with exit 1.
+
+**Measured** on 6 Pinocchio episodes on the 4090 (wall time, including about
+2.5 s of kernel compilation per planner):
+
+| Setup | Sequential | Interwoven | Pooled (6 workers) |
+| --- | --- | --- | --- |
+| GPU-bound | 18.6 s | 12.0 s | 12.1 s (2 planners on 1 GPU) |
+| CPU-heavy | 18.5 s | 12.0 s | 9.6 s |
+
+**Checked:**
+
+- **Pool-size independence:** 1 worker and 3 workers give the same per-episode
+  goals, and first actions agree to about 1e-4.
+- **Ctrl-C:** 1 s shutdown; finished episodes kept, in-flight ones
+  `interrupted`, no processes left.
+- **A missing GPU** stops the run in 2 s with exit 1.
+- **Tests:** `tests/test_parallel_drivers.py` has 9 tests, and the full suite
+  is 186, all passing.
+
+## What was done — experiments/run_temp_sigma_grid.py and its HPC scripts
+
+This replaces the old `contact_study/drivers/run_temp_sigma_grid.py` together
+with `temp_sigma_grid.slurm` and `submit_temp_sigma_grid.sh`.
+
+**How it works:**
+
+- **Cells:** one CSV row is one cell. It has the batch CSV's columns, plus the
+  required `temperatures` and `noise_sigmas` lists.
+- **Points:** each grid point (temperatures outer) runs `n_episodes` through
+  `run_episodes_interwoven.main`, with that point's `--temperature` and
+  `--noise-sigma`.
+- **Same episodes at every point:** every point uses the same `--seed`, and
+  pooled episodes are seeded by `(seed, episode)`, so every point sees the same
+  episodes.
+- **Ranking:** success rate first, then mean steps to success. Each cell prints
+  a ranked table and a replay command for its best point.
+- **Output:**
+  - `cell_<row>_<label>/point_<i>_T<t>_s<σ>.json` and `.status.json`;
+  - `grid_summary.json` per cell;
+  - `summary.csv`, `summary.json` and `best.csv` at the top.
+- **Resuming:** finished points are skipped on a rerun.
+
+**Reuse:** it takes its CSV handling from `run_episode_batches.py`. That
+file's `checkColumns` gained optional `own_columns`, `managed` and `required`
+parameters, and `rowToArgv` gained `own_columns`. The batch runner's own
+behaviour is unchanged.
+
+**HPC:** `hpc/run_temp_sigma_grid.slurm`, `submit_temp_sigma_grid.sh` and
+`summarize_temp_sigma_grid.slurm` follow the `run_episode_batches` pipeline:
+conda setup on the login node, `--check` before submitting, `--array` sized
+from `--count`, and the summary queued `afterany`. Each task asks for 4 CPUs,
+for the planner and two workers.
+
+**Checked:**
+
+- **`--check`** rejects `temperature` and `noise_sigma` columns, missing grid
+  columns, negative or repeated values, and bad driver values.
+- **A local run** (2 cells × 2 points): points share the same goals and goal
+  seeds, the summaries and `best.csv` are written, and a rerun skips every
+  point.
+- **Simulated SLURM** (fake `sbatch`): the array and summary job complete, and
+  resubmitting resumes.
+- **Tests:** `tests/test_temp_sigma_grid.py` has 11 tests. The full suite is
+  197, all passing.
+
 ## Small fixes — 2026-09-24
 
 Three requested changes, plus a driver bug found while testing them.

@@ -129,6 +129,14 @@ class MPPI(SamplingBasedPlannerBase):
         """Undo adaptive-temperature drift so a new episode starts from lambda."""
         self.lam = self.config.temperature
 
+    def SaveState(self) -> dict:
+        """The base state plus the adaptive temperature."""
+        return {**super().SaveState(), "lam": self.lam}
+
+    def LoadState(self, state: dict) -> None:
+        super().LoadState(state)
+        self.lam = float(state.get("lam", self.config.temperature))
+
     def _actionUncertainty(self) -> np.ndarray:
         """Weighted standard deviation of the samples' first actions.
 

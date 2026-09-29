@@ -13,23 +13,39 @@ from __future__ import annotations
 from ContactModelStudy.Simulators.Simulator import Simulator
 
 
-def _mujoco(xml: str, timestep: float) -> Simulator:
+def _mujoco():
     from ContactModelStudy.Simulators.Mujoco import Mujoco, MujocoConfig
-    return Mujoco(xml, MujocoConfig(timestep=timestep))
+    return Mujoco, MujocoConfig
 
 
-def _pinocchio(xml: str, timestep: float) -> Simulator:
+def _pinocchio():
     from ContactModelStudy.Simulators.Pinocchio import Pinocchio, PinocchioConfig
-    return Pinocchio(xml, PinocchioConfig(timestep=timestep))
+    return Pinocchio, PinocchioConfig
 
 
-def _drake(xml: str, timestep: float) -> Simulator:
+def _drake():
     from ContactModelStudy.Simulators.Drake import Drake, DrakeConfig
-    return Drake(xml, DrakeConfig(timestep=timestep))
+    return Drake, DrakeConfig
 
 
-#: Eval simulator builders, by name.
+#: Eval simulators by name: each gives ``(simulator class, config class)``.
 EVAL_SIMS = {"mujoco": _mujoco, "pinocchio": _pinocchio, "drake": _drake}
+
+
+def _classes(name: str):
+    if name not in EVAL_SIMS:
+        raise ValueError(f"unknown eval simulator {name!r}; choose from {sorted(EVAL_SIMS)}")
+    return EVAL_SIMS[name]()
+
+
+def evalSimConfig(name: str, timestep: float):
+    """``(class name, config)`` of the named eval simulator, without building it.
+
+    What ``makeEvalSim`` would build, for describing a run in a process that
+    does not hold the simulator itself.
+    """
+    sim_cls, cfg_cls = _classes(name)
+    return sim_cls.__name__, cfg_cls(timestep=timestep)
 
 
 def makeEvalSim(name: str, xml: str, timestep: float) -> Simulator:
@@ -43,6 +59,5 @@ def makeEvalSim(name: str, xml: str, timestep: float) -> Simulator:
     Raises:
         ValueError: If ``name`` is not a known simulator.
     """
-    if name not in EVAL_SIMS:
-        raise ValueError(f"unknown eval simulator {name!r}; choose from {sorted(EVAL_SIMS)}")
-    return EVAL_SIMS[name](xml, timestep)
+    sim_cls, cfg_cls = _classes(name)
+    return sim_cls(xml, cfg_cls(timestep=timestep))

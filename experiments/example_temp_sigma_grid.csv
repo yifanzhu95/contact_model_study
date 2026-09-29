@@ -1,0 +1,6 @@
+label,task,rollout_model,eval_sim,hand_acc,obj_acc,n_episodes,steps,seed,goal_difficulty,ctrl_time_step,time_horizon,n_samples,n_iterations,temperatures,noise_sigmas
+cube_M2,cube_reorient,M2,mujoco,high,high,5,500,0,8,0.064,0.352,256,1,"100 50 25 12.5 6.25",0.1
+cube_M3,cube_reorient,M3,mujoco,high,high,5,500,0,8,0.064,0.352,256,1,"100 50 25 12.5 6.25",0.1
+cube_M4,cube_reorient,M4,mujoco,high,high,5,500,0,8,0.064,0.352,256,1,"100 50 25 12.5 6.25",0.1
+duck_M2_foam,duck_reorient,M2,mujoco,high,foam16a,5,500,0,8,0.064,0.352,256,1,"50 25 10","0.2 0.1 0.05"
+cube_M2_pinocchio,cube_reorient,M2,pinocchio,high,high,5,500,0,8,0.064,0.352,256,1,"50 25 10",0.1
