@@ -2,7 +2,6 @@
 #SBATCH --job-name=temp_sigma_grid_summary
 #SBATCH --output=logs/temp_sigma_grid_summary_%j.out
 #SBATCH --error=logs/temp_sigma_grid_summary_%j.err
-#SBATCH --partition=gpu
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=4G
 #SBATCH --time=00:15:00
