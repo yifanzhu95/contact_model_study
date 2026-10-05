@@ -1,4 +1,4 @@
-# Experiments: batches of episodes from a CSV
+# Experiments: batches, grids and Bayesian optimization from a CSV
 
 `run_episode_batches.py` runs batches of `run_episodes.py` episodes described by
 a CSV, one row per batch (a *cell*). It works the same on a workstation and on
@@ -25,6 +25,8 @@ driver's default.
   `substeps`, `time_horizon` or `horizon`, `n_samples`, `noise_sigma`,
   `temperature`, `control_mode`, `settle`, `seed`, `goal_difficulty`,
   `nconmax`, `njmax`. `run_episodes.py --help` lists them all.
+  `eval_sim` takes a CPU simulator (`mujoco`, `pinocchio`, `drake`) or a GPU
+  contact model (`M1`–`M4`).
 - **On/off options.** These take `true` or `false`: `stop_on_success`,
   `warm_start`, `uncertainty`, `save_steps`, `graph`, `debug`, ...
 - **Cost weights.** `w_quat`, `w_pos_x`, ..., `w_fallen_term` override the
@@ -142,3 +144,117 @@ task per row on its own GPU, validation first, and a summary job queued
 - **Time:** a cell costs `#temperatures × #noise_sigmas × n_episodes`
   episodes, so the time limit has to cover the widest row. Raise it with
   `SBATCH_ARGS="--time=24:00:00"`.
+
+# Bayesian optimization of weights, temperature and noise
+
+`run_bayes_opt.py` runs one Bayesian optimization (BO) per CSV row. It uses
+scikit-optimize's Gaussian process to search the cost weights, MPPI's
+`temperature` and `noise_sigma`. Each *trial* is one point of the search,
+scored by running `n_episodes` episodes on every model in `rollout_models`, with
+the same weights for all of them.
+
+Every episode of a cell runs on one long-lived pool (`EpisodePool`, the engine
+of `run_episodes_pooled.py`): a planner process per GPU, an eval-sim worker per
+remaining core, and several trials in flight at once. While trials are
+pending, the next point is chosen as if each pending trial had scored the best
+J so far (a *constant liar*), so concurrent trials don't pile onto one spot.
+A trial's settings travel with its episodes, and the planner processes apply
+them in place, so nothing restarts between trials.
+
+Every trial and every model sees the same episodes, because goals and planner
+noise depend only on `(seed, episode)`.
+
+| | Command |
+| --- | --- |
+| Check a CSV (runs nothing) | `python experiments/run_bayes_opt.py bo.csv --check` |
+| Every cell, in order | `python experiments/run_bayes_opt.py bo.csv` |
+| One cell, sized pool | `python experiments/run_bayes_opt.py bo.csv --cell 0 --gpus 0,1 --workers 12` |
+| Rebuild the summaries | `python experiments/run_bayes_opt.py bo.csv --summarize --outdir <results dir>` |
+| Submit to the HPC | `experiments/hpc/submit_bayes_opt.sh bo.csv [max concurrent]` |
+
+`example_bayes_opt.csv` is a template, and `example_bo_seeds.csv` is an example
+seed file.
+
+**Objective** (minimized), as in the old `run_bayes_opt.py`:
+
+```
+J_model = -w_success * success_rate + w_cost * mean normalized final goal error
+```
+
+The goal error divides each final error by the task's success threshold, sums
+them, clips at `err_clip` and divides by it, so both terms are in [0, 1]. An
+episode that raised scores as a failure with the worst error. `model_agg`
+folds the models' J: `mean`, or `worst` (the largest).
+
+**The CSV.** It takes the batch CSV's columns (driver options, `w_*` to pin a
+weight, `label`), except `rollout_model` and `video`, plus:
+
+| Column | Meaning | Blank |
+| --- | --- | --- |
+| `rollout_models` | Models scored with the same weights, e.g. `M1 M2 M3 M4` | the driver default |
+| `model_agg` | `mean` or `worst` | `mean` |
+| `opt_weights` | Weights to search: `w_quat:1:50 w_contact` (bare name: x/4 to x4 around the object's value), or `none` | the old study's nine weights and bounds, widened to contain the object's own values |
+| `temperature_range`, `noise_sigma_range` | `lo hi` to search | pinned to the `temperature`/`noise_sigma` column or the driver default |
+| `per_model_temperature` | `true`: a `temperature_<model>` dimension per model | `false` |
+| `n_calls` | Trials in all, including seeds and resumed trials | 100 |
+| `n_initial_points` | Random trials before the GP, less one per seed | 10 |
+| `acq_func`, `bo_seed` | `gp_hedge`, `EI`, `LCB` or `PI`; the optimizer's seed | `gp_hedge`, 0 |
+| `w_success`, `w_cost`, `err_clip` | The objective | 1, 0.1, 250 |
+| `trials_in_flight` | Trials evaluated at once | enough to give every worker an episode |
+
+Every dimension is log-uniform. `--check` rejects:
+
+- an empty search space;
+- a knob that is both pinned and searched;
+- an unknown weight or model;
+- a seed outside the search box.
+
+**Seeding with known settings.** Seeds run before the random and GP trials,
+count toward `n_calls`, and each replaces one random trial.
+
+- `seed_defaults` (on unless `false`): the object's own weights, with the
+  pinned temperature and noise. The default temperature must then lie inside
+  `temperature_range`. Turn this off if it doesn't.
+- `seed_points`: a CSV of known settings (path relative to the batch CSV),
+  with one row per point and columns named after the dimensions (`w_quat`,
+  `temperature`, `noise_sigma`, ...). Anything a row leaves out takes its
+  default. A value for a pinned setting must equal the pinned value.
+- `seed_from` + `seed_top_k` (5): an earlier cell folder. Its best trials
+  are **re-run** here, so their scores come from this row's episodes and
+  models. Dimensions that don't exist here are ignored, and values outside the
+  box are clipped into it.
+
+**Output**, in `results/bayes_opt_<csv>_<job id or time>/`:
+
+- **One folder per cell** (`cell_<row>_<label>/`):
+  - `trial_<i>/<model>.json` (and `.npy` files if `save_steps`): the trial's
+    episodes on that model, readable with `EpisodeReplayer`. The recorded
+    configs carry the trial's temperature, noise and weights.
+  - `trial_<i>/trial.json`: the point, its source (`defaults`,
+    `seed_points:<row>`, `seed_from:<trial>`, `random`, `gp`), its J and the
+    per-model scores.
+  - `bo_state.json`: the space and every point and J.
+  - `bo_summary.json`: the trials ranked, the best-so-far trace, the best
+    trial and the commands to replay it.
+- **At the top:**
+  - `summary.csv`: every trial, with its cell's settings;
+  - `best.csv`: each cell's best trial.
+
+**Resuming.** Rerun into the same folder, with `OUTDIR=` on the HPC. Finished
+trials are told to the optimizer again, and the search continues to
+`n_calls`; raise `n_calls` to extend a finished search. Trials that were still
+running are redone. The search space may be widened, but a changed set of
+dimensions, or a narrowed range that leaves earlier trials outside it, is
+refused. `--overwrite` starts the cell over.
+
+**Stopping.** Ctrl-C or `scancel` stops at the next control step. Finished
+trials are kept.
+
+**On the HPC.** `hpc/submit_bayes_opt.sh`, `hpc/run_bayes_opt.slurm` and
+`hpc/summarize_bayes_opt.slurm` mirror the other pipelines: one array task per
+row, validation first, and a summary job queued `afterany`.
+
+- **Resources:** each task asks for 2 GPUs, 16 CPUs, 32 GB and 24 h. The pool
+  uses whatever SLURM grants. Change it per submission, for example
+  `SBATCH_ARGS="--gpus=rtx_5000_ada:4 --cpus-per-task=32 --time=48:00:00"`.
+- **Cost:** a cell is `n_calls × models × n_episodes` episodes.

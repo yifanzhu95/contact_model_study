@@ -50,6 +50,10 @@ EVAL_SIMS = {
     "mujoco": ("ContactModelStudy.Simulators.Mujoco", "Mujoco"),
     "pinocchio": ("ContactModelStudy.Simulators.Pinocchio", "Pinocchio"),
     "drake": ("ContactModelStudy.Simulators.Drake", "Drake"),
+    # GPU contact models as eval sims, all behind the one-world adapter. Its
+    # Step only queues graph replays; the wait for the GPU lands in GetState,
+    # so read the two rows together.
+    **{m: ("ContactModelStudy.Simulators.SingleWorld", "SingleWorld") for m in ("M1", "M2", "M3", "M4")},
 }
 PLAN = "planner: Plan (GPU rollouts)"
 

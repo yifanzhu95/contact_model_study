@@ -1,0 +1,4 @@
+label,task,rollout_models,model_agg,eval_sim,hand_acc,obj_acc,n_episodes,steps,seed,goal_difficulty,ctrl_time_step,time_horizon,n_samples,temperature,noise_sigma,opt_weights,temperature_range,noise_sigma_range,per_model_temperature,n_calls,n_initial_points,seed_defaults,seed_points,save_steps
+cube_all_models,cube_reorient,M1 M2 M3 M4,mean,mujoco,high,high,4,500,0,8,0.064,0.352,256,,,,1 200,0.02 0.5,false,150,12,true,example_bo_seeds.csv,false
+cube_M2_knobs_only,cube_reorient,M2,mean,mujoco,high,high,8,500,0,8,0.064,0.352,256,,,none,1 200,0.02 0.5,false,40,8,true,,false
+duck_per_model_temp,duck_reorient,M2 M3,worst,mujoco,high,foam16a,4,500,0,8,0.064,0.352,256,,0.1,w_quat w_contact w_joint w_pos_term,1 200,,true,100,10,true,,false

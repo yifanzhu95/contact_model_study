@@ -98,6 +98,23 @@ def test_each_eval_simulator(tmp_path, sim):
     assert rp.configs["eval_simulator"]["class"].lower() == sim and len(rp[0]) == 5
 
 
+@pytest.mark.parametrize("model, cls", [("M1", "VectorizedMujoco"), ("M3", "ComFree"), ("M4", "XPBD")])
+def test_gpu_contact_model_as_eval_simulator(tmp_path, model, cls):
+    rp = EpisodeReplayer(run(tmp_path, "--steps", "5", "--eval-sim", model, "--settle", "0.05"))
+    assert rp.configs["eval_simulator"]["class"] == cls and len(rp[0]) == 5
+    assert np.isfinite(rp[0].q).all()
+
+
+def test_pooled_run_with_a_gpu_eval_simulator(tmp_path):
+    from ContactModelStudy.Drivers import run_episodes_pooled as pooled
+    out = tmp_path / "pooled.json"
+    argv = [*BASE, "--eval-sim", "M2", "--n-episodes", "2", "--steps", "4", "--workers", "2",
+            "--results", str(out)]
+    assert pooled.main(argv) == 0
+    rp = EpisodeReplayer(out)
+    assert len(rp) == 2 and rp.configs["eval_simulator"]["class"] == "VectorizedMujoco"
+
+
 @pytest.mark.parametrize("task, scene", [("duck_reorient", "duck_high_high"), ("ball_reorient", "ball_high_high")])
 def test_each_task(tmp_path, task, scene):
     rp = EpisodeReplayer(run(tmp_path, "--steps", "5", "--task", task))

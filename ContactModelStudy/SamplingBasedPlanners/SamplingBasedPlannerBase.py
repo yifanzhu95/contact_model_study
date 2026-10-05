@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import abc
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import warp as wp
@@ -129,6 +129,9 @@ class SamplingBasedPlannerBase(abc.ABC):
     """
 
     name = "SamplingBasedPlanner"
+    #: Config fields ``UpdateConfig`` may change on a built planner: the ones
+    #: read afresh on every plan, so no buffer or captured graph depends on them.
+    RUNTIME_FIELDS: tuple[str, ...] = ("noise_sigma",)
 
     def __init__(
         self,
@@ -562,6 +565,34 @@ class SamplingBasedPlannerBase(abc.ABC):
         self.last_action_seq = None
         self.last_plan_ok = False
         self._resetParams()
+
+    def FirstActionDistribution(self) -> tuple[np.ndarray, np.ndarray]:
+        """``(mu, cov)``: the last plan's first action, as a Gaussian in command space.
+
+        ``mu`` is the action ``Plan`` returned, ``(nu,)``; ``cov`` is the
+        ``(nu, nu)`` spread of the samples' first actions under the weights the
+        planner formed that action with. A planner that can describe its action
+        distribution overrides this; ``Utils/PlannerKLDiv.py`` compares two of
+        them. Raises ``RuntimeError`` before the first plan or after a failed one.
+        """
+        raise NotImplementedError(f"{type(self).__name__} cannot describe its action distribution")
+
+    def UpdateConfig(self, **changes) -> None:
+        """Change config fields in ``RUNTIME_FIELDS`` without rebuilding the planner.
+
+        The config is replaced, not edited, so its own validation runs on the
+        new values. Anything else (the sample count, the control mode, graph
+        use, ...) shaped the planner's buffers or its captured rollout, and
+        needs a new planner.
+
+        Raises:
+            ValueError: On a field outside ``RUNTIME_FIELDS``, or an invalid value.
+        """
+        fixed = set(changes) - set(self.RUNTIME_FIELDS)
+        if fixed:
+            raise ValueError(f"{type(self).__name__} cannot change {sorted(fixed)} after it is "
+                             f"built; only {list(self.RUNTIME_FIELDS)}")
+        self.config = replace(self.config, **changes)
 
     # -- per-episode state -----------------------------------------------------
     def SaveState(self) -> dict:

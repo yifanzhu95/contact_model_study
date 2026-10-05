@@ -17,7 +17,7 @@ of the *current* goal; see ``GOAL_DIFFICULTIES``.
 from __future__ import annotations
 
 import abc
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional
 
@@ -224,6 +224,8 @@ class LeapReorient(TaskBase):
                          else self.rollout_timestep)
 
         self.params = self.objectParams()
+        # The object's own tuned weights, which config.cost_weights overrides.
+        self._object_weights = dict(self.params["cost_weights"])
         if cfg.cost_weights:
             self.params["cost_weights"] = {**self.params["cost_weights"], **cfg.cost_weights}
         self._validate_params()
@@ -462,6 +464,28 @@ class LeapReorient(TaskBase):
             # In place, never reallocated: a planner's captured CUDA graph holds
             # this buffer's address, and must see the new goal on replay.
             self._gpu["goal"].assign(self.goal)
+
+    def setCostWeights(self, weights: dict) -> None:
+        """Override some cost weights by name; see ``TaskBase.setCostWeights``.
+
+        Raises:
+            ValueError: On a name that is not in ``COST_WEIGHT_KEYS``.
+        """
+        unknown = set(weights) - set(COST_WEIGHT_KEYS)
+        if unknown:
+            raise ValueError(f"unknown cost weight(s) {sorted(unknown)}; "
+                             f"valid names are {list(COST_WEIGHT_KEYS)}")
+        self.params["cost_weights"] = {**self.params["cost_weights"],
+                                       **{k: float(v) for k, v in weights.items()}}
+        # The config keeps describing this instance (a recorder snapshots it):
+        # its overrides are now whatever differs from the object's own weights.
+        overrides = {k: v for k, v in self.params["cost_weights"].items()
+                     if v != self._object_weights[k]}
+        self.config = replace(self.config, cost_weights=overrides or None)
+        self._weights = None                 # rebuilt from params on next access
+        if self._gpu is not None:
+            # In place, as in setGoal: a captured graph holds this buffer's address.
+            self._gpu["weights"].assign(self.weights)
 
     def reseed(self, seed: int | None) -> None:
         """Restart goal sampling from ``seed``, without changing the config.

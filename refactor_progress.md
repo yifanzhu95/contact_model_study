@@ -2010,6 +2010,178 @@ for the planner and two workers.
 - **Tests:** `tests/test_temp_sigma_grid.py` has 11 tests. The full suite is
   197, all passing.
 
+## What was done — Utils/PlannerKLDiv.py
+
+**`CalcPlannerKLDiv(q, q_dot, Planner1, Planner2, u=None, shrinkage=1e-3, restore=True)`**
+returns `KL(P1 ‖ P2)`, in nats.
+
+- **The two sides:** each is a planner, or a Gaussian action `(u, u_sigma)`
+  where `u_sigma` is a scalar, a `(nu,)` vector of stds, or a `(nu, nu)`
+  covariance.
+- **A planner side:** the planner plans from the state, and its first action
+  is moment-matched to a Gaussian. The mean is the returned command; the
+  covariance is the weighted sample spread, shrunk toward
+  `noise_sigma² I` by `shrinkage`, the old default 1e-3.
+  - With `restore`, the planner's `SaveState` is put back afterwards, so
+    measuring a planner that's driving an episode doesn't change its next
+    plan.
+- **Edge cases:** a failed plan gives `nan`, and a degenerate covariance gives
+  `inf`. Every covariance gets a 1e-12 variance floor.
+- **Also public:** `GaussianKL` and `PlannerGaussian`.
+
+**Ported** from `contact_study/evaluation/distributions.py`
+(`weighted_moments_from_particles`, `gaussian_kl`).
+
+**New planner hook:** `SamplingBasedPlannerBase.FirstActionDistribution()`,
+which MPPI implements by reading `w_wp` and `V_wp`, with the mean in command
+space.
+
+**Checked** in `tests/test_planner_kl.py` (9 tests):
+
+- `GaussianKL` equals the old `gaussian_kl` at d = 1, 3 and 16.
+- Closed-form cases and asymmetry hold.
+- The planner's moments equal the old `weighted_moments_from_particles`.
+- `restore` leaves the planner's state unchanged.
+- A planner against its own `(action, sigma)` gives a small KL.
+- A failed plan gives NaN.
+
+**Measured** at a settled grasp, N = 1024, KL from M2:
+
+| Temperature | M1 | M3 | M4 |
+| --- | --- | --- | --- |
+| 10 | 0.000 | 0.000 | 0.000 |
+| 1 | 0.015 | 0.006 | 0.001 |
+| 0.25 | 0.41 | 0.10 | 0.05 |
+
+At a high temperature the weights are nearly uniform, so every planner's
+distribution is just its proposal and the KL can't see the contact model.
+Planners with the same `seed` share noise samples: a common-random-numbers
+comparison. Two M2 planners give 0 with the same seed and 0.12 with different
+seeds.
+
+## What was done — experiments/run_bayes_opt.py, a long-lived EpisodePool
+
+This replaces the old `contact_study/drivers/run_bayes_opt.py` and
+`bayes_opt.slurm`. One CSV row is one Bayesian optimization over cost weights,
+temperature and noise_sigma, on one or more rollout models.
+
+**What it keeps from the old driver:**
+
+- skopt's GP, with log-uniform dimensions and `name:lo:hi` weight specs. A bare
+  name brackets x4 around the object's own value.
+- The objective `-w_success·success + w_cost·normalized goal error`.
+- Several models folded by `mean` or `worst`, and per-model temperatures.
+- The same episodes for every trial.
+- Resume, with the old checks on a changed search space.
+
+**What's new:**
+
+- **The pool.** Episodes run on a pool sized from the machine or the SLURM
+  allocation: planners on every GPU, workers on the cores. Several trials are in
+  flight at once, and the next point is chosen with a constant liar.
+- **Seeds.** `seed_defaults`, `seed_points` (a CSV of known settings) and
+  `seed_from` (re-runs an earlier cell's best trials) are evaluated first, and
+  use up random trials.
+- **Records.** Each trial saves an `EpisodeRecorder` file per model, whose
+  configs show the trial's settings.
+- **The batch pipeline.** It gets the same CSV, `--check`/`--count`/`--cell`/
+  `--summarize`, and HPC submit, array and summary scripts as the other
+  experiments.
+
+**Changes to existing code, so one pool can serve every trial:**
+
+- **`EpisodePool` is now a class.** It has `start`, `submit(EpisodeJob)`,
+  `poll`, `interrupt` and `close`, plus `sigtermAsInterrupt`.
+  - A job can set its own rollout model, planner params and cost weights.
+  - Each planner process holds a planner per model, and applies a job's
+    settings only when they change.
+  - `runPool` is a thin wrapper around it, so the two drivers are unchanged.
+- **The reply queues are now kept on the pool.** `Process.start` drops its
+  args, and a queue the parent no longer referenced was freed before the
+  spawned child could attach to it.
+- **`TaskBase.setCostWeights(w)`** (implemented by `LeapReorient`) updates the
+  device weights in place, as `setGoal` does, so captured graphs use them. It
+  also updates `config.cost_weights`, which now holds the overrides relative to
+  the object's own weights, so recordings show the weights actually used.
+- **`SamplingBasedPlannerBase.UpdateConfig(**fields)`** accepts only
+  `RUNTIME_FIELDS`: `noise_sigma`, plus `temperature` for MPPI, which also
+  resets `lam`. It validates through the config's `__post_init__`.
+
+**Checked:**
+
+- **A local run** (M2 and M3, 7 trials, 2 in flight):
+  - trials overlap, and the GP points avoid the pending ones;
+  - recorded configs carry each trial's temperature, noise and weights;
+  - a rerun with a larger `n_calls` continues from the finished trials.
+- **Ctrl-C** stops in about a second. Finished trials are kept, and in-flight
+  trials are redone on resume.
+- **Two planner processes on one GPU** (8 workers, 48 episodes): planners were
+  95% busy.
+- **The example CSVs** pass `--check`. The driver's default temperature is now
+  40, so the example ranges are `1 200`.
+- **The HPC scripts** pass `bash -n`, each checked separately.
+- **Tests:**
+  - `tests/test_bayes_opt.py` has 24 tests, covering the space, validation,
+    seeds, scoring, the constant liar, resume checks, and an end-to-end
+    resume and summary;
+  - `tests/test_runtime_settings.py` has 4 tests: `setCostWeights` reaches a
+    captured graph, `UpdateConfig` refuses rebuild-only fields, and one pool
+    serves two batches with different models and settings;
+  - the full suite is 234 tests, all passing.
+
+## What was done — the GPU contact models (M1–M4) as eval simulators
+
+`--eval-sim` now also takes `M1`–`M4`. Each builds exactly that rollout preset
+(`GetContactModelSim`) with `N=1` on the eval scene, at the eval timestep.
+That gives a rollout-model × eval-model matrix.
+
+**The new pieces:**
+
+- **`Simulators/SingleWorld.py`** wraps a one-world `VectorizedSimulator` as a
+  plain `Simulator`, with un-batched shapes. The episode loop, the tasks, the
+  recorder and the renderer need no change: tasks take their host path,
+  because it isn't a `VectorizedSimulator`. `class_name` reports the wrapped
+  backend.
+  - `Step(n)` splits `n` into power-of-two blocks of at most 256 steps. The
+    first block of each size runs eagerly (the real step) and is then
+    captured; later blocks replay the graph. A failed capture falls back to
+    eager, with a warning.
+- **`Utils/EvalSimulators.py`** gains `EVAL_PRESETS`, `evalSimNames()` (which
+  feeds the driver's `--eval-sim` choices), `isGpuEvalSim()`, and
+  `EVAL_PRESET_OVERRIDES`, empty because no eval scene overflowed the
+  per-world buffers.
+- **`EpisodePool`** gives each worker a GPU, round-robin, when the eval sim is
+  one. The utilization line now says "eval workers".
+- **`test_scripts/profile_run_episodes.py`** takes M1–M4.
+
+**Measured:**
+
+- **Holding the grasp for 2 s, compared with CPU MuJoCo** on the cube, duck
+  and ball:
+  - Every state stays finite, and there are no buffer-overflow warnings.
+  - M2 matches CPU MuJoCo to 0.1–3 mm.
+  - M4 lets the duck sag (z 0.064 m vs 0.090 m).
+- **Speed:**
+  - **Per control step** at the defaults (2 ms eval step, 32 steps per
+    control step): CPU MuJoCo takes 5.2 ms, and M2 takes about 41 ms
+    (Step plus the wait in GetState).
+  - **Per physics step:** about 1.3 ms one-world, against about 5 ms eager.
+  - **Whole episode step:** 54 ms with mujoco, 91 with M2, 81 with M3, 85 with M4.
+- **Pooled, with M2 eval, 8 episodes on one GPU:** 1 worker took 58.6 s and 4
+  workers 61.0 s. Planners and eval workers share the GPU, so more workers on
+  one GPU don't help.
+- **M1 is not bit-reproducible on MJWarp.** Two eager runs end ~1.5e-3 apart.
+  The graph-vs-eager test therefore compares against that noise; M2–M4 agree
+  to below 1e-5.
+
+**Tests:**
+
+- `tests/test_gpu_eval_sims.py` has 14 tests: names, adapter shapes and
+  configs, tasks judge on the host, graph equals eager, and the cube is held
+  for 1 s.
+- `tests/test_run_episodes.py` gains 4: the driver with M1, M3 and M4 as eval,
+  and a pooled run with M2.
+
 ## Small fixes — 2026-09-24
 
 Three requested changes, plus a driver bug found while testing them.

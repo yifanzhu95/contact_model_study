@@ -22,7 +22,8 @@ ContactModelStudy/
 │   ├── Drake.py                Drake MultibodyPlant (CPU)
 │   ├── VectorizedMujoco.py     MuJoCo Warp (MJWarp), N worlds
 │   ├── ComFree.py              complementarity-free contact on MJWarp
-│   └── XPBD.py                 XPBD contact on MJWarp
+│   ├── XPBD.py                 XPBD contact on MJWarp
+│   └── SingleWorld.py          a one-world GPU simulator as a plain Simulator (GPU eval sims)
 ├── Tasks/                 what to do, what it costs, when it succeeds
 │   ├── TaskBase.py             TaskBase, TaskBaseConfig, TaskRole
 │   ├── LeapReorient.py         shared LEAP-hand reorientation machinery + cost
@@ -37,12 +38,13 @@ ContactModelStudy/
 │   ├── run_episodes.py            closed-loop episodes, one at a time
 │   ├── run_episodes_interwoven.py two episodes at once: one plans on the GPU while the other steps on the CPU
 │   ├── run_episodes_pooled.py     many at once, across the GPUs and CPU cores of a machine
-│   └── EpisodePool.py             the engine behind the two parallel drivers
+│   └── EpisodePool.py             the engine behind the parallel drivers and the BO search
 └── Utils/
     ├── ContactModelPresets.py  M1–M4 as ready-made rollout simulators
-    ├── EvalSimulators.py       eval simulator by name (mujoco/pinocchio/drake)
+    ├── EvalSimulators.py       eval simulator by name (mujoco/pinocchio/drake, or M1-M4 on the GPU)
     ├── EpisodeRecorder.py      record, save, summarize and replay episodes
     ├── MjcfModelInfo.py        MJCF parameters as MuJoCo resolves them
+    ├── PlannerKLDiv.py         KL between two planners' (or Gaussian) actions at a state
     └── Quaternions.py          wxyz quaternion helpers
 ```
 
@@ -51,7 +53,7 @@ Outside the package:
 | Path | What |
 | --- | --- |
 | `scenes/leap/` | Scene MJCFs, one eval scene and many rollout scenes per object |
-| `experiments/` | Batches of episodes from a CSV, locally or as an HPC job array (see its README) |
+| `experiments/` | Batches of episodes, temperature/noise grids and Bayesian optimization, from a CSV, locally or as an HPC job array (see its README) |
 | `tests/` | pytest suite |
 | `test_scripts/` | Ad-hoc scripts, including `profile_run_episodes.py` |
 | `contact_study/` | The old codebase, kept only for comparison tests |
@@ -140,6 +142,27 @@ come through `Utils/MjcfModelInfo.py`, which compiles the scene with MuJoCo,
 because neither engine's own parser reads MJCF defaults correctly. Changing a
 value in the XML changes it in all three eval simulators.
 
+**The GPU contact models can be the eval simulator too.** `--eval-sim M1`–`M4`
+builds exactly that rollout preset (`ContactModelPresets`), with one world, on
+the eval scene at the eval timestep. It comes wrapped in `SingleWorld`, which
+strips the world axis, so the episode loop, the tasks (which judge it on the
+host), the recorder and the renderer treat it like CPU MuJoCo. Planning with
+one model and judging in another gives a rollout × eval matrix.
+
+- **Steps are replayed from CUDA graphs.** `Step(n)` is split into power-of-two
+  blocks, and each block size is captured once, so only a handful of graphs
+  ever exist. That is about 4× faster than launching each step.
+- **It's still slower than CPU MuJoCo.** A one-world MJWarp step is about
+  1.3 ms of back-to-back kernels at the 2 ms eval step: about 41 ms per 64 ms
+  control step, against 5 ms for CPU MuJoCo.
+- **In the pool, GPU eval workers share the GPU with the planners.** More
+  workers on one GPU don't help (8 episodes: 59 s with 1 worker, 61 s with
+  4); more GPUs do.
+- **M1 isn't bit-reproducible on MJWarp.** Its stiff contact under 200 solver
+  iterations ends ~1e-3 apart between two identical runs.
+- **M4 lets the duck sag** in the grasp (0.064 m vs 0.090 m on CPU MuJoCo
+  after 2 s). That is the XPBD model's physics.
+
 ### Configs
 
 Each class is built from a dataclass config: `Simulator(xml, SimulatorConfig)`,
@@ -170,6 +193,7 @@ simulator.
 | `calcCosts(vec_sim, terminal)` | Per-world cost, **GPU only**, a Warp kernel |
 | `isSuccess(sim)`, `isFailure(sim)` | On one simulator: a bool. On a vectorized one: a device array. Never both true. |
 | `sampleNewGoal()`, `setGoal(g)`, `setRendererToGoal(r)` | Goals, each a rotation of the current goal; ten difficulty levels (`GOAL_DIFFICULTIES`) |
+| `setCostWeights(w)` | Change cost weights by name on a built task, in place on the device, so a captured rollout graph uses them; the config is updated to match |
 | `alignRendererConfigWithTask(cfg)` | Puts the task's camera into a renderer config |
 
 `LeapReorientConfig` holds what may change between instances:
@@ -214,6 +238,10 @@ the simulator it's given.
   actions:
   - near `noise_sigma` when the costs couldn't tell the samples apart;
   - near 0 when one sample dominated.
+- **Changing settings on a built planner:** `UpdateConfig(temperature=..., noise_sigma=...)`
+  changes the fields in `RUNTIME_FIELDS` without a rebuild (they are read on
+  every plan). Anything else shaped the buffers or the captured graph and
+  needs a new planner.
 - **Adding a planner:** subclass `SamplingBasedPlannerBase`, implement
   `_buildSamples` and `_updateParams`, and optionally `_actionUncertainty`.
 
@@ -267,14 +295,15 @@ python ContactModelStudy/Drivers/run_episodes.py --hand-acc low --ctrl-time-step
 python ContactModelStudy/Drivers/run_episodes_interwoven.py --n-episodes 10
 python ContactModelStudy/Drivers/run_episodes_pooled.py --n-episodes 64 --gpus 0,1 --workers 12
 
-# batches from a CSV, locally or on the HPC: see experiments/README.md
+# batches, grids and Bayesian optimization from a CSV, locally or on the HPC: see experiments/README.md
 python experiments/run_episode_batches.py experiments/example_batches.csv
+python experiments/run_bayes_opt.py experiments/example_bayes_opt.csv --cell 0
 
 # where the time goes, per eval simulator
 python test_scripts/profile_run_episodes.py -- --rollout-model M2
 
 # tests (skips what the machine lacks: GPU, Pinocchio, Drake, old package)
-python -m pytest tests                 # all, about a minute on an RTX 4090
+python -m pytest tests                 # all, about 3.5 minutes on an RTX 4090
 python -m pytest tests -m "not slow"   # without the end-to-end driver runs
 ```
 
@@ -284,7 +313,7 @@ Useful driver options:
 | --- | --- |
 | `--task` | Which object: `cube_reorient`, `duck_reorient`, `ball_reorient` |
 | `--rollout-model` | M1–M4 |
-| `--eval-sim` | `mujoco`, `pinocchio`, `drake` |
+| `--eval-sim` | `mujoco`, `pinocchio`, `drake`, or a GPU contact model `M1`–`M4` |
 | `--hand-acc` / `--obj-acc` | Rollout scene fidelity; for the duck, `obj_acc` can also be a `foam*` variant |
 | `--cost-weight NAME=VALUE` | Override one cost weight; repeatable |
 | `--stop-on-success` / `--no-stop-on-success` | Multi-goal episodes |
@@ -312,8 +341,15 @@ of the two is always idle. The parallel drivers overlap them.
 - **Scheduling** is two shared queues:
   - a free worker takes the next episode;
   - a free planner takes the next plan request.
-- **The main process** collects the finished episodes into one results file,
-  as `run_episodes.py` does.
+- **The main process** owns an `EpisodePool` and submits `EpisodeJob`s to it.
+  `runPool`, behind both drivers, submits `--n-episodes` jobs and collects them
+  into one results file, as `run_episodes.py` does.
+- **Per-job settings.** The pool's processes live until it is closed, and a
+  job can name its own rollout model (each planner process holds a planner
+  per model the pool was built for), planner params and cost weights. The
+  planner process applies them in place before each plan
+  (`UpdateConfig`, `setCostWeights`), so nothing is rebuilt.
+  `experiments/run_bayes_opt.py` keeps one pool for a whole search this way.
 
 **Seeds.** Each episode's goals and planner noise come from
 `(--seed, episode index)`. So results don't depend on the pool's size (1 or 3

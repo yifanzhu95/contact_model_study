@@ -324,6 +324,9 @@ This class handels the replaying for a batch of episodes. It should allow for it
 
 *function* init(path) $\rightarrow$ EpisodeReplayer: This constructor takes in a path to a record batch of episodes.
 
+### PlannerKLDiv.py
+
+*function* CalcPlannerKLDiv(q,q_dot,Planner1 = {SamplingBasedPlanner | (u,u_sigma)},Planner2 = {SamplingBasedPlanner | (u,u_sigma)}) $\rightarrow$ float: Takes in a simulation state and two planners or guassian actions then from that state and calculates the KL divergance between the two planners or the actions or one planners and a action. 
 
 ## Experiments:
 

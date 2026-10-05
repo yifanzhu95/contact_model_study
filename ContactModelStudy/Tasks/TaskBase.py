@@ -259,6 +259,18 @@ class TaskBase(abc.ABC):
         """
         raise NotImplementedError(f"{type(self).__name__} does not expose its goal")
 
+    def setCostWeights(self, weights: dict) -> None:
+        """Change some of the cost's weights, by name, after construction.
+
+        Weights left out keep their value. Like ``setGoal``, a task must update
+        any device copy in place, so a planner whose rollout graph is already
+        captured scores with the new weights on its next replay. A search over
+        weights (``experiments/run_bayes_opt.py``) changes them between episodes
+        this way instead of rebuilding the planner. Tasks that support it
+        override this.
+        """
+        raise NotImplementedError(f"{type(self).__name__} cannot change its cost weights")
+
     @abc.abstractmethod
     def setRendererToGoal(self, renderer) -> None:
         """Bring ``renderer``'s depiction of the goal in line, so frames show it.

@@ -73,6 +73,7 @@ class MPPI(SamplingBasedPlannerBase):
     """
 
     name = "MPPI"
+    RUNTIME_FIELDS = SamplingBasedPlannerBase.RUNTIME_FIELDS + ("temperature",)
 
     def __init__(self, simulator, task, config: MPPI_Config | None = None):
         """See ``SamplingBasedPlannerBase.__init__``; ``config`` is an ``MPPI_Config``."""
@@ -128,6 +129,33 @@ class MPPI(SamplingBasedPlannerBase):
     def _resetParams(self) -> None:
         """Undo adaptive-temperature drift so a new episode starts from lambda."""
         self.lam = self.config.temperature
+
+    def UpdateConfig(self, **changes) -> None:
+        """See the base; a new ``temperature`` also restarts ``lambda`` from it."""
+        super().UpdateConfig(**changes)
+        if "temperature" in changes:
+            self.lam = self.config.temperature
+
+    def FirstActionDistribution(self) -> tuple[np.ndarray, np.ndarray]:
+        """Weighted mean and covariance of the last plan's first actions.
+
+        The softmax weights of the final iteration and the samples they scored
+        form a weighted particle set whose mean is the returned action. Every
+        control mode turns a sample's first value into a command by adding the
+        same offset, so the covariance of the samples is the covariance of the
+        commands. Read from the device after the plan, so call it before the
+        next ``Plan``.
+        """
+        if not self.last_plan_ok or self.last_action_seq is None:
+            raise RuntimeError("no successful plan to describe; call Plan first")
+        w = self.w_wp.numpy().astype(np.float64)
+        V0 = self.V_wp.numpy()[:, 0, :].astype(np.float64)
+        s = w.sum()
+        w = w / s if np.isfinite(s) and s > 0 else np.full(w.shape, 1.0 / w.size)
+        mean_V0 = w @ V0
+        D = V0 - mean_V0
+        cov = (w[:, None] * D).T @ D
+        return self.last_action_seq[0].astype(np.float64).copy(), 0.5 * (cov + cov.T)
 
     def SaveState(self) -> dict:
         """The base state plus the adaptive temperature."""

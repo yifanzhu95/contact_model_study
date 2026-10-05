@@ -63,7 +63,7 @@ from ContactModelStudy.Utils.ContactModelPresets import (  # noqa: E402
     GetContactModelSim,
 )
 from ContactModelStudy.Utils.EpisodeRecorder import EpisodeRecorder  # noqa: E402
-from ContactModelStudy.Utils.EvalSimulators import EVAL_SIMS, makeEvalSim  # noqa: E402
+from ContactModelStudy.Utils.EvalSimulators import evalSimNames, makeEvalSim  # noqa: E402
 
 #: Tasks this driver can run, by the name passed to --task.
 TASKS = {"cube_reorient": CubeReorient, "duck_reorient": DuckReorient,
@@ -113,9 +113,10 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--ctrl-time-step", type=float, default=None,
                    help="control-step duration (s), rounded down to whole rollout "
                         "timesteps; the alternative to --substeps")
-    g.add_argument("--eval-sim", default="mujoco", choices=sorted(EVAL_SIMS),
-                   help="simulator the episode is scored in (the rollouts always run "
-                        "on MJWarp); every one runs the same eval MJCF")
+    g.add_argument("--eval-sim", default="mujoco", choices=evalSimNames(),
+                   help="simulator the episode is scored in, on the eval MJCF: a CPU "
+                        "simulator (mujoco, pinocchio, drake) or a GPU contact model "
+                        "(M1-M4, as for --rollout-model, with one world)")
     g.add_argument("--settle", type=float, default=1.0,
                    help="seconds to let the hand and object come to rest, holding "
                         "the initial grasp, before planning starts (filmed, not "
@@ -139,7 +140,7 @@ def build_parser() -> argparse.ArgumentParser:
                    choices=sorted(CONTACT_MODELS) + sorted(ALIASES), metavar="MODEL",
                    help="contact model the planner rolls out with: M1 (stiff MJWarp), "
                         "M2 (MJWarp soft, default), M3 (ComFree), M4 (XPBD)")
-    g.add_argument("--n-samples", type=int, default=64,
+    g.add_argument("--n-samples", type=int, default=256,
                    help="N: rollout worlds, one per sampled control sequence")
     g.add_argument("--horizon", type=int, default=None,
                    help=f"H: planning horizon in control steps. Give this or "
