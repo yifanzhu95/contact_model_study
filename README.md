@@ -169,6 +169,11 @@ The expected version line is `3.6.0 1.12.0`.
 1. Contact models M1-M4, with throughput checks on primitives and Allegro scenes.
 2. Duck `grasp_reorient` MPPI closed-loop smoke tests on the four FOAM sphere
    scenes, using the fixed eight-hull Duck as the eval model.
+3. An isolated Newton 1.6 / SolverKamino offline-reference subproject under
+   `kamino_reference/`.  It consumes the same fingerprinted state, goal, cost,
+   timing and candidate tape as M1--M4 without mixing the incompatible Warp and
+   MuJoCo dependency stacks.  Start with
+   `kamino_reference/docs/collaborator_handoff.md`.
 
 ## What needs to be done next
 

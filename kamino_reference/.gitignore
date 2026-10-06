@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Generated runs and guard logs stay local.  Only the three frozen planning
+# inputs needed by a clean checkout are versioned.
+artifacts/*
+!artifacts/reference_inputs/
+artifacts/reference_inputs/*
+!artifacts/reference_inputs/cube_high_high_pinocchio_settled_contact_c7_g12_s0_iter3.npz
+!artifacts/reference_inputs/step39_optimizer_v2_development_max_seed3900.npz
+!artifacts/reference_inputs/step39_optimizer_v2_heldout_max_seed3902.npz

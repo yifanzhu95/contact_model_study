@@ -1,0 +1,113 @@
+{
+  "budget_ladder": [
+    {
+      "claim_scope": "safety_and_plumbing_only",
+      "iterations": 1,
+      "label": "G0_4x1",
+      "numerical_repeats": 1,
+      "samples": 4
+    },
+    {
+      "claim_scope": "development_scaling_experiment",
+      "iterations": 1,
+      "label": "B1_32x20",
+      "numerical_repeats": 20,
+      "samples": 32
+    },
+    {
+      "claim_scope": "development_scaling_experiment",
+      "iterations": 3,
+      "label": "B2_32x20x3",
+      "numerical_repeats": 20,
+      "samples": 32
+    },
+    {
+      "claim_scope": "development_scaling_experiment",
+      "iterations": 3,
+      "label": "B3_64x20x3",
+      "numerical_repeats": 20,
+      "samples": 64
+    },
+    {
+      "claim_scope": "maximum_preregistered_development_budget",
+      "iterations": 3,
+      "label": "B4_128x20x3",
+      "numerical_repeats": 20,
+      "samples": 128
+    }
+  ],
+  "claim_boundary": {
+    "allowed_after_all_gates": "A repeat-aggregated, simulator-defined offline Kamino reference action for the frozen planning problem.",
+    "excluded": [
+      "real-world ground truth",
+      "mathematical global optimality",
+      "online real-time MPC",
+      "production Pinocchio replacement",
+      "a reference claim from one budget without convergence and held-out gates"
+    ]
+  },
+  "convergence_gates": {
+    "action_change_between_successive_budgets_l2_rad_max": 0.001,
+    "action_change_between_successive_budgets_linf_rad_max": 0.0005,
+    "bootstrap_componentwise_95_percent_full_width_rad_max": 0.001,
+    "common_validation_cost_relative_change_max": 0.005,
+    "consecutive_passing_budget_transitions_required": 2,
+    "minimum_pairwise_rank_spearman": 0.95,
+    "minimum_pairwise_top5_overlap": 4,
+    "strict_valid_candidate_repeat_cells_required": "all",
+    "temperature_or_threshold_retuning_after_results": "forbidden"
+  },
+  "held_out_rule": {
+    "candidate_noise_seed": 3902,
+    "required_before_operational_reference": true,
+    "retuning_after_held_out_results": "forbidden"
+  },
+  "numerical_repeat_estimator": {
+    "bootstrap_draws": 2000,
+    "bootstrap_scope": "resample whole repeat rows and report component-wise 95 percent first-action intervals",
+    "bootstrap_seed": 4401,
+    "diagnostics": [
+      "median",
+      "sample standard deviation",
+      "standard error",
+      "minimum",
+      "maximum",
+      "range"
+    ],
+    "primary": "arithmetic mean candidate cost in float64",
+    "prohibited": "compute one soft-min action per repeat and average those actions"
+  },
+  "provenance": {
+    "basis": "Step 43 fixed-four-world repeat-count convergence",
+    "evidence_scope": "The 20-repeat estimator was calibrated on four candidates; 32/64/128-candidate budgets remain scaling experiments until their gates pass.",
+    "historical_v2_status": "The old five-repeat B1 remains unauthorized."
+  },
+  "reference_claim": {
+    "estimator_contract_supported": true,
+    "minimum_numerical_repeats": 20,
+    "single_budget_claim_allowed": false,
+    "why_single_budget_is_not_enough": "Budget convergence, common validation, and held-out evaluation are still required."
+  },
+  "safety_execution": {
+    "guard": "scripts/run_gpu_guarded.py",
+    "initial_candidate_chunk_worlds_max": 4,
+    "initial_guard_wall_time_s": 120,
+    "require_explicit_local_scene_override_on_new_machine": true
+  },
+  "schema": "kamino_feasibility.reference_optimizer_v3_preregistration.v1",
+  "solver_policy": {
+    "device": "cuda:0",
+    "dynamics_storage": "sparse",
+    "padmm_max_iterations": 800,
+    "padmm_penalty_update_method": "fixed",
+    "padmm_rho0": 0.1,
+    "padmm_tolerance": 0.0005,
+    "sparse_linear_solver": "CRF"
+  },
+  "status": "FROZEN_FOR_COLLABORATOR_SCALING",
+  "temperature_rule": {
+    "effective_sample_size": "report only; do not create a post-hoc pass threshold",
+    "primary_temperature": 10.0,
+    "retuning_on_development_or_held_out_results": "forbidden"
+  }
+}
