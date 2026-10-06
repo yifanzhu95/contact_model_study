@@ -238,6 +238,15 @@ the simulator it's given.
   actions:
   - near `noise_sigma` when the costs couldn't tell the samples apart;
   - near 0 when one sample dominated.
+- **Planning on the eval scene** (`plan_on_eval_scene=True`, driver flag
+  `--plan-on-eval`): the planner rolls out on the eval MJCF at the eval
+  timestep instead of the rollout scene. The planner checks that its task's
+  role agrees with the flag, so the recorded config can't misdescribe the
+  rollout. With `--eval-sim Mk` and `--rollout-model Mk`, the planner's model
+  is the judged world: an oracle baseline.
+  - **Cost:** the control step and horizon resolve at the eval timestep. At
+    0.5 ms eval and 4 ms rollout steps, that is 8× the rollout steps per plan:
+    about 420 ms per plan instead of about 95 ms (N = 256).
 - **Changing settings on a built planner:** `UpdateConfig(temperature=..., noise_sigma=...)`
   changes the fields in `RUNTIME_FIELDS` without a rebuild (they are read on
   every plan). Anything else shaped the buffers or the captured graph and
@@ -320,6 +329,7 @@ Useful driver options:
 | `--results` / `--no-results` | Where to save; saved by default to `results/` |
 | `--save-steps` | Also save the per-step `.npy` data |
 | `--uncertainty` | Record the planner's uncertainty |
+| `--plan-on-eval` | Plan on the eval scene at the eval timestep (`plan_on_eval_scene`) |
 | `--video` / `--no-video` | Record a video |
 
 ## Running episodes in parallel

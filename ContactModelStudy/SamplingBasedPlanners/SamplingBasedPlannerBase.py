@@ -85,6 +85,14 @@ class SamplingBasedPlannerConfig:
             spread out the samples' first actions were, per actuator, under the
             weights the planner used to form the action. What exactly that is
             depends on the planner; see its ``_actionUncertainty``.
+        plan_on_eval_scene: Predict with the task's *eval* scene, at the eval
+            timestep: the same model the eval simulator runs, instead of the
+            rollout scene. The planner is handed its task and simulator, so
+            this flag does not build anything; it says which they are, and the
+            planner checks that its task's role agrees (an eval-role task with
+            the flag, a rollout-role one without), so a recorded config always
+            describes what was rolled out. The drivers read it to build the
+            planner's task (``run_episodes.py --plan-on-eval``).
     """
 
     noise_sigma: float = 0.01
@@ -96,6 +104,7 @@ class SamplingBasedPlannerConfig:
     use_graph: bool = True
     debug: bool = False
     return_uncertainty: bool = False
+    plan_on_eval_scene: bool = False
 
     def __post_init__(self) -> None:
         if self.noise_sigma <= 0.0:
@@ -190,6 +199,16 @@ class SamplingBasedPlannerBase(abc.ABC):
                 f"{type(self).__name__} cannot report an action uncertainty; "
                 f"set return_uncertainty=False"
             )
+
+        role = getattr(task, "role", None)
+        if role is not None:
+            from ContactModelStudy.Tasks.TaskBase import TaskRole
+            on_eval = TaskRole(role) is TaskRole.EVAL
+            if on_eval != bool(self.config.plan_on_eval_scene):
+                raise ValueError(
+                    f"plan_on_eval_scene={self.config.plan_on_eval_scene} but the task's role is "
+                    f"{TaskRole(role).value!r}: plan on the eval scene with an eval-role task and "
+                    f"plan_on_eval_scene=True, or on the rollout scene with a rollout-role task")
 
         # Diagnostics a driver or an evaluation pass can read after a plan.
         self.last_action_seq: np.ndarray | None = None

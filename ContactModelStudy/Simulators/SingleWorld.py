@@ -125,6 +125,11 @@ class SingleWorld(Simulator):
     def timestep(self) -> float:
         return self.inner.timestep
 
+    @property
+    def time(self) -> float:
+        """Simulated time of the one world (what a recorder timestamps steps with)."""
+        return float(self.inner.time[0])
+
     def Close(self) -> None:
         self._graphs.clear()
         self.inner.Close()

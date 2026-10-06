@@ -44,6 +44,9 @@ def test_single_world_reads_like_a_simulator(sims, model, cube_tasks, cube_initi
     q, v = sim.GetState()
     assert q.shape == (sim.nq,) and v.shape == (sim.nv,) and sim.GetControl().shape == (sim.nu,)
     assert np.allclose(q, q0, atol=1e-6) and np.allclose(sim.GetControl(), u0, atol=1e-6)
+    t0 = sim.time
+    sim.Step(10)
+    assert isinstance(t0, float) and sim.time == pytest.approx(t0 + 10 * DT)
     # Tasks judge it on the host, like CPU MuJoCo.
     ev = cube_tasks[1]
     ev.setSimToInitialState(sim)

@@ -263,6 +263,28 @@ def runAll(csv_path: Path, rows: list[dict], outdir: Path, overwrite: bool, stop
 
 
 # -- summary -------------------------------------------------------------------
+def cellResultMetrics(res: Path) -> dict:
+    """A cell's results file, boiled down: counts, success rate, mean steps and plan time.
+
+    Empty when the file does not exist. Shared with ``process_batch_results.py``,
+    so its final table reports the batch exactly as ``summary.csv`` does.
+    """
+    if not res.exists():
+        return {}
+    doc = json.loads(res.read_text())
+    eps = [e["summary"] for e in doc.get("episodes", [])]
+    plan = [e["plan_s_mean"] for e in eps if e.get("plan_s_mean") is not None]
+    steps = [e["steps_to_success"] for e in eps if e.get("steps_to_success") is not None]
+    return dict(
+        n_episodes_run=doc.get("n_episodes"), n_success=doc.get("n_success"),
+        n_failed=doc.get("n_failed"), success_rate=doc.get("success_rate"),
+        mean_steps_to_success=(sum(steps) / len(steps)) if steps else None,
+        mean_goals_reached=(sum(e["goals_reached"] for e in eps) / len(eps)) if eps else None,
+        plan_ms_mean=(1e3 * sum(plan) / len(plan)) if plan else None,
+        results=res.name,
+    )
+
+
 def summarize(csv_path: Path, rows: list[dict], outdir: Path) -> Path | None:
     """Merge every cell's results into ``summary.csv`` and ``summary.json``."""
     table = []
@@ -274,20 +296,7 @@ def summarize(csv_path: Path, rows: list[dict], outdir: Path) -> Path | None:
             entry["status"], entry["wall_s"] = status.get("status"), round(status.get("wall_s", 0), 1)
         except (OSError, ValueError):
             entry["status"] = "not run"
-        res = outdir / f"{name}.json"
-        if res.exists():
-            doc = json.loads(res.read_text())
-            eps = [e["summary"] for e in doc.get("episodes", [])]
-            plan = [e["plan_s_mean"] for e in eps if e.get("plan_s_mean") is not None]
-            steps = [e["steps_to_success"] for e in eps if e.get("steps_to_success") is not None]
-            entry.update(
-                n_episodes_run=doc.get("n_episodes"), n_success=doc.get("n_success"),
-                n_failed=doc.get("n_failed"), success_rate=doc.get("success_rate"),
-                mean_steps_to_success=(sum(steps) / len(steps)) if steps else None,
-                mean_goals_reached=(sum(e["goals_reached"] for e in eps) / len(eps)) if eps else None,
-                plan_ms_mean=(1e3 * sum(plan) / len(plan)) if plan else None,
-                results=res.name,
-            )
+        entry.update(cellResultMetrics(outdir / f"{name}.json"))
         table.append(entry)
     if not table:
         return None

@@ -2182,6 +2182,122 @@ That gives a rollout-model × eval-model matrix.
 - `tests/test_run_episodes.py` gains 4: the driver with M1, M3 and M4 as eval,
   and a pooled run with M2.
 
+## What was done — planning on the eval scene (`plan_on_eval_scene`)
+
+**What it is:**
+
+- **The config field.** `SamplingBasedPlannerConfig.plan_on_eval_scene` (default
+  `False`) says the planner rolls out on the task's eval scene, at the eval
+  timestep. The planner is handed its task and simulator, so the field builds
+  nothing.
+- **The check.** `SamplingBasedPlannerBase.__init__` requires the task's role to
+  agree: an eval-role task with the flag, a rollout-role one without.
+  Anything else is a `ValueError`, so a recorded config always says what was
+  rolled out.
+- **The drivers.** `run_episodes.py --plan-on-eval` sets the field, and
+  `buildTasks` builds the planner's task with `TaskRole.EVAL`. Everything
+  downstream follows from `task.getModelPath()`/`task.timestep`: the
+  interwoven and pooled drivers (planner processes and workers), the batch,
+  grid and BO CSVs (a `plan_on_eval` column), and the recorder's `rollout_task`.
+
+**Changes to existing code:**
+
+- **The eval steps per control step** now come from the two timesteps,
+  `round(substeps * task.timestep / eval_task.timestep)`, instead of
+  `substeps * eval_steps_per_rollout_step`. It is the same number normally,
+  and right when the planner runs at the eval timestep.
+- **A bug in the previous change:** `SingleWorld` had no `time`, so every GPU
+  eval run (M1–M4) recorded NaN step times. It now reports the world's
+  simulated time, and a test covers it.
+
+**Measured:** cube, M2 eval, 4 episodes × 200 steps, 2 workers, at the current
+defaults (0.5 ms eval, 4 ms rollout, 64 ms control step, 256 samples):
+
+| | Rollout scene | `--plan-on-eval` |
+| --- | --- | --- |
+| Rollout steps per control step | 16 | 128 |
+| Plan time (mean) | 83–98 ms | 411–437 ms |
+| Successes | 2 of 4 | 0 of 4 |
+| Wall time | 85 s | 409 s |
+
+Four episodes is too few to read the success difference as a result.
+
+**Tests:**
+
+- 2 in `tests/test_planner.py`: an eval-scene planner plans, and a role
+  mismatch raises either way.
+- 2 in `tests/test_run_episodes.py`: sequential and pooled `--plan-on-eval`
+  runs, checking the recorded scene, role, flag, rollout timestep and the
+  2 ms step spacing.
+- The `SingleWorld` time check.
+- The full suite was 254 passing, plus the 2 that exposed the `time` bug, which
+  now pass.
+
+## What was done — experiments/process_batch_results.py: KL to the optimal planner, forward-simulation error
+
+`process_batch_results.py <batch dir>` analyses every cell of a
+`run_episode_batches` results folder. It writes `analysis/<cell>.analysis.json`
+and `.npz` per cell, and `final_results.csv`/`.json` plus `final_episodes.csv`
+at the top. Those tables merge the cell settings, the batch's own results and
+the new metrics.
+
+**The pipeline:**
+
+- **HPC:** `hpc/submit_process_batch_results.sh <batch dir> [throttle]` →
+  `process_batch_results.slurm` (an array over the cells) →
+  `summarize_batch_results.slurm` (`afterany`).
+- **Cells** are the folder's `cell_*.status.json` files.
+- **Errors fail one cell, with the reason:** a CPU eval simulator, no saved
+  steps, or missing results.
+
+**The KL:**
+
+- **The used planner** is rebuilt from `configs.metadata.cli_args`.
+- **The optimal planner** is the same with `--plan-on-eval` and
+  `rollout_model = eval_sim`. Its control step and horizon are given as
+  durations, so both cover the same time.
+- **The replay:** both replay each episode in order from the recorded states,
+  with the previous recorded control and each step's goal. They reset where
+  `run_episode` reset, and share the per-episode noise seed.
+- **The measure:** `PlannerGaussian` (no restore) and `GaussianKL`, both ways.
+
+**The forward-simulation error:**
+
+- **The setup:** a rollout-model simulator and an eval-preset simulator, each
+  with one world per recorded step. They are set to the recorded states and
+  controls, and each takes one control step (`substeps` rollout steps, and
+  `round(substeps · rollout_dt / eval_dt)` eval steps).
+- **The comparison:** object position and rotation, hand RMS, and
+  `qpos`/`qvel` L2. The eval prediction is also compared with the recorded
+  next state.
+
+**Changes to existing code:**
+
+- **`EpisodeRecorder.GenerateSummary`** now also saves `goal_values` and
+  `goal_steps`. Older files are rebuilt from the goal stream and checked
+  against the labels.
+- **`run_episode_batches.cellResultMetrics()`** is factored out of
+  `summarize`, so the final table reports the batch as `summary.csv` does.
+
+**Measured** on a local batch (cube, 2 episodes × 40 steps, N = 128, 0.5 ms eval):
+
+| Cell | KL(used‖opt) | KL(opt‖used) | object pos error | eval vs recorded |
+| --- | --- | --- | --- | --- |
+| M3 planner, M1 world | 1.60 | 1.76 | 3.5 mm | 0.03 mm |
+| M1 oracle (`--plan-on-eval`) | 0.023 | 0.023 | 0.04 mm | 0.04 mm |
+
+The oracle's residual is M1's own run-to-run nondeterminism. Analysing cost
+about 1–2 s per recorded step, dominated by the optimal planner at the eval
+timestep.
+
+**Checked:**
+
+- The submit script against a fake `sbatch`: `--array=0-2%2`, `ANALYSIS_ARGS`
+  passed through, the summary `afterany`.
+- `bash -n` on each script.
+- `tests/test_process_batch_results.py` has 7 tests: cells, checks, optimal
+  args, metrics, goal reconstruction, and an end-to-end run with resume.
+
 ## Small fixes — 2026-09-24
 
 Three requested changes, plus a driver bug found while testing them.

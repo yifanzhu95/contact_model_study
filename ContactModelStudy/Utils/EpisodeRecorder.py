@@ -335,7 +335,9 @@ class EpisodeRecorder:
         An episode's summary has:
 
         * ``id``, ``finish_reason``, ``failed``, ``n_steps``;
-        * ``goals`` (their labels, in order), ``goals_reached``,
+        * ``goals`` (their labels, in order), with ``goal_values`` (each goal
+          as ``setGoal`` took it) and ``goal_steps`` (the step it was adopted
+          at), ``goals_reached``,
           ``success_steps``, ``steps_to_success`` and ``success``. An episode
           succeeded if it reached any goal, however it then ended;
         * ``goal_errors_start`` / ``goal_errors_end``, when the task defines
@@ -377,6 +379,8 @@ class EpisodeRecorder:
             "failed": ep.finish_reason == "failure",
             "n_steps": ep.n_steps,
             "goals": [label for _step, _goal, label in ep.goals],
+            "goal_values": [goal for _step, goal, _label in ep.goals],
+            "goal_steps": [step for step, _goal, _label in ep.goals],
             "goals_reached": len(succ),
             "success_steps": succ,
             "steps_to_success": succ[0] if succ else None,

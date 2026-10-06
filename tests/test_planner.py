@@ -143,3 +143,22 @@ def test_planner_without_the_hook_refuses_the_flag(sim, cube_tasks):
     with pytest.raises(NotImplementedError):
         NoUncertainty(sim, cube_tasks[0], SB.SamplingBasedPlannerConfig(return_uncertainty=True))
     NoUncertainty(sim, cube_tasks[0], SB.SamplingBasedPlannerConfig())
+
+
+# -- planning on the eval scene ------------------------------------------------
+def test_plan_on_eval_scene(cube_tasks, cube_initial):
+    from conftest import EVAL_CUBE
+    from ContactModelStudy.Simulators.VectorizedMujoco import VectorizedMujoco, VectorizedMujocoConfig
+    ro, ev = cube_tasks
+    q0, v0, u0 = cube_initial
+    eval_sim = VectorizedMujoco(EVAL_CUBE, VectorizedMujocoConfig(timestep=ev.timestep, horizon=4, substeps=4), N=32)
+    p = _mppi(eval_sim, ev, plan_on_eval_scene=True)
+    assert np.isfinite(p.Plan(q0, v0, u=u0)).all()
+
+
+def test_plan_on_eval_scene_must_match_the_task_role(sim, cube_tasks):
+    ro, ev = cube_tasks
+    with pytest.raises(ValueError, match="role is 'rollout'"):
+        _mppi(sim, ro, plan_on_eval_scene=True)
+    with pytest.raises(ValueError, match="role is 'eval'"):
+        _mppi(sim, ev)

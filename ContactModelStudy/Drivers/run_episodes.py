@@ -164,6 +164,11 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--adaptive-temp", action=argparse.BooleanOptionalAction, default=False)
     g.add_argument("--graph", action=argparse.BooleanOptionalAction, default=True,
                    help="capture the rollout into a CUDA graph (much faster)")
+    g.add_argument("--plan-on-eval", action=argparse.BooleanOptionalAction, default=False,
+                   help="roll out on the eval scene at the eval timestep (the model the eval "
+                        "simulator runs) instead of the rollout scene; --hand-acc/--obj-acc "
+                        "then do not apply, and the control step and horizon resolve at the "
+                        "eval timestep (more rollout steps per plan when it is finer)")
 
     g = p.add_argument_group("gpu buffers")
     g.add_argument("--nconmax", type=int, default=None,
@@ -253,9 +258,10 @@ def run_episode(args, task, eval_task, sim, planner, renderer, recorder) -> str:
         renderer.Reset()
 
     # One control step advances the eval simulator this many of its own (fine)
-    # steps: the planner's (resolved) substeps rollout steps, each
-    # eval_steps_per_rollout_step long.
-    eval_steps = planner.substeps * eval_task.config.eval_steps_per_rollout_step
+    # steps: the planner's (resolved) substeps rollout steps, each task.timestep long.
+    # From the two timesteps rather than eval_steps_per_rollout_step, so it is
+    # also right for a planner on the eval scene (rollout step = eval step).
+    eval_steps = int(round(planner.substeps * task.timestep / eval_task.timestep))
     # Frames are due every `steps_per_frame` eval steps — on the simulation
     # clock, not the control clock. A control step can be longer than a frame
     # (64 ms vs 33 ms at 30 fps), so capturing once per control step would drop
@@ -399,8 +405,12 @@ def buildTasks(args, seed: int | None = None):
     task_cls = TASKS[args.task]
     common = dict(timestep=args.timestep, eval_steps_per_rollout_step=args.eval_steps_per_rollout_step,
                   goal_difficulty=args.goal_difficulty, cost_weights=args.cost_weights)
-    task = task_cls(LeapReorientConfig(role=TaskRole.ROLLOUT, hand_acc=args.hand_acc,
-                                       obj_acc=args.obj_acc, **common))
+    if args.plan_on_eval:
+        # The planner predicts with the eval scene itself; see --plan-on-eval.
+        task = task_cls(LeapReorientConfig(role=TaskRole.EVAL, **common))
+    else:
+        task = task_cls(LeapReorientConfig(role=TaskRole.ROLLOUT, hand_acc=args.hand_acc,
+                                           obj_acc=args.obj_acc, **common))
     eval_task = task_cls(LeapReorientConfig(role=TaskRole.EVAL,
                                             seed=args.seed if seed is None else seed, **common))
     return task, eval_task
@@ -425,6 +435,7 @@ def buildPlannerConfig(args) -> MPPI_Config:
         control_mode=args.control_mode, delta_range=delta_range,
         warm_start=args.warm_start, seed=args.seed, use_graph=args.graph,
         debug=args.debug, return_uncertainty=args.uncertainty,
+        plan_on_eval_scene=args.plan_on_eval,
     )
 
 
@@ -459,13 +470,14 @@ def runRecordedEpisode(episode: int, args, task, eval_task, sim, planner, record
 
 def printHeader(args, task, eval_task, rollout_cfg, rollout_sim_class: str, planner_repr: str) -> None:
     control_hz = 1.0 / rollout_cfg.control_timestep
-    print(f"task       {args.task}  (rollout {args.hand_acc}_{args.obj_acc})")
+    scene = "planning on the eval scene" if args.plan_on_eval else f"rollout {args.hand_acc}_{args.obj_acc}"
+    print(f"task       {args.task}  ({scene})")
     print(f"eval scene {Path(eval_task.getModelPath()).name}  (on {args.eval_sim})")
     print(f"rollout    {Path(task.getModelPath()).name}  (contact model {args.rollout_model}: "
           f"{rollout_sim_class})")
     print(f"planner    {planner_repr}")
     print(f"timesteps  eval {eval_task.timestep * 1e3:g} ms, rollout "
-          f"{task.timestep * 1e3:g} ms ({args.eval_steps_per_rollout_step} eval steps per rollout step)")
+          f"{task.timestep * 1e3:g} ms ({round(task.timestep / eval_task.timestep)} eval steps per rollout step)")
     print(f"control    {control_hz:.1f} Hz: {rollout_cfg.resolved_substeps} rollout steps = "
           f"{rollout_cfg.control_timestep * 1e3:g} ms per control step  ({args.steps} steps = "
           f"{args.steps / control_hz:.2f} s per episode)")

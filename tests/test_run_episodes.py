@@ -115,6 +115,27 @@ def test_pooled_run_with_a_gpu_eval_simulator(tmp_path):
     assert len(rp) == 2 and rp.configs["eval_simulator"]["class"] == "VectorizedMujoco"
 
 
+def test_plan_on_eval(tmp_path):
+    rp = EpisodeReplayer(run(tmp_path, "--steps", "5", "--plan-on-eval", "--eval-sim", "M2"))
+    c = rp.configs
+    assert c["rollout_task"]["role"] == "eval" and c["rollout_task"]["model_path"].endswith("env_leap_eval_cube.xml")
+    assert c["rollout_task"]["model_path"] == c["eval_task"]["model_path"]
+    assert c["planner"]["config"]["plan_on_eval_scene"] is True
+    assert c["rollout_simulator"]["config"]["timestep"] == pytest.approx(0.0005)
+    # 4 substeps at the eval step, so the eval sim takes 4 (not 4 x 8) steps per control step.
+    assert np.allclose(np.diff(rp[0].t), 4 * 0.0005)
+
+
+def test_pooled_plan_on_eval(tmp_path):
+    from ContactModelStudy.Drivers import run_episodes_pooled as pooled
+    out = tmp_path / "pooled.json"
+    assert pooled.main([*BASE, "--plan-on-eval", "--eval-sim", "M2", "--n-episodes", "2", "--steps", "4",
+                        "--workers", "2", "--results", str(out)]) == 0
+    rp = EpisodeReplayer(out)
+    assert len(rp) == 2 and rp.configs["rollout_task"]["role"] == "eval"
+    assert np.allclose(np.diff(rp[0].t), 4 * 0.0005)
+
+
 @pytest.mark.parametrize("task, scene", [("duck_reorient", "duck_high_high"), ("ball_reorient", "ball_high_high")])
 def test_each_task(tmp_path, task, scene):
     rp = EpisodeReplayer(run(tmp_path, "--steps", "5", "--task", task))

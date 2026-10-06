@@ -1,4 +1,4 @@
-# Experiments: batches, grids and Bayesian optimization from a CSV
+# Experiments: batches, grids, Bayesian optimization, and analysing results
 
 `run_episode_batches.py` runs batches of `run_episodes.py` episodes described by
 a CSV, one row per batch (a *cell*). It works the same on a workstation and on
@@ -27,6 +27,7 @@ driver's default.
   `nconmax`, `njmax`. `run_episodes.py --help` lists them all.
   `eval_sim` takes a CPU simulator (`mujoco`, `pinocchio`, `drake`) or a GPU
   contact model (`M1`–`M4`).
+  `plan_on_eval` (true/false) makes the planner roll out on the eval scene.
 - **On/off options.** These take `true` or `false`: `stop_on_success`,
   `warm_start`, `uncertainty`, `save_steps`, `graph`, `debug`, ...
 - **Cost weights.** `w_quat`, `w_pos_x`, ..., `w_fallen_term` override the
@@ -258,3 +259,80 @@ row, validation first, and a summary job queued `afterany`.
   uses whatever SLURM grants. Change it per submission, for example
   `SBATCH_ARGS="--gpus=rtx_5000_ada:4 --cpus-per-task=32 --time=48:00:00"`.
 - **Cost:** a cell is `n_calls × models × n_episodes` episodes.
+
+# Processing batch results: KL to the optimal planner, forward-simulation error
+
+`process_batch_results.py` takes a results folder written by
+`run_episode_batches.py` and analyses every cell:
+
+1. **KL to the optimal planner.**
+   - **The used planner** is rebuilt from the cell's recorded command line.
+   - **The optimal planner** is the same planner (sample count, temperature,
+     noise, weights, and the same control step and horizon as durations)
+     planning with the eval model: the eval scene at the eval timestep, with
+     the eval simulator's contact model.
+   - **The replay:** both walk every recorded episode, planning from the
+     recorded states with the recorded previous controls and each step's goal.
+     Each planner keeps its own warm state and resets where the episode did.
+     Both draw the same noise.
+   - **The measure:** each step's first actions become Gaussians, and both
+     `KL(used‖opt)` and `KL(opt‖used)` are kept, along with the distance
+     between their means.
+2. **Forward-simulation error.** From every recorded state, with that step's
+   action, the rollout model (rollout scene and timestep) and the eval
+   simulator (eval scene and timestep) each take one control step. All the
+   steps of an episode run at once, as the worlds of one GPU simulator.
+   - **The comparison:** object position (m) and rotation (rad), hand joints
+     (RMS rad), and the full `qpos`/`qvel`.
+   - **A sanity column (`eval_vs_recorded_*`):** the eval prediction against
+     what the episode actually did next. This shows the cost of restarting
+     from a recorded state; it is about 0.04 mm.
+
+**Requirements.** The cell must have been run with `save_steps=true`, and its
+`eval_sim` must be a GPU contact model (`M1`–`M4`): the optimal planner and the
+forward step need a vectorized eval model. Anything else fails that cell with
+the reason.
+
+| | Command |
+| --- | --- |
+| Count the cells | `python experiments/process_batch_results.py <batch dir> --count` |
+| Analyse every cell, then the final tables | `python experiments/process_batch_results.py <batch dir>` |
+| One cell | `python experiments/process_batch_results.py <batch dir> --cell 2` |
+| Only the final tables | `python experiments/process_batch_results.py <batch dir> --summarize` |
+| Submit to the HPC | `experiments/hpc/submit_process_batch_results.sh <batch dir> [max concurrent]` |
+
+**Options:**
+
+- `--stride k` computes the KL only every k-th step. Each planner keeps its
+  warm state between the steps it plans.
+- `--max-episodes` limits the episodes analysed per cell.
+- `--shrinkage` is the KL's covariance shrinkage (1e-3).
+- `--overwrite` redoes cells already analysed.
+
+**Output**, written into the batch folder:
+
+- **`analysis/<cell>.analysis.json`:** each metric's mean, median and p90,
+  per episode and per cell, plus how the optimal planner was built.
+- **`analysis/<cell>.analysis.npz`:** the per-step arrays.
+- **`analysis/<cell>.analysis_status.json`:** `done` or `failed`, with the
+  error.
+- **`final_results.csv` (and `.json`):** one row per cell. It holds the cell's
+  settings, the batch's own results as in `summary.csv` (status, success rate,
+  steps to success, plan time), the analysis status, and every analysis
+  metric.
+- **`final_episodes.csv`:** one row per episode, the same way.
+
+**Goals.** New results save each goal's quaternion (`goal_values`,
+`goal_steps`). Older ones are rebuilt by replaying the eval task's goal stream
+from the recorded seed, and checked against the saved goal labels.
+
+**Cost.** The optimal planner runs at the eval timestep, so each recorded step
+costs a few plans: about 1–2 s at 0.5 ms eval and 64 ms control steps.
+
+**On the HPC.** `submit_process_batch_results.sh <batch dir> [max concurrent]`
+counts the cells, submits `process_batch_results.slurm` (one GPU per cell,
+12 h), and queues `summarize_batch_results.slurm` `afterany` to build
+`final_results.csv`.
+
+- **Extra flags** go in `ANALYSIS_ARGS`, e.g. `ANALYSIS_ARGS="--stride 4"`.
+- **Resubmitting** skips the cells already done.
