@@ -1,0 +1,19 @@
+{
+  "contract_path": "configs/optimizer_v3_20_repeat.json",
+  "contract_sha256": "747942ad9df4d587c4c6f73bffb24f1768ef034de77acd64ecd79b4909658402",
+  "development": {
+    "file_sha256": "d23b1bf045d8e21dd283525695941ef246512ac0bd162b02d321ab0bf5525516",
+    "fingerprint_sha256": "aa9c097ec7f7b2390a089e251e4b04b191a6108dc1ac8f8270ae252e566764c8",
+    "path": "artifacts/reference_inputs/step39_optimizer_v2_development_max_seed3900.npz"
+  },
+  "held_out": {
+    "file_sha256": "5abf2a8559f39efb2015efc0ce0240c2e8ad75b73ca0cd93aa617bb322ab2f6b",
+    "fingerprint_sha256": "eb99e9866b84ddacbc4fa40f82b207b92e748f9e00ef2094d023cfeb315c72d2",
+    "path": "artifacts/reference_inputs/step39_optimizer_v2_heldout_max_seed3902.npz"
+  },
+  "schema": "kamino_feasibility.reference_optimizer_v3_inputs.v1",
+  "template": {
+    "file_sha256": "9b577a75922f73a981f1e6d40d9bb010c9ba49dbc646de8c776ddfb5decc3cc4",
+    "path": "artifacts/reference_inputs/cube_high_high_pinocchio_settled_contact_c7_g12_s0_iter3.npz"
+  }
+}
