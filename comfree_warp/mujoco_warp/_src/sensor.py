@@ -367,8 +367,8 @@ def _frame_axis(
   elif objtype == ObjType.CAMERA:
     xmat = cam_xmat_in[worldid, objid]
     axis = wp.vec3(xmat[0, frame_axis], xmat[1, frame_axis], xmat[2, frame_axis])
-  else:  # UNKNOWN
-    axis = wp.vec3(xmat[0, frame_axis], xmat[1, frame_axis], xmat[2, frame_axis])
+  else:  # UNKNOWN: no frame to read an axis from (Warp >= 1.17 rejects the undefined `xmat` here)
+    axis = wp.vec3(0.0, 0.0, 0.0)
 
   if refid == -1:
     return axis
