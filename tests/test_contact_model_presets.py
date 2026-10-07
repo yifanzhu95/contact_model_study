@@ -86,7 +86,7 @@ def test_run_shape_passes_through():
 
 def test_unknown_model_name():
     with pytest.raises(ValueError):
-        _presetConfig("M5")
+        _presetConfig("M9")
 
 
 def test_override_that_is_not_a_field_of_that_model():

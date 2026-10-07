@@ -5,7 +5,7 @@ control. A planner (MPPI) chooses actions by rolling out many sampled futures
 in a fast GPU simulator, the *rollout model*. Those actions are then applied
 in a separate, more accurate simulator standing in for reality, the *eval
 simulator*. The study measures how well a task is performed as the rollout
-model's contact physics (M1–M4) and geometry fidelity change.
+model's contact physics (M1–M5) and geometry fidelity change.
 
 The main task is in-hand reorientation with a 16-DOF LEAP hand: turn a cube,
 duck or ball to a goal orientation.
@@ -23,6 +23,7 @@ ContactModelStudy/
 │   ├── VectorizedMujoco.py     MuJoCo Warp (MJWarp), N worlds
 │   ├── ComFree.py              complementarity-free contact on MJWarp
 │   ├── XPBD.py                 XPBD contact on MJWarp
+│   ├── Kamino.py               Newton's SolverKamino: full-NCP contact by PADMM (M5)
 │   └── SingleWorld.py          a one-world GPU simulator as a plain Simulator (GPU eval sims)
 ├── Tasks/                 what to do, what it costs, when it succeeds
 │   ├── TaskBase.py             TaskBase, TaskBaseConfig, TaskRole
@@ -40,7 +41,7 @@ ContactModelStudy/
 │   ├── run_episodes_pooled.py     many at once, across the GPUs and CPU cores of a machine
 │   └── EpisodePool.py             the engine behind the parallel drivers and the BO search
 └── Utils/
-    ├── ContactModelPresets.py  M1–M4 as ready-made rollout simulators
+    ├── ContactModelPresets.py  M1–M5 as ready-made rollout simulators
     ├── EvalSimulators.py       eval simulator by name (mujoco/pinocchio/drake, or M1-M4 on the GPU)
     ├── EpisodeRecorder.py      record, save, summarize and replay episodes
     ├── MjcfModelInfo.py        MJCF parameters as MuJoCo resolves them
@@ -134,6 +135,7 @@ Every simulator is a `Simulator`: `SetState(q, q_dot)`, `GetState()`,
 | `VectorizedMujoco` | GPU | As `Mujoco`; pyramidal friction cones only |
 | `ComFree` | GPU | As `VectorizedMujoco`, plus `stiffness` and `damping` |
 | `XPBD` | GPU | As `VectorizedMujoco`, plus `xpbd_substeps`, `xpbd_iterations`, `relaxation`, `vmax_depenetration` |
+| `Kamino` | GPU, Newton | The MJCF, imported by Newton and mapped to MuJoCo's layout by name; `KaminoConfig` holds PADMM and linear-solver settings |
 
 **Pinocchio and Drake inherit physics from the MJCF.** Damping, armature,
 joint limits, friction and servo gains are all read from the scene. So are the
@@ -142,7 +144,7 @@ come through `Utils/MjcfModelInfo.py`, which compiles the scene with MuJoCo,
 because neither engine's own parser reads MJCF defaults correctly. Changing a
 value in the XML changes it in all three eval simulators.
 
-**The GPU contact models can be the eval simulator too.** `--eval-sim M1`–`M4`
+**The GPU contact models can be the eval simulator too.** `--eval-sim M1`–`M5`
 builds exactly that rollout preset (`ContactModelPresets`), with one world, on
 the eval scene at the eval timestep. It comes wrapped in `SingleWorld`, which
 strips the world axis, so the episode loop, the tasks (which judge it on the
@@ -283,16 +285,34 @@ parameters, for example
 | M2 | `VectorizedMujoco` | MuJoCo's default soft contact (pyramidal cone), Newton, 25 iterations, 1e-6 |
 | M3 | `ComFree` | Complementarity-free contact (Jin 2024) |
 | M4 | `XPBD` | XPBD relaxation over MJWarp's constraint rows |
+| M5 | `Kamino` | Full NCP solved by PADMM (Newton's `SolverKamino`), with the collaborator's frozen reference settings: sparse, fused CR, ρ₀ = 0.1, tolerance 5e-4, up to 800 iterations. The accuracy reference, and by far the slowest model |
 
 Any config field can be overridden for a sweep, for example `stiffness=0.5` on
 M3.
 
 ## Running
 
-Use the `contact_modeling` conda environment. It needs MuJoCo, Warp,
-`comfree_warp`, and optionally Pinocchio and Drake. A CUDA GPU is needed for
-the rollouts. For offscreen video on a headless machine, set `MUJOCO_GL=egl`;
-the driver sets this itself when there's no display.
+Use the `contact_kamino` or `contact_modeling` conda environment; the top-level
+`README.md` (Installation and system setup) has what each runs and how to build
+it. A CUDA GPU is needed for the rollouts. For offscreen video on a headless
+machine, set `MUJOCO_GL=egl`; the driver sets this itself when there's no
+display. **M5 (Kamino) needs `contact_kamino`.**
+
+**What M5 costs**, measured on an RTX 4090:
+
+- **The cube rollout scene, at a 4 ms step:**
+  - one world takes about 8–19 ms per step with dense dynamics, or about
+    90–150 ms with sparse;
+  - 16–64 worlds (sparse) take about 80–145 ms per step;
+  - 256 worlds take about 440 ms per step, so a 256-sample plan takes about
+    35 s.
+- **The eval scene:** its fused CR solve needs more GPU shared memory than Ada
+  cards give a block, so `"auto"` falls back to unfused CR, at about 410 ms
+  per 0.5 ms step.
+- **Dense dynamics** overflows beyond a few worlds.
+
+So M5 is practical as an eval simulator on the coarser scenes, and as a
+small-sample reference planner, not as a 256-sample closed-loop planner.
 
 ```bash
 # one or more closed-loop episodes (every option: --help)
@@ -321,8 +341,8 @@ Useful driver options:
 | Option | Effect |
 | --- | --- |
 | `--task` | Which object: `cube_reorient`, `duck_reorient`, `ball_reorient` |
-| `--rollout-model` | M1–M4 |
-| `--eval-sim` | `mujoco`, `pinocchio`, `drake`, or a GPU contact model `M1`–`M4` |
+| `--rollout-model` | M1–M5 |
+| `--eval-sim` | `mujoco`, `pinocchio`, `drake`, or a GPU contact model `M1`–`M5` |
 | `--hand-acc` / `--obj-acc` | Rollout scene fidelity; for the duck, `obj_acc` can also be a `foam*` variant |
 | `--cost-weight NAME=VALUE` | Override one cost weight; repeatable |
 | `--stop-on-success` / `--no-stop-on-success` | Multi-goal episodes |

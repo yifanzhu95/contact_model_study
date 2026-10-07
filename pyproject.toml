@@ -9,11 +9,14 @@ description = "Systematic study of contact model fidelity for sampling-based MPC
 requires-python = ">=3.10"
 
 dependencies = [
-    # comfree_warp currently targets MuJoCo 3.6 and its vendored MJWarp code
-    # compiles with Warp 1.12.  Warp 1.16 fails while compiling sensor.py.
+    # comfree_warp targets MuJoCo 3.6. The pin is asu-iris/comfree_warp@ba8b996
+    # plus one fix to its vendored MJWarp sensor.py, which Warp >= 1.16 would
+    # not compile otherwise. The fix lives on this repo's `comfree-warp1.17`
+    # branch (a standalone branch off the comfree history; never merge it into
+    # the study branches). Tested with Warp 1.13 and 1.17.
     "mujoco==3.6.0",
-    "warp-lang==1.12.0",
-    "comfree_warp @ git+https://github.com/asu-iris/comfree_warp.git@ba8b9969f5f7859d51b1f738f458f8d2f49be080",
+    "warp-lang>=1.12,<1.18",
+    "comfree_warp @ git+https://github.com/yifanzhu95/contact_model_study.git@98b4015dcd96961b80d6d78565b002b83178263e",
     "numpy>=1.26",
     "matplotlib>=3.8",
     "scipy>=1.12",
@@ -22,6 +25,16 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "black", "ruff"]
+# M5 (Kamino, ContactModelStudy/Simulators/Kamino.py): Newton's SolverKamino.
+# Needs Python >= 3.11 (Newton's Kamino code does not import on 3.10) and
+# exactly Warp 1.17 (the Kamino reference measured 1.18 as much slower). The
+# `contact_kamino` conda env is built this way; see ContactModelStudy/README.md.
+kamino = [
+    "newton==1.6.0",
+    "warp-lang==1.17.0",
+    "trimesh",
+    "fast-simplification",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

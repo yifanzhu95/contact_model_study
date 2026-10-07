@@ -26,7 +26,7 @@ driver's default.
   `temperature`, `control_mode`, `settle`, `seed`, `goal_difficulty`,
   `nconmax`, `njmax`. `run_episodes.py --help` lists them all.
   `eval_sim` takes a CPU simulator (`mujoco`, `pinocchio`, `drake`) or a GPU
-  contact model (`M1`–`M4`).
+  contact model (`M1`–`M5`; M5, Kamino, needs the `contact_kamino` env).
   `plan_on_eval` (true/false) makes the planner roll out on the eval scene.
 - **On/off options.** These take `true` or `false`: `stop_on_success`,
   `warm_start`, `uncertainty`, `save_steps`, `graph`, `debug`, ...
@@ -289,7 +289,7 @@ row, validation first, and a summary job queued `afterany`.
      from a recorded state; it is about 0.04 mm.
 
 **Requirements.** The cell must have been run with `save_steps=true`, and its
-`eval_sim` must be a GPU contact model (`M1`–`M4`): the optimal planner and the
+`eval_sim` must be a GPU contact model (`M1`–`M5`): the optimal planner and the
 forward step need a vectorized eval model. Anything else fails that cell with
 the reason.
 

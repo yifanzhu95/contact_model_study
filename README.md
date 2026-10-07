@@ -141,36 +141,104 @@ contact_study/
 ```
 
 
-## Installation
+## Installation and system setup
 
-The GPU contact backends are sensitive to the MuJoCo/Warp combination.  The
-versions below are pinned in `pyproject.toml` because this repository was
-verified with MuJoCo 3.6.0 and Warp 1.12.0; Warp 1.16 does not compile the
-current ComFree/MJWarp sensor kernels.
+### What the machine needs
+
+- **Linux with an NVIDIA GPU and its driver.**
+  - The rollouts (M1–M5) all run on the GPU through Warp. Warp ships its own
+    CUDA runtime, so only the driver is needed, not the CUDA toolkit.
+  - Used on an RTX 4090 (driver 580, CUDA 13.0) and on the HPC's RTX 5000 Ada.
+  - Without a GPU, only the CPU parts run, and the tests skip the rest.
+- **conda** (Miniconda or Anaconda). Pinocchio and coal come from conda-forge.
+- **ffmpeg** on the `PATH` for videos (mediapy calls it). The recipes below
+  install it into the env. Without it, pass `--no-video`.
+- **On a headless machine**, MuJoCo renders through EGL, which comes with the
+  NVIDIA driver.
+  - The episode drivers set `MUJOCO_GL=egl` themselves when there is no
+    `DISPLAY`.
+  - Set it yourself for anything else that renders: `export MUJOCO_GL=egl`.
+
+### Which environment
+
+| Env | Python | Warp | Runs | Notes |
+| --- | --- | --- | --- | --- |
+| `contact_kamino` | 3.12 | 1.17 | M1–M5, CPU MuJoCo, Pinocchio, Drake | Everything. Recommended for a new setup. |
+| `contact_modeling` | 3.10 | 1.13 | M1–M4, CPU MuJoCo, Pinocchio, Drake | The original env; the HPC jobs use it. |
+
+M5 (Kamino, from Newton 1.6) is the reason for the split: Newton's Kamino code
+does not import on Python 3.10, and Newton needs Warp ≥ 1.17. Both envs pass
+the full test suite.
+
+### Building `contact_kamino` (recommended)
+
+From the repo root:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e .
+conda create -n contact_kamino -c conda-forge python=3.12 pinocchio=4.0.0 coal=3.0.2 numpy=2.2 ffmpeg
+conda activate contact_kamino
+pip install drake==1.51.1 mediapy pytest
+pip install -e ".[kamino]"     # MuJoCo 3.6, Warp 1.17, Newton 1.6, comfree_warp (pinned), skopt, ...
 ```
 
-The editable install fetches the official `comfree_warp` revision recorded in
-`pyproject.toml`.  To inspect or edit that dependency as a separate checkout,
-install the checkout after the command above:
+### Building `contact_modeling`
 
 ```bash
-git clone https://github.com/asu-iris/comfree_warp.git /path/to/comfree_warp
-python -m pip install -e /path/to/comfree_warp
+conda create -n contact_modeling -c conda-forge python=3.10 pinocchio=4.0.0 coal=3.0.2 numpy=2.2 ffmpeg
+conda activate contact_modeling
+pip install warp-lang==1.13.0 drake==1.51.1 mediapy pytest
+pip install -e .               # MuJoCo 3.6, comfree_warp (pinned), skopt, ...
 ```
 
-Verify the environment before a long experiment:
+- Install `warp-lang==1.13.0` first, as above. `pyproject.toml` allows Warp
+  1.12–1.17, so pip keeps the version already there.
+- Pinocchio and Drake are needed only for those eval simulators. Without
+  them, the tests that use them skip.
+
+### The `comfree_warp` dependency
+
+`pyproject.toml` pins MuJoCo 3.6.0 (comfree needs exactly that) and Warp
+1.12–1.17.
+
+`comfree_warp` is installed from this repository's `comfree-warp1.17` branch.
+That is upstream `asu-iris/comfree_warp@ba8b996` plus one fix to its vendored
+MJWarp `sensor.py`, without which Warp ≥ 1.16 does not compile it.
+
+That branch stands apart from the study code: it shares only the early comfree
+history. **Never merge it into the study branches.**
+
+To edit comfree, check that branch out somewhere else and install it over the
+pinned one:
 
 ```bash
-python -c "import mujoco, warp, comfree_warp; print(mujoco.__version__, warp.__version__)"
+git clone -b comfree-warp1.17 https://github.com/yifanzhu95/contact_model_study.git /path/to/comfree_warp
+pip install -e /path/to/comfree_warp --no-deps
 ```
 
-The expected version line is `3.6.0 1.12.0`.
+### Checking the install
+
+```bash
+python -c "import mujoco, warp, comfree_warp; print(mujoco.__version__, warp.__version__)"   # 3.6.0, then 1.17.0 or 1.13.0
+python -c "import warp; warp.init()"         # lists the CUDA devices Warp can see
+python -m pytest tests -m "not slow"         # a few minutes; the full suite is longer
+```
+
+- On an RTX 4090, the full suite takes about 4 minutes in `contact_modeling`
+  and about 32 minutes in `contact_kamino`, where the M5 tests on the eval
+  scene are slow.
+- The first run of each GPU model also spends a while compiling Warp kernels.
+  They are cached afterwards.
+
+### On the HPC
+
+- Build the env once on the login node, the same way, after
+  `module load miniconda`.
+- The submit scripts in `experiments/hpc/` load `miniconda` and activate
+  `contact_modeling` to validate the CSV. `CONDA_ENV=contact_kamino` changes
+  that env.
+- The `.slurm` jobs themselves still activate `contact_modeling`, so M5 cannot
+  run through them yet.
+- See `experiments/README.md` for the submission workflow.
 
 ## What has been implemented and tested so far
 

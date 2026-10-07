@@ -17,6 +17,10 @@ M2        ``VectorizedMujoco`` (MJWarp)  MuJoCo's default soft contact (the
                                          scene's own solref/solimp).
 M3        ``ComFree``                    Complementarity-free contact (Jin 2024).
 M4        ``XPBD``                       XPBD relaxation on MJWarp's rows.
+M5        ``Kamino`` (Newton)            Full NCP, solved by PADMM (Newton's
+                                         SolverKamino); the reference model.
+                                         Needs Newton 1.6 (the contact_kamino
+                                         env), and is far slower than M1-M4.
 ========  =============================  =====================================
 
 All four use pyramidal friction cones, the only kind MJWarp has, so the
@@ -76,8 +80,16 @@ CONTACT_MODELS: dict[str, dict] = {
     },
 }
 
+# M5's solver settings are KaminoConfig's defaults (the collaborator's frozen
+# reference policy); nothing physical is set here: Kamino reads it from the MJCF.
+CONTACT_MODELS["M5"] = {
+    "simulator": "kamino",
+    "description": "Kamino full-NCP PADMM (Newton SolverKamino)",
+    "params": {},
+}
+
 #: Other accepted names: the old study's backend names.
-ALIASES = {"mujoco_hard": "M1", "mujoco_soft": "M2", "comfree": "M3", "xpbd": "M4"}
+ALIASES = {"mujoco_hard": "M1", "mujoco_soft": "M2", "comfree": "M3", "xpbd": "M4", "kamino": "M5"}
 
 
 def _simulatorClasses(kind: str):
@@ -89,6 +101,9 @@ def _simulatorClasses(kind: str):
     if kind == "comfree":
         from ContactModelStudy.Simulators.ComFree import ComFree, ComFreeConfig
         return ComFree, ComFreeConfig
+    if kind == "kamino":
+        from ContactModelStudy.Simulators.Kamino import Kamino, KaminoConfig
+        return Kamino, KaminoConfig
     from ContactModelStudy.Simulators.XPBD import XPBD, XPBDConfig
     return XPBD, XPBDConfig
 

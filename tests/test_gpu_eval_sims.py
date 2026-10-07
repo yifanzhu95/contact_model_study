@@ -1,6 +1,8 @@
-"""The GPU contact models (M1-M4) as eval simulators: SingleWorld and EvalSimulators."""
+"""The GPU contact models (M1-M5) as eval simulators: SingleWorld and EvalSimulators."""
 
 from __future__ import annotations
+
+import importlib.util
 
 import numpy as np
 import pytest
@@ -10,11 +12,15 @@ from ContactModelStudy.Utils.EvalSimulators import (EVAL_PRESETS, evalSimConfig,
                                                     isGpuEvalSim, makeEvalSim)
 
 DT = 0.002
-CLASSES = {"M1": "VectorizedMujoco", "M2": "VectorizedMujoco", "M3": "ComFree", "M4": "XPBD"}
+CLASSES = {"M1": "VectorizedMujoco", "M2": "VectorizedMujoco", "M3": "ComFree", "M4": "XPBD", "M5": "Kamino"}
+# M5 (Kamino) builds only where Newton is installed (the contact_kamino env).
+MODELS = [pytest.param(m, marks=pytest.mark.skipif(importlib.util.find_spec("newton") is None,
+                                                   reason="M5 needs Newton (contact_kamino env)"))
+          if m == "M5" else m for m in EVAL_PRESETS]
 
 
 def test_names():
-    assert evalSimNames() == ["drake", "mujoco", "pinocchio", "M1", "M2", "M3", "M4"]
+    assert evalSimNames() == ["drake", "mujoco", "pinocchio", "M1", "M2", "M3", "M4", "M5"]
     assert all(isGpuEvalSim(m) for m in EVAL_PRESETS)
     assert not any(isGpuEvalSim(n) for n in ("mujoco", "pinocchio", "drake"))
     with pytest.raises(ValueError, match="unknown eval simulator"):
@@ -25,11 +31,19 @@ def test_names():
 
 @pytest.fixture(scope="module")
 def sims():
-    return {m: makeEvalSim(m, EVAL_CUBE, DT) for m in EVAL_PRESETS}
+    """Each preset's eval sim, built on first use and shared across the tests."""
+    built = {}
+
+    class _Sims:
+        def __getitem__(self, m):
+            if m not in built:
+                built[m] = makeEvalSim(m, EVAL_CUBE, DT)
+            return built[m]
+    return _Sims()
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("model", EVAL_PRESETS)
+@pytest.mark.parametrize("model", MODELS)
 def test_single_world_reads_like_a_simulator(sims, model, cube_tasks, cube_initial):
     from ContactModelStudy.Simulators.Simulator import Simulator
     from ContactModelStudy.Simulators.VectorizedSimulator import VectorizedSimulator
@@ -55,7 +69,7 @@ def test_single_world_reads_like_a_simulator(sims, model, cube_tasks, cube_initi
 
 @pytest.mark.gpu
 @pytest.mark.slow
-@pytest.mark.parametrize("model", EVAL_PRESETS)
+@pytest.mark.parametrize("model", MODELS)
 def test_graph_steps_equal_eager_steps(model, cube_initial):
     """Graph replay agrees with eager stepping as well as eager agrees with itself.
 
@@ -83,7 +97,7 @@ def test_graph_steps_equal_eager_steps(model, cube_initial):
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("model", EVAL_PRESETS)
+@pytest.mark.parametrize("model", MODELS)
 def test_cube_stays_in_hand(sims, model, cube_tasks, cube_initial):
     sim, ev = sims[model], cube_tasks[1]
     ev.setSimToInitialState(sim)

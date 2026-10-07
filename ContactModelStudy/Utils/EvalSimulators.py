@@ -5,12 +5,13 @@ Every choice runs the eval MJCF at the timestep given. Two kinds:
 
 * **CPU simulators** (``EVAL_SIMS``): ``mujoco``, ``pinocchio``, ``drake``, each
   with its default solver settings.
-* **GPU contact models** (``EVAL_PRESETS``): ``M1``-``M4``, exactly the rollout
+* **GPU contact models** (``EVAL_PRESETS``): ``M1``-``M5``, exactly the rollout
   contact model of that name (``ContactModelPresets``), built with one world and
   wrapped in ``SingleWorld`` so it reads like a CPU simulator. Planning with one
   model and judging in another gives the rollout x eval matrix. The preset is
   resolved at the *eval* timestep, so M1's time constant, ``2 * dt``, is twice
-  the eval step here.
+  the eval step here. M5 (Kamino) needs the ``contact_kamino`` env, and on the
+  high-fidelity eval scenes it runs its slow unfused solver (see ``Kamino``).
 
 Pinocchio, Drake and the GPU backends are imported only when chosen, so a
 machine with only MuJoCo installed can still use the rest.
@@ -40,7 +41,7 @@ def _drake():
 EVAL_SIMS = {"mujoco": _mujoco, "pinocchio": _pinocchio, "drake": _drake}
 
 #: GPU contact models usable as the eval simulator, by preset name.
-EVAL_PRESETS = ("M1", "M2", "M3", "M4")
+EVAL_PRESETS = ("M1", "M2", "M3", "M4", "M5")
 
 #: Config fields set on a GPU eval preset on top of the preset itself. Empty:
 #: the per-world contact and constraint buffers already cover the eval scenes.
@@ -82,7 +83,7 @@ def makeEvalSim(name: str, xml: str, timestep: float) -> Simulator:
 
     Args:
         name: A CPU simulator (``"mujoco"``, ``"pinocchio"``, ``"drake"``) or a
-            GPU contact model (``"M1"``-``"M4"``).
+            GPU contact model (``"M1"``-``"M5"``).
         xml: Path to the eval MJCF.
         timestep: Physics timestep in seconds.
 

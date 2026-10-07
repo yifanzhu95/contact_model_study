@@ -2298,6 +2298,106 @@ timestep.
 - `tests/test_process_batch_results.py` has 7 tests: cells, checks, optimal
   args, metrics, goal reconstruction, and an end-to-end run with resume.
 
+## What was done — Simulators/Kamino.py: Newton's SolverKamino as contact model M5
+
+**The environment.** The reference README pins Python 3.12, Warp 1.17 and
+MuJoCo 3.12. What Kamino actually needs is narrower.
+
+- **Newton 1.6** requires only `warp-lang>=1.17`. MuJoCo 3.12 comes only with
+  its `sim` extra (SolverMuJoCo).
+- **comfree_warp** asks for `warp-lang>=1.12`, unbounded, and MuJoCo 3.6.
+- **Two real blockers turned up:**
+  - Newton's Kamino code does not import on Python 3.10, despite Newton
+    declaring 3.10 support, because of a `wp.array[...] | None` annotation.
+  - comfree_warp's vendored MJWarp `sensor.py` reads an undefined `xmat` in
+    `_frame_axis`'s UNKNOWN branch, which Warp ≥ 1.16 rejects. This is the
+    failure `pyproject.toml` already noted. I fixed it in the comfree_warp
+    checkout; the change is uncommitted there.
+- **Result:** a new conda env `contact_kamino`, with Python 3.12, MuJoCo 3.6,
+  Warp 1.17, Newton 1.6, Pinocchio 4.0, Drake 1.51.1 and the fixed
+  comfree_warp, runs everything. M1–M5 share one process, so no bridge is
+  needed. `contact_modeling` is unchanged. `pyproject.toml` gains a `kamino`
+  extra.
+
+**The simulator:**
+
+- **`Kamino(VectorizedSimulator)` and `KaminoConfig`.** Defaults are the
+  collaborator's frozen policy: sparse, CRF, fixed ρ₀ = 0.1, tolerance 5e-4,
+  800 iterations, zero contact gap. Ported from
+  `kamino_reference/src/kamino_feasibility`: the MJCF import with site
+  recording, the asset-path fallback, the replicated build, and the FK reset.
+- **MuJoCo layout:** the MJCF is also compiled with MuJoCo. Joints, sites and
+  actuators are mapped by name, and the build refuses on a mismatch. A device
+  mirror keeps `qpos`/`qvel`/`ctrl`/`site_xpos` in MuJoCo order, so the task
+  cost and success kernels run unchanged.
+- **Conventions, measured against MuJoCo:**
+  - free-joint quaternions are `xyzw` in Newton and `wxyz` in MuJoCo;
+  - free-joint angular velocity is world frame in Newton and body frame in
+    MuJoCo; linear velocity agrees.
+  - Both are converted on the device. The reference adapter passed `qvel`
+    through unconverted.
+- **`"auto"` linear solver:** CRF, falling back to CR, with a warning, when
+  the GPU lacks the shared memory. That happens on the eval scenes on Ada
+  cards: about 241 KB requested against about 100 KB available.
+- **Graph-capturable:** state is copied `state_1 → state_0` rather than
+  swapped, and time is kept on the device. MPPI with and without graphs gives
+  identical costs.
+- **The preset:** M5 (alias `kamino`) in `ContactModelPresets`, and `M5` in
+  `EVAL_PRESETS`.
+
+**Measured** (RTX 4090):
+
+| Setup | Time per step |
+| --- | --- |
+| Cube rollout scene, one world, dense | 8–19 ms |
+| Cube rollout scene, one world, sparse | 90–150 ms |
+| 16–64 worlds, sparse | 80–145 ms |
+| 256 worlds, sparse | about 440 ms (about 35 s per 256-sample plan) |
+| Eval scene, CR fallback | about 410 ms (per 0.5 ms step) |
+
+- Holding the grasp for 1 s keeps the cube at z = 0.089 m, in line with M1–M4.
+- The state round trip agrees to 2e-7, and the site positions to 3e-8 of
+  `mj_forward`.
+- A contact-free spinning, falling cube matches MuJoCo to 1e-7 in position.
+
+**Tests:** `tests/test_kamino.py` has 8 tests:
+
+- config validation, which runs anywhere;
+- the rest skip without Newton: round trip and sites, the velocity convention,
+  holding the grasp with the task kernels, MPPI graph vs eager, the preset and
+  eval sim, the eval-scene solver fallback, and the driver planning with M5.
+
+`tests/test_gpu_eval_sims.py` now covers M5 as an eval sim; its M5 cases skip
+without Newton. Two existing tests that hard-coded M1–M4 were updated.
+
+**Full suite:**
+
+| Env | Result |
+| --- | --- |
+| `contact_kamino` (Warp 1.17, Python 3.12) | 273 passed, 3 failed: the hard-coded M1–M4 lists, since fixed and their files re-run (about 31 min; the M5 eval-scene tests are slow) |
+| `contact_modeling` (Warp 1.13, Python 3.10) | 265 passed, M5 skipped |
+
+**The comfree_warp fix, committed to the fork.** This repo is a GitHub fork of
+`asu-iris/comfree_warp`, and the pinned comfree commit `ba8b996` is in its
+history.
+
+- The `sensor.py` fix is commit `98b4015` on a new standalone branch,
+  `comfree-warp1.17`, cut from `ba8b996`.
+  - Never merge it into the study branches: they deleted the comfree tree, so
+    the merge would be a modify/delete conflict.
+- `pyproject.toml` now pins comfree to
+  `git+https://github.com/yifanzhu95/contact_model_study.git@98b4015…`, and
+  Warp to `>=1.12,<1.18`.
+- Both conda envs now install comfree from that commit, rather than editable
+  from `Dependancies/comfree_warp`. That checkout is back to clean upstream
+  `main`.
+- Upstreaming the fix to `asu-iris` (a one-commit PR from the branch) is
+  deferred.
+- **Suites after the switch:**
+  - `contact_kamino`: 276 passed, everything.
+  - `contact_modeling`: 265 passed, 10 skipped (M5), and 1 failure: M1
+    graph-vs-eager, run-to-run MJWarp noise, which passed 3 of 3 times alone.
+
 ## Small fixes — 2026-09-24
 
 Three requested changes, plus a driver bug found while testing them.
