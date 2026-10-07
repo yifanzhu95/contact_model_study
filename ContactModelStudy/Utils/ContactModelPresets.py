@@ -20,7 +20,7 @@ M4        ``XPBD``                       XPBD relaxation on MJWarp's rows.
 M5        ``Kamino`` (Newton)            Full NCP, solved by PADMM (Newton's
                                          SolverKamino); the reference model.
                                          Needs Newton 1.6 (the contact_kamino
-                                         env), and is far slower than M1-M4.
+                                         env), and is the slowest model.
 ========  =============================  =====================================
 
 All four use pyramidal friction cones, the only kind MJWarp has, so the
@@ -80,8 +80,9 @@ CONTACT_MODELS: dict[str, dict] = {
     },
 }
 
-# M5's solver settings are KaminoConfig's defaults (the collaborator's frozen
-# reference policy); nothing physical is set here: Kamino reads it from the MJCF.
+# M5's solver settings are KaminoConfig's defaults (the collaborator's PADMM
+# policy, with dense dynamics and a 256-contact buffer per world); nothing
+# physical is set here: Kamino reads it from the MJCF.
 CONTACT_MODELS["M5"] = {
     "simulator": "kamino",
     "description": "Kamino full-NCP PADMM (Newton SolverKamino)",

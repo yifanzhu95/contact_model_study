@@ -2398,6 +2398,70 @@ history.
   - `contact_modeling`: 265 passed, 10 skipped (M5), and 1 failure: M1
     graph-vs-eager, run-to-run MJWarp noise, which passed 3 of 3 times alone.
 
+### Kamino speed-up — 2026-10-07
+
+**Profile (Nsight Systems, one world, cube rollout scene).** 99.5% of GPU time
+was the fused conjugate-residual kernel, at 4.2 ms per call, once per PADMM
+iteration. PADMM itself needed only about 20 iterations.
+
+- The cause is the contact buffer. Newton sizes it for the worst case:
+
+  | Scene | Contact capacity | Constraint-row capacity | Rows active |
+  | --- | --- | --- | --- |
+  | Rollout | 4,844 | 14,650 | 102 |
+  | Eval | 19,992 | 60,094 | 102 |
+
+- The kernel's cost and shared memory scale with capacity. That oversizing is
+  also why the fused kernel did not fit on the eval scene, and why dense
+  dynamics overflowed.
+
+**Changes in `KaminoConfig`:**
+
+- **`max_contacts_per_world`**, a new field, defaults to 256. `None` keeps
+  Newton's estimate.
+- **`dynamics_storage`** now defaults to `"dense"`. With the cap, the dense
+  Delassus matrix is small, so dense works for any world count.
+- **Why 256:** peak contacts per world under noisy, MPPI-like controls.
+
+  | Scenes | Peak contacts per world |
+  | --- | --- |
+  | Cube and ball, all scenes | ≤ 36 |
+  | Duck eval | 63 |
+  | Duck `high_high` | 73 |
+  | Duck `low_high` | 162 |
+
+**Results:** time per physics step under graph replay.
+
+| Case | Before | After |
+| --- | --- | --- |
+| 1 world | 196 ms | 2.3 ms |
+| 64 worlds | 370 ms | 4.7 ms |
+| 256 worlds | 857 ms | 9.3 ms |
+| Eval scene, 1 world | 19 ms | 0.6 ms |
+
+- **Accuracy:** the final states differ from the uncapped solver by 7e-4 in
+  joint angles. For comparison, two identical uncapped runs differ by 3e-4,
+  and tightening the PADMM tolerance to 1e-6 moves the result by 1e-2.
+- **Planning is now bound by PADMM iterations.** Under the driver's σ = 0.2,
+  the mean is about 190 iterations and some worlds hit the 800 cap, so a
+  256-sample plan takes about 4 s (it was about 35 s). At σ = 0.01 a plan
+  takes 0.5 s. `padmm_max_iterations` is the remaining lever; I left it at
+  800.
+
+**Also in this change:**
+
+- **Overflow tracking:** a capturable kernel tracks peak contacts per world.
+  `GetState` warns once if a world reached the cap, and `Diagnostics()` now
+  reports `contacts` (peak since its last call, then reset) and
+  `contact_capacity`.
+- **Duck scenes load:** `_ScenePathResolver` resolved only flat
+  `objects/<file>` fallbacks, so every duck scene failed to load. It now
+  strips `..`/`.` from the mesh path and finds it under the scene directory.
+- **Tests:** in `tests/test_kamino.py`, 11 tests pass in 2 minutes.
+  - New: the duck rollout (`low_high`) and eval scenes load and hold the
+    grasp; a full contact buffer warns; validation covers the new field.
+  - The solver-fallback test now pins the sparse, uncapped setup it covers.
+
 ## Small fixes — 2026-09-24
 
 Three requested changes, plus a driver bug found while testing them.

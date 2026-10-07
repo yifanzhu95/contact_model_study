@@ -53,7 +53,7 @@ EVAL_SIMS = {
     # GPU contact models as eval sims, all behind the one-world adapter. Its
     # Step only queues graph replays; the wait for the GPU lands in GetState,
     # so read the two rows together.
-    **{m: ("ContactModelStudy.Simulators.SingleWorld", "SingleWorld") for m in ("M1", "M2", "M3", "M4")},
+    **{m: ("ContactModelStudy.Simulators.SingleWorld", "SingleWorld") for m in ("M1", "M2", "M3", "M4", "M5")},
 }
 PLAN = "planner: Plan (GPU rollouts)"
 

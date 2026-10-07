@@ -12,15 +12,17 @@ import json
 import numpy as np
 import pytest
 
-from conftest import EVAL_CUBE, ROLLOUT_CUBE
+from conftest import EVAL_CUBE, ROLLOUT_CUBE, SCENES
 from ContactModelStudy.Simulators.Kamino import KaminoConfig
 
 
 def test_config_validation():
-    KaminoConfig()
+    c = KaminoConfig()
+    assert c.dynamics_storage == "dense" and c.max_contacts_per_world == 256
+    KaminoConfig(max_contacts_per_world=None)
     for bad in (dict(dynamics_storage="banded"), dict(sparse_linear_solver="LU"), dict(padmm_tolerance=0.0),
                 dict(padmm_max_iterations=0), dict(padmm_rho0=-1.0), dict(padmm_penalty_update="x"),
-                dict(contact_gap=-0.1)):
+                dict(contact_gap=-0.1), dict(max_contacts_per_world=0), dict(max_contacts_per_world=1.5)):
         with pytest.raises(ValueError):
             KaminoConfig(**bad)
 
@@ -32,7 +34,7 @@ needs_newton = pytest.mark.skipif(importlib.util.find_spec("newton") is None,
 
 def _sim(N=1, **kw):
     from ContactModelStudy.Simulators.Kamino import Kamino
-    return Kamino(ROLLOUT_CUBE, KaminoConfig(**{"timestep": 0.004, "dynamics_storage": "dense", **kw}), N=N)
+    return Kamino(ROLLOUT_CUBE, KaminoConfig(**{"timestep": 0.004, **kw}), N=N)
 
 
 @pytest.fixture(scope="module")
@@ -100,7 +102,9 @@ def test_holds_the_grasp_and_tasks_read_it(one, cube_tasks, cube_initial):
     assert not ro.isFailure(one).numpy()[0]
     assert q[0, 18] > 0.07                              # the cube is still in the palm
     assert np.isfinite(ro.calcCosts(one).numpy()).all()
-    assert one.Diagnostics()["converged"].all()
+    d = one.Diagnostics()
+    assert d["converged"].all() and d["contact_capacity"] == 256
+    assert 0 < d["contacts"].max() < 256
 
 
 @pytest.mark.gpu
@@ -137,13 +141,51 @@ def test_preset_and_eval_sim(cube_initial):
     assert sim.GetState()[0].shape == (sim.nq,) and sim.time == pytest.approx(t0 + 5 * 0.004)
 
 
+@pytest.mark.gpu
+@needs_newton
+@pytest.mark.parametrize("scene", ["env_leap_rollout_duck_low_high.xml", "env_leap_eval_duck.xml"])
+def test_duck_scenes_load_and_hold(scene):
+    """The duck's meshes resolve through the included meshdir, and its contacts fit the cap.
+
+    The low-fidelity rollout duck has the most contacts measured on any Leap
+    scene (162 per world under exploratory controls).
+    """
+    from ContactModelStudy.Simulators.Kamino import Kamino
+    from ContactModelStudy.Tasks.DuckReorient import DuckReorient
+    from ContactModelStudy.Tasks.LeapReorient import LeapReorientConfig
+    from ContactModelStudy.Tasks.TaskBase import TaskRole
+    q0, v0, u0 = DuckReorient(LeapReorientConfig(role=TaskRole.ROLLOUT)).getInitialState()
+    dt = 0.0005 if "eval" in scene else 0.004
+    sim = Kamino(str(SCENES / scene), KaminoConfig(timestep=dt), N=2)
+    sim.SetState(q0, v0)
+    sim.SetControl(u0)
+    sim.Step(int(0.25 / dt))
+    q, _ = sim.GetState()
+    d = sim.Diagnostics()
+    assert np.isfinite(q).all() and (q[:, 18] > 0.07).all()
+    assert d["converged"].all()
+
+
+@pytest.mark.gpu
+@needs_newton
+def test_a_full_contact_buffer_warns(cube_initial):
+    q0, v0, u0 = cube_initial
+    sim = _sim(max_contacts_per_world=2)
+    sim.SetState(q0, v0)
+    sim.SetControl(u0)
+    sim.Step(2)
+    with pytest.warns(RuntimeWarning, match="contact capacity of 2"):
+        sim.GetState()
+
+
 @pytest.mark.slow
 @pytest.mark.gpu
 @needs_newton
 def test_eval_scene_falls_back_to_the_unfused_solver_when_it_must():
-    """The eval scene's fused CR solve wants more shared memory than an Ada GPU has."""
+    """Uncapped and sparse, the eval scene's fused CR solve wants more shared memory than an Ada GPU has."""
     from ContactModelStudy.Simulators.Kamino import Kamino
-    sim = Kamino(EVAL_CUBE, KaminoConfig(timestep=0.0005), N=1)
+    sim = Kamino(EVAL_CUBE, KaminoConfig(timestep=0.0005, dynamics_storage="sparse", max_contacts_per_world=None),
+                 N=1)
     assert sim.linear_solver in ("CRF", "CR")          # CR on GPUs with ~100 KB of shared memory per block
     sim.Step(2)
     assert np.isfinite(sim.GetState()[0]).all()

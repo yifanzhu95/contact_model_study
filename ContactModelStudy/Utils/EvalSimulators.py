@@ -10,8 +10,7 @@ Every choice runs the eval MJCF at the timestep given. Two kinds:
   wrapped in ``SingleWorld`` so it reads like a CPU simulator. Planning with one
   model and judging in another gives the rollout x eval matrix. The preset is
   resolved at the *eval* timestep, so M1's time constant, ``2 * dt``, is twice
-  the eval step here. M5 (Kamino) needs the ``contact_kamino`` env, and on the
-  high-fidelity eval scenes it runs its slow unfused solver (see ``Kamino``).
+  the eval step here. M5 (Kamino) needs the ``contact_kamino`` env.
 
 Pinocchio, Drake and the GPU backends are imported only when chosen, so a
 machine with only MuJoCo installed can still use the rest.

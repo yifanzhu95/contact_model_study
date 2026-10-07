@@ -285,7 +285,7 @@ parameters, for example
 | M2 | `VectorizedMujoco` | MuJoCo's default soft contact (pyramidal cone), Newton, 25 iterations, 1e-6 |
 | M3 | `ComFree` | Complementarity-free contact (Jin 2024) |
 | M4 | `XPBD` | XPBD relaxation over MJWarp's constraint rows |
-| M5 | `Kamino` | Full NCP solved by PADMM (Newton's `SolverKamino`), with the collaborator's frozen reference settings: sparse, fused CR, ρ₀ = 0.1, tolerance 5e-4, up to 800 iterations. The accuracy reference, and by far the slowest model |
+| M5 | `Kamino` | Full NCP solved by PADMM (Newton's `SolverKamino`), with the collaborator's PADMM settings (ρ₀ = 0.1, tolerance 5e-4, up to 800 iterations), dense dynamics and a 256-contact buffer per world. The accuracy reference, and the slowest model |
 
 Any config field can be overridden for a sweep, for example `stiffness=0.5` on
 M3.
@@ -298,21 +298,38 @@ it. A CUDA GPU is needed for the rollouts. For offscreen video on a headless
 machine, set `MUJOCO_GL=egl`; the driver sets this itself when there's no
 display. **M5 (Kamino) needs `contact_kamino`.**
 
-**What M5 costs**, measured on an RTX 4090:
+**What M5 costs**, measured on an RTX 4090 under CUDA-graph replay (which the
+planner and the eval sim use):
 
-- **The cube rollout scene, at a 4 ms step:**
-  - one world takes about 8–19 ms per step with dense dynamics, or about
-    90–150 ms with sparse;
-  - 16–64 worlds (sparse) take about 80–145 ms per step;
-  - 256 worlds take about 440 ms per step, so a 256-sample plan takes about
-    35 s.
-- **The eval scene:** its fused CR solve needs more GPU shared memory than Ada
-  cards give a block, so `"auto"` falls back to unfused CR, at about 410 ms
-  per 0.5 ms step.
-- **Dense dynamics** overflows beyond a few worlds.
+| Case | Per physics step | Before the contact cap |
+| --- | --- | --- |
+| Cube rollout scene (4 ms step), 1 world | 2.3 ms | 196 ms |
+| Cube rollout scene, 64 worlds | 4.7 ms | 370 ms |
+| Cube rollout scene, 256 worlds | 9.3 ms | 857 ms |
+| Cube eval scene (0.5 ms step), 1 world | 0.6 ms | 19 ms |
+| MPPI plan, 256 samples, 80 steps, σ = 0.2 | about 50 ms (4 s per plan) | — |
+| MPPI plan, σ = 0.01 | about 6 ms (0.5 s per plan) | — |
 
-So M5 is practical as an eval simulator on the coarser scenes, and as a
-small-sample reference planner, not as a 256-sample closed-loop planner.
+- **What made it fast:** Newton sizes the contact buffer for the worst case
+  (4,844 contacts per world on the cube rollout scene, 19,992 on the eval
+  scene), and Kamino's solve scales with that capacity rather than with the
+  10–40 contacts actually active. `max_contacts_per_world` (default 256) caps
+  it, which also lets dense dynamics, a blocked Cholesky factorization per
+  step, run for any number of worlds.
+  - The most contacts measured on any Leap scene is 162 per world: the
+    low-fidelity duck under exploratory controls. Cube and ball stay under 40.
+  - A world that reaches the cap may drop contacts. Kamino prints a warning,
+    and `GetState`/`Diagnostics` warn as well; raise the cap if you see it.
+  - Results agree with the uncapped sparse solver to 7e-4 in joint angles,
+    against 3e-4 between two identical uncapped runs and 1e-2 from tightening
+    the PADMM tolerance to 1e-6.
+- **Planning is bound by PADMM iterations.** Exploratory controls (the
+  driver's σ = 0.2) need a mean of about 190 iterations per step, some worlds
+  reach the 800 cap, and a graph-replayed step waits for its slowest world.
+  `padmm_max_iterations` trades accuracy for speed: at 100, a plan takes
+  0.8 s, but only about half the worlds converge.
+- **Eager stepping is 3–15× slower than graph replay**, because Kamino's
+  inner loops synchronize with the host each iteration when not captured.
 
 ```bash
 # one or more closed-loop episodes (every option: --help)

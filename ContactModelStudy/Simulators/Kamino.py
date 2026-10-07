@@ -24,12 +24,20 @@ kernel and success test (written against MuJoCo indices) run unchanged on
 Needs ``newton`` 1.6 (with Warp 1.17), which is imported only when a simulator
 is built, so ``KaminoConfig`` is importable, and recordable, anywhere.
 
-Cost, measured on an RTX 4090 with the default (frozen) policy: ~90-150 ms per
-physics step for one world on the cube rollout scene, ~145 ms for 16-64 worlds,
-~440 ms for 256. The eval scene's fused sparse solve (``CRF``) needs more GPU
-shared memory than an Ada card has, so ``"auto"`` falls back to the unfused
-``CR`` solver there (~410 ms per step). Dense dynamics is ~10x faster for one
-world but overflows its Delassus size for more than a few worlds.
+Speed comes from the contact buffer. Newton sizes it for the worst case of
+every geometry pair (4,844 contacts per world on the cube rollout scene, 19,992
+on the eval scene), and Kamino's solve costs scale with that capacity, not with
+the ~10-40 contacts actually active. ``max_contacts_per_world`` caps it (256 by
+default; the most measured on any Leap scene is 162, the low-fidelity duck), so
+the dense Delassus matrix stays small and dense dynamics, a blocked Cholesky
+factorization per step, works for any number of worlds.
+
+Cost, measured on an RTX 4090 under CUDA-graph replay with the defaults: ~2.3 ms
+per 4 ms step for one world on the cube rollout scene, ~4.7 ms for 64 worlds,
+~9.3 ms for 256; ~0.6 ms per 0.5 ms step on the cube eval scene. The uncapped
+sparse solve took 196, 370, 857 and 19 ms. Eager stepping is 3-15x slower than
+graph replay, because Kamino's inner loops synchronize with the host each
+iteration when not captured.
 """
 
 from __future__ import annotations
@@ -56,14 +64,21 @@ _PENALTY_UPDATES = ("fixed", "balanced")
 class KaminoConfig(VectorizedSimulatorConfig):
     """Kamino's solver settings; everything physical comes from the MJCF.
 
-    Defaults are the collaborator's frozen reference policy (sparse dynamics,
-    fused CR, fixed PADMM penalty ``rho0=0.1``, tolerance ``5e-4``, at most 800
-    iterations).
+    The PADMM settings are the collaborator's frozen reference policy (fixed
+    penalty ``rho0=0.1``, tolerance ``5e-4``, at most 800 iterations). Their
+    sparse, uncapped dynamics were 30-100x slower than the dense, capped
+    defaults here, for results that agree to well within the PADMM tolerance.
 
     Attributes:
-        dynamics_storage: ``"sparse"`` or ``"dense"`` Jacobian and dynamics.
-            Dense is much faster for one world but its size overflows for more
-            than a handful.
+        dynamics_storage: ``"dense"`` (blocked Cholesky; the default) or
+            ``"sparse"`` (iterative conjugate residual) Jacobian and dynamics.
+            Dense needs ``max_contacts_per_world``: its matrix grows with the
+            square of the contact capacity.
+        max_contacts_per_world: Contact buffer per world, or ``None`` for
+            Newton's worst-case estimate (thousands, and dense then overflows
+            beyond a few worlds). Contacts past the cap are dropped; Kamino
+            prints a warning, and ``GetState``/``Diagnostics`` warn when a
+            world has reached it.
         sparse_linear_solver: ``"CRF"`` (fused conjugate residual), ``"CR"``,
             or ``"auto"``: CRF, falling back to CR, with a warning, when the
             GPU cannot give the fused kernel the shared memory it asks for.
@@ -76,7 +91,8 @@ class KaminoConfig(VectorizedSimulatorConfig):
         collision_detection: Detect contacts at all. Off is for tests.
     """
 
-    dynamics_storage: str = "sparse"
+    dynamics_storage: str = "dense"
+    max_contacts_per_world: int | None = 256
     sparse_linear_solver: str = "auto"
     padmm_tolerance: float = 5e-4
     padmm_max_iterations: int = 800
@@ -101,6 +117,9 @@ class KaminoConfig(VectorizedSimulatorConfig):
             raise ValueError(f"padmm_max_iterations must be a positive integer, got {self.padmm_max_iterations}")
         if not (np.isfinite(self.padmm_rho0) and self.padmm_rho0 > 0):
             raise ValueError(f"padmm_rho0 must be positive, got {self.padmm_rho0}")
+        cap = self.max_contacts_per_world
+        if cap is not None and (int(cap) != cap or cap < 1):
+            raise ValueError(f"max_contacts_per_world must be a positive integer or None, got {cap}")
         if not (np.isfinite(self.contact_gap) and self.contact_gap >= 0):
             raise ValueError(f"contact_gap must be >= 0, got {self.contact_gap}")
 
@@ -122,23 +141,30 @@ def _leaf(label: str) -> str:
 
 
 class _ScenePathResolver:
-    """Resolve MJCF assets, falling back to ``<scene dir>/objects/<name>``.
+    """Resolve MJCF assets the way MuJoCo finds them for the Leap scenes.
 
-    Newton 1.6 expands included ``meshdir`` declarations differently from
-    MuJoCo for the Leap scenes; this is the reference's narrow correction.
+    Newton 1.6 resolves a mesh file against a different base than MuJoCo, which
+    applies the ``meshdir`` of an included file: ``../../objects/ducks/...``
+    from the hand's asset directory lands outside the repo for Newton. When the
+    direct path does not exist, the file's path with its ``..``/``.`` parts
+    removed is tried under the scene's directory, dropping leading components
+    until one exists (so ``objects/cube.obj`` and ``objects/ducks/.../x.obj``
+    are both found under ``scenes/leap``).
     """
 
     def __init__(self, scene: Path):
-        self.scene = scene
+        self.scene = Path(scene).resolve()
 
     def __call__(self, base_dir: str | None, file_path: str) -> str:
         base = Path(base_dir) if base_dir is not None else self.scene.parent
         candidate = (base / file_path).resolve()
         if candidate.exists():
             return str(candidate)
-        alternate = (self.scene.parent / "objects" / candidate.name).resolve()
-        if candidate.parent.name == "objects" and alternate.exists():
-            return str(alternate)
+        parts = [p for p in Path(file_path).parts if p not in ("..", ".")]
+        for k in range(len(parts)):
+            alternate = self.scene.parent / Path(*parts[k:])
+            if alternate.exists():
+                return str(alternate)
         return str(candidate)
 
 
@@ -310,6 +336,7 @@ class Kamino(VectorizedSimulator):
         sc.use_fk_solver = True
         sc.use_collision_detector = cfg.collision_detection
         sc.collision_detector.default_gap = cfg.contact_gap
+        sc.collision_detector.max_contacts_per_world = cfg.max_contacts_per_world
         sparse = cfg.dynamics_storage == "sparse"
         sc.sparse_jacobian = sparse
         sc.sparse_dynamics = sparse
@@ -325,8 +352,9 @@ class Kamino(VectorizedSimulator):
             self.solver = newton.solvers.SolverKamino(self.model, config=sc)
         except ValueError as exc:
             if not sparse and "non-negative" in str(exc):
-                raise ValueError(f"dense dynamics overflows for N={self.N} worlds of this scene; "
-                                 f"use dynamics_storage='sparse'") from exc
+                raise ValueError(f"dense dynamics overflows for N={self.N} worlds of this scene with "
+                                 f"max_contacts_per_world={cfg.max_contacts_per_world}; lower the cap "
+                                 f"or use dynamics_storage='sparse'") from exc
             raise
         self._reset_q = wp.empty(self.model.joint_coord_count, dtype=wp.float32, device=self.device)
         self._reset_qd = wp.empty(self.model.joint_dof_count, dtype=wp.float32, device=self.device)
@@ -363,6 +391,9 @@ class Kamino(VectorizedSimulator):
         self._applied_index = -1
         # On the device, advanced by a kernel, so a captured graph keeps it right.
         self._time_wp = wp.zeros(N, dtype=wp.float32, device=dev)
+        # Peak active contacts per world since the last Diagnostics() (see _checkContacts).
+        self._contact_peak = wp.zeros(N, dtype=wp.int32, device=dev)
+        self._warned_contacts = False
 
     # -- control sequences ---------------------------------------------------
     def SetControlSequence(self, U_n) -> None:
@@ -401,6 +432,10 @@ class Kamino(VectorizedSimulator):
         self.state_0.clear_forces()
         self.solver.step(self.state_0, self.state_1, self.control, None, self.config.timestep)
         self.state_0.assign(self.state_1)
+        contacts = self.solver._contacts_kamino
+        if contacts is not None:
+            wp.launch(_peak_kernel, dim=self.N, inputs=[contacts.world_active_contacts],
+                      outputs=[self._contact_peak], device=self.device)
 
     def Step_GPU(self, steps: int = 1) -> None:
         """Advance every world ``steps`` timesteps; then refresh the MuJoCo-layout mirror."""
@@ -456,6 +491,7 @@ class Kamino(VectorizedSimulator):
             raise RuntimeError(f"Kamino's FK reset did not converge in worlds {np.flatnonzero(~ok).tolist()}")
 
     def GetState(self) -> tuple[np.ndarray, np.ndarray]:
+        self._checkContacts()
         return self.qpos_wp.numpy(), self.qvel_wp.numpy()
 
     def BroadcastState(self, q, q_dot=None, u=None) -> None:
@@ -509,11 +545,42 @@ class Kamino(VectorizedSimulator):
         """Simulated time per world, ``(N,)``, counted since construction."""
         return self._time_wp.numpy().astype(float)
 
+    @property
+    def contact_capacity(self) -> int:
+        """Contacts each world can hold (the cap, or Newton's estimate without one); 0 without collisions."""
+        contacts = self.solver._contacts_kamino
+        return 0 if contacts is None else int(max(contacts.world_max_contacts_host))
+
+    def _checkContacts(self, reset: bool = False) -> np.ndarray:
+        """Peak active contacts per world since the last reset; warns once if a world reached the cap.
+
+        A world at capacity may have dropped contacts. ``Diagnostics`` resets
+        the peak, so its report covers the steps since the previous call.
+        """
+        peak = self._contact_peak.numpy()
+        if reset:
+            self._contact_peak.zero_()
+        cap = self.contact_capacity
+        if cap and (peak >= cap).any() and not self._warned_contacts:
+            self._warned_contacts = True
+            warnings.warn(f"Kamino: {int((peak >= cap).sum())} world(s) reached the contact capacity of {cap} "
+                          f"per world, so contacts may have been dropped; raise max_contacts_per_world.",
+                          RuntimeWarning, stacklevel=3)
+        return peak
+
     def Diagnostics(self) -> dict:
-        """The last step's PADMM status per world: converged, iterations, residuals."""
+        """The last step's PADMM status per world, and peak contacts since the last check.
+
+        Returns:
+            ``converged``, ``iterations`` and the residuals ``r_p``/``r_d``/``r_c``
+            of the last step; ``contacts``, the most active contacts per world
+            since the previous ``Diagnostics`` (``(N,)``); and
+            ``contact_capacity``.
+        """
         s = self.solver.status.numpy()
         return {"converged": s["converged"].astype(bool), "iterations": s["iterations"].astype(int),
-                "r_p": s["r_p"].astype(float), "r_d": s["r_d"].astype(float), "r_c": s["r_c"].astype(float)}
+                "r_p": s["r_p"].astype(float), "r_d": s["r_d"].astype(float), "r_c": s["r_c"].astype(float),
+                "contacts": self._checkContacts(reset=True), "contact_capacity": self.contact_capacity}
 
     def Close(self) -> None:
         self.solver = None
@@ -526,6 +593,12 @@ class Kamino(VectorizedSimulator):
 def _broadcast_kernel(src: wp.array(dtype=float), dst: wp.array2d(dtype=float)):
     n, i = wp.tid()
     dst[n, i] = src[i]
+
+
+@wp.kernel
+def _peak_kernel(active: wp.array(dtype=wp.int32), peak: wp.array(dtype=wp.int32)):
+    n = wp.tid()
+    peak[n] = wp.max(peak[n], active[n])
 
 
 @wp.kernel
