@@ -8,7 +8,8 @@ it draws success rate against each metric, one marker per cell. The x position i
 the cell's median with a whisker up to its p90; ``process_batch_results.stats``
 computes both over every analysed step of every episode in the cell pooled
 together (no lower percentile is stored, so the whisker is one-sided). The
-vertical bar is a 95% Wilson interval on the success rate.
+vertical bar is a 95% Wilson interval on the success rate. It also draws each KL
+against each forward error, both axes as median with a whisker to p90.
 
 Metrics:
     KL divergence           KL(used || opt)       kl_used_opt_mean
@@ -122,44 +123,76 @@ def plotEpisodeHistograms(episodes: pd.DataFrame, out_dir: Path):
         print(f"wrote {path}")
 
 
-def plotSuccessScatter(cells: pd.DataFrame, out_dir: Path):
+def cellStyles(cells: pd.DataFrame):
+    """Colour per rollout model and marker per hand accuracy, plus the legend handles for both."""
     models = orderedLevels(cells["rollout_model"], sorted(cells["rollout_model"].unique()))
     accs = orderedLevels(cells["hand_acc"], ACC_ORDER)
     model_color = {m: MODEL_COLORS[k % len(MODEL_COLORS)] for k, m in enumerate(models)}
     acc_marker = {a: ACC_MARKERS.get(a, "D") for a in accs}
+    handles = [Line2D([], [], linestyle="", marker="o", markersize=9, color=model_color[m],
+                      label=f"rollout {m}") for m in models]
+    handles += [Line2D([], [], linestyle="", marker=acc_marker[a], markersize=9, color="#777777",
+                       label=f"hand acc {a}") for a in accs]
+    return model_color, acc_marker, handles
 
+
+def medianP90(cells: pd.DataFrame, col: str, scale: float):
+    """Each cell's median and the one-sided (median -> p90) error, as errorbar expects."""
+    base = col.removesuffix("_mean")
+    median = cells[f"{base}_median"].to_numpy(float) * scale
+    p90 = cells[f"{base}_p90"].to_numpy(float) * scale
+    return median, np.vstack([np.zeros_like(median), p90 - median])
+
+
+def scatterCells(cells, x, y, xerr, yerr, xlabel, ylabel, title, xlog, ylog, path, ylim=None):
+    """One marker per cell with its error bars; saved to ``path``."""
+    model_color, acc_marker, handles = cellStyles(cells)
+    fig, ax = plt.subplots(figsize=(7, 5))
+    for k, (_, row) in enumerate(cells.iterrows()):
+        color = model_color[row["rollout_model"]]
+        ax.errorbar(x[k], y[k], xerr=xerr[:, k:k + 1], yerr=yerr[:, k:k + 1], fmt="none", ecolor=color,
+                    alpha=0.5, elinewidth=1.5, capsize=3, zorder=2)
+        ax.scatter(x[k], y[k], s=90, color=color, marker=acc_marker[row["hand_acc"]],
+                   edgecolor="white", linewidth=1.5, zorder=3)
+    if xlog:
+        ax.set_xscale("log")
+    if ylog:
+        ax.set_yscale("log")
+    if ylim:
+        ax.set_ylim(*ylim)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title, loc="left")
+    styleAxes(ax)
+    ax.legend(handles=handles, frameon=False, loc="center left", bbox_to_anchor=(1.0, 0.5))
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"wrote {path}")
+
+
+def plotSuccessScatter(cells: pd.DataFrame, out_dir: Path):
     lo, hi = wilsonInterval(cells["n_success"].to_numpy(float), cells["n_episodes_run"].to_numpy(float))
     rate = cells["success_rate"].to_numpy(float)
     yerr = np.vstack([rate - lo, hi - rate]).clip(min=0)
-
     for col, label, scale, log in METRICS:
-        base = col.removesuffix("_mean")
-        fig, ax = plt.subplots(figsize=(7, 5))
-        for k, (_, row) in enumerate(cells.iterrows()):
-            x = row[f"{base}_median"] * scale
-            color = model_color[row["rollout_model"]]
-            ax.errorbar(x, row["success_rate"], xerr=[[0.0], [row[f"{base}_p90"] * scale - x]],
-                        yerr=yerr[:, k:k + 1], fmt="none", ecolor=color, alpha=0.5, elinewidth=1.5,
-                        capsize=3, zorder=2)
-            ax.scatter(x, row["success_rate"], s=90, color=color,
-                       marker=acc_marker[row["hand_acc"]], edgecolor="white", linewidth=1.5, zorder=3)
-        if log:
-            ax.set_xscale("log")
-        ax.set_ylim(-0.05, 1.05)
-        ax.set_xlabel(f"{label}, cell median (whisker to p90)")
-        ax.set_ylabel("Success rate (95% Wilson interval)")
-        ax.set_title(f"Success rate vs {label}", loc="left")
-        styleAxes(ax)
-        handles = [Line2D([], [], linestyle="", marker="o", markersize=9, color=model_color[m],
-                          label=f"rollout {m}") for m in models]
-        handles += [Line2D([], [], linestyle="", marker=acc_marker[a], markersize=9, color="#777777",
-                           label=f"hand acc {a}") for a in accs]
-        ax.legend(handles=handles, frameon=False, loc="center left", bbox_to_anchor=(1.0, 0.5))
-        fig.tight_layout()
-        path = out_dir / f"scatter_success_vs_{col}.png"
-        fig.savefig(path, dpi=150)
-        plt.close(fig)
-        print(f"wrote {path}")
+        x, xerr = medianP90(cells, col, scale)
+        scatterCells(cells, x, rate, xerr, yerr, f"{label}, cell median (whisker to p90)",
+                     "Success rate (95% Wilson interval)", f"Success rate vs {label}", log, False,
+                     out_dir / f"scatter_success_vs_{col}.png", ylim=(-0.05, 1.05))
+
+
+def plotKLvsForwardScatter(cells: pd.DataFrame, out_dir: Path):
+    """Each KL against each forward error; both axes median with a whisker to p90."""
+    kls = [m for m in METRICS if m[0].startswith("kl_")]
+    errors = [m for m in METRICS if m[0].startswith("fsim_")]
+    for kcol, klabel, kscale, klog in kls:
+        y, yerr = medianP90(cells, kcol, kscale)
+        for ecol, elabel, escale, elog in errors:
+            x, xerr = medianP90(cells, ecol, escale)
+            scatterCells(cells, x, y, xerr, yerr, f"{elabel}, cell median (whisker to p90)",
+                         f"{klabel}, cell median (whisker to p90)", f"{klabel} vs {elabel}", elog, klog,
+                         out_dir / f"scatter_{kcol}_vs_{ecol}.png")
 
 
 def main():
@@ -171,7 +204,9 @@ def main():
 
     args.out.mkdir(parents=True, exist_ok=True)
     plotEpisodeHistograms(pd.read_csv(args.episodes), args.out)
-    plotSuccessScatter(pd.read_csv(args.cells), args.out)
+    cells = pd.read_csv(args.cells)
+    plotSuccessScatter(cells, args.out)
+    plotKLvsForwardScatter(cells, args.out)
 
 
 if __name__ == "__main__":
