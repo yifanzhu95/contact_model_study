@@ -20,6 +20,7 @@ OUTDIR="${OUTDIR:?set OUTDIR to the results folder of the run}"
 
 module load miniconda
 eval "$(conda shell.bash hook)"
-conda activate contact_modeling
+# The submit script exports CONDA_ENV; contact_kamino (M1-M5) otherwise.
+conda activate "${CONDA_ENV:-contact_kamino}"
 
 python experiments/run_bayes_opt.py "$CSV" --summarize --outdir "$OUTDIR"

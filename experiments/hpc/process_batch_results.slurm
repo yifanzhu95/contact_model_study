@@ -34,7 +34,8 @@ CELL="${SLURM_ARRAY_TASK_ID:?run this as an array job}"
 
 module load miniconda
 eval "$(conda shell.bash hook)"
-conda activate contact_modeling
+# The submit script exports CONDA_ENV; contact_kamino (M1-M5) otherwise.
+conda activate "${CONDA_ENV:-contact_kamino}"
 export MUJOCO_GL=egl
 
 echo "cell ${CELL} of ${BATCH_DIR} on $(hostname)"

@@ -164,7 +164,7 @@ contact_study/
 | Env | Python | Warp | Runs | Notes |
 | --- | --- | --- | --- | --- |
 | `contact_kamino` | 3.12 | 1.17 | M1–M5, CPU MuJoCo, Pinocchio, Drake | Everything. Recommended for a new setup. |
-| `contact_modeling` | 3.10 | 1.13 | M1–M4, CPU MuJoCo, Pinocchio, Drake | The original env; the HPC jobs use it. |
+| `contact_modeling` | 3.10 | 1.13 | M1–M4, CPU MuJoCo, Pinocchio, Drake | The original env. |
 
 M5 (Kamino, from Newton 1.6) is the reason for the split: Newton's Kamino code
 does not import on Python 3.10, and Newton needs Warp ≥ 1.17. Both envs pass
@@ -233,11 +233,11 @@ python -m pytest tests -m "not slow"         # a few minutes; the full suite is 
 
 - Build the env once on the login node, the same way, after
   `module load miniconda`.
-- The submit scripts in `experiments/hpc/` load `miniconda` and activate
-  `contact_modeling` to validate the CSV. `CONDA_ENV=contact_kamino` changes
-  that env.
-- The `.slurm` jobs themselves still activate `contact_modeling`, so M5 cannot
-  run through them yet.
+- The submit scripts in `experiments/hpc/` and their `.slurm` jobs activate
+  `contact_kamino`, so every model, M5 included, runs on the cluster.
+- To use another env, set `CONDA_ENV` when submitting, for example
+  `CONDA_ENV=contact_modeling bash experiments/hpc/submit_episode_batches.sh ...`.
+  The submit script exports it, so the jobs activate the same env.
 - See `experiments/README.md` for the submission workflow.
 
 ## What has been implemented and tested so far

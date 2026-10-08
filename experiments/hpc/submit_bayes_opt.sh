@@ -28,7 +28,8 @@ mkdir -p logs
 # env the jobs use. `module` is a shell function set up by login shells; a
 # script run with `bash` may not have it, so load the module system first when
 # it is missing. Both setups reference unset variables, so strict mode is
-# paused around them. CONDA_ENV picks another env.
+# paused around them. CONDA_ENV picks another env (default contact_kamino, which
+# runs M1-M5); it is exported, so the jobs activate the same one.
 set +u
 if ! type module >/dev/null 2>&1; then
     for init in /etc/profile.d/lmod.sh /etc/profile.d/modules.sh /usr/share/lmod/lmod/init/bash; do
@@ -37,7 +38,8 @@ if ! type module >/dev/null 2>&1; then
 fi
 module load miniconda
 eval "$(conda shell.bash hook)"
-conda activate "${CONDA_ENV:-contact_modeling}"
+export CONDA_ENV="${CONDA_ENV:-contact_kamino}"
+conda activate "$CONDA_ENV"
 set -u
 
 python experiments/run_bayes_opt.py "$CSV" --check --outdir /tmp/bayes_opt_check > /tmp/bayes_opt_check.$$ \
