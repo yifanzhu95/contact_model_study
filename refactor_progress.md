@@ -2462,6 +2462,43 @@ iteration. PADMM itself needed only about 20 iterations.
     grasp; a full contact buffer warns; validation covers the new field.
   - The solver-fallback test now pins the sparse, uncapped setup it covers.
 
+### Kamino `convex_meshes` — 2026-10-08
+
+Newton's MJCF importer brings mesh geoms in as triangle meshes. Kamino's
+triangle-mesh contact path then generates many point contacts per pair: on 60
+identical states, the duck had 32–39 contacts per world against 3 for MuJoCo
+and M1–M4. The duck also drifted out of a held grasp, and steps cost about 10×
+more. MuJoCo always collides a mesh as its convex hull.
+
+**The new field `KaminoConfig.convex_meshes`** (default `True`):
+
+- Each colliding mesh shape is replaced by `Mesh.compute_convex_hull()` (capped
+  at `maxhullvert`, as MuJoCo does) and given the type `CONVEX_MESH`. This
+  happens on the template, before replication.
+- Visual-only meshes stay as they are.
+- A first version converted every mesh and kept the raw vertices. That made the
+  cube eval step 4× slower: Kamino's bounding-box kernel queries every vertex
+  of a convex mesh every step, and the visual meshes and the duck's hull files
+  are dense.
+
+**Results:**
+
+| Measure | Triangle meshes | Convex hulls | MuJoCo |
+| --- | --- | --- | --- |
+| Duck contacts per world, same states (eval / rollout high / rollout low) | 35.7 / 31.6 / 29.1 | 4.0 / 3.7 / 1.9 | 3.3 / 3.1 / 1.4 |
+| Cube contacts per world, same states (eval / rollout high / rollout low) | 6.2 / 4.8 / 2.0 | 4.9 / 3.5 / 2.0 | 5.6 / 3.8 / 2.1 |
+| Duck held grasp, eval scene, 0.25 s | drifts up to 0.104 m (spread 0.088–0.104) | 0.0915 m, all worlds | — |
+| Duck PADMM iterations (eval / rollout high) | 58 / 253 | 5 / 29 | — |
+| Duck time per eager step, 64 worlds | 52–90 ms | 5–7 ms | — |
+
+- Cube graph-replay timings are unchanged: 2.3, 4.6 and 9.2 ms for 1, 64 and
+  256 worlds, and 0.6 ms on the eval scene.
+- Peak contacts per world under exploratory controls are now at most 19 on any
+  scene. The duck reached 186 with triangle meshes. The cap stays at 256.
+- **Tests:** `test_meshes_collide_as_convex_hulls_by_default` checks that the
+  colliding meshes become convex hulls of at most 64 vertices, and that the
+  duck's peak contacts are lower than with triangle meshes.
+
 ## Small fixes — 2026-09-24
 
 Three requested changes, plus a driver bug found while testing them.

@@ -313,16 +313,32 @@ planner and the eval sim use):
 - **What made it fast:** Newton sizes the contact buffer for the worst case
   (4,844 contacts per world on the cube rollout scene, 19,992 on the eval
   scene), and Kamino's solve scales with that capacity rather than with the
-  10–40 contacts actually active. `max_contacts_per_world` (default 256) caps
+  5–20 contacts actually active. `max_contacts_per_world` (default 256) caps
   it, which also lets dense dynamics, a blocked Cholesky factorization per
   step, run for any number of worlds.
-  - The most contacts measured on any Leap scene is 162 per world: the
-    low-fidelity duck under exploratory controls. Cube and ball stay under 40.
+  - The most contacts measured on any Leap scene, under exploratory controls,
+    is 19 per world. With `convex_meshes=False` the low-fidelity duck reaches
+    186, which the default cap still covers.
   - A world that reaches the cap may drop contacts. Kamino prints a warning,
     and `GetState`/`Diagnostics` warn as well; raise the cap if you see it.
   - Results agree with the uncapped sparse solver to 7e-4 in joint angles,
     against 3e-4 between two identical uncapped runs and 1e-2 from tightening
     the PADMM tolerance to 1e-6.
+- **Meshes collide as convex hulls (`convex_meshes`, default on), as in
+  MuJoCo.** Newton imports mesh geoms as triangle meshes. Its triangle-mesh
+  path put about 10× MuJoCo's contact points on the duck (32–39 per world
+  against 3, on the same states), let the duck drift out of a held grasp,
+  and cost 10× the step time.
+  - Each colliding mesh is replaced by its hull, at most `maxhullvert`
+    vertices, as MuJoCo builds it. Visual-only meshes are untouched.
+  - Using the hull matters for speed as well: Kamino bounds a convex mesh by
+    querying every vertex, every step, and the duck's hull files carry up to
+    8,464 vertices.
+  - On the same states the duck now has 1.9–4.0 contacts per world, against
+    MuJoCo's 1.4–3.3, and the cube 2.0–4.9 against 2.1–5.6. Kamino still puts
+    a few points on a face contact where MuJoCo puts one. These are point
+    contacts, not a contact patch: three constraint rows each, with no
+    torsional or rolling friction.
 - **Planning is bound by PADMM iterations.** Exploratory controls (the
   driver's σ = 0.2) need a mean of about 190 iterations per step, some worlds
   reach the 800 cap, and a graph-replayed step waits for its slowest world.

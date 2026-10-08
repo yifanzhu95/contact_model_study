@@ -18,7 +18,7 @@ from ContactModelStudy.Simulators.Kamino import KaminoConfig
 
 def test_config_validation():
     c = KaminoConfig()
-    assert c.dynamics_storage == "dense" and c.max_contacts_per_world == 256
+    assert c.dynamics_storage == "dense" and c.max_contacts_per_world == 256 and c.convex_meshes
     KaminoConfig(max_contacts_per_world=None)
     for bad in (dict(dynamics_storage="banded"), dict(sparse_linear_solver="LU"), dict(padmm_tolerance=0.0),
                 dict(padmm_max_iterations=0), dict(padmm_rho0=-1.0), dict(padmm_penalty_update="x"),
@@ -145,11 +145,7 @@ def test_preset_and_eval_sim(cube_initial):
 @needs_newton
 @pytest.mark.parametrize("scene", ["env_leap_rollout_duck_low_high.xml", "env_leap_eval_duck.xml"])
 def test_duck_scenes_load_and_hold(scene):
-    """The duck's meshes resolve through the included meshdir, and its contacts fit the cap.
-
-    The low-fidelity rollout duck has the most contacts measured on any Leap
-    scene (162 per world under exploratory controls).
-    """
+    """The duck's meshes resolve through the included meshdir, and the hulls hold the grasp."""
     from ContactModelStudy.Simulators.Kamino import Kamino
     from ContactModelStudy.Tasks.DuckReorient import DuckReorient
     from ContactModelStudy.Tasks.LeapReorient import LeapReorientConfig
@@ -164,6 +160,33 @@ def test_duck_scenes_load_and_hold(scene):
     d = sim.Diagnostics()
     assert np.isfinite(q).all() and (q[:, 18] > 0.07).all()
     assert d["converged"].all()
+
+
+@pytest.mark.gpu
+@needs_newton
+def test_meshes_collide_as_convex_hulls_by_default():
+    """As in MuJoCo: Newton's triangle-mesh path puts several times more points on the duck's hulls."""
+    import newton as nt
+    from ContactModelStudy.Simulators.Kamino import Kamino
+    from ContactModelStudy.Tasks.DuckReorient import DuckReorient
+    from ContactModelStudy.Tasks.LeapReorient import LeapReorientConfig
+    from ContactModelStudy.Tasks.TaskBase import TaskRole
+    q0, v0, u0 = DuckReorient(LeapReorientConfig(role=TaskRole.ROLLOUT)).getInitialState()
+    peaks = {}
+    for convex in (True, False):
+        sim = Kamino(str(SCENES / "env_leap_eval_duck.xml"), KaminoConfig(timestep=0.0005, convex_meshes=convex), N=1)
+        types = sim.model.shape_type.numpy()
+        colliding = (sim.model.shape_flags.numpy() & int(nt.ShapeFlags.COLLIDE_SHAPES)) != 0
+        assert (types[colliding] == int(nt.GeoType.MESH)).any() != convex
+        if convex:                                          # hulls, at most the MJCF's maxhullvert=30 vertices
+            hulls = [m for m, t in zip(sim.model.shape_source, types) if t == int(nt.GeoType.CONVEX_MESH)]
+            assert hulls and max(len(m.vertices) for m in hulls) <= 64
+        sim.SetState(q0, v0)
+        sim.SetControl(u0)
+        sim.Diagnostics()                                   # reset the peak
+        sim.Step(500)                                       # 0.25 s: the duck settles into the palm
+        peaks[convex] = int(sim.Diagnostics()["contacts"].max())
+    assert 0 < peaks[True] < peaks[False]
 
 
 @pytest.mark.gpu

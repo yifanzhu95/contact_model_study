@@ -21,14 +21,21 @@ kernel and success test (written against MuJoCo indices) run unchanged on
 * free-joint angular velocity: MuJoCo body frame, Newton world frame (linear
   velocity agrees). The reference adapter passed ``qvel`` through unchanged.
 
+Mesh geoms collide as their convex hulls, as in MuJoCo (``convex_meshes``).
+Newton imports them as triangle meshes, whose contact path puts tens of points
+on each mesh pair (about 10x MuJoCo's count on the duck's hulls) and let the
+duck drift out of a held grasp; as convex meshes they take Newton's GJK/MPR
+path.
+
 Needs ``newton`` 1.6 (with Warp 1.17), which is imported only when a simulator
 is built, so ``KaminoConfig`` is importable, and recordable, anywhere.
 
 Speed comes from the contact buffer. Newton sizes it for the worst case of
 every geometry pair (4,844 contacts per world on the cube rollout scene, 19,992
 on the eval scene), and Kamino's solve costs scale with that capacity, not with
-the ~10-40 contacts actually active. ``max_contacts_per_world`` caps it (256 by
-default; the most measured on any Leap scene is 162, the low-fidelity duck), so
+the ~5-20 contacts actually active. ``max_contacts_per_world`` caps it (256 by
+default; the most measured on any Leap scene is 19 with convex meshes, and 186,
+the low-fidelity duck, with ``convex_meshes=False``), so
 the dense Delassus matrix stays small and dense dynamics, a blocked Cholesky
 factorization per step, works for any number of worlds.
 
@@ -89,17 +96,21 @@ class KaminoConfig(VectorizedSimulatorConfig):
         contact_gap: Contact detection gap (m) for geoms without one. 0 is
             MuJoCo's default; Newton's own default is 0.1 m.
         collision_detection: Detect contacts at all. Off is for tests.
+        convex_meshes: Collide mesh geoms as their convex hulls, as MuJoCo
+            does (and so M1-M4). Off keeps Newton's triangle-mesh treatment,
+            which generates several times more contact points per mesh pair.
     """
 
     dynamics_storage: str = "dense"
-    max_contacts_per_world: int | None = 256
+    max_contacts_per_world: int | None = 64
     sparse_linear_solver: str = "auto"
     padmm_tolerance: float = 5e-4
-    padmm_max_iterations: int = 800
-    padmm_rho0: float = 0.1
+    padmm_max_iterations: int = 1000
+    padmm_rho0: float = 1.0#0.1
     padmm_penalty_update: str = "fixed"
     contact_gap: float = 0.0
     collision_detection: bool = True
+    convex_meshes: bool = True
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -214,7 +225,15 @@ class Kamino(VectorizedSimulator):
 
     # -- construction --------------------------------------------------------
     def _templateBuilder(self, newton):
-        """One world of the scene, recording every site's shape index as it is imported."""
+        """One world of the scene, recording every site's shape index as it is imported.
+
+        With ``convex_meshes``, each colliding mesh shape becomes a convex mesh
+        here, before the template is replicated, holding the mesh's convex hull
+        (at most ``maxhullvert`` vertices, as MuJoCo builds it). The hull, not
+        the raw vertices, matters for speed too: Kamino bounds a convex mesh by
+        querying every vertex, every step, and the duck's hull files carry up to
+        8,464. Visual-only meshes are left as they are.
+        """
         recorded: list[tuple[str, int]] = []
 
         class _Builder(newton.ModelBuilder):
@@ -227,6 +246,15 @@ class Kamino(VectorizedSimulator):
         b.rigid_gap = self.config.contact_gap
         newton.solvers.SolverKamino.register_custom_attributes(b)
         b.add_mjcf(str(self.model_path), path_resolver=_ScenePathResolver(Path(self.model_path)))
+        if self.config.convex_meshes:
+            collides, hulls = int(newton.ShapeFlags.COLLIDE_SHAPES), {}
+            for i, t in enumerate(b.shape_type):
+                if t == newton.GeoType.MESH and b.shape_flags[i] & collides:
+                    mesh = b.shape_source[i]
+                    if id(mesh) not in hulls:                   # meshes are shared, e.g. the fingertips
+                        hulls[id(mesh)] = mesh.compute_convex_hull()
+                    b.shape_source[i] = hulls[id(mesh)]
+                    b.shape_type[i] = newton.GeoType.CONVEX_MESH
         return b, recorded
 
     def _buildMaps(self, template) -> None:
