@@ -158,7 +158,7 @@ class KaminoConfig(VectorizedSimulatorConfig):
     sparse_linear_solver: str = "auto"
     dynamics_solver: str = "padmm"
     padmm_tolerance: float = 5e-4
-    padmm_max_iterations: int = 1000#100
+    padmm_max_iterations: int = 100
     padmm_rho0: float = 0.1
     padmm_penalty_update: str = "fixed"
     padmm_use_acceleration: bool = True
