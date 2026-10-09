@@ -285,7 +285,7 @@ parameters, for example
 | M2 | `VectorizedMujoco` | MuJoCo's default soft contact (pyramidal cone), Newton, 25 iterations, 1e-6 |
 | M3 | `ComFree` | Complementarity-free contact (Jin 2024) |
 | M4 | `XPBD` | XPBD relaxation over MJWarp's constraint rows |
-| M5 | `Kamino` | Full NCP solved by PADMM (Newton's `SolverKamino`), with the collaborator's PADMM settings (ρ₀ = 0.1, tolerance 5e-4, up to 800 iterations), dense dynamics and a 256-contact buffer per world. The accuracy reference, and the slowest model |
+| M5 | `Kamino` | Full NCP solved by PADMM (Newton's `SolverKamino`): ρ₀ = 0.1, full warm start, tolerance 5e-4, up to 100 iterations, contact and joint stabilization 0.05 and 0.1, dense dynamics and a 128-contact buffer per world (tuned against sticking; see [Why M5 objects stuck](#why-m5-objects-stuck)). The accuracy reference, and the slowest model |
 
 Any config field can be overridden for a sweep, for example `stiffness=0.5` on
 M3.
@@ -298,8 +298,10 @@ it. A CUDA GPU is needed for the rollouts. For offscreen video on a headless
 machine, set `MUJOCO_GL=egl`; the driver sets this itself when there's no
 display. **M5 (Kamino) needs `contact_kamino`.**
 
-**What M5 costs**, measured on an RTX 4090 under CUDA-graph replay (which the
-planner and the eval sim use):
+**What M5 costs**, measured on an idle RTX 4090 under CUDA-graph replay (which
+the planner and the eval sim use), with the earlier settings (`rho0=0.1`, a 0.9
+warm start, 800 iterations, a 256-contact buffer). The tuned defaults need
+several times fewer PADMM iterations; see [Why M5 objects stuck](#why-m5-objects-stuck).
 
 | Case | Per physics step | Before the contact cap |
 | --- | --- | --- |
@@ -313,14 +315,17 @@ planner and the eval sim use):
 - **What made it fast:** Newton sizes the contact buffer for the worst case
   (4,844 contacts per world on the cube rollout scene, 19,992 on the eval
   scene), and Kamino's solve scales with that capacity rather than with the
-  5–20 contacts actually active. `max_contacts_per_world` (default 256) caps
+  5–20 contacts actually active. `max_contacts_per_world` (default 128) caps
   it, which also lets dense dynamics, a blocked Cholesky factorization per
   step, run for any number of worlds.
   - The most contacts measured on any Leap scene, under exploratory controls,
     is 19 per world. With `convex_meshes=False` the low-fidelity duck reaches
-    186, which the default cap still covers.
-  - A world that reaches the cap may drop contacts. Kamino prints a warning,
-    and `GetState`/`Diagnostics` warn as well; raise the cap if you see it.
+    186, which needs a higher cap.
+  - A world that reaches the cap drops contacts, and dropped contacts let
+    fingers sink into the object (see below). Kamino prints "per-world contact
+    capacity exceeded", and `GetState`/`Diagnostics` warn as well; raise the
+    cap if you see it. At one world the cap costs nothing measurable (64, 128
+    and 256 all step in the same time).
   - Results agree with the uncapped sparse solver to 7e-4 in joint angles,
     against 3e-4 between two identical uncapped runs and 1e-2 from tightening
     the PADMM tolerance to 1e-6.
@@ -339,13 +344,82 @@ planner and the eval sim use):
     a few points on a face contact where MuJoCo puts one. These are point
     contacts, not a contact patch: three constraint rows each, with no
     torsional or rolling friction.
-- **Planning is bound by PADMM iterations.** Exploratory controls (the
-  driver's σ = 0.2) need a mean of about 190 iterations per step, some worlds
-  reach the 800 cap, and a graph-replayed step waits for its slowest world.
-  `padmm_max_iterations` trades accuracy for speed: at 100, a plan takes
-  0.8 s, but only about half the worlds converge.
+- **Planning is bound by PADMM iterations**, because a graph-replayed step
+  waits for its slowest world. With the tuned defaults, exploratory controls
+  (the driver's σ = 0.2) need about 27 iterations per step and a plan takes
+  1.4 s; with the old `rho0=1`, 0.9 warm start and 1,000-iteration cap they
+  needed about 220 and 9.7 s (measured on a shared GPU, so both are slow).
 - **Eager stepping is 3–15× slower than graph replay**, because Kamino's
   inner loops synchronize with the host each iteration when not captured.
+
+### Why M5 objects stuck
+
+With Kamino as the eval simulator, a held cube would sometimes freeze in the
+hand for seconds while the fingers kept moving, with a fingertip partly inside
+it. Five settings combined to cause it; all are `KaminoConfig` fields now, and
+the defaults are tuned (measured on the cube eval scene at its 0.5 ms step):
+
+1. **PADMM did not converge on a grasp.** A held object leaves its internal
+   squeeze forces underdetermined. PADMM's dual residual, which the penalty
+   `padmm_rho0` scales, then stalls above the tolerance while the primal and
+   complementarity residuals are already met. At `rho0=1` with a 0.9 warm
+   start, 98% of squeezed-grasp steps ran to the iteration cap (1,000
+   iterations did not help: still 72%). The truncated forces stay near the
+   warm start. Over 0.5 s of finger rolling that put the cube up to 4 mm and
+   6° from a converged solve at 100 iterations.
+   - Fix: `padmm_rho0=0.1` and `padmm_warmstart_scale=1.0`. Grasps now
+     converge in about 30 iterations, and the result matches a tight
+     (5e-5) solve better than 1,000 iterations at `rho0=1` did.
+   - `rho0` cannot go much lower: at 0.03 the primal side under-converges
+     on impacts and fingertips sink up to 2.6 mm.
+2. **An under-converged step lets fingers sink in.** Whenever the solve is cut
+   short (too few iterations, `dynamics_solver="dvi"` at any useful speed,
+   dropped contacts), fingertips penetrate 1–5 mm and stay there for hundreds
+   of milliseconds.
+3. **Penetration came out slowly.** Newton's contact stabilization (0.01)
+   removes 1% of a penetration per step: a fingertip 8 mm inside, still
+   pressing, took about 150 ms to come out.
+   - Fix: `contact_stabilization=0.05`, about 30 ms, with no extra energy (the
+     cube is pushed exactly as far). At 0.1 the error against a converged
+     solve starts to grow.
+4. **The contact buffer could overflow.** At 64 per world, anything that adds
+   contacts (here a 1 mm `contact_gap`) dropped real ones. Fingers then passed
+   into the cube and a third of the solves failed.
+   - Fix: back to 128 (6× the most ever measured). Leave `contact_gap` at 0.
+5. **The fingers came off their joints.** Kamino works in maximal
+   coordinates: each link is a free body and each hinge a constraint in the
+   same solve, with Newton's 0.01 joint stabilization. Steps cut off at the
+   iteration cap let the links drift, about 1 mm after 0.25 s of squeezing
+   and still growing. `qpos` (joint angles) then no longer says where the
+   links are, and the video, the cost and the planner all read `qpos`. In a
+   closed-loop episode with the old settings, MuJoCo forward kinematics of
+   Kamino's `qpos` put the thumb 2 mm inside the cube, where Kamino's own
+   bodies were 0.26 mm in. The penetration in the videos is largely this.
+   - Fix: convergence (1.) keeps the drift under 0.01 mm, and
+     `joint_stabilization=0.1` holds it to about 0.1 mm even when no step
+     converges, at no cost in iterations (and with lower error against the
+     converged reference).
+
+**Result** on the same two closed-loop episodes (`--plan-on-eval`, M2
+planner, seed 1; episode 0 / episode 1), old settings against new (run before
+`joint_stabilization` went to 0.1, which changes neither iterations nor
+speed):
+
+| | `rho0=1`, 100 iterations | Tuned defaults |
+| --- | --- | --- |
+| Steps not converged | 38% / 69% | 1.9% / 11% |
+| PADMM iterations per step | 75 / 89 | 14 / 22 |
+| Eval time per 0.5 ms step | 6.9 / 9.7 ms | 2.1 / 2.6 ms |
+| Worst penetration, Kamino's contacts | 0.19 / 0.26 mm | 0.09 / 0.09 mm |
+| Worst penetration, MuJoCo FK of `qpos` | 0.50 / 1.97 mm | 0.06 / 0.11 mm |
+
+On one world under graph replay the eval step is about 3.5× faster than the
+old defaults (1.7 against 6.0 ms, on a shared GPU). `padmm_max_iterations=50`
+is no faster on one world, but a little less accurate.
+
+How each number was measured is in `refactor_progress.md` (Kamino sticking,
+2026-10-08). `tests/test_kamino.py::test_a_squeezed_grasp_converges_and_a_sunk_fingertip_comes_out`
+fails on either half of the old settings.
 
 ```bash
 # one or more closed-loop episodes (every option: --help)

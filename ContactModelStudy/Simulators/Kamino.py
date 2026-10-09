@@ -33,13 +33,14 @@ is built, so ``KaminoConfig`` is importable, and recordable, anywhere.
 Speed comes from the contact buffer. Newton sizes it for the worst case of
 every geometry pair (4,844 contacts per world on the cube rollout scene, 19,992
 on the eval scene), and Kamino's solve costs scale with that capacity, not with
-the ~5-20 contacts actually active. ``max_contacts_per_world`` caps it (256 by
+the ~5-20 contacts actually active. ``max_contacts_per_world`` caps it (128 by
 default; the most measured on any Leap scene is 19 with convex meshes, and 186,
-the low-fidelity duck, with ``convex_meshes=False``), so
+the low-fidelity duck, with ``convex_meshes=False``, which needs a higher cap), so
 the dense Delassus matrix stays small and dense dynamics, a blocked Cholesky
 factorization per step, works for any number of worlds.
 
-Cost, measured on an RTX 4090 under CUDA-graph replay with the defaults: ~2.3 ms
+Cost, measured on an idle RTX 4090 under CUDA-graph replay (``rho0=0.1``, a
+256-contact cap, a 0.9 warm start): ~2.3 ms
 per 4 ms step for one world on the cube rollout scene, ~4.7 ms for 64 worlds,
 ~9.3 ms for 256; ~0.6 ms per 0.5 ms step on the cube eval scene. The uncapped
 sparse solve took 196, 370, 857 and 19 ms. Eager stepping is 3-15x slower than
@@ -65,16 +66,49 @@ from ContactModelStudy.Simulators.VectorizedSimulator import (
 _STORAGES = ("sparse", "dense")
 _LINEAR_SOLVERS = ("auto", "CRF", "CR")
 _PENALTY_UPDATES = ("fixed", "balanced")
+_DYNAMICS_SOLVERS = ("padmm", "dvi")
+_INTEGRATORS = ("euler", "moreau")
 
 
 @dataclass
 class KaminoConfig(VectorizedSimulatorConfig):
     """Kamino's solver settings; everything physical comes from the MJCF.
 
-    The PADMM settings are the collaborator's frozen reference policy (fixed
-    penalty ``rho0=0.1``, tolerance ``5e-4``, at most 800 iterations). Their
-    sparse, uncapped dynamics were 30-100x slower than the dense, capped
-    defaults here, for results that agree to well within the PADMM tolerance.
+    The defaults are tuned against objects sticking in a grasp (see the README,
+    "Why M5 objects stuck"): fixed penalty ``rho0=0.1``, full warm start,
+    tolerance ``5e-4``, at most 100 iterations, a 128-contact buffer, and
+    stronger contact (5x) and joint (10x) stabilization than Newton's. Grasps
+    then converge in tens of iterations, where ``rho0=1`` with a 0.9 warm start
+    ran nearly every grasp step to the iteration cap, and an eval step is about
+    3.5x faster.
+
+    The settings that matter, from the tuning:
+
+    * ``padmm_rho0`` and ``padmm_warmstart_scale`` decide whether a grasp
+      converges at all. A held object leaves its internal squeeze forces
+      underdetermined, and PADMM's dual residual, which ``rho`` scales, stalls
+      above the tolerance (``rho0=1``: 98% of grasp steps at the cap); shrinking
+      the warm start makes it re-find those forces every step. Too small a
+      ``rho0`` (0.03) instead under-converges the primal side, and fingers
+      sink into the object on impact.
+    * ``max_contacts_per_world``: a world past it drops contacts, and dropped
+      contacts let fingers pass into the object, after which PADMM fails to
+      converge and the fingertip stays embedded for hundreds of milliseconds.
+    * ``contact_gap`` above 0 fills that buffer (a 1 mm gap overflowed 64)
+      and slows convergence; leave it at 0.
+    * ``contact_stabilization`` is how fast a penetration is pushed back out
+      (Newton's 0.01 takes ~150 ms for 8 mm at a 0.5 ms step; 0.05 takes
+      ~30 ms). Much higher adds energy and error.
+    * ``joint_stabilization``: Kamino works in maximal coordinates, so the
+      hand's hinges are constraints in the same solve. Steps cut off at the
+      iteration cap let the links drift off their joints (fingertips 1 mm and
+      growing after 0.25 s of an unconverged squeeze), and ``qpos``, which is
+      what the video, the cost and the planner see, then no longer says where
+      the links are. 0.1 (Newton's is 0.01) holds that drift to ~0.1 mm even
+      when nothing converges, at no cost in iterations.
+    * ``dynamics_solver="dvi"`` is a fixed-cost alternative, but at any useful
+      speed it under-converges and penetrates (1-4 mm), so it is not the
+      default.
 
     Attributes:
         dynamics_storage: ``"dense"`` (blocked Cholesky; the default) or
@@ -85,14 +119,32 @@ class KaminoConfig(VectorizedSimulatorConfig):
             Newton's worst-case estimate (thousands, and dense then overflows
             beyond a few worlds). Contacts past the cap are dropped; Kamino
             prints a warning, and ``GetState``/``Diagnostics`` warn when a
-            world has reached it.
+            world has reached it. The most measured on a Leap scene is 19.
         sparse_linear_solver: ``"CRF"`` (fused conjugate residual), ``"CR"``,
             or ``"auto"``: CRF, falling back to CR, with a warning, when the
             GPU cannot give the fused kernel the shared memory it asks for.
+        dynamics_solver: ``"padmm"`` (proximal ADMM; the default) or ``"dvi"``
+            (direct joint solve plus projected Gauss-Seidel on contacts).
         padmm_tolerance: Primal, dual and complementarity tolerance.
-        padmm_max_iterations: Cap on PADMM iterations per step.
+        padmm_max_iterations: Cap on PADMM iterations per step. A converging
+            step needs 5-50; the cap bounds the rare one that does not, which
+            a graph-replayed batch of worlds waits for.
         padmm_rho0: Initial (and, with ``"fixed"``, constant) penalty.
-        padmm_penalty_update: ``"fixed"`` or ``"balanced"``.
+        padmm_penalty_update: ``"fixed"`` or ``"balanced"`` (sparse only).
+        padmm_use_acceleration: Nesterov-accelerated PADMM.
+        padmm_warmstart_scale: Scale on the previous step's constraint forces
+            when warm-starting, in ``[0, 1]``.
+        dvi_max_iterations: DVI outer iterations per step (``"dvi"`` only).
+        dvi_sweeps: Gauss-Seidel sweeps per DVI iteration.
+        dvi_tolerance: DVI tolerance on the projected update size.
+        contact_stabilization: Baumgarte factor on contact penetration (the
+            fraction removed per step), in ``[0, 1]``.
+        joint_stabilization: Baumgarte factor on joint constraint drift.
+        limit_stabilization: Baumgarte factor on joint-limit violation.
+        contact_penetration_margin: Dead zone (m) on contact distance, so
+            near-touching contacts are not corrected for float noise.
+        integrator: ``"euler"`` (semi-implicit) or ``"moreau"`` (midpoint
+            Moreau-Jean).
         contact_gap: Contact detection gap (m) for geoms without one. 0 is
             MuJoCo's default; Newton's own default is 0.1 m.
         collision_detection: Detect contacts at all. Off is for tests.
@@ -102,12 +154,23 @@ class KaminoConfig(VectorizedSimulatorConfig):
     """
 
     dynamics_storage: str = "dense"
-    max_contacts_per_world: int | None = 64
+    max_contacts_per_world: int | None = 128
     sparse_linear_solver: str = "auto"
+    dynamics_solver: str = "padmm"
     padmm_tolerance: float = 5e-4
-    padmm_max_iterations: int = 1000
-    padmm_rho0: float = 1.0#0.1
+    padmm_max_iterations: int = 1000#100
+    padmm_rho0: float = 0.1
     padmm_penalty_update: str = "fixed"
+    padmm_use_acceleration: bool = True
+    padmm_warmstart_scale: float = 1.0
+    dvi_max_iterations: int = 24
+    dvi_sweeps: int = 2
+    dvi_tolerance: float = 1e-5
+    contact_stabilization: float = 0.05
+    joint_stabilization: float = 0.1
+    limit_stabilization: float = 0.01
+    contact_penetration_margin: float = 1e-6
+    integrator: str = "euler"
     contact_gap: float = 0.0
     collision_detection: bool = True
     convex_meshes: bool = True
@@ -116,6 +179,25 @@ class KaminoConfig(VectorizedSimulatorConfig):
         super().__post_init__()
         if self.dynamics_storage not in _STORAGES:
             raise ValueError(f"dynamics_storage must be one of {_STORAGES}, got {self.dynamics_storage!r}")
+        if self.dynamics_solver not in _DYNAMICS_SOLVERS:
+            raise ValueError(f"dynamics_solver must be one of {_DYNAMICS_SOLVERS}, got {self.dynamics_solver!r}")
+        if self.integrator not in _INTEGRATORS:
+            raise ValueError(f"integrator must be one of {_INTEGRATORS}, got {self.integrator!r}")
+        for name in ("contact_stabilization", "joint_stabilization", "limit_stabilization", "padmm_warmstart_scale"):
+            value = getattr(self, name)
+            if not (np.isfinite(value) and 0.0 <= value <= 1.0):
+                raise ValueError(f"{name} must be in [0, 1], got {value}")
+        if not (np.isfinite(self.contact_penetration_margin) and self.contact_penetration_margin >= 0):
+            raise ValueError(f"contact_penetration_margin must be >= 0, got {self.contact_penetration_margin}")
+        for name in ("dvi_max_iterations", "dvi_sweeps"):
+            value = getattr(self, name)
+            if int(value) != value or value < 1:
+                raise ValueError(f"{name} must be a positive integer, got {value}")
+        if not (np.isfinite(self.dvi_tolerance) and self.dvi_tolerance >= 0):
+            raise ValueError(f"dvi_tolerance must be >= 0, got {self.dvi_tolerance}")
+        if (self.dynamics_solver == "padmm" and self.padmm_penalty_update != "fixed"
+                and self.dynamics_storage != "sparse"):
+            raise ValueError("padmm_penalty_update='balanced' needs dynamics_storage='sparse'")
         if self.sparse_linear_solver not in _LINEAR_SOLVERS:
             raise ValueError(f"sparse_linear_solver must be one of {_LINEAR_SOLVERS}, "
                              f"got {self.sparse_linear_solver!r}")
@@ -360,22 +442,35 @@ class Kamino(VectorizedSimulator):
 
     def _makeSolver(self, linear: str):
         newton, cfg = self._newton, self.config
-        sc = newton.solvers.SolverKamino.Config.from_model(self.model)
+        sparse = cfg.dynamics_storage == "sparse"
+        dvi = cfg.dynamics_solver == "dvi"
+        # Passed to from_model so its solver-dependent defaults (DVI: no
+        # preconditioning, a direct bilateral solve) are the ones built.
+        sc = newton.solvers.SolverKamino.Config.from_model(
+            self.model, dynamics_solver=cfg.dynamics_solver, sparse_jacobian=sparse or dvi,
+            sparse_dynamics=sparse, integrator=cfg.integrator)
         sc.use_fk_solver = True
         sc.use_collision_detector = cfg.collision_detection
         sc.collision_detector.default_gap = cfg.contact_gap
         sc.collision_detector.max_contacts_per_world = cfg.max_contacts_per_world
-        sparse = cfg.dynamics_storage == "sparse"
-        sc.sparse_jacobian = sparse
-        sc.sparse_dynamics = sparse
-        if sparse:
+        if sparse and not dvi:
             sc.dynamics.linear_solver_type = linear
+        sc.constraints.alpha = cfg.joint_stabilization
+        sc.constraints.beta = cfg.limit_stabilization
+        sc.constraints.gamma = cfg.contact_stabilization
+        sc.constraints.delta = cfg.contact_penetration_margin
         sc.padmm.primal_tolerance = cfg.padmm_tolerance
         sc.padmm.dual_tolerance = cfg.padmm_tolerance
         sc.padmm.compl_tolerance = cfg.padmm_tolerance
         sc.padmm.max_iterations = int(cfg.padmm_max_iterations)
         sc.padmm.rho_0 = cfg.padmm_rho0
         sc.padmm.penalty_update_method = cfg.padmm_penalty_update
+        sc.padmm.use_acceleration = cfg.padmm_use_acceleration
+        sc.padmm.warmstart_scale = cfg.padmm_warmstart_scale
+        sc.dvi.max_alternating_iterations = int(cfg.dvi_max_iterations)
+        sc.dvi.inequality_sweeps_per_iteration = int(cfg.dvi_sweeps)
+        sc.dvi.tolerance = cfg.dvi_tolerance
+        sc.validate()
         try:
             self.solver = newton.solvers.SolverKamino(self.model, config=sc)
         except ValueError as exc:
@@ -389,7 +484,7 @@ class Kamino(VectorizedSimulator):
         RC = newton.solvers.SolverKamino.ResetConfig
         from_q, from_qd = RC.FromJointQ(self._reset_q), RC.FromJointU(self._reset_qd)
         self._reset_config = RC(body_poses=from_q, body_velocities=from_qd, base_pose=from_q, base_velocity=from_qd)
-        return linear if sparse else None
+        return linear if sparse and not dvi else None
 
     def _probeSolver(self) -> None:
         """One step; under "auto", fall back from fused CR when the GPU lacks shared memory."""

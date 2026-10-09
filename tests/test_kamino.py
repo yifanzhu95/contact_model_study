@@ -18,10 +18,20 @@ from ContactModelStudy.Simulators.Kamino import KaminoConfig
 
 def test_config_validation():
     c = KaminoConfig()
-    assert c.dynamics_storage == "dense" and c.max_contacts_per_world == 256 and c.convex_meshes
+    assert c.dynamics_storage == "dense" and c.max_contacts_per_world == 128 and c.convex_meshes
+    # The anti-sticking tuning: a grasp converges only with a small penalty and a full warm start.
+    assert c.padmm_rho0 == 0.1 and c.padmm_warmstart_scale == 1.0
+    assert c.contact_stabilization == 0.05 and c.joint_stabilization == 0.1
+    assert c.dynamics_solver == "padmm" and c.contact_gap == 0.0
     KaminoConfig(max_contacts_per_world=None)
+    KaminoConfig(dynamics_storage="sparse", padmm_penalty_update="balanced")
     for bad in (dict(dynamics_storage="banded"), dict(sparse_linear_solver="LU"), dict(padmm_tolerance=0.0),
                 dict(padmm_max_iterations=0), dict(padmm_rho0=-1.0), dict(padmm_penalty_update="x"),
+                dict(padmm_penalty_update="balanced"), dict(padmm_warmstart_scale=1.5),
+                dict(dynamics_solver="pgs"), dict(integrator="rk4"), dict(dvi_max_iterations=0),
+                dict(dvi_sweeps=1.5), dict(dvi_tolerance=-1.0), dict(contact_stabilization=-0.1),
+                dict(joint_stabilization=2.0), dict(limit_stabilization=float("nan")),
+                dict(contact_penetration_margin=-1e-6),
                 dict(contact_gap=-0.1), dict(max_contacts_per_world=0), dict(max_contacts_per_world=1.5)):
         with pytest.raises(ValueError):
             KaminoConfig(**bad)
@@ -103,7 +113,7 @@ def test_holds_the_grasp_and_tasks_read_it(one, cube_tasks, cube_initial):
     assert q[0, 18] > 0.07                              # the cube is still in the palm
     assert np.isfinite(ro.calcCosts(one).numpy()).all()
     d = one.Diagnostics()
-    assert d["converged"].all() and d["contact_capacity"] == 256
+    assert d["converged"].all() and d["contact_capacity"] == 128
     assert 0 < d["contacts"].max() < 256
 
 
@@ -187,6 +197,65 @@ def test_meshes_collide_as_convex_hulls_by_default():
         sim.Step(500)                                       # 0.25 s: the duck settles into the palm
         peaks[convex] = int(sim.Diagnostics()["contacts"].max())
     assert 0 < peaks[True] < peaks[False]
+
+
+@pytest.mark.gpu
+@needs_newton
+def test_a_squeezed_grasp_converges_and_a_sunk_fingertip_comes_out(cube_initial):
+    """The anti-sticking tuning, on the eval scene at its 0.5 ms step.
+
+    With ``rho0=1`` and a 0.9 warm start nearly every squeezed-grasp step ran to
+    the iteration cap, so the fingers drifted off their joints, and with
+    Newton's 0.01 contact stabilization a fingertip 3 mm inside the cube was
+    still about 1.5 mm in after 50 ms.
+    """
+    import mujoco
+    from ContactModelStudy.Simulators.Kamino import Kamino
+    sim = Kamino(EVAL_CUBE, KaminoConfig(timestep=0.0005), N=1)
+    q0, v0, u0 = cube_initial
+    sim.SetState(q0, v0)
+    sim.SetControl(u0)
+    sim.Step(400)                                       # 0.2 s: the cube settles into the palm
+    flex = [a for a in range(sim.nu) if sim.mjm.actuator(a).name.split("_")[1] in ("mcp", "pip", "dip", "ipl")]
+    q, _ = sim.GetState()
+    u = q[0, :16].copy()
+    u[flex] += 0.3                                      # squeeze
+    sim.SetControl(u)
+    converged, iterations = [], []
+    for _ in range(20):
+        sim.Step(10)
+        d = sim.Diagnostics()
+        converged.append(bool(d["converged"][0]))
+        iterations.append(int(d["iterations"][0]))
+    assert np.mean(converged) >= 0.8 and np.mean(iterations) < 60
+
+    # The links stay on their joints: fingertip sites from Kamino's body poses
+    # agree with forward kinematics of its qpos (1 mm apart, and growing, with
+    # the old settings).
+    mjm, md = sim.mjm, mujoco.MjData(sim.mjm)
+    md.qpos[:] = sim.GetState()[0][0]
+    mujoco.mj_kinematics(mjm, md)
+    tips = [mjm.site(n).id for n in ("if_tip", "mf_tip", "rf_tip", "th_tip")]
+    assert np.abs(sim.DeviceState().site_xpos.numpy()[0][tips] - md.site_xpos[tips]).max() < 3e-4
+
+    # Curl the index finger 3 mm into the cube and keep commanding that pose.
+    index = [mjm.joint(n).qposadr[0] for n in ("if_mcp", "if_pip", "if_dip")]
+
+    def penetration(qpos):
+        md.qpos[:] = qpos
+        mujoco.mj_forward(mjm, md)
+        return -min([0.0] + [c.dist for c in md.contact[:md.ncon]])
+
+    q, _ = sim.GetState()
+    q = q[0].astype(np.float64)
+    while penetration(q) < 3e-3:
+        q[index] += 0.005
+    sim.SetState(q)
+    u = sim.GetControl()[0]
+    u[index] = q[index]
+    sim.SetControl(u)
+    sim.Step(100)                                       # 50 ms
+    assert penetration(sim.GetState()[0][0].astype(np.float64)) < 1e-3
 
 
 @pytest.mark.gpu

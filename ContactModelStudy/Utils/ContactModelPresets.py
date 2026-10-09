@@ -80,9 +80,10 @@ CONTACT_MODELS: dict[str, dict] = {
     },
 }
 
-# M5's solver settings are KaminoConfig's defaults (the collaborator's PADMM
-# policy, with dense dynamics and a 256-contact buffer per world); nothing
-# physical is set here: Kamino reads it from the MJCF.
+# M5's solver settings are KaminoConfig's defaults (PADMM with rho0=0.1 and a
+# full warm start, dense dynamics, a 128-contact buffer per world; tuned against
+# objects sticking in a grasp); nothing physical is set here: Kamino reads it
+# from the MJCF.
 CONTACT_MODELS["M5"] = {
     "simulator": "kamino",
     "description": "Kamino full-NCP PADMM (Newton SolverKamino)",

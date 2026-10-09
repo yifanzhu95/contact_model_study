@@ -2499,6 +2499,92 @@ more. MuJoCo always collides a mesh as its convex hull.
   colliding meshes become convex hulls of at most 64 vertices, and that the
   duck's peak contacts are lower than with triangle meshes.
 
+### Kamino sticking — 2026-10-08
+
+With M5 as the eval simulator a held cube sometimes froze in the hand for
+seconds, a fingertip partly inside it. The cause was the solver settings, not
+the physics import (joint damping 0.3, armature, kp 3 / kv 0.01 and the
+fingertip hulls all match MuJoCo's). `README.md`, "Why M5 objects stuck", has
+the explanation; this is how it was measured.
+
+**New `KaminoConfig` fields**, passed to `SolverKamino.Config`:
+`dynamics_solver` (`padmm`/`dvi`), `padmm_use_acceleration`,
+`padmm_warmstart_scale`, `dvi_max_iterations`, `dvi_sweeps`, `dvi_tolerance`,
+`contact_stabilization`, `joint_stabilization`, `limit_stabilization`
+(Baumgarte gamma/alpha/beta), `contact_penetration_margin` (delta) and
+`integrator` (`euler`/`moreau`). `dynamics_solver`, the storage and the
+integrator go to `Config.from_model` so its solver-dependent defaults are
+built (DVI needs preconditioning off). `padmm_penalty_update="balanced"` with
+dense storage is now rejected by the config, as Newton does.
+
+**New defaults:** `padmm_rho0` 1.0 → 0.1, `padmm_warmstart_scale` 0.9 → 1.0,
+`padmm_max_iterations` 1000 → 100, `contact_stabilization` 0.01 → 0.05,
+`joint_stabilization` 0.01 → 0.1, `max_contacts_per_world` 64 → 128.
+
+**How it was measured** (eval cube scene, 0.5 ms step; the GPU was shared
+with a long `run_episodes` job, so absolute times are inflated, but each
+comparison ran under the same load):
+
+- *Grasp states*: 16 worlds settled, then squeezed (flexion targets +0.3 rad).
+  From them, 64 steps per config, recording the per-world PADMM status. At
+  `rho0=1` the dual residual stalled at 3e-3 to 2e-2 against a 5e-4
+  tolerance (98–100% of steps at the cap; 72% even at 1,000 iterations),
+  while the primal (1e-7) and complementarity (1e-9) residuals were met.
+  `rho0=0.1` with a full warm start: 1.4% at the cap, about 30 iterations.
+- *Accuracy*: the same 16 grasps, 0.5 s of sinusoidal finger rolling,
+  final cube pose against a tight solve (`rho0=0.1`, tolerance 5e-5, up to
+  2,000 iterations). A second tight solve (`rho0=0.03`) gives the noise floor.
+
+  | Config | Iterations | Pos. error median / max | Angle max |
+  | --- | --- | --- | --- |
+  | Second tight solve | 81 | 0.08 / 0.9 mm | 3.0° |
+  | Old defaults (`rho0=1`, 1,000) | 834 | 0.18 / 1.5 mm | 4.1° |
+  | `rho0=1`, 100 | 100 | 0.48 / 4.2 mm | 6.3° |
+  | New defaults, gamma 0.01 | 42 | 0.17 / 0.42 mm | 1.3° |
+  | New defaults, cap 128 | 41 | 0.09 / 0.57 mm | 0.6° |
+  | New, `contact_stabilization` 0.1 | 50 | 0.24 / 0.76 mm | 2.8° |
+  | Shipped defaults without `joint_stabilization` 0.1 | 47 | 0.22 / 0.87 mm | 3.2° |
+  | Shipped defaults | 48 | 0.17 / 0.52 mm | 0.6° |
+  | DVI, 24 iterations | 48 sweeps | 0.78 / 7.6 mm, penetrates 2.1 mm | 15° |
+  | DVI, 8 iterations | 16 sweeps | 2.2 / 8.5 mm, penetrates 4.4 mm | 15° |
+
+- *Impacts*: 32 worlds, 2.6 s of commands at the current joint angles plus
+  σ = 0.2 noise, held 64 ms. Penetration from Kamino's own contact distances.
+  The new defaults and `rho0=1` at 100 iterations both stay under 1.4 mm;
+  `rho0=0.03` reaches 2.6 mm; a 1 mm `contact_gap` overflowed the 64-contact
+  buffer and reached 5.5 mm, with 20 of 32 worlds over 1 mm for up to 337 ms.
+- *Injected penetration*: the index finger curled 0.4–8 mm into the cube and
+  held there. Time until under 0.5 mm: up to 150 ms at gamma 0.01, 32 ms at
+  0.05; the cube was displaced the same in both.
+- *Closed loop*: `--plan-on-eval`, M2 planner, seed 1, with the eval sim's
+  contact distances recorded every step and rechecked with MuJoCo's collision
+  on the logged states. Numbers in the README table.
+- *Joint drift*: the 16 grasps squeezed for 0.25 s; fingertip sites from
+  Kamino's body poses against MuJoCo forward kinematics of Kamino's `qpos`.
+  Old settings at 100 iterations: 0.5 mm after 32 ms, 1.1 mm after 0.25 s,
+  every step at the cap. Joint stabilization 0.1 with the same solver: 0.12 mm,
+  flat; 0.3: 0.04 mm. New defaults: 0.003–0.01 mm.
+- *Speed*: one world under `SingleWorld` graph replay, configs interleaved:
+  6.0 ms per step (old defaults) against 1.7 ms (new); caps 64, 128 and 256
+  all 1.7 ms. MPPI with M5 rollouts (256 worlds, σ = 0.2): 9.7 s per plan
+  against 1.4 s.
+
+**What the videos showed**: the renderer draws MuJoCo forward kinematics of
+Kamino's `qpos`. In an old-settings closed-loop episode (`rho0=1`, 100
+iterations, every step at the cap for seconds), that put the thumb's thin
+collision boxes up to 1.97 mm inside the cube, while Kamino's own contacts in
+the same steps said 0.26 mm. Kamino's detector agrees with MuJoCo's on those
+states (same distance, same normal); the difference is the joint drift. With
+the new defaults the two agree (0.11 mm worst). Fingertips sunk deeper than
+2 mm were not reproduced in closed loop, only in the open-loop stress cases
+above, which the new defaults also remove.
+
+**Tests:** `test_config_validation` covers the new fields and defaults;
+`test_a_squeezed_grasp_converges_and_a_sunk_fingertip_comes_out` fails with
+the old solver settings (convergence) and with the old contact stabilization
+(penetration still over 1 mm after 50 ms), and checks the fingertips stay on
+their joints.
+
 ## Small fixes — 2026-09-24
 
 Three requested changes, plus a driver bug found while testing them.
