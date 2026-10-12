@@ -1,12 +1,12 @@
-# Polaris Kamino deployment review / Polaris Kamino 部署审阅稿
+# Kamino deployment on Polaris / Kamino 的 Polaris 部署
 
 This package implements G0 correctness checks, G1 single-GPU calibration, G2 four-GPU throughput evaluation, G3 a small research pilot, and a single-launch PBS job chain. Local implementation does not establish A100 compatibility; GPU execution and Polaris measurements are still pending.
 
 本部署包已实现 G0 正确性检查、G1 单卡负载校准、G2 四卡吞吐量评估、G3 小规模科研试验，以及一次启动的 PBS 作业链。本地实现完成仍需在 A100 验证，GPU 执行和 Polaris 实测结果尚待取得。
 
-Kyle asked to run a few experiments first and confirm that they work, and mentioned A100s for BO and temperature searches. We interpret this as a reason to prepare a measured expansion path. The exact budgets below are our proposal, not settings specified by Kyle. Deployment edits are isolated on `codex/polaris-readiness`, based on Kyle's integrated commit `a8dcc873e9f4e4f13dcf9973b30ed72f9d3bfa70`; publishing that branch does not merge it into the shared experiment branches.
+The deployment starts with correctness checks and measured calibration before expanding to multi-GPU experiments and parameter searches. The budgets below define the initial pilot, not hardware-validated optimal settings. Deployment changes are isolated on `codex/polaris-readiness`, based on integrated commit `a8dcc873e9f4e4f13dcf9973b30ed72f9d3bfa70`; publishing this branch does not merge it into shared experiment branches.
 
-Kyle 要求先运行几个实验、确认工作正常，并提到了用 A100 做 BO 和温度搜索。据此，我们准备一个依据测量结果逐步扩大的方案。下面的具体规模由我们建议，不是 Kyle 指定的参数。部署改动隔离在 `codex/polaris-readiness`，基于 Kyle 的集成提交 `a8dcc873e9f4e4f13dcf9973b30ed72f9d3bfa70`；发布该分支不会将它合并到共享实验分支。
+部署首先进行正确性检查和实测校准，再扩大到多 GPU 实验和参数搜索。下方规模定义首轮试点，不是经过硬件验证的最优设置。部署改动隔离在 `codex/polaris-readiness`，基于集成提交 `a8dcc873e9f4e4f13dcf9973b30ed72f9d3bfa70`；发布该分支不会将它合并到共享实验分支。
 
 ## Hardware and parallel work / 硬件与并行方式
 
@@ -18,9 +18,9 @@ GPU work can grow in two ways. Increasing N gives one plan more candidate action
 
 增加 GPU 工作量有两种方式。增加 N，让一次规划包含更多候选动作序列：N=256 表示预测 256 种未来。让不同 GPU 同时运行独立 episode 或参数配置，则增加实验吞吐量。四张卡各运行 N=256，得到四个独立规划器，并不等于一个 N=1024 的规划器。
 
-Kyle's integrated code already provides `run_episodes_pooled.py` and `EpisodePool.py`. Queues connect GPU planners and CPU evaluation workers. Start with one planner process per GPU, then measure whether more CPU workers help. Multiple planners on one GPU may increase contention and memory use.
+The integrated code provides `run_episodes_pooled.py` and `EpisodePool.py`. Queues connect GPU planners and CPU evaluation workers. Start with one planner process per GPU, then measure whether more CPU workers help. Multiple planners on one GPU may increase contention and memory use.
 
-Kyle 的集成代码已有 `run_episodes_pooled.py` 和 `EpisodePool.py`，通过队列连接 GPU 规划进程和 CPU 评估进程。建议先给每张卡一个规划进程，再测量增加 CPU 工作进程是否有帮助。同一卡增加规划进程可能导致争抢和显存增加，收益需要实测。
+集成代码提供 `run_episodes_pooled.py` 和 `EpisodePool.py`，通过队列连接 GPU 规划进程和 CPU 评估进程。先给每张卡一个规划进程，再测量增加 CPU 工作进程是否有帮助。同一卡增加规划进程可能导致争抢和显存增加，收益需要实测。
 
 ## G0: correctness check / 正确性检查
 
@@ -44,9 +44,9 @@ Record wall time, planning time after compilation/warm-up, GPU utilization over 
 
 ## G2: four-GPU throughput / 四卡吞吐量
 
-Use the validated N from G1 and Kyle's pooled driver. Compare one GPU with four GPUs on the same batch of 24 episode IDs and the same base seed, with up to 100 plans per episode. Both measurements must use the pooled driver: the sequential driver uses a different goal random stream. Start with one planner per GPU and four CPU evaluation workers; on four GPUs, test eight and sixteen workers if measured time permits. Freeze N and all scientific settings.
+Use the validated N from G1 and the pooled driver. Compare one GPU with four GPUs on the same batch of 24 episode IDs and the same base seed, with up to 100 plans per episode. Both measurements must use the pooled driver: the sequential driver uses a different goal random stream. Start with one planner per GPU and four CPU evaluation workers; on four GPUs, test eight and sixteen workers if measured time permits. Freeze N and all scientific settings.
 
-使用 G1 验证过的 N 和 Kyle 的进程池入口。固定同一批 24 个 episode 编号及同一个基础种子，每个 episode 最多 100 次规划，对比单卡与四卡。两次都使用进程池入口：顺序入口的目标随机序列不同。起步时每卡一个规划进程、总共四个 CPU 评估进程；若实测耗时允许，再在四卡下测试八个和十六个 CPU 评估进程。保持 N 和科研参数一致。
+使用 G1 验证过的 N 和进程池入口。固定同一批 24 个 episode 编号及同一个基础种子，每个 episode 最多 100 次规划，对比单卡与四卡。两次都使用进程池入口：顺序入口的目标随机序列不同。起步时每卡一个规划进程、总共四个 CPU 评估进程；若实测耗时允许，再在四卡下测试八个和十六个 CPU 评估进程。保持 N 和科研参数一致。
 
 Measure valid episodes per hour, batch wall time, per-GPU utilization/memory, request waiting, and solver validity. Fourfold acceleration is not guaranteed. The extended preflight checks one or four visible A100s. Pooled results record topology, per-episode request wait time, device routing, source identity, and a completion sidecar. An interrupted or incomplete batch cannot pass merely because its process exits successfully.
 
@@ -54,9 +54,9 @@ Measure valid episodes per hour, batch wall time, per-GPU utilization/memory, re
 
 ## G3: research pilot / 科研试点
 
-Use all four GPUs for independent parameter cells. The pilot crosses temperature {10, 40, 100} with noise sigma {0.02, 0.05, 0.10}: nine settings, three seeds each, one cube episode per seed, up to 100 plans per episode. This is 27 episodes and at most 2,700 plans. G3 launches independent sequential drivers, at most one per GPU, so its seeds match G1. G2 instead uses Kyle's shared pool. Freeze N, horizon, contact settings, cost weights, and MPPI iteration count. These values are exploratory, not tuned recommendations.
+Use all four GPUs for independent parameter cells. The pilot crosses temperature {10, 40, 100} with noise sigma {0.02, 0.05, 0.10}: nine settings, three seeds each, one cube episode per seed, up to 100 plans per episode. This is 27 episodes and at most 2,700 plans. G3 launches independent sequential drivers, at most one per GPU, so its seeds match G1. G2 instead uses the shared pool. Freeze N, horizon, contact settings, cost weights, and MPPI iteration count. These values are exploratory, not tuned recommendations.
 
-让四卡并行处理不同参数组合。试点为温度 {10、40、100} 与噪声标准差 {0.02、0.05、0.10} 的组合：九组配置，每组三个种子，每种子一个方块 episode，每个 episode 最多 100 次规划。合计 27 个 episode、最多 2,700 次规划。G3 启动独立的顺序实验进程，每张卡同时最多一组，其种子方式与 G1 一致；G2 使用 Kyle 的共享进程池。固定 N、时域、接触设置、代价权重及 MPPI 迭代次数。这些是探索值，尚未调优。
+让四卡并行处理不同参数组合。试点为温度 {10、40、100} 与噪声标准差 {0.02、0.05、0.10} 的组合：九组配置，每组三个种子，每种子一个方块 episode，每个 episode 最多 100 次规划。合计 27 个 episode、最多 2,700 次规划。G3 启动独立的顺序实验进程，每张卡同时最多一组，其种子方式与 G1 一致；G2 使用共享进程池。固定 N、时域、接触设置、代价权重及 MPPI 迭代次数。这些是探索值，尚未调优。
 
 Report task success/error, planning time, and invalid-candidate rates together. Larger noise may create harder contacts and invalidate a cell even when Python finishes. Three seeds per cell are a pilot, insufficient for a strong success-rate conclusion. Use these results to design more repeats or a BO search. Validate other objects separately.
 
@@ -64,9 +64,9 @@ Report task success/error, planning time, and invalid-candidate rates together. 
 
 ## Isolated GitHub delivery / 独立 GitHub 分支交付
 
-The user authorized GitHub publication on the dedicated deployment branch only. Publish `codex/polaris-readiness` without merging or pushing to `main`, `planner_dev`, `refactor_and_simplification`, or any existing experiment branch. The deployment branch contains instrumentation and packaging changes relative to the base; the original versions remain on their own branches. Do not switch Kyle's active checkout to the deployment branch. Offline transfer remains an optional alternative.
+The dedicated deployment branch is `codex/polaris-readiness`. Keep it separate from `main`, `planner_dev`, `refactor_and_simplification`, and existing experiment branches. It contains instrumentation and packaging changes relative to the base; original versions remain on their own branches. Clone into a new directory and create a separate environment rather than switching or modifying an active experiment checkout. Offline transfer remains an optional alternative.
 
-用户已授权仅在专用部署分支发布到 GitHub。发布 `codex/polaris-readiness`，不合并或推送到 `main`、`planner_dev`、`refactor_and_simplification` 或任何已有实验分支。部署分支相对基线包含诊断与打包改动，原版本仍保留在各自分支。不要将 Kyle 正在使用的代码目录切换到部署分支。离线传递只是可选替代方式。
+专用部署分支为 `codex/polaris-readiness`，与 `main`、`planner_dev`、`refactor_and_simplification` 及已有实验分支保持隔离。它相对基线包含诊断与打包改动，原版本仍保留在各自分支。克隆到新目录并建立独立环境，不切换或修改正在运行实验的目录。离线传递只是可选替代方式。
 
 The operator clones into a new directory, then detaches at the exact deployment commit supplied with the handoff. Replace `<deployment-commit>` with that full SHA, not the base SHA above. A pinned commit prevents later branch updates from silently changing an experiment. These commands must not target an existing working checkout. The submitters still accept any matching clean local commit and do not require GitHub access during a compute job.
 
@@ -81,9 +81,19 @@ git -C /home/<user>/contact_model_study_polaris rev-parse HEAD
 git -C /home/<user>/contact_model_study_polaris status --short
 ```
 
-The initial G2/G3 budget is fixed at N=64. This is the second calibration level: more candidates than N=32 while avoiding the initial cost of N=128/256 for the longer pilot episodes. It is an engineering starting point, not an A100 measurement, optimal setting, or convergence claim. Use the G1 evidence to revisit it later. Throughput measurements describe this instrumented deployment version, not Kyle's uninstrumented version.
+The initial G2/G3 budget is fixed at N=64. This is the second calibration level: more candidates than N=32 while avoiding the initial cost of N=128/256 for the longer pilot episodes. It is an engineering starting point, not an A100 measurement, optimal setting, or convergence claim. Use the G1 evidence to revisit it later. Throughput measurements describe this instrumented deployment version, not the uninstrumented baseline.
 
-首轮 G2/G3 固定为 N=64，即第二档校准规模：候选比 N=32 更多，同时先不将较长试验扩大到 N=128/256。它是工程上的起点，不是 A100 实测结论、最优参数或收敛证明；以后再依据 G1 证据调整。吞吐量测量对应这个带诊断的部署版本，不等同于 Kyle 原先未加入这些诊断的版本。
+首轮 G2/G3 固定为 N=64，即第二档校准规模：候选比 N=32 更多，同时先不将较长试验扩大到 N=128/256。它是工程上的起点，不是 A100 实测结论、最优参数或收敛证明；以后再依据 G1 证据调整。吞吐量测量对应这个带诊断的部署版本，不等同于未加入这些诊断的基线版本。
+
+## Operator configuration / 操作者配置
+
+No source-code or PBS-script edits are needed to supply the deployment account and paths. Provide four runtime values: `--project` is the existing ALCF allocation/account string, `--env` is a new dedicated environment directory, `--out-root` is an existing writable Eagle results directory, and the source directory is the new clone containing `pipeline.py`. The submitter automatically passes the project to every job with `qsub -A`; it cannot create an allocation, grant access, or confirm the remaining balance. Confirm permission to use `debug`, including four held dependent jobs, before submission. Use absolute paths without whitespace, commas, quotes or backslashes. Do not place output or configuration files in the source checkout.
+
+部署账户和目录通过运行参数提供，无需编辑源码或 PBS 脚本。需要四项值：`--project` 是已有的 ALCF 额度/账户名称，`--env` 是新的独立环境目录，`--out-root` 是已有且可写的 Eagle 结果目录，源码目录则是包含 `pipeline.py` 的新克隆目录。提交入口自动通过 `qsub -A` 将项目传给每个作业；它不能创建额度、授予权限或确认剩余额度。提交前确认可以使用 `debug`，包括四个挂起且带依赖的作业。目录使用不含空白、逗号、引号或反斜杠的绝对路径，不在源码目录内保存结果或配置文件。
+
+Initial login, choosing the four values, obtaining an interactive preparation node, and starting submission are operator actions. Environment installation and its checks run inside `setup_environment.sh`; after successful submission and release, G0–G3 sequencing, runtime preflight, validation, GPU assignment and result recording are automatic. `--check` only validates the plan and driver arguments: it does not prove GPU compatibility, queue eligibility or completion within the time limit. Failures stop progression; there is no automatic repair, resubmission or whole-chain resume.
+
+首次登录、选择四项配置、取得交互式准备节点和启动提交由操作者完成。`setup_environment.sh` 自动安装环境并执行相应检查；提交与放行成功后，G0–G3 衔接、运行前检查、有效性判定、GPU 分配和结果记录自动完成。`--check` 只验证计划和入口参数，不能证明 GPU 兼容性、队列权限或能在时限内完成。失败会阻止继续，不自动修复、重提或整链续跑。
 
 ## G0 operator commands / G0 操作命令
 
