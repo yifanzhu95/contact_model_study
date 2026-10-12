@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+
 from conftest import REPO_ROOT
 from ContactModelStudy.Utils.Provenance import (
     git_provenance,
@@ -13,8 +15,28 @@ from ContactModelStudy.Utils.Provenance import (
 def test_git_provenance_uses_an_exact_commit():
     provenance = git_provenance(REPO_ROOT)
     assert len(provenance["commit"]) == 40
-    assert provenance["branch"]
+    assert provenance["detached"] == (provenance["branch"] is None)
     assert isinstance(provenance["dirty"], bool)
+
+
+def test_git_provenance_accepts_a_clean_detached_commit(tmp_path):
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(tmp_path), *args],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+
+    git("init")
+    git("-c", "user.name=Provenance Test", "-c", "user.email=test@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "Test source")
+    expected = git("rev-parse", "HEAD")
+    git("switch", "--detach", expected)
+    provenance = git_provenance(tmp_path)
+    assert provenance["commit"] == expected
+    assert provenance["branch"] is None
+    assert provenance["detached"] is True
+    assert provenance["dirty"] is False
+    assert provenance["changed_paths"] == []
 
 
 def test_scheduler_provenance_defaults_to_local():
