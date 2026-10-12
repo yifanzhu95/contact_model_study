@@ -181,6 +181,7 @@ class RemotePlanner:
         self.last_plan_seconds = None
         self.last_action_uncertainty = None
         self.last_rollout_diagnostics = []
+        self.last_plan_ok = None
         self.wait_s = 0.0
         self._requests, self._replies = requests, replies
         self._worker, self._abort = worker, abort
@@ -210,6 +211,7 @@ class RemotePlanner:
         self._episode, self._noise_seed = episode, noise_seed
         self._state, self._reset, self._mean = None, True, None
         self.last_rollout_diagnostics = []
+        self.last_plan_ok = None
 
     def Reset(self, mean=None) -> None:
         self._reset, self._mean = True, None if mean is None else np.asarray(mean, dtype=float)
@@ -238,6 +240,7 @@ class RemotePlanner:
         self.last_min_cost, self.last_plan_seconds = rep["min_cost"], rep["plan_s"]
         self.last_action_uncertainty = rep["sigma"]
         self.last_rollout_diagnostics = rep.get("rollout_diagnostics", [])
+        self.last_plan_ok = rep.get("plan_ok")
         return rep["action"] if rep["sigma"] is None else (rep["action"], rep["sigma"])
 
 
@@ -324,6 +327,7 @@ def _plannerMain(args, gpu: str | None, planner_id: int, models: list[str],
                 plan_s = time.perf_counter() - t1
                 action, sigma = out if isinstance(out, tuple) else (out, None)
                 replies[req["worker"]].put({"action": action, "sigma": sigma, "plan_s": plan_s,
+                                            "plan_ok": planner.last_plan_ok,
                                             "min_cost": float(getattr(planner, "last_min_cost", np.nan)),
                                             "rollout_diagnostics": [
                                                 {**d, "planner_id": planner_id, "gpu": gpu}
@@ -401,6 +405,8 @@ def _workerMain(args, worker_id: int, gpu: str | None, descs: dict, jobs, reques
         episode.extra["goal_seed"] = goal_seed
         episode.extra["planner_request_wait_s"] = planner.wait_s - wait0
         plan_seconds = float(np.nansum(episode.planning_time))
+        if episode.rejected_plan is not None:
+            plan_seconds += float(episode.rejected_plan.get("planning_time") or 0.0)
         episode.extra["planner_wait_overhead_s"] = max(0.0, planner.wait_s - wait0 - plan_seconds)
         summary.update(episode.extra)
         events.put(("episode", worker_id, job_id, episode, summary, error))

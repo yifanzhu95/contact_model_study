@@ -54,6 +54,7 @@ python -m pytest -q \
     tests/test_polaris_package.py \
     tests/test_polaris_stages.py \
     tests/test_polaris_pipeline.py \
+    tests/test_polaris_direct.py \
     tests/test_parallel_drivers.py \
     tests/test_kamino.py::test_config_validation \
     tests/test_episode_batches.py -m "not gpu"

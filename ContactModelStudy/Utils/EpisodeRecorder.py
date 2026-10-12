@@ -142,6 +142,7 @@ class _Episode:
     #: Compact per-optimizer-iteration rollout validity for each control step.
     #: An empty inner list means the rollout backend has no such contract.
     planner_diagnostics: list = field(default_factory=list)
+    rejected_plan: dict | None = None
     #: ``(step, goal, label)`` for every goal adopted during the episode.
     goals: list = field(default_factory=list)
     #: Steps at which a goal was reached.
@@ -283,6 +284,19 @@ class EpisodeRecorder:
         ep.planner_diagnostics.append(
             _jsonable(getattr(self.planner, "last_rollout_diagnostics", [])))
 
+    def recordPlanFailure(self, q, q_dot, planning_time=None) -> None:
+        """Keep a rejected planning attempt separately: no action was applied."""
+        ep = self._current()
+        if ep.start_errors is None:
+            ep.start_errors = self._goalErrors(q, q_dot)
+        ep.rejected_plan = _jsonable({
+            "step": ep.n_steps, "action_applied": False,
+            "q": np.asarray(q).ravel(), "q_dot": np.asarray(q_dot).ravel(),
+            "planning_time": planning_time,
+            "planner_cost": getattr(self.planner, "last_min_cost", None),
+            "rollout_diagnostics": getattr(self.planner, "last_rollout_diagnostics", []),
+        })
+
     def recordGoal(self, goal, label: str | None = None) -> None:
         """Note that the task has adopted ``goal``, from the current step on.
 
@@ -397,7 +411,7 @@ class EpisodeRecorder:
         summary = {
             "id": ep.id,
             "finish_reason": ep.finish_reason,
-            "failed": ep.finish_reason == "failure",
+            "failed": ep.finish_reason in ("failure", "planner_failure"),
             "n_steps": ep.n_steps,
             "goals": [label for _step, _goal, label in ep.goals],
             "goal_values": [goal for _step, goal, _label in ep.goals],
@@ -414,6 +428,7 @@ class EpisodeRecorder:
             "plan_s_mean": float(rest.mean()) if rest.size else None,
             "plan_s_max": float(rest.max()) if rest.size else None,
             "planner_validation": self._plannerValidation(ep),
+            "rejected_plan": ep.rejected_plan,
         }
         summary.update(ep.extra)
         return summary
@@ -423,8 +438,10 @@ class EpisodeRecorder:
         rollout = ep.configs.get("rollout_simulator", {})
         applicable = rollout.get("class") == "Kamino"
         iterations = int(ep.configs.get("planner", {}).get("config", {}).get("n_iterations", 1))
-        expected = ep.n_steps * iterations
+        expected = (ep.n_steps + int(ep.rejected_plan is not None)) * iterations
         diagnostics = [item for plan in ep.planner_diagnostics for item in plan]
+        if ep.rejected_plan is not None:
+            diagnostics += ep.rejected_plan.get("rollout_diagnostics", [])
         if not applicable:
             return {
                 "applicable": False,
@@ -436,6 +453,8 @@ class EpisodeRecorder:
             }
 
         blocking: dict[str, int] = {}
+        if ep.rejected_plan is not None:
+            blocking["planner_failure"] = 1
         for item in diagnostics:
             for reason, count in item.get("blocking_reasons", {}).items():
                 blocking[reason] = blocking.get(reason, 0) + int(count)
@@ -501,7 +520,8 @@ class EpisodeRecorder:
                 npy = f"{path.stem}_{ep.id}.npy"
                 np.save(path.parent / npy, ep.toArray(self._dims()))
             entry = {"id": ep.id, "file": npy, "finish_reason": ep.finish_reason,
-                     "n_steps": ep.n_steps, "summary": summary}
+                     "n_steps": ep.n_steps, "summary": summary,
+                     "planner_diagnostics": ep.planner_diagnostics}
             if ep.configs != self.configs:
                 entry["configs"] = ep.configs
             entries.append(entry)

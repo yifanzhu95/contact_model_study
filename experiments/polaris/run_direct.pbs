@@ -1,0 +1,52 @@
+#!/bin/bash -l
+#PBS -N kamino_research
+#PBS -l select=1:system=polaris
+#PBS -l place=scatter
+#PBS -l filesystems=home:eagle
+#PBS -r n
+#PBS -m n
+set -euo pipefail
+: "${PROJ_DIR:?}" "${ENV_DIR:?}" "${OUTDIR:?}" "${EXPECTED_SHA:?}"
+: "${ALCF_PROJECT:?}" "${PBS_JOBID:?}"
+exec > "$OUTDIR/job.log" 2>&1
+runner_pid=""
+finalize() {
+    job_rc=$?
+    trap - EXIT
+    set +e
+    # No output after sealing: job.log and experiment.log have their final bytes.
+    "$ENV_DIR/bin/python" "$PROJ_DIR/experiments/polaris/direct.py" finalize \
+        --outdir "$OUTDIR" --exit-code "$job_rc" > /dev/null 2>&1
+    seal_rc=$?
+    if [[ "$job_rc" == 0 && "$seal_rc" != 0 ]]; then job_rc=2; fi
+    exit "$job_rc"
+}
+stop_run() {
+    trap '' TERM INT
+    if [[ -n "$runner_pid" ]]; then
+        kill -TERM "$runner_pid" 2>/dev/null || true
+        wait "$runner_pid" || true
+    fi
+    exit 143
+}
+trap finalize EXIT
+trap stop_run TERM INT
+set +u
+module use /soft/modulefiles
+module load conda
+conda activate "$ENV_DIR"
+set -u
+export PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1 MUJOCO_GL=egl OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0,1,2,3
+export TMPDIR="/local/scratch/${USER}/kamino_${PBS_JOBID}"
+export WARP_CACHE_PATH="$TMPDIR/warp-cache"
+mkdir -p "$WARP_CACHE_PATH"
+cd "$PROJ_DIR"
+python experiments/polaris/preflight.py --repo "$PROJ_DIR" --outdir "$OUTDIR" \
+    --expected-sha "$EXPECTED_SHA" --gpus 0,1,2,3 --output "$OUTDIR/preflight.json"
+python -m pip check > "$OUTDIR/pip-check.txt"
+python -m pip freeze --all > "$OUTDIR/pip-freeze.txt"
+conda list --explicit > "$OUTDIR/conda-explicit.txt"
+python experiments/polaris/direct.py run --outdir "$OUTDIR" &
+runner_pid=$!
+wait "$runner_pid"

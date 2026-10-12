@@ -21,11 +21,15 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--outdir", required=True, type=Path)
     parser.add_argument("--job-exit-code", required=True, type=int)
+    parser.add_argument("--exclude", action="append", default=[],
+                        help="exact relative path whose writer is outside this job's control")
     args = parser.parse_args(argv)
     outdir = args.outdir.resolve()
     destination = outdir / "artifact_manifest.json"
     files = []
     for path in sorted(p for p in outdir.rglob("*") if p.is_file() and p != destination):
+        if str(path.relative_to(outdir)) in args.exclude:
+            continue
         files.append({
             "path": str(path.relative_to(outdir)),
             "bytes": path.stat().st_size,
@@ -35,6 +39,7 @@ def main(argv=None) -> int:
         "schema": "contact_model_study.artifact_manifest.v1",
         "job_exit_code": args.job_exit_code,
         "files": files,
+        "excluded_paths": sorted(set(args.exclude)),
     }
     temporary = destination.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")

@@ -165,6 +165,10 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--adaptive-temp", action=argparse.BooleanOptionalAction, default=False)
     g.add_argument("--graph", action=argparse.BooleanOptionalAction, default=True,
                    help="capture the rollout into a CUDA graph (much faster)")
+    g.add_argument("--kamino-max-iterations", type=int, default=None,
+                   help="explicit M5/PADMM iteration cap; omitted preserves the model default")
+    g.add_argument("--stop-on-invalid-plan", action="store_true",
+                   help="end an episode as planner_failure before applying an all-invalid plan")
     g.add_argument("--plan-on-eval", action=argparse.BooleanOptionalAction, default=False,
                    help="roll out on the eval scene at the eval timestep (the model the eval "
                         "simulator runs) instead of the rollout scene; --hand-acc/--obj-acc "
@@ -314,6 +318,10 @@ def run_episode(args, task, eval_task, sim, planner, renderer, recorder) -> str:
         # A planner in another process reports its own solve time, so waiting
         # for a free GPU is not counted as planning.
         dt = getattr(planner, "last_plan_seconds", None) or (time.perf_counter() - t0)
+        if getattr(args, "stop_on_invalid_plan", False) and getattr(planner, "last_plan_ok", None) is not True:
+            recorder.recordPlanFailure(q, q_dot, planning_time=dt)
+            end_reason = "planner_failure"
+            break
         u, sigma = out if isinstance(out, tuple) else (out, None)
         recorder.recordStateAndAction(q, q_dot, u, sigma, planning_time=dt)
 
@@ -380,6 +388,12 @@ def parseArgs(argv=None, parser: argparse.ArgumentParser | None = None,
                 parser.error(f"--cost-weight {name}: {value!r} is not a number")
     if args.settle < 0:
         parser.error(f"--settle must be >= 0, got {args.settle}")
+    if args.kamino_max_iterations is not None:
+        if args.kamino_max_iterations < 1:
+            parser.error("--kamino-max-iterations must be >= 1")
+        from ContactModelStudy.Utils.ContactModelPresets import _resolveName
+        if _resolveName(args.rollout_model) != "M5":
+            parser.error("--kamino-max-iterations applies only to an M5/Kamino rollout")
     # Each pair is one setting given two ways; the rollout config rejects both
     # being set, but saying so here names the flags rather than the fields.
     for (a, b), (field, value) in _PAIR_DEFAULTS.items():
@@ -424,6 +438,8 @@ def rolloutSimOverrides(args, task) -> dict:
     would override the config's defaults with "let MJWarp choose".
     """
     buffers = {k: v for k, v in (("nconmax", args.nconmax), ("njmax", args.njmax)) if v is not None}
+    if getattr(args, "kamino_max_iterations", None) is not None:
+        buffers["padmm_max_iterations"] = args.kamino_max_iterations
     return dict(timestep=task.timestep, substeps=args.substeps, ctrl_time_step=args.ctrl_time_step,
                 horizon=args.horizon, time_horizon=args.time_horizon, **buffers)
 

@@ -1,12 +1,46 @@
 # Kamino deployment on Polaris / Kamino 的 Polaris 部署
 
-This package implements G0 correctness checks, G1 single-GPU calibration, G2 four-GPU throughput evaluation, G3 a small research pilot, and a single-launch PBS job chain. Local implementation does not establish A100 compatibility; GPU execution and Polaris measurements are still pending.
+The current operator entry is `direct.py submit`: one PBS allocation running actual four-GPU cube experiments, without a separate diagnostic job or a G0 prerequisite. The older G0–G3 validation workflow is retained below for optional reference qualification; do not submit both workflows for the same run. First-run A100 logs confirmed installation and GPU tests but failed strict rollout validation. The new numerical preset has not yet run on Polaris.
 
-本部署包已实现 G0 正确性检查、G1 单卡负载校准、G2 四卡吞吐量评估、G3 小规模科研试验，以及一次启动的 PBS 作业链。本地实现完成仍需在 A100 验证，GPU 执行和 Polaris 实测结果尚待取得。
+当前交付入口为 `direct.py submit`：一个 PBS 作业内直接运行四卡方块实验，不需要另提诊断作业，也不以前置 G0 通过为条件。下方保留旧版 G0–G3 验证流程供后续参考模型资格验证使用；同一次实验不要同时提交两种流程。首轮 A100 日志证明安装和 GPU 测试完成，但严格 rollout 验证失败。新数值配置尚未在 Polaris 实测。
 
-The deployment starts with correctness checks and measured calibration before expanding to multi-GPU experiments and parameter searches. The budgets below define the initial pilot, not hardware-validated optimal settings. Deployment changes are isolated on `codex/polaris-readiness`, based on integrated commit `a8dcc873e9f4e4f13dcf9973b30ed72f9d3bfa70`; publishing this branch does not merge it into shared experiment branches.
+Deployment changes are isolated on `codex/polaris-readiness`, based on integrated commit `a8dcc873e9f4e4f13dcf9973b30ed72f9d3bfa70`; publishing this branch does not merge it into shared experiment branches. The direct batch is an exploratory experiment, not an already-qualified full-NCP reference or hardware speedup benchmark.
 
-部署首先进行正确性检查和实测校准，再扩大到多 GPU 实验和参数搜索。下方规模定义首轮试点，不是经过硬件验证的最优设置。部署改动隔离在 `codex/polaris-readiness`，基于集成提交 `a8dcc873e9f4e4f13dcf9973b30ed72f9d3bfa70`；发布该分支不会将它合并到共享实验分支。
+部署改动隔离在 `codex/polaris-readiness`，基于集成提交 `a8dcc873e9f4e4f13dcf9973b30ed72f9d3bfa70`；发布此分支不会将其合并到共享实验分支。直接运行的是探索性实验，并非已经认证的 full-NCP 参考结果，也不是硬件加速比测试。
+
+## Direct research batch: current handoff / 直接实验：当前交付方式
+
+Clone the deployment branch into a **new directory**, detach at the full commit supplied in the handoff, and reuse the already-built M5 environment. Do not edit the old checkout, failed output, or its `submission.json`. No dependency installation changed. The operator supplies only the existing allocation, environment directory, Eagle output root, and queue/time limit; no source or PBS edits are needed.
+
+将部署分支克隆到**新目录**，固定到交付消息中的完整提交号，复用已安装的 M5 环境。不改旧源码、失败结果或旧 `submission.json`。此次没有修改依赖安装。操作者只提供已有额度名称、环境目录、Eagle 结果根目录和队列/时间限制，无需修改源码或 PBS。
+
+```bash
+<env>/bin/python <new-repo>/experiments/polaris/direct.py submit \
+  --project <existing-allocation> --env <env> --out-root <eagle-root> \
+  --queue capacity --walltime 04:00:00
+```
+
+This submits exactly **one non-rerunnable PBS job**, held until its ID is recorded, then released. Only after `Submitted and released ONE job` appears can SSH be closed without affecting normal execution. No login-node controller, manual ledger edits, second submission, or separate test job is required. Queue access and balance remain account-holder responsibilities. The [official queue guide](https://docs.alcf.anl.gov/polaris/running-jobs/) permits one-node jobs in `capacity`; use `--queue debug --walltime 01:00:00` only if appropriate, with a shorter batch budget. The wrapper does not automatically switch queues or retry a rejected request.
+
+入口只提交**一个不自动重跑的 PBS 作业**，登记编号后再放行。仅当出现 `Submitted and released ONE job` 时，断开 SSH 才不会影响正常执行。不需要登录节点控制程序、手改登记文件、第二次提交或单独测试作业。队列权限和额度由账户持有人确认。[官方队列说明](https://docs.alcf.anl.gov/polaris/running-jobs/)允许 `capacity` 运行单节点作业；必要时可用 `--queue debug --walltime 01:00:00`，但整批可用时间更短。入口不会自动换队列或重提被拒绝的请求。
+
+The preset uses four GPU planners (one per GPU), eight CPU MuJoCo workers, N=64, seed 0 with deterministic episode seeds, 24 cube episodes and up to 100 control steps each. CUDA graphs remain enabled. The control interval is 64 ms, Kamino timestep 4 ms and horizon five control intervals (320 ms). Temperature 40, noise sigma 0.05, one MPPI iteration and the 5e-4 PADMM tolerances are unchanged. Only this explicit run raises the iteration cap from 100 to 400; the shared model default stays 100. This may help convergence and increase runtime, but is not a proven cure. Runtime arguments allow later reviewed changes to episode/sample/step/cap budgets.
+
+预设为四个 GPU 规划进程（每卡一个）、八个 CPU MuJoCo 工作进程、N=64、基础种子 0 并按 episode 确定种子、24 次方块实验、每次最多 100 个控制步。保留 CUDA graph。控制间隔 64 ms、Kamino 时间步 4 ms、预测长度五个控制间隔（320 ms）。温度 40、噪声标准差 0.05、一次 MPPI 迭代和 PADMM 的 5e-4 精度要求均不变。只在本次显式配置中将求解迭代上限从 100 提到 400，模型默认仍为 100。这可能帮助收敛，也会增加耗时，并不是已证明有效的修复。后续经审阅可通过运行参数改变 episode、候选、步数和迭代预算。
+
+Candidate filtering remains strict. Some invalid candidates do not abort the whole batch; if every candidate is unusable, that episode ends as `planner_failure` **before** any zero absolute joint target is applied. Other requested episodes continue. The rejected attempt, pre-action state and solver evidence are saved separately from applied actions. `results.json` includes per-plan compact diagnostics and per-episode numeric arrays. `status.json` separates `execution_status` from `validation_status` and `scaling_eligible`: a complete batch can contain task/planner failures and fail numerical validation. Never report its completion as a precision certificate, successful manipulation, or a validated speedup. The direct run does not automatically launch G1–G3 or BO.
+
+严格保留候选过滤。部分候选无效不会终止整批；所有候选均不可用时，该 episode 记为 `planner_failure`，在执行任何零绝对关节目标**之前**停止，然后继续其他 episode。被拒绝的规划、动作前状态和求解证据单独保存，不冒充已执行动作。`results.json` 保存逐次规划的紧凑诊断和各 episode 数值数组。`status.json` 将 `execution_status` 与 `validation_status`、`scaling_eligible` 分开：整批执行完成仍可能包含任务/规划失败，数值验证也可能不通过。不能将“完成”解释为精度认证、操作成功或已验证的加速。直接入口不会自动启动 G1–G3 或 BO。
+
+Preflight runs inside the same allocation, checking the pinned clean source, Python/package versions, four A100s, scene hashes and writable Eagle output. The job reserves ten minutes for startup and saving; if the experiment reaches its time budget, it interrupts the pool, saves available data and reports an incomplete run. Hard PBS termination or node loss may still prevent a final seal. Every submission uses a fresh output directory. Return that entire directory, including `plan.json`, `submission.json`, `status.json`, `results.json`, `pool_stats.json`, logs, arrays, environment records and `artifact_manifest.json`. The in-job seal excludes the live login-owned `submission.json` and PBS stdout/stderr; a registered `submission_at_start.json` snapshot is sealed instead. On submission failure, preserve the printed directory and do not blindly rerun the command.
+
+预检在同一个作业内执行，核对固定且干净的源码、Python/依赖版本、四张 A100、场景哈希和可写 Eagle 目录。作业预留十分钟用于启动和保存；实验达到时间预算时中断进程池，保存已有数据并报告未完成。PBS 强制终止或节点故障仍可能导致无法最终封存。每次提交使用新的结果目录。请返回完整目录，包括 `plan.json`、`submission.json`、`status.json`、`results.json`、`pool_stats.json`、日志、数组、环境记录和 `artifact_manifest.json`。作业内封存排除由登录进程继续写入的 `submission.json` 和 PBS 标准输出/错误，改为封存已登记的 `submission_at_start.json` 快照。若提交失败，保留打印的目录，不要直接反复重提。
+
+## Legacy qualification workflow / 旧版资格验证流程
+
+The G0–G3 sections below describe the optional strict qualification path, not the current direct-run instructions. Its all-at-once four-job submission was rejected by the observed per-user queue limit; it has not been converted to a one-job chain. Do not use it for this handoff or manually edit its historical ledger.
+
+以下 G0–G3 章节描述可选的严格资格验证流程，不是此次直接运行指令。实测队列的用户限制拒绝其一次提交四个作业；这条旧流程没有改为单作业链。本次交付不要使用它，也不要手改其历史登记文件。
 
 ## Hardware and parallel work / 硬件与并行方式
 
