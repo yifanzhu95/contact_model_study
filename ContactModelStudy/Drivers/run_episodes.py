@@ -169,6 +169,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="explicit M5/PADMM iteration cap; omitted preserves the model default")
     g.add_argument("--stop-on-invalid-plan", action="store_true",
                    help="end an episode as planner_failure before applying an all-invalid plan")
+    g.add_argument("--kamino-acceptance", choices=("strict", "exploratory"), default="strict",
+                   help="explicit M5 candidate policy; strict numerical qualification is always recorded")
     g.add_argument("--plan-on-eval", action=argparse.BooleanOptionalAction, default=False,
                    help="roll out on the eval scene at the eval timestep (the model the eval "
                         "simulator runs) instead of the rollout scene; --hand-acc/--obj-acc "
@@ -394,6 +396,10 @@ def parseArgs(argv=None, parser: argparse.ArgumentParser | None = None,
         from ContactModelStudy.Utils.ContactModelPresets import _resolveName
         if _resolveName(args.rollout_model) != "M5":
             parser.error("--kamino-max-iterations applies only to an M5/Kamino rollout")
+    if args.kamino_acceptance != "strict":
+        from ContactModelStudy.Utils.ContactModelPresets import _resolveName
+        if _resolveName(args.rollout_model) != "M5":
+            parser.error("--kamino-acceptance applies only to an M5/Kamino rollout")
     # Each pair is one setting given two ways; the rollout config rejects both
     # being set, but saying so here names the flags rather than the fields.
     for (a, b), (field, value) in _PAIR_DEFAULTS.items():
@@ -440,6 +446,8 @@ def rolloutSimOverrides(args, task) -> dict:
     buffers = {k: v for k, v in (("nconmax", args.nconmax), ("njmax", args.njmax)) if v is not None}
     if getattr(args, "kamino_max_iterations", None) is not None:
         buffers["padmm_max_iterations"] = args.kamino_max_iterations
+    if getattr(args, "kamino_acceptance", "strict") != "strict":
+        buffers["rollout_acceptance"] = args.kamino_acceptance
     return dict(timestep=task.timestep, substeps=args.substeps, ctrl_time_step=args.ctrl_time_step,
                 horizon=args.horizon, time_horizon=args.time_horizon, **buffers)
 

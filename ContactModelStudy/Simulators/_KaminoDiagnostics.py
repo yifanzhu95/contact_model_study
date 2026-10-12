@@ -29,6 +29,7 @@ def _accumulate_solver_diagnostics_kernel(
     primal_failure_steps: wp.array(dtype=wp.int32),
     dual_failure_steps: wp.array(dtype=wp.int32),
     complementarity_failure_steps: wp.array(dtype=wp.int32),
+    nonfinite_residual_steps: wp.array(dtype=wp.int32),
     max_iterations: wp.array(dtype=wp.int32),
     max_active_contacts: wp.array(dtype=wp.int32),
     max_primal_residual: wp.array(dtype=wp.float32),
@@ -37,6 +38,8 @@ def _accumulate_solver_diagnostics_kernel(
 ):
     world = wp.tid()
     current = status[world]
+    if not wp.isfinite(current.r_p) or not wp.isfinite(current.r_d) or not wp.isfinite(current.r_c):
+        nonfinite_residual_steps[world] = nonfinite_residual_steps[world] + 1
     if current.converged == 1:
         converged_steps[world] = converged_steps[world] + 1
     if active_contacts[world] > 0:
@@ -60,6 +63,26 @@ def _accumulate_solver_diagnostics_kernel(
 
 
 @wp.kernel
+def _accumulate_finite_state_kernel(
+    joint_q: wp.array(dtype=wp.float32),
+    joint_qd: wp.array(dtype=wp.float32),
+    nq: int,
+    nv: int,
+    nonfinite_state_steps: wp.array(dtype=wp.int32),
+):
+    world = wp.tid()
+    bad = not wp.isfinite(joint_q[world * nq])
+    for i in range(nq):
+        if not wp.isfinite(joint_q[world * nq + i]):
+            bad = True
+    for i in range(nv):
+        if not wp.isfinite(joint_qd[world * nv + i]):
+            bad = True
+    if bad:
+        nonfinite_state_steps[world] = nonfinite_state_steps[world] + 1
+
+
+@wp.kernel
 def _strict_rollout_validity_kernel(
     reset_success: wp.array(dtype=wp.bool),
     qpos: wp.array2d(dtype=wp.float32),
@@ -72,10 +95,14 @@ def _strict_rollout_validity_kernel(
     complementarity_failure_steps: wp.array(dtype=wp.int32),
     max_iterations: wp.array(dtype=wp.int32),
     max_active_contacts: wp.array(dtype=wp.int32),
+    nonfinite_residual_steps: wp.array(dtype=wp.int32),
+    nonfinite_state_steps: wp.array(dtype=wp.int32),
     expected_fine_steps: int,
     iteration_limit: int,
     contact_capacity: int,
+    exploratory: int,
     valid: wp.array(dtype=wp.bool),
+    usable: wp.array(dtype=wp.bool),
     finite_state: wp.array(dtype=wp.bool),
     finite_cost: wp.array(dtype=wp.bool),
 ):
@@ -89,6 +116,7 @@ def _strict_rollout_validity_kernel(
     for i in range(qvel.shape[1]):
         if not wp.isfinite(qvel[world, i]):
             state_ok = False
+    state_ok = state_ok and nonfinite_state_steps[world] == 0
     cost_ok = wp.isfinite(running_costs[world]) and wp.isfinite(terminal_costs[world])
     solver_ok = (
         converged_steps[world] == expected_fine_steps
@@ -100,9 +128,14 @@ def _strict_rollout_validity_kernel(
     contacts_ok = contact_capacity <= 0 or max_active_contacts[world] < contact_capacity
     ok = reset_success[world] and state_ok and cost_ok and solver_ok and contacts_ok
     valid[world] = ok
+    # Reaching capacity is a warning, not proof that the buffer overflowed.
+    hard_contacts_ok = contact_capacity <= 0 or max_active_contacts[world] <= contact_capacity
+    hard_ok = (reset_success[world] and state_ok and cost_ok
+               and nonfinite_residual_steps[world] == 0 and hard_contacts_ok)
+    usable[world] = hard_ok
     finite_state[world] = state_ok
     finite_cost[world] = cost_ok
-    if not ok:
+    if (exploratory == 0 and not ok) or (exploratory == 1 and not hard_ok):
         # MPPI treats NaN costs as zero-weight candidates.  Mark both pieces so
         # any later cost folding stays NaN and cannot influence the action.
         running_costs[world] = wp.nan
@@ -120,6 +153,8 @@ class KaminoRolloutDiagnostics:
         "complementarity_failure_steps",
         "max_iterations",
         "max_active_contacts",
+        "nonfinite_residual_steps",
+        "nonfinite_state_steps",
     )
     _RESIDUALS = (
         "max_primal_residual",
@@ -135,6 +170,7 @@ class KaminoRolloutDiagnostics:
         for name in self._RESIDUALS:
             setattr(self, name, wp.zeros(world_count, dtype=wp.float32, device=device))
         self.valid = wp.zeros(world_count, dtype=wp.bool, device=device)
+        self.usable = wp.zeros(world_count, dtype=wp.bool, device=device)
         self.finite_state = wp.zeros(world_count, dtype=wp.bool, device=device)
         self.finite_cost = wp.zeros(world_count, dtype=wp.bool, device=device)
 
@@ -143,6 +179,7 @@ class KaminoRolloutDiagnostics:
         for name in self._COUNTERS + self._RESIDUALS:
             getattr(self, name).zero_()
         self.valid.zero_()
+        self.usable.zero_()
         self.finite_state.zero_()
         self.finite_cost.zero_()
 
@@ -161,6 +198,7 @@ class KaminoRolloutDiagnostics:
                 self.primal_failure_steps,
                 self.dual_failure_steps,
                 self.complementarity_failure_steps,
+                self.nonfinite_residual_steps,
                 self.max_iterations,
                 self.max_active_contacts,
                 self.max_primal_residual,
@@ -169,6 +207,13 @@ class KaminoRolloutDiagnostics:
             ],
             device=self.device,
         )
+
+    def accumulate_state(self, joint_q, joint_qd) -> None:
+        """Retain transient nonfinite native state at every fine step, on device."""
+        wp.launch(_accumulate_finite_state_kernel, dim=self.world_count,
+                  inputs=[joint_q, joint_qd, joint_q.shape[0] // self.world_count,
+                          joint_qd.shape[0] // self.world_count, self.nonfinite_state_steps],
+                  device=self.device)
 
     def invalidate_costs(
         self,
@@ -181,8 +226,12 @@ class KaminoRolloutDiagnostics:
         expected_fine_steps: int,
         iteration_limit: int,
         contact_capacity: int,
+        acceptance_policy: str = "strict",
     ) -> None:
         """Mark invalid candidate costs NaN before the planner weights them."""
+        if acceptance_policy not in ("strict", "exploratory"):
+            raise ValueError("acceptance_policy must be strict or exploratory")
+        self.acceptance_policy = acceptance_policy
         wp.launch(
             _strict_rollout_validity_kernel,
             dim=self.world_count,
@@ -198,11 +247,14 @@ class KaminoRolloutDiagnostics:
                 self.complementarity_failure_steps,
                 self.max_iterations,
                 self.max_active_contacts,
+                self.nonfinite_residual_steps,
+                self.nonfinite_state_steps,
                 int(expected_fine_steps),
                 int(iteration_limit),
                 int(contact_capacity),
+                int(acceptance_policy == "exploratory"),
             ],
-            outputs=[self.valid, self.finite_state, self.finite_cost],
+            outputs=[self.valid, self.usable, self.finite_state, self.finite_cost],
             device=self.device,
         )
 
@@ -212,6 +264,7 @@ class KaminoRolloutDiagnostics:
         valid = self.valid.numpy().astype(bool)
         finite_state = self.finite_state.numpy().astype(bool)
         finite_cost = self.finite_cost.numpy().astype(bool)
+        usable = self.usable.numpy().astype(bool)
 
         def worlds(mask) -> int:
             return int(np.count_nonzero(mask))
@@ -230,9 +283,19 @@ class KaminoRolloutDiagnostics:
             ),
             "nonfinite_state_worlds": worlds(~finite_state),
             "nonfinite_cost_worlds": worlds(~finite_cost),
+            "nonfinite_residual_worlds": worlds(arrays["nonfinite_residual_steps"] > 0),
+            "definite_contact_overflow_worlds": (
+                worlds(arrays["max_active_contacts"] > contact_capacity) if contact_capacity > 0 else 0
+            ),
         }
+        hard_names = ("nonfinite_state_worlds", "nonfinite_cost_worlds",
+                      "nonfinite_residual_worlds", "definite_contact_overflow_worlds")
         return {
-            "schema": "contact_model_study.kamino_rollout_diagnostics.v1",
+            "schema": "contact_model_study.kamino_rollout_diagnostics.v2",
+            "acceptance_policy": getattr(self, "acceptance_policy", "strict"),
+            "usable_worlds": worlds(usable), "unusable_worlds": worlds(~usable),
+            "hard_blocking_reasons": {k: blocking[k] for k in hard_names if blocking[k]},
+            "quality_warnings": {k: v for k, v in blocking.items() if v and k not in hard_names},
             "world_count": self.world_count,
             "expected_fine_steps": int(expected_fine_steps),
             "valid_worlds": worlds(valid),

@@ -295,8 +295,9 @@ def _plannerMain(args, gpu: str | None, planner_id: int, models: list[str],
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     busy, n_plans = 0.0, 0
     try:
+        init_start = time.perf_counter()
         units = {m: _PlannerUnit(args, m) for m in models}
-        events.put(("planner_ready", planner_id, gpu))
+        events.put(("planner_ready", planner_id, gpu, time.perf_counter() - init_start))
         while True:
             try:
                 req = requests.get(timeout=_POLL_S)
@@ -403,6 +404,7 @@ def _workerMain(args, worker_id: int, gpu: str | None, descs: dict, jobs, reques
         episode = recorder.episodes.pop()
         episode.extra["worker"] = worker_id
         episode.extra["goal_seed"] = goal_seed
+        episode.extra["noise_seed"] = noise_seed
         episode.extra["planner_request_wait_s"] = planner.wait_s - wait0
         plan_seconds = float(np.nansum(episode.planning_time))
         if episode.rejected_plan is not None:
@@ -628,6 +630,8 @@ class EpisodePool:
             self.stats["planner_busy"] += msg[2]
             self.stats["plans"] += msg[3]
             self.stats["planner_stats"] += 1
+        elif kind == "planner_ready":
+            self.stats.setdefault("planner_initialization_s", {})[str(msg[1])] = msg[3]
 
     def _checkAlive(self) -> None:
         if self._closed or self.fatal:

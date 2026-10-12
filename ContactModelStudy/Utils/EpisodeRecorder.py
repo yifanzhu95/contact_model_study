@@ -425,6 +425,7 @@ class EpisodeRecorder:
             "q_end": ep.q_end,
             "q_dot_end": ep.q_dot_end,
             "plan_s_first": float(finite[0]) if finite.size else None,
+            "applied_plan_s_total": float(finite.sum()),
             "plan_s_mean": float(rest.mean()) if rest.size else None,
             "plan_s_max": float(rest.max()) if rest.size else None,
             "planner_validation": self._plannerValidation(ep),
@@ -472,6 +473,9 @@ class EpisodeRecorder:
             "recorded_rollouts": len(diagnostics),
             "valid_worlds": sum(int(item.get("valid_worlds", 0)) for item in diagnostics),
             "invalid_worlds": sum(int(item.get("invalid_worlds", 0)) for item in diagnostics),
+            "acceptance_policies": sorted({item.get("acceptance_policy", "strict") for item in diagnostics}),
+            "usable_worlds": sum(int(item.get("usable_worlds", item.get("valid_worlds", 0))) for item in diagnostics),
+            "unusable_worlds": sum(int(item.get("unusable_worlds", item.get("invalid_worlds", 0))) for item in diagnostics),
             "planner_devices": sorted({str(item["gpu"]) for item in diagnostics if item.get("gpu") is not None}),
             "max_iterations": max((int(item.get("max_iterations", 0)) for item in diagnostics), default=0),
             "max_active_contacts": max(

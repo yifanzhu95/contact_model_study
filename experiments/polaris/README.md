@@ -1,249 +1,148 @@
-# Kamino deployment on Polaris / Kamino 的 Polaris 部署
+# Kamino on Polaris: full G1–G3 campaign / 完整 G1–G3 实验
 
-The current operator entry is `direct.py submit`: one PBS allocation running actual four-GPU cube experiments, without a separate diagnostic job or a G0 prerequisite. The older G0–G3 validation workflow is retained below for optional reference qualification; do not submit both workflows for the same run. First-run A100 logs confirmed installation and GPU tests but failed strict rollout validation. The new numerical preset has not yet run on Polaris.
+The current operator entry is `campaign.py submit`. It submits **one PBS job** for the original G1 calibration, G2 parallel comparison and G3 parameter grid. There is no separate G0 job, inter-stage submission, login-node watcher or fixed-topology substitute. Changes are isolated on `codex/polaris-readiness`, based on integrated commit `a8dcc873e9f4e4f13dcf9973b30ed72f9d3bfa70`; shared experiment branches are not changed.
 
-当前交付入口为 `direct.py submit`：一个 PBS 作业内直接运行四卡方块实验，不需要另提诊断作业，也不以前置 G0 通过为条件。下方保留旧版 G0–G3 验证流程供后续参考模型资格验证使用；同一次实验不要同时提交两种流程。首轮 A100 日志证明安装和 GPU 测试完成，但严格 rollout 验证失败。新数值配置尚未在 Polaris 实测。
+当前入口是 `campaign.py submit`，只提交**一个 PBS 作业**，完整执行原 G1 校准、G2 并行对比和 G3 参数组合。不另提 G0，不在阶段间提交作业，不依赖登录节点监控，也不以单一配置代替完整实验。改动隔离在 `codex/polaris-readiness`，基于集成提交 `a8dcc873e9f4e4f13dcf9973b30ed72f9d3bfa70`；共享实验分支不变。
 
-Deployment changes are isolated on `codex/polaris-readiness`, based on integrated commit `a8dcc873e9f4e4f13dcf9973b30ed72f9d3bfa70`; publishing this branch does not merge it into shared experiment branches. The direct batch is an exploratory experiment, not an already-qualified full-NCP reference or hardware speedup benchmark.
+## Workload / 实验范围
 
-部署改动隔离在 `codex/polaris-readiness`，基于集成提交 `a8dcc873e9f4e4f13dcf9973b30ed72f9d3bfa70`；发布此分支不会将其合并到共享实验分支。直接运行的是探索性实验，并非已经认证的 full-NCP 参考结果，也不是硬件加速比测试。
+| Stage | Configurations | Episodes | Maximum control plans |
+| --- | --- | ---: | ---: |
+| G1 | N=32/64/128/256 × seeds 0/1/2; one GPU, ≤20 steps | 12 | 240 |
+| G2 | N=64; 1 GPU/4 workers, 4 GPUs/4, 8, 16 workers; 24 paired episodes per topology, ≤100 steps | 96 | 9,600 |
+| G3 | N=64; temperature 10/40/100 × sigma 0.02/0.05/0.10 × seeds 0/1/2; ≤100 steps | 27 | 2,700 |
+| Total | 43 cells | 135 | 12,540 |
 
-## Direct research batch: current handoff / 直接实验：当前交付方式
+G1 runs sequentially on GPU 0. All four G2 topologies run sequentially, using the same pooled driver and deterministic per-episode goal/noise seeds; no other campaign workload competes with them. G3 runs independent sequential drivers, at most one per GPU and four at once. G1 and G3 share the sequential driver's seed convention; G2 uses the pooled convention. N=64 is a reviewed starting budget, not an optimum or an automatically selected calibration result. No cell or N level is silently dropped.
 
-Clone the deployment branch into a **new directory**, detach at the full commit supplied in the handoff, and reuse the already-built M5 environment. Do not edit the old checkout, failed output, or its `submission.json`. No dependency installation changed. The operator supplies only the existing allocation, environment directory, Eagle output root, and queue/time limit; no source or PBS edits are needed.
+G1 在 GPU 0 上顺序执行。G2 的四种拓扑逐一执行，均使用进程池入口和相同的 episode 目标／噪声种子，不与本批其他实验争抢资源。G3 运行独立实验进程，每卡同时最多一组、总共最多四组。G1 与 G3 使用顺序入口的种子规则，G2 使用进程池规则。N=64 是已选定的起始预算，不是最优值，也不是自动校准选择。不会暗中省略配置或 N 档位。
 
-将部署分支克隆到**新目录**，固定到交付消息中的完整提交号，复用已安装的 M5 环境。不改旧源码、失败结果或旧 `submission.json`。此次没有修改依赖安装。操作者只提供已有额度名称、环境目录、Eagle 结果根目录和队列/时间限制，无需修改源码或 PBS。
+All stages retain the cube scenes, cost weights, one MPPI iteration, CUDA graphs, no warm start, no video and saved numeric steps. The control interval is 64 ms, rollout timestep 4 ms, and effective horizon five control intervals (320 ms). PADMM uses the original cap **100** and tolerance **5e-4**, uniformly. The earlier reduced direct pilot's cap400 is not used. Experiments may finish early when the object drops or planning fails.
 
-```bash
-<env>/bin/python <new-repo>/experiments/polaris/direct.py submit \
-  --project <existing-allocation> --env <env> --out-root <eagle-root> \
-  --queue capacity --walltime 04:00:00
-```
+各阶段保留方块场景、代价权重、一次 MPPI 迭代、CUDA graph、不热启动、不录视频并保存数值步骤。控制间隔 64 ms，rollout 时间步 4 ms，有效预测长度为五个控制间隔（320 ms）。PADMM 统一使用原始上限 **100** 和容差 **5e-4**，不用之前单配置入口的 400。物体掉落或规划失败时，episode 可能提前结束。
 
-This submits exactly **one non-rerunnable PBS job**, held until its ID is recorded, then released. Only after `Submitted and released ONE job` appears can SSH be closed without affecting normal execution. No login-node controller, manual ledger edits, second submission, or separate test job is required. Queue access and balance remain account-holder responsibilities. The [official queue guide](https://docs.alcf.anl.gov/polaris/running-jobs/) permits one-node jobs in `capacity`; use `--queue debug --walltime 01:00:00` only if appropriate, with a shorter batch budget. The wrapper does not automatically switch queues or retry a rejected request.
+## Operator: prepare once, submit once / 操作者：一次准备、一次提交
 
-入口只提交**一个不自动重跑的 PBS 作业**，登记编号后再放行。仅当出现 `Submitted and released ONE job` 时，断开 SSH 才不会影响正常执行。不需要登录节点控制程序、手改登记文件、第二次提交或单独测试作业。队列权限和额度由账户持有人确认。[官方队列说明](https://docs.alcf.anl.gov/polaris/running-jobs/)允许 `capacity` 运行单节点作业；必要时可用 `--queue debug --walltime 01:00:00`，但整批可用时间更短。入口不会自动换队列或重提被拒绝的请求。
+Use a **new source directory**, detached at the full deployment SHA supplied in the handoff. Do not modify any active checkout, previous failed output, or historical submission ledger. Reuse the already prepared Python3.12 environment with MuJoCo3.6.0, Newton1.6.0 and Warp1.17.0. No new dependencies were added. Replace the four example values below as needed; these are runtime settings, not source edits. Never share login credentials.
 
-The preset uses four GPU planners (one per GPU), eight CPU MuJoCo workers, N=64, seed 0 with deterministic episode seeds, 24 cube episodes and up to 100 control steps each. CUDA graphs remain enabled. The control interval is 64 ms, Kamino timestep 4 ms and horizon five control intervals (320 ms). Temperature 40, noise sigma 0.05, one MPPI iteration and the 5e-4 PADMM tolerances are unchanged. Only this explicit run raises the iteration cap from 100 to 400; the shared model default stays 100. This may help convergence and increase runtime, but is not a proven cure. Runtime arguments allow later reviewed changes to episode/sample/step/cap budgets.
-
-预设为四个 GPU 规划进程（每卡一个）、八个 CPU MuJoCo 工作进程、N=64、基础种子 0 并按 episode 确定种子、24 次方块实验、每次最多 100 个控制步。保留 CUDA graph。控制间隔 64 ms、Kamino 时间步 4 ms、预测长度五个控制间隔（320 ms）。温度 40、噪声标准差 0.05、一次 MPPI 迭代和 PADMM 的 5e-4 精度要求均不变。只在本次显式配置中将求解迭代上限从 100 提到 400，模型默认仍为 100。这可能帮助收敛，也会增加耗时，并不是已证明有效的修复。后续经审阅可通过运行参数改变 episode、候选、步数和迭代预算。
-
-Candidate filtering remains strict. Some invalid candidates do not abort the whole batch; if every candidate is unusable, that episode ends as `planner_failure` **before** any zero absolute joint target is applied. Other requested episodes continue. The rejected attempt, pre-action state and solver evidence are saved separately from applied actions. `results.json` includes per-plan compact diagnostics and per-episode numeric arrays. `status.json` separates `execution_status` from `validation_status` and `scaling_eligible`: a complete batch can contain task/planner failures and fail numerical validation. Never report its completion as a precision certificate, successful manipulation, or a validated speedup. The direct run does not automatically launch G1–G3 or BO.
-
-严格保留候选过滤。部分候选无效不会终止整批；所有候选均不可用时，该 episode 记为 `planner_failure`，在执行任何零绝对关节目标**之前**停止，然后继续其他 episode。被拒绝的规划、动作前状态和求解证据单独保存，不冒充已执行动作。`results.json` 保存逐次规划的紧凑诊断和各 episode 数值数组。`status.json` 将 `execution_status` 与 `validation_status`、`scaling_eligible` 分开：整批执行完成仍可能包含任务/规划失败，数值验证也可能不通过。不能将“完成”解释为精度认证、操作成功或已验证的加速。直接入口不会自动启动 G1–G3 或 BO。
-
-Preflight runs inside the same allocation, checking the pinned clean source, Python/package versions, four A100s, scene hashes and writable Eagle output. The job reserves ten minutes for startup and saving; if the experiment reaches its time budget, it interrupts the pool, saves available data and reports an incomplete run. Hard PBS termination or node loss may still prevent a final seal. Every submission uses a fresh output directory. Return that entire directory, including `plan.json`, `submission.json`, `status.json`, `results.json`, `pool_stats.json`, logs, arrays, environment records and `artifact_manifest.json`. The in-job seal excludes the live login-owned `submission.json` and PBS stdout/stderr; a registered `submission_at_start.json` snapshot is sealed instead. On submission failure, preserve the printed directory and do not blindly rerun the command.
-
-预检在同一个作业内执行，核对固定且干净的源码、Python/依赖版本、四张 A100、场景哈希和可写 Eagle 目录。作业预留十分钟用于启动和保存；实验达到时间预算时中断进程池，保存已有数据并报告未完成。PBS 强制终止或节点故障仍可能导致无法最终封存。每次提交使用新的结果目录。请返回完整目录，包括 `plan.json`、`submission.json`、`status.json`、`results.json`、`pool_stats.json`、日志、数组、环境记录和 `artifact_manifest.json`。作业内封存排除由登录进程继续写入的 `submission.json` 和 PBS 标准输出/错误，改为封存已登记的 `submission_at_start.json` 快照。若提交失败，保留打印的目录，不要直接反复重提。
-
-## Legacy qualification workflow / 旧版资格验证流程
-
-The G0–G3 sections below describe the optional strict qualification path, not the current direct-run instructions. Its all-at-once four-job submission was rejected by the observed per-user queue limit; it has not been converted to a one-job chain. Do not use it for this handoff or manually edit its historical ledger.
-
-以下 G0–G3 章节描述可选的严格资格验证流程，不是此次直接运行指令。实测队列的用户限制拒绝其一次提交四个作业；这条旧流程没有改为单作业链。本次交付不要使用它，也不要手改其历史登记文件。
-
-## Hardware and parallel work / 硬件与并行方式
-
-A Polaris node has one 32-core CPU and four NVIDIA A100 GPUs. In our proposed configuration, the CPU runs Python, schedules work, and advances MuJoCo evaluation episodes; GPUs run batched Kamino predictions used by MPPI. Requesting a node does not automatically make one Python process use four GPUs. See the [ALCF hardware overview](https://docs.alcf.anl.gov/polaris/).
-
-Polaris 一个节点包含一颗 32 核 CPU 和四张 NVIDIA A100。本方案中，CPU 执行 Python、安排工作，并推进 MuJoCo 评估实验；GPU 执行 MPPI 所需的批量 Kamino 预测。申请节点不会自动让一个 Python 程序用上四张卡。硬件信息见 [ALCF 官方介绍](https://docs.alcf.anl.gov/polaris/)。
-
-GPU work can grow in two ways. Increasing N gives one plan more candidate action sequences: N=256 means predicting 256 possible futures. Running independent episodes or parameter settings on different GPUs increases experiment throughput. Four GPUs with N=256 each give four independent planners, not one N=1024 planner.
-
-增加 GPU 工作量有两种方式。增加 N，让一次规划包含更多候选动作序列：N=256 表示预测 256 种未来。让不同 GPU 同时运行独立 episode 或参数配置，则增加实验吞吐量。四张卡各运行 N=256，得到四个独立规划器，并不等于一个 N=1024 的规划器。
-
-The integrated code provides `run_episodes_pooled.py` and `EpisodePool.py`. Queues connect GPU planners and CPU evaluation workers. Start with one planner process per GPU, then measure whether more CPU workers help. Multiple planners on one GPU may increase contention and memory use.
-
-集成代码提供 `run_episodes_pooled.py` 和 `EpisodePool.py`，通过队列连接 GPU 规划进程和 CPU 评估进程。先给每张卡一个规划进程，再测量增加 CPU 工作进程是否有帮助。同一卡增加规划进程可能导致争抢和显存增加，收益需要实测。
-
-## G0: correctness check / 正确性检查
-
-The implemented G0 uses one visible A100, one cube episode, ten closed-loop plans, four candidates, one MPPI iteration, CUDA graphs, and no video. It checks state conversion, solver diagnostics, graph/eager agreement, source/environment identity, and result writing. Later stages use the remaining cards.
-
-已实现的 G0 使用一张可见 A100、一个方块 episode、十次闭环规划、四个候选、一次 MPPI 迭代，启用 CUDA graph，不生成视频。它检查状态转换、求解器诊断、graph 与普通执行的一致性、代码/环境版本和结果保存。后续阶段使用其余 GPU。
-
-Every expected Kamino fine step must converge. Reset failure, excessive residuals, iteration/contact-capacity limits, non-finite state/cost, or missing diagnostics block progression. Invalid candidates receive NaN costs before MPPI weighting. G0 requires all candidates to be valid; ordinary MPPI may still return an action with only some valid candidates.
-
-每个预期的 Kamino 细时间步都必须收敛。重置失败、残差超标、触及迭代或接触容量上限、状态或代价出现非有限数值，以及诊断缺失，都阻止进入下一阶段。无效候选在 MPPI 计算权重前被写入 NaN。G0 要求所有候选有效；普通 MPPI 在部分候选有效时仍可能返回动作，因此需要分别检查。
-
-## G1: single-GPU calibration / 单卡负载校准
-
-After G0, test N=32, 64, 128, and 256 in ascending order on one GPU. Keep the cube scene, horizon, cost weights, temperature 40, noise sigma 0.05, and one MPPI iteration fixed. For each N use seeds 0, 1, 2, one episode per seed, and up to twenty plans per episode: twelve short episodes and at most 240 plans. Stop a failing level before increasing N.
-
-G0 通过后，在一张卡上按顺序测试 N=32、64、128、256。固定方块场景、预测时域、代价权重、温度 40、噪声标准差 0.05 和一次 MPPI 迭代。每个 N 使用种子 0、1、2，每个种子一个 episode，每个 episode 最多二十次规划：合计十二个短 episode、最多 240 次规划。某一级失败时先分析原因。
-
-Record wall time, planning time after compilation/warm-up, GPU utilization over time, peak device memory, solver iterations/residuals, and valid-candidate counts. Choose N using valid work per unit time and planning quality, not utilization alone. Changing N changes the algorithm's sampling budget, so this study does not establish pure hardware speedup or planning convergence.
-
-记录总耗时、排除编译和预热后的规划耗时、GPU 利用率时间序列、显存峰值、求解迭代数与残差，以及有效候选数量。选择 N 时考虑单位时间完成的有效工作和规划质量，不能只看利用率。改变 N 也改变了算法采样预算，不能据此得出纯硬件加速比或规划收敛结论。
-
-## G2: four-GPU throughput / 四卡吞吐量
-
-Use the validated N from G1 and the pooled driver. Compare one GPU with four GPUs on the same batch of 24 episode IDs and the same base seed, with up to 100 plans per episode. Both measurements must use the pooled driver: the sequential driver uses a different goal random stream. Start with one planner per GPU and four CPU evaluation workers; on four GPUs, test eight and sixteen workers if measured time permits. Freeze N and all scientific settings.
-
-使用 G1 验证过的 N 和进程池入口。固定同一批 24 个 episode 编号及同一个基础种子，每个 episode 最多 100 次规划，对比单卡与四卡。两次都使用进程池入口：顺序入口的目标随机序列不同。起步时每卡一个规划进程、总共四个 CPU 评估进程；若实测耗时允许，再在四卡下测试八个和十六个 CPU 评估进程。保持 N 和科研参数一致。
-
-Measure valid episodes per hour, batch wall time, per-GPU utilization/memory, request waiting, and solver validity. Fourfold acceleration is not guaranteed. The extended preflight checks one or four visible A100s. Pooled results record topology, per-episode request wait time, device routing, source identity, and a completion sidecar. An interrupted or incomplete batch cannot pass merely because its process exits successfully.
-
-衡量每小时完成的有效 episode 数、整批耗时、各卡利用率/显存、请求等待和求解有效性。不能预设四卡一定快四倍。扩展后的预检核对一张或四张可见 A100；进程池结果记录进程分配、每个 episode 的请求等待、GPU 分配、代码来源和整批完成状态。中断或不完整的实验不会因进程正常退出就被判为通过。
-
-## G3: research pilot / 科研试点
-
-Use all four GPUs for independent parameter cells. The pilot crosses temperature {10, 40, 100} with noise sigma {0.02, 0.05, 0.10}: nine settings, three seeds each, one cube episode per seed, up to 100 plans per episode. This is 27 episodes and at most 2,700 plans. G3 launches independent sequential drivers, at most one per GPU, so its seeds match G1. G2 instead uses the shared pool. Freeze N, horizon, contact settings, cost weights, and MPPI iteration count. These values are exploratory, not tuned recommendations.
-
-让四卡并行处理不同参数组合。试点为温度 {10、40、100} 与噪声标准差 {0.02、0.05、0.10} 的组合：九组配置，每组三个种子，每种子一个方块 episode，每个 episode 最多 100 次规划。合计 27 个 episode、最多 2,700 次规划。G3 启动独立的顺序实验进程，每张卡同时最多一组，其种子方式与 G1 一致；G2 使用共享进程池。固定 N、时域、接触设置、代价权重及 MPPI 迭代次数。这些是探索值，尚未调优。
-
-Report task success/error, planning time, and invalid-candidate rates together. Larger noise may create harder contacts and invalidate a cell even when Python finishes. Three seeds per cell are a pilot, insufficient for a strong success-rate conclusion. Use these results to design more repeats or a BO search. Validate other objects separately.
-
-同时报告任务成功情况/误差、规划耗时和无效候选比例。较大噪声可能产生更困难的接触，即使 Python 结束，该组实验也可能无效。每组三个种子只适合试点，不足以支持强有力的成功率结论。应据此设计更多重复实验或 BO 搜索，其他物体单独验证。
-
-## Isolated GitHub delivery / 独立 GitHub 分支交付
-
-The dedicated deployment branch is `codex/polaris-readiness`. Keep it separate from `main`, `planner_dev`, `refactor_and_simplification`, and existing experiment branches. It contains instrumentation and packaging changes relative to the base; original versions remain on their own branches. Clone into a new directory and create a separate environment rather than switching or modifying an active experiment checkout. Offline transfer remains an optional alternative.
-
-专用部署分支为 `codex/polaris-readiness`，与 `main`、`planner_dev`、`refactor_and_simplification` 及已有实验分支保持隔离。它相对基线包含诊断与打包改动，原版本仍保留在各自分支。克隆到新目录并建立独立环境，不切换或修改正在运行实验的目录。离线传递只是可选替代方式。
-
-The operator clones into a new directory, then detaches at the exact deployment commit supplied with the handoff. Replace `<deployment-commit>` with that full SHA, not the base SHA above. A pinned commit prevents later branch updates from silently changing an experiment. These commands must not target an existing working checkout. The submitters still accept any matching clean local commit and do not require GitHub access during a compute job.
-
-操作者将代码克隆到新目录，再固定到交付时提供的精确部署提交。将 `<deployment-commit>` 替换为该完整 SHA，而不是上面的基线 SHA。固定提交可防止后续分支更新悄悄改变实验。这些命令不能指向已有工作目录。提交入口仍接受匹配的干净本地提交，不要求计算作业期间访问 GitHub。
+在**新目录**克隆源码，并固定到交付消息提供的完整 SHA。不修改正在使用的代码目录、旧失败结果或历史提交登记。复用已准备的 Python3.12 环境：MuJoCo3.6.0、Newton1.6.0、Warp1.17.0。本次未增加依赖。根据实际情况替换下方四项示例值；它们是运行配置，不是修改源码。不要分享登录凭证。
 
 ```bash
 git clone --single-branch --branch codex/polaris-readiness \
   https://github.com/yifanzhu95/contact_model_study.git \
-  /home/<user>/contact_model_study_polaris
-git -C /home/<user>/contact_model_study_polaris switch --detach <deployment-commit>
-git -C /home/<user>/contact_model_study_polaris rev-parse HEAD
-git -C /home/<user>/contact_model_study_polaris status --short
+  /home/<user>/contact_model_study_polaris_full
+git -C /home/<user>/contact_model_study_polaris_full switch --detach <deployment-SHA>
+
+PROJ_DIR=/home/<user>/contact_model_study_polaris_full
+ENV_DIR=/home/<user>/envs/contact-kamino-polaris
+ALCF_PROJECT=FoundationModels4RobotManipulation
+OUT_ROOT=/eagle/FoundationModels4RobotManipulation/<user>/kamino_polaris
+
+"$ENV_DIR/bin/python" "$PROJ_DIR/experiments/polaris/campaign.py" submit \
+  --project "$ALCF_PROJECT" --env "$ENV_DIR" --out-root "$OUT_ROOT" \
+  --queue capacity --walltime 24:00:00
 ```
 
-The initial G2/G3 budget is fixed at N=64. This is the second calibration level: more candidates than N=32 while avoiding the initial cost of N=128/256 for the longer pilot episodes. It is an engineering starting point, not an A100 measurement, optimal setting, or convergence claim. Use the G1 evidence to revisit it later. Throughput measurements describe this instrumented deployment version, not the uninstrumented baseline.
+The account/project must already exist and permit this operator to charge it; `--project` is passed to PBS as `qsub -A`. The environment and writable Eagle output root must already exist. Use absolute paths without whitespace, commas, quotes or backslashes. A clean pinned source is mandatory for submission. If the environment is not ready, the authorized operator first obtains a compute node and runs `bash experiments/polaris/setup_environment.sh <absolute-repo> <absolute-env>`; do not install or run simulations on a login node.
 
-首轮 G2/G3 固定为 N=64，即第二档校准规模：候选比 N=32 更多，同时先不将较长试验扩大到 N=128/256。它是工程上的起点，不是 A100 实测结论、最优参数或收敛证明；以后再依据 G1 证据调整。吞吐量测量对应这个带诊断的部署版本，不等同于未加入这些诊断的基线版本。
+项目额度必须已经存在，且允许操作者使用；`--project` 会以 `qsub -A` 传给 PBS。环境目录和可写的 Eagle 结果根目录应已存在。使用不含空白、逗号、引号、反斜杠的绝对路径，提交时源码须固定且干净。如果环境尚未准备，获授权操作者先取得计算节点，再运行 `bash experiments/polaris/setup_environment.sh <源码绝对路径> <环境绝对路径>`；不在登录节点安装或运行仿真。
 
-## Operator configuration / 操作者配置
+The [official Polaris queue guide](https://docs.alcf.anl.gov/polaris/running-jobs/) allows 1–4 nodes in `capacity`, with a documented maximum of 168 hours. This campaign requests **one node, up to24 hours**; this is a bounded budget, not a measured completion-time guarantee. It exits when finished and reserves ten minutes for startup/finalization. The account holder must confirm queue access and available allocation; the software cannot grant them. `debug` supports at most one hour and is not the recommended full-campaign queue. There is no automatic queue switch, resubmission or extra allocation.
 
-No source-code or PBS-script edits are needed to supply the deployment account and paths. Provide four runtime values: `--project` is the existing ALCF allocation/account string, `--env` is a new dedicated environment directory, `--out-root` is an existing writable Eagle results directory, and the source directory is the new clone containing `pipeline.py`. The submitter automatically passes the project to every job with `qsub -A`; it cannot create an allocation, grant access, or confirm the remaining balance. Confirm permission to use `debug`, including four held dependent jobs, before submission. Use absolute paths without whitespace, commas, quotes or backslashes. Do not place output or configuration files in the source checkout.
+[Polaris 官方队列说明](https://docs.alcf.anl.gov/polaris/running-jobs/)中 `capacity` 允许 1–4 个节点，最长 168 小时。本实验申请**一个节点、最多24小时**；这是有限预算，不是实测完成时间保证。完成后即退出，并预留十分钟用于启动／封存。账户持有人需确认队列权限和可用额度，软件不能授予这些权限。`debug` 最多一小时，不建议用于完整实验。不自动换队列、重提或追加额度。
 
-部署账户和目录通过运行参数提供，无需编辑源码或 PBS 脚本。需要四项值：`--project` 是已有的 ALCF 额度/账户名称，`--env` 是新的独立环境目录，`--out-root` 是已有且可写的 Eagle 结果目录，源码目录则是包含 `pipeline.py` 的新克隆目录。提交入口自动通过 `qsub -A` 将项目传给每个作业；它不能创建额度、授予权限或确认剩余额度。提交前确认可以使用 `debug`，包括四个挂起且带依赖的作业。目录使用不含空白、逗号、引号或反斜杠的绝对路径，不在源码目录内保存结果或配置文件。
+The submitter first requests one held, non-rerunnable job, saves its ID and plan hash, then releases it. Only after **`Submitted and released ONE job`** appears is normal execution independent of SSH. If submission/release fails or the response is unknown, keep the printed output directory and send its `submission.json`; do not blindly rerun or hand-edit the ledger. This protects against duplicate jobs, not against ordinary quality warnings.
 
-Initial login, choosing the four values, obtaining an interactive preparation node, and starting submission are operator actions. Environment installation and its checks run inside `setup_environment.sh`; after successful submission and release, G0–G3 sequencing, runtime preflight, validation, GPU assignment and result recording are automatic. `--check` only validates the plan and driver arguments: it does not prove GPU compatibility, queue eligibility or completion within the time limit. Failures stop progression; there is no automatic repair, resubmission or whole-chain resume.
+提交入口先申请一个挂起、不自动重跑的作业，保存编号和计划哈希，再放行。仅当出现 **`Submitted and released ONE job`** 后，正常执行才不依赖 SSH。提交／放行失败或返回不明时，保留打印出的目录并提供 `submission.json`，不要反复重提或手改登记。这是在防止重复作业，不是在拦截普通数值告警。
 
-首次登录、选择四项配置、取得交互式准备节点和启动提交由操作者完成。`setup_environment.sh` 自动安装环境并执行相应检查；提交与放行成功后，G0–G3 衔接、运行前检查、有效性判定、GPU 分配和结果记录自动完成。`--check` 只验证计划和入口参数，不能证明 GPU 兼容性、队列权限或能在时限内完成。失败会阻止继续，不自动修复、重提或整链续跑。
+Inside that allocation, the wrapper checks source, package versions, four A100s, scene hashes, PBS identity and Eagle writing; records the environment; executes all G1 → all G2 → all G3; and seals artifacts. GPU roles are assigned explicitly, without MPI. Baseline/calibration phases intentionally leave other GPUs idle so that the comparisons remain interpretable.
 
-## G0 operator commands / G0 操作命令
+在同一个作业内，程序检查源码、依赖版本、四张 A100、场景哈希、PBS 身份及 Eagle 写入；记录环境；自动执行全部 G1 → 全部 G2 → 全部 G3；最后封存结果。GPU 任务明确分配，不用 MPI。基线／校准阶段有意让其他 GPU 空闲，以免干扰比较。
 
-The authorized operator supplies the ALCF project name, repository path, environment path, and Eagle output root. Replace every angle-bracket placeholder. Request an interactive compute node following the [official PBS workflow](https://docs.alcf.anl.gov/polaris/running-jobs/).
+For a read-only argument/matrix preview, append `--check` to the submission command. It does not create directories, query queue eligibility, run CUDA, or submit jobs. It is not proof that the campaign will finish within24 hours.
 
-获授权操作者提供 ALCF 项目名、源码目录、环境目录和 Eagle 结果根目录。替换所有尖括号占位符。按照[官方 PBS 流程](https://docs.alcf.anl.gov/polaris/running-jobs/)申请交互式计算节点。
+在提交命令末尾加 `--check` 可只读预览参数和矩阵。它不建目录、不检查账户队列资格、不运行 CUDA，也不提交作业；不能证明实验可在24小时内完成。
+
+## Numerical policy: explicit exploration / 数值策略：明确的探索模式
+
+The campaign explicitly uses `--kamino-acceptance exploratory` in **every stage**. Finite residual overshoot, nonconvergence and iteration-limit hits are quality warnings and no longer manufacture NaN costs that remove those candidates. Reaching contact capacity is a warning, not proof of overflow. The original strict checks and per-plan diagnostics remain recorded; strict qualification is independent of whether an experiment runs to completion. This acceptance-policy change may change the selected actions; do not pool these results with old strict-filter runs as one cohort.
+
+本批**所有阶段**显式使用 `--kamino-acceptance exploratory`。有限的残差超标、未收敛、触及迭代上限会记为质量告警，不再人为把相应候选代价改成 NaN 并剔除。接触数达到容量是告警，不等于证明溢出。原严格检查和逐次规划诊断仍然记录；严格资格与实验是否执行完成分别判定。接受策略的改变可能改变选出的动作，不能与旧严格过滤实验混为同一批统计。
+
+Actual nonfinite raw state/cost/residual, failed reset and definite contact-buffer overflow remain hard candidate rejection conditions. Fine-step residual/state checks are accumulated on-device and compatible with graph capture. If all candidates are unusable, the episode ends as `planner_failure` **before** applying the fallback zero absolute joint target, and the rejected attempt is saved separately. Other episodes continue. The model default outside this explicit campaign remains `strict`.
+
+真实的原始状态／代价／残差 NaN 或 Inf、重置失败、明确的接触缓冲区溢出仍会使候选被拒绝。细时间步的残差／状态检查在设备上累积，与 graph capture 兼容。若所有候选均不可用，episode 记为 `planner_failure`，在执行错误的零绝对关节目标**之前**结束，并单独保存被拒规划。其他 episode 继续。本批以外的模型默认仍为 `strict`。
+
+Task failures, quality warnings, and isolated cell errors/OOM are recorded without stopping other planned cells or shrinking N. Recognized global environment/source/filesystem/driver failures stop the campaign. Missing utilization samples are measurement warnings; they do not kill experiments. Unknown runtime errors are preserved as cell errors rather than silently repaired. There is no automatic retry.
+
+任务失败、质量告警和孤立配置报错／显存不足会被记录，不阻止其他配置，也不缩小 N。已识别的全局环境／源码／文件系统／驱动故障会停止整批。利用率采样缺失只是测量告警，不终止实验。未知运行错误保留为配置报错，不暗中修复。不自动重试。
+
+## Results and fair performance reporting / 结果和公平性能统计
+
+`status.json` separates execution completion, task outcomes, strict numerical qualification and performance claims. It includes all stage verdicts, G1's N groups and G2 comparisons. Each cell stores source/policy identity, requested/completed work, first-plan timing, later planning means, CPU request waiting, per-planner initialization time (pooled), GPU telemetry, diagnostics and numeric arrays. Initialization timing excludes neither all Python import time nor all lazy CUDA compilation: first-plan and full-process wall times are also retained, not relabeled as pure steady-state compute.
+
+`status.json` 分别报告执行完成、任务结果、严格数值资格和性能结论，包含各阶段判定、G1 的 N 分组和 G2 对比。各配置保存源码／策略身份、请求和完成工作量、首个规划耗时、后续规划平均耗时、CPU 请求等待、进程池中各规划器初始化耗时、GPU 采样、诊断及数值数组。初始化计时并未覆盖全部 Python 导入或延迟 CUDA 编译，因此同时保留首规划及整个进程耗时，不冒充纯稳态计算时间。
+
+A descriptive exploratory wall-time ratio is shown only for matching full work in the same allocation, with observed requested GPUs and complete telemetry. A qualified speedup additionally requires strict numerical qualification. Early drop, planner failure, unequal step counts or mixed resumed allocations never produce a speedup. Wall times and completed-plan counts remain visible even when ratios are ineligible. Three G3 seeds per setting are a pilot, not a strong statistical success-rate claim.
+
+仅当同一作业内完成匹配的全部工作、观察到所需 GPU 且遥测完整时，才显示探索性的描述耗时比；经过严格资格的加速比还要求数值检查通过。提前掉落、规划失败、步数不等或混合续跑节点不能产生加速比。即使不适合计算比值，耗时和实际规划数仍保留。G3 每组仅三个种子是试点，不支持强统计成功率结论。
+
+## Budget and explicit resume / 时间预算及显式续跑
+
+A time limit or interrupt stops active children, retains completed cells and partial attempts, and marks the remainder uncompleted. A hard PBS kill/node loss may prevent final saving or sealing; no software can guarantee otherwise. No automatic new job is launched. To continue later, use the same source/environment and one command below, replacing `<previous-campaign-root>` with the earlier printed path.
+
+达到时间预算或收到中断时，停止活动子进程，保留已完成配置及部分尝试，并将剩余标为未完成。PBS 强制杀进程或节点丢失可能使最终保存／封存来不及完成，软件无法保证例外。不自动创建新作业。后续若要续跑，使用相同源码／环境和下方一个命令，将 `<previous-campaign-root>` 替换为先前打印的目录。
 
 ```bash
-qsub -I -A <project> -q debug -l select=1:system=polaris \
-  -l walltime=01:00:00 -l filesystems=home:eagle
+"$ENV_DIR/bin/python" "$PROJ_DIR/experiments/polaris/campaign.py" submit \
+  --project "$ALCF_PROJECT" --env "$ENV_DIR" --out-root "$OUT_ROOT" \
+  --queue capacity --walltime 24:00:00 \
+  --resume-from <previous-campaign-root>
 ```
 
-On the allocated compute node, build the environment with Python 3.12, MuJoCo 3.6, Newton 1.6, and Warp 1.17. Build it on Polaris rather than copying the workstation environment.
+Resume automatically asks PBS to confirm the prior job is finished, checks the identical source/matrix/environment snapshots, and copies hash-verified completed cells and all partial historical attempts into a **fresh** output directory. Completed cells with warnings or recorded task/planner failures are reused, not retried. Incomplete/error cells restart as whole cells in a new attempt; partial episodes are not mixed into completed benchmarks. Old evidence is never overwritten. A completed cell with corrupt/missing evidence blocks resume rather than being silently rerun. If PBS cannot confirm the old job is finished, resume refuses rather than risk overlapping writers. G2 ratios involving reused cells remain unqualified as cross-allocation comparisons.
 
-在获分配的计算节点上建立环境：Python 3.12、MuJoCo 3.6、Newton 1.6、Warp 1.17。在 Polaris 建立环境，不复制工作站的现成环境。
+续跑自动询问 PBS 以确认旧作业已结束，核对相同源码／矩阵／环境快照，将经过哈希复核的已完成配置和所有历史部分尝试复制到**新**结果目录。带告警、记录任务失败或规划失败的已完成配置会复用，不重跑。未完成／报错配置以新尝试整组重新开始，部分 episode 不混入完整基准。旧证据不覆盖。已完成配置的证据损坏／缺失时会拒绝续跑，不暗中重跑。PBS 无法确认旧作业结束时也拒绝续跑，以免并发写入。涉及复用配置的 G2 比值不作为同节点加速结论。
+
+Return the **entire printed campaign directory**, not only a screenshot. It contains `plan.json`, `submission.json`, `submission_at_start.json`, `status.json`, preflight/environment records, logs, `g1/`, `g2/`, `g3/`, per-attempt outcomes/arrays and `artifact_manifest.json`. The seal excludes the login-owned live ledger and PBS stdout/stderr, which PBS may stage later. To inspect saved progress without submitting anything:
+
+请返回**打印出的整个结果目录**，不只是截图。目录包含计划、提交记录、启动时提交快照、总状态、预检／环境记录、日志、G1／G2／G3 子目录、各次尝试的结果／数组及产物哈希清单。封存排除登录进程负责的实时登记和 PBS 稍后可能写入的标准输出／错误文件。如需只读查看已保存进度：
 
 ```bash
-bash experiments/polaris/setup_environment.sh \
-  /home/<user>/contact_model_study_polaris \
-  /home/<user>/envs/contact-kamino-py312
+"$ENV_DIR/bin/python" "$PROJ_DIR/experiments/polaris/campaign.py" status --root <campaign-root>
 ```
 
-After setup and returning to the login shell, choose either the single-launch pipeline below or the separate G0 command here; do not submit both for the same experiment. The separate script requests PBS debug, one node, and thirty minutes. Create the Eagle output root first. The script prints the job ID and result path; inspect with `qstat -f <job-id>`.
+## Package map / 文件对应关系
 
-准备完成并返回登录节点后，可选择下方的一次启动流程，或这里的单独 G0 命令；同一次实验不要两者都提交。单独脚本申请 PBS debug 队列、一个节点、三十分钟时限。提前建立 Eagle 结果根目录。脚本打印作业编号和结果路径，用 `qstat -f <job-id>` 查看状态。
-
-```bash
-bash experiments/polaris/submit_m5_smoke.sh \
-  <project> \
-  /home/<user>/contact_model_study_polaris \
-  /home/<user>/envs/contact-kamino-py312 \
-  /eagle/<project>/<user>/contact_model_study
+```text
+experiments/polaris/
+├── campaign.py             # one-submit full-matrix controller / 完整实验控制器
+├── run_campaign.pbs        # one Polaris allocation and final seal / 单作业及封存
+├── g1.csv, g3.csv          # original calibration and parameter rows / 原校准及参数行
+├── m5_smoke.csv            # shared scene/control defaults / 公共场景和控制设置
+├── run_stage.py            # reused matrix/command helpers; old strict CLI / 矩阵工具及旧严格入口
+├── direct.py               # reused single-job journal/finalizer; reduced pilot CLI / 提交和封存工具及旧单配置入口
+├── preflight.py            # compute-node source/environment/device checks / 节点预检
+├── collect_manifest.py     # final artifact hashes / 结果哈希
+├── setup_environment.sh    # one-time environment setup and CPU checks / 一次性安装
+└── requirements-m5.txt     # unchanged pinned dependencies / 不变的依赖
+ContactModelStudy/
+├── Simulators/Kamino.py, _KaminoDiagnostics.py  # explicit policy plus raw diagnostics / 接受策略及原始诊断
+├── Drivers/run_episodes.py, EpisodePool.py     # safe episode exit, seeds and timings / 安全结束、种子和计时
+└── Utils/EpisodeRecorder.py                   # separate actions, rejection and quality / 动作、拒绝与质量记录
+tests/test_polaris_campaign.py, test_kamino_diagnostics.py  # CPU/fake-PBS checks / 离线测试
 ```
 
-Preserve the whole output directory: preflight, test logs, cell results/status/arrays, `smoke_verdict.json`, environment snapshots, artifact manifest, and PBS stdout/stderr. PBS stages stdout/stderr after the job, outside the in-job hash manifest. G0 progression requires `smoke_verdict.json` to report `passed=true`.
+Legacy `pipeline.py`, separate-stage PBS scripts and `direct.py submit` remain for historical/reference use, **not this handoff**. The former submits four held jobs with strict G0 gates; the latter runs only one fixed topology. Do not submit either alongside `campaign.py`, and do not edit their historical ledgers. Strict reference qualification remains separately selectable, but its old multi-job submitter still has the observed queue-limit incompatibility.
 
-保留完整结果目录：预检、测试日志、各组结果/状态/数组、`smoke_verdict.json`、环境快照、产物清单和 PBS 标准输出/错误日志。PBS 在作业后放置的输出/错误文件不在作业内哈希清单中。进入下一阶段要求 `smoke_verdict.json` 显示 `passed=true`。
+旧 `pipeline.py`、分阶段 PBS 脚本及 `direct.py submit` 保留用于历史／参考用途，**不是此次交付入口**。前者提交四个挂起作业并要求严格 G0 通过，后者只跑单一拓扑。不要与 `campaign.py` 同时提交，也不要编辑历史登记。严格参考资格仍可单独选择，但旧多作业入口仍存在实测队列限制的不兼容。
 
-## Single-launch pipeline / 一次启动完整流程
+## Verification boundary / 验证边界
 
-After environment preparation, `pipeline.py submit` is the single entry for G0–G3. It submits four separate jobs with PBS `afterok` dependencies: submission happens together, execution remains sequential. Each job requests one node; G0 has thirty minutes and the other stages one hour each. There may be queue waits between stages. See the [ALCF PBS dependency documentation](https://docs.alcf.anl.gov/running-jobs/not_in_nav/pbs-qsub-options-table/).
+CPU tests and fake PBS tests check matrix coverage, single submission, warning continuation, hard candidate rejection, interruption, immutable artifacts and resume. They do not establish A100 convergence, real queue eligibility, task success or completion within24 hours. The previous Polaris run tested installation and GPUs but failed strict qualification; it is preserved as historical evidence, not a result of this new campaign.
 
-完成环境准备后，`pipeline.py submit` 是 G0–G3 的统一入口。它提交四个独立作业，以 PBS 的 `afterok` 依赖连接：一起提交，但按顺序执行。各作业申请一个节点，G0 时限三十分钟，其余阶段各一小时。阶段之间可能等待排队。机制见 [ALCF 官方 PBS 依赖说明](https://docs.alcf.anl.gov/running-jobs/not_in_nav/pbs-qsub-options-table/)。
+CPU 和模拟 PBS 测试检查矩阵覆盖、单次提交、告警继续、硬候选拒绝、中断、结果保全及续跑。它们不能证明 A100 数值收敛、真实队列资格、任务成功或24小时内完成。之前 Polaris 运行验证了安装和 GPU，但未通过严格数值资格；其证据保留，不冒充新实验结果。
 
-The reviewed first-deployment default is N=64 for G2/G3; omitting `--n-samples` uses that fixed value, and the commands below state it explicitly for clarity. It is not a claim that N=64 has passed. The automatic chain requires all of G1 to complete and pass, and N=64 to appear in its validated list. It does not choose the largest N or silently fall back to a smaller one. Explicit overrides to 32, 128 or 256 are supported for later reviewed runs. Separate-stage operation below can still be used for a reviewed smaller-N recovery after a failed higher level.
+The M5 deployment environment intentionally omits the M1–M4-only `comfree_warp` dependency. An additional M4 preset test therefore cannot run in this environment; the same missing-dependency failure was reproduced on the unmodified preceding commit. It is not evidence of an M5 regression or a reason to install unrelated GPU backends for this campaign.
 
-首轮部署已选定 G2/G3 默认使用 N=64；省略 `--n-samples` 也会采用这个固定值，下方命令为清楚起见仍显式写出。它不代表 N=64 已通过验证。自动作业链要求 G1 整体完成并通过，而且 N=64 出现在已验证列表中。它不会自动选择最大的 N，也不会悄悄改用较小值。以后经审阅可显式改为 32、128 或 256。若较高一级失败，经审阅后仍可用下方的分阶段方式，在已验证的小 N 上恢复工作。
-
-Preview from the prepared Python environment with `--check`. It validates the four stages' driver options and prints their paths, fixed N and time limits; it creates no output directories and never calls PBS. A dirty workstation checkout is allowed for preview only. For real submission, use the clean local deployment commit, existing Eagle root and prepared environment; the project/repository/environment/output paths must not contain whitespace, commas, quotes or backslashes. Replace all placeholders; do not run this from the workstation.
-
-在准备好的 Python 环境中加 `--check` 预览：它检查四阶段的入口参数，打印路径、固定 N 和时限，不建立结果目录，也不调用 PBS。预览允许工作站的未提交副本。正式提交必须使用干净的本地部署提交、已有 Eagle 目录及准备好的环境；项目名、源码/环境/结果路径不能包含空白、逗号、引号或反斜杠。替换所有占位符；不要在工作站执行正式提交。
-
-```bash
-<env>/bin/python <repo>/experiments/polaris/pipeline.py submit --check \
-  --project <project> --env <env> --out-root <eagle-root> --n-samples 64
-
-<env>/bin/python <repo>/experiments/polaris/pipeline.py submit \
-  --project <project> --env <env> --out-root <eagle-root> --n-samples 64
-```
-
-All four jobs are first submitted with a user hold, meaning they cannot run. Once every ID is recorded, the script releases G3, G2, G1, then G0; PBS dependencies still prevent later stages from running early. Only after the command reports that all jobs were accepted and released is normal sequencing independent of the operator's computer or SSH connection. No monitoring daemon or further job submission is needed. Runtime wrappers check the registered job, source commit, fixed parameters, preceding full-stage verdict and final artifact seal before launching a stage.
-
-四个作业首先以用户挂起状态提交，暂不能运行。全部作业编号记录成功后，脚本依次放行 G3、G2、G1，最后放行 G0；PBS 依赖仍会阻止后续阶段提前运行。只有命令确认全部作业已接受并放行后，正常衔接才不再依赖操作者的电脑或 SSH 连接。无需常驻监控程序，也无需再提交下一阶段。每阶段运行前核对已登记作业、代码提交、固定参数、前阶段的完整通过判定及最终产物清单中的状态文件哈希。
-
-The command prints a new `<pipeline-root>`. Preserve `pipeline_plan.json`, `submission.json` and the `g0`–`g3` subdirectories. The submission ledger records scheduler commands, responses, IDs and release state. If submission/release fails or a response is unknown, the command stops without automatic retries or job deletion. G0 is kept held unless the final release was attempted; an ambiguous final release may already have started it. Inspect `submission.json` and `qstat -xf <job-id>` before any recovery. Never blindly rerun the submit command or release G0 from a partially submitted chain.
-
-命令打印新的 `<pipeline-root>`。保留 `pipeline_plan.json`、`submission.json` 及 `g0`–`g3` 子目录。提交记录包含调度命令、返回信息、作业编号和放行状态。若提交/放行失败，或返回情况不明，命令会停止，不自动重试或删除作业。除非已经尝试最后放行，G0 都仍被挂起；最后一次放行若返回不明，G0 可能已经启动。恢复前核对 `submission.json` 和 `qstat -xf <job-id>`。不要盲目重跑提交命令，也不要在作业链只提交了一部分时自行放行 G0。
-
-Inspect file-based progress with the command below. It does not submit jobs, query PBS or start a watcher. A hard kill can leave a stale running status or no final status; check PBS when the file evidence is incomplete. A scientific failure, time limit or infrastructure error stops progression. This first version has no automatic resubmission or whole-chain resume; recover deliberately using the separate stage scripts and their existing cell checkpoints, after confirming that the old jobs cannot still write to those directories. Submitting the pipeline again creates a new run, not a continuation.
-
-用下方命令查看文件记录中的进度。它不提交作业、不查询 PBS，也不启动监控。强制终止可能留下过时的运行状态，或没有最终状态；文件证据不完整时需查看 PBS。科研检查失败、超时或基础设施异常都会阻止继续。首版不自动重提，也不提供整链续跑；应先确认旧作业不会继续写入这些目录，再用独立阶段脚本及其已有配置检查点恢复。再次提交完整流程会创建新实验，不是续跑。
-
-```bash
-<env>/bin/python <repo>/experiments/polaris/pipeline.py status --root <pipeline-root>
-```
-
-## Separate G1–G3 operation / 单独运行 G1–G3
-
-Before submission, the operator can inspect all workloads with `--check`. This parses the scientific and pooled-driver options without running simulations or submitting jobs. The N=32 examples below only preview the plan; they do not establish that N=32 is valid on Polaris.
-
-提交前，操作者可用 `--check` 查看全部工作内容。此操作解析科研参数和进程池参数，不运行仿真或提交作业。下面的 N=32 仅用于预览，不能据此判定它在 Polaris 有效。
-
-```bash
-python experiments/polaris/run_stage.py g1 --check --outdir /tmp/polaris-preview
-python experiments/polaris/run_stage.py g2 --check --n-samples 32 --outdir /tmp/polaris-preview
-python experiments/polaris/run_stage.py g3 --check --n-samples 32 --outdir /tmp/polaris-preview
-```
-
-Submit each stage separately using the previous stage's verdict path. G1 requires passing G0. For G2, replace `<validated-N>` with one number listed in G1's `validated_samples`: all three seeds must pass at that N. A failure at a larger N stops calibration, but a previously validated smaller N remains usable. G3 requires a fully passing G2 at the same N.
-
-每个阶段分别提交，并传入前一阶段的判定文件。G1 要求 G0 通过。提交 G2 时，将 `<validated-N>` 替换为 G1 的 `validated_samples` 中的一个数：该 N 下三个种子必须全部通过。更大的 N 失败会停止校准，但此前已验证的较小 N 仍可使用。G3 要求同一 N 下 G2 整体通过。
-
-```bash
-bash experiments/polaris/submit_stage.sh g1 <project> <repo> <env> <eagle-root> \
-  <g0-output>/smoke_verdict.json -
-bash experiments/polaris/submit_stage.sh g2 <project> <repo> <env> <eagle-root> \
-  <g1-output>/stage_verdict.json <validated-N>
-bash experiments/polaris/submit_stage.sh g3 <project> <repo> <env> <eagle-root> \
-  <g2-output>/stage_verdict.json <validated-N>
-```
-
-Each stage requests one node and one hour in PBS debug, with a 50-minute workload budget and time reserved for shutdown. Completion within that budget is not assumed. If the stage is incomplete, resubmit the same command with its existing output directory as an eighth argument. Completed cells are checked and skipped; incomplete or failed cells restart from the beginning in a new attempt directory. Partial episodes are retained as evidence, not continued mid-trajectory. Do not submit two jobs to the same output directory concurrently.
-
-每个阶段申请 PBS debug 队列的一个节点、一个小时，其中工作预算为五十分钟，并留出退出时间。不能预设整阶段能在预算内完成。若未完成，在相同提交命令末尾加上已有结果目录作为第八个参数。已完成配置会重新核对后跳过，未完成或失败配置在新的 attempt 目录从头运行。部分 episode 保留作为证据，不从轨迹中途继续。同一结果目录同时只能运行一个作业。
-
-```bash
-bash experiments/polaris/submit_stage.sh g2 <project> <repo> <env> <eagle-root> \
-  <g1-output>/stage_verdict.json <validated-N> <existing-g2-output>
-```
-
-Read `stage_verdict.json` for completion, pending cells, validated N values, and G2 speedup ratios. Each cell has a `cell.status.json` and numbered attempt directories containing driver logs, result arrays/JSON, GPU telemetry, and pooled statistics where applicable. GPU telemetry is sampled approximately once per second; its memory maximum is a sampled maximum and may miss short spikes. Utilization includes initialization. `planner_wait_overhead_s` includes queue and communication overhead; it is not a direct measurement of CPU idle time. Planning-time means exclude the first plan of each episode, which is only a conservative approximation of warmed execution.
-
-读取 `stage_verdict.json` 查看完成状态、待运行配置、已验证 N 和 G2 加速比。各配置包含 `cell.status.json` 及编号 attempt 目录，保存日志、结果数组/JSON、GPU 采样和适用时的进程池统计。GPU 约每秒采样一次，显存最大值是采样最大值，可能漏掉短暂峰值；利用率包含初始化。`planner_wait_overhead_s` 包含排队和通信开销，不等于 CPU 空闲时间。规划时间均值排除每个 episode 的首次规划，只是对预热后执行耗时的保守近似。
-
-## Current evidence / 当前证据
-
-The selected offline suite passed 75 tests, with five GPU-marked tests excluded. These checks cover stage budgets, prerequisite/source gates (including a clean detached commit), incomplete results, per-GPU scheduling, resume validation, synthetic child-process execution, held-job submission/release ordering, partial scheduler failures, runtime pipeline gates, artifact sealing, and wrapper failure/signal propagation. Fake PBS command-line tools were used; no real scheduler was contacted. Diagnostic kernels were executed on CPU. The workstation reported an NVML driver/library mismatch. Actual CUDA execution, A100 memory limits, G1–G3 timings, and four-GPU solver behavior remain unmeasured. Authentication and submission are performed by the authorized operator.
-
-所选离线测试共 75 项通过，排除了五项标记为需要 GPU 的测试。这些检查覆盖阶段规模、前置阶段/版本检查（包括固定在精确提交的干净副本）、不完整结果、每卡调度、续跑核对、模拟子进程执行、挂起作业提交/放行顺序、调度中途失败、运行时阶段检查、产物封存，以及包装脚本的错误/终止信号传递。测试使用模拟 PBS 命令行工具，没有连接真实调度器。诊断内核已在 CPU 上执行。工作站报告 NVML 驱动/库不匹配。实际 CUDA 执行、A100 显存限制、G1–G3 耗时和四卡求解器行为均未测量。登录认证与提交由获授权操作者执行。
+M5 部署环境有意不安装 M1–M4 才需要的 `comfree_warp` 依赖，因此额外的 M4 预设测试无法在该环境运行；在未修改的上一提交上也复现了相同缺依赖错误。这不是 M5 回归的证据，也不需要为本批安装无关的 GPU 后端。

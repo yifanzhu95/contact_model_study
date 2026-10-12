@@ -151,6 +151,9 @@ class KaminoConfig(VectorizedSimulatorConfig):
         convex_meshes: Collide mesh geoms as their convex hulls, as MuJoCo
             does (and so M1-M4). Off keeps Newton's triangle-mesh treatment,
             which generates several times more contact points per mesh pair.
+        rollout_acceptance: ``strict`` rejects any strict-quality miss;
+            ``exploratory`` rejects hard nonfinite/reset/overflow failures only.
+            Both retain strict numerical diagnostics. Explicitly label cohorts.
     """
 
     dynamics_storage: str = "dense"
@@ -174,9 +177,12 @@ class KaminoConfig(VectorizedSimulatorConfig):
     contact_gap: float = 0.0
     collision_detection: bool = True
     convex_meshes: bool = True
+    rollout_acceptance: str = "strict"
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        if self.rollout_acceptance not in ("strict", "exploratory"):
+            raise ValueError("rollout_acceptance must be strict or exploratory")
         if self.dynamics_storage not in _STORAGES:
             raise ValueError(f"dynamics_storage must be one of {_STORAGES}, got {self.dynamics_storage!r}")
         if self.dynamics_solver not in _DYNAMICS_SOLVERS:
@@ -560,6 +566,7 @@ class Kamino(VectorizedSimulator):
         self.state_0.clear_forces()
         self.solver.step(self.state_0, self.state_1, self.control, None, self.config.timestep)
         self.state_0.assign(self.state_1)
+        self._rollout_diagnostics.accumulate_state(self.state_0.joint_q, self.state_0.joint_qd)
         contacts = self.solver._contacts_kamino
         active_contacts = self._zero_contacts if contacts is None else contacts.world_active_contacts
         self._rollout_diagnostics.accumulate(
@@ -730,13 +737,10 @@ class Kamino(VectorizedSimulator):
                     self._rollout_diagnostics.max_complementarity_residual.numpy().astype(float)}
 
     def FinalizeRolloutCosts(self, running_costs, terminal_costs, expected_fine_steps: int) -> None:
-        """Fail closed before MPPI weights candidate costs.
+        """Apply the explicit acceptance policy before MPPI weights costs.
 
-        A candidate is invalid when reset failed, any expected fine step did
-        not converge, a residual exceeded tolerance, PADMM reached its iteration
-        cap, contact capacity was reached, or its final state/cost is non-finite.
-        The device kernel changes its cost to NaN, which MPPI already assigns
-        exactly zero weight.
+        Strict remains the default. Exploratory retains finite underconverged
+        candidates, but always reports strict qualification independently.
         """
         self._rollout_diagnostics.invalidate_costs(
             reset_success=self._reset_success,
@@ -747,6 +751,7 @@ class Kamino(VectorizedSimulator):
             expected_fine_steps=expected_fine_steps,
             iteration_limit=self.config.padmm_max_iterations,
             contact_capacity=self.contact_capacity,
+            acceptance_policy=self.config.rollout_acceptance,
         )
 
     def RolloutDiagnostics(self, expected_fine_steps: int) -> dict:
@@ -760,6 +765,7 @@ class Kamino(VectorizedSimulator):
         reset_failures = int(np.count_nonzero(~reset))
         if reset_failures:
             summary["blocking_reasons"]["reset_failure_worlds"] = reset_failures
+            summary["hard_blocking_reasons"]["reset_failure_worlds"] = reset_failures
             summary["valid_worlds"] = int(np.count_nonzero(
                 self._rollout_diagnostics.valid.numpy().astype(bool) & reset))
             summary["invalid_worlds"] = self.N - summary["valid_worlds"]

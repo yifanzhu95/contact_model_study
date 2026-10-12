@@ -139,7 +139,7 @@ def submit(plan, root):
         job = operation(["qsub", "-h", "-r", "n", "-A", plan["project"],
                          "-q", plan["queue"], "-l", f"walltime={plan['walltime']}",
                          "-v", env, "-o", str(root / "pbs.stdout"), "-e", str(root / "pbs.stderr"),
-                         str(REPO / "experiments/polaris/run_direct.pbs")])
+                         str(REPO / "experiments/polaris" / plan.get("wrapper", "run_direct.pbs"))])
         if not re.fullmatch(r"\d+(?:\.[A-Za-z0-9_.-]+)?", job):
             raise ValueError("unrecognized PBS job ID; inspect the recorded response, do not resubmit")
         ledger.update(state="registered_held", job_id=job)
