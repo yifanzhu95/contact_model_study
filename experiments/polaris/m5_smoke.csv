@@ -1,0 +1,2 @@
+label,task,rollout_model,eval_sim,hand_acc,obj_acc,n_episodes,steps,seed,goal_difficulty,ctrl_time_step,time_horizon,n_samples,n_iterations,noise_sigma,temperature,warm_start,graph,save_steps,video,debug
+polaris_g0_m5_cube,cube_reorient,M5,mujoco,high,high,1,10,0,8,0.064,0.352,4,1,0.05,40,false,true,true,false,true

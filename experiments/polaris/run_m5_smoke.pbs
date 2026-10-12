@@ -1,0 +1,77 @@
+#!/bin/bash -l
+#PBS -N kamino_g0_m5
+#PBS -l select=1:system=polaris
+#PBS -l place=scatter
+#PBS -l walltime=00:30:00
+#PBS -l filesystems=home:eagle
+#PBS -q debug
+#PBS -r y
+#PBS -m n
+
+# Account, source/environment paths and stdout/stderr destinations are supplied
+# by submit_m5_smoke.sh. No scientific parameter is selected in this script;
+# the single reviewed cell is experiments/polaris/m5_smoke.csv.
+set -euo pipefail
+
+: "${PROJ_DIR:?submit with experiments/polaris/submit_m5_smoke.sh}"
+: "${ENV_DIR:?submit with experiments/polaris/submit_m5_smoke.sh}"
+: "${OUTDIR:?submit with experiments/polaris/submit_m5_smoke.sh}"
+: "${EXPECTED_SHA:?submit with experiments/polaris/submit_m5_smoke.sh}"
+: "${ALCF_PROJECT:?submit with experiments/polaris/submit_m5_smoke.sh}"
+: "${PBS_JOBID:?this script must run as a PBS job}"
+
+mkdir -p "$OUTDIR"
+
+finalize() {
+    job_rc=$?
+    trap - EXIT
+    set +e
+    "$ENV_DIR/bin/python" "$PROJ_DIR/experiments/polaris/collect_manifest.py" \
+        --outdir "$OUTDIR" --job-exit-code "$job_rc"
+    exit "$job_rc"
+}
+trap finalize EXIT
+
+set +u
+module use /soft/modulefiles
+module load conda
+conda activate "$ENV_DIR"
+set -u
+
+export PYTHONNOUSERSITE=1
+export CUDA_VISIBLE_DEVICES=0
+export MUJOCO_GL=egl
+export OMP_NUM_THREADS=1
+export TMPDIR="/local/scratch/${USER}/kamino_${PBS_JOBID}"
+export WARP_CACHE_PATH="$TMPDIR/warp-cache"
+mkdir -p "$TMPDIR" "$WARP_CACHE_PATH"
+
+cd "$PROJ_DIR"
+python experiments/polaris/preflight.py \
+    --repo "$PROJ_DIR" \
+    --outdir "$OUTDIR" \
+    --expected-sha "$EXPECTED_SHA" \
+    --output "$OUTDIR/preflight.json"
+
+python -m pip check > "$OUTDIR/pip-check.txt"
+python -m pip freeze --all > "$OUTDIR/pip-freeze.txt"
+conda list --explicit > "$OUTDIR/conda-explicit.txt"
+
+python -m pytest -q \
+    tests/test_kamino_diagnostics.py \
+    tests/test_kamino.py::test_config_validation \
+    tests/test_kamino.py::test_state_roundtrip_and_sites_match_mujoco \
+    tests/test_kamino.py::test_free_joint_velocity_convention_matches_mujoco \
+    tests/test_kamino.py::test_holds_the_grasp_and_tasks_read_it \
+    tests/test_kamino.py::test_mppi_graph_matches_eager \
+    tests/test_kamino.py::test_a_squeezed_grasp_converges_and_a_sunk_fingertip_comes_out \
+    | tee "$OUTDIR/pytest-m5.txt"
+
+python experiments/run_episode_batches.py \
+    experiments/polaris/m5_smoke.csv \
+    --cell 0 \
+    --outdir "$OUTDIR"
+
+python experiments/polaris/verify_smoke.py \
+    --outdir "$OUTDIR" \
+    --expected-sha "$EXPECTED_SHA"

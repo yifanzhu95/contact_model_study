@@ -129,6 +129,11 @@ def test_mppi_graph_matches_eager(cube_tasks, cube_initial):
         p = MPPI(sim, ro, MPPI_Config(seed=0, noise_sigma=0.1, temperature=10.0, use_graph=graph))
         a = p.Plan(q0, v0, u=u0)
         assert np.isfinite(a).all() and not p._graph_failed
+        assert len(p.last_rollout_diagnostics) == 1
+        diagnostic = p.last_rollout_diagnostics[0]
+        assert diagnostic["expected_fine_steps"] == 4
+        assert diagnostic["valid_worlds"] == 4 and diagnostic["all_worlds_valid"]
+        assert diagnostic["blocking_reasons"] == {}
         out[graph] = p.costs_wp.numpy() + p.terminal_costs_wp.numpy()
     assert np.allclose(out[True], out[False], rtol=1e-4)
 

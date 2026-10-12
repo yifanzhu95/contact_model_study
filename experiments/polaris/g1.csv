@@ -1,0 +1,13 @@
+label,n_samples,seed,n_episodes,steps
+g1_n32_seed0,32,0,1,20
+g1_n32_seed1,32,1,1,20
+g1_n32_seed2,32,2,1,20
+g1_n64_seed0,64,0,1,20
+g1_n64_seed1,64,1,1,20
+g1_n64_seed2,64,2,1,20
+g1_n128_seed0,128,0,1,20
+g1_n128_seed1,128,1,1,20
+g1_n128_seed2,128,2,1,20
+g1_n256_seed0,256,0,1,20
+g1_n256_seed1,256,1,1,20
+g1_n256_seed2,256,2,1,20

@@ -139,6 +139,9 @@ class _Episode:
     sigma_u: list = field(default_factory=list)
     planning_time: list = field(default_factory=list)
     planner_cost: list = field(default_factory=list)
+    #: Compact per-optimizer-iteration rollout validity for each control step.
+    #: An empty inner list means the rollout backend has no such contract.
+    planner_diagnostics: list = field(default_factory=list)
     #: ``(step, goal, label)`` for every goal adopted during the episode.
     goals: list = field(default_factory=list)
     #: Steps at which a goal was reached.
@@ -277,6 +280,8 @@ class EpisodeRecorder:
                           else np.asarray(sigma_U, dtype=np.float64).ravel())
         ep.planning_time.append(np.nan if planning_time is None else float(planning_time))
         ep.planner_cost.append(float(getattr(self.planner, "last_min_cost", np.nan)))
+        ep.planner_diagnostics.append(
+            _jsonable(getattr(self.planner, "last_rollout_diagnostics", [])))
 
     def recordGoal(self, goal, label: str | None = None) -> None:
         """Note that the task has adopted ``goal``, from the current step on.
@@ -359,12 +364,28 @@ class EpisodeRecorder:
             reasons = [e["finish_reason"] for e in eps]
             n = len(eps)
             n_ok = sum(e["success"] for e in eps)
+            validations = [e["planner_validation"] for e in eps]
+            applicable = [v for v in validations if v["applicable"]]
+            validation_ok = bool(applicable) and len(applicable) == len(validations) \
+                and all(v["status"] == "pass" for v in applicable)
+            blocking: dict[str, int] = {}
+            for validation in applicable:
+                for reason, count in validation["blocking_reasons"].items():
+                    blocking[reason] = blocking.get(reason, 0) + int(count)
+            validation = {
+                "applicable": bool(applicable),
+                "status": ("pass" if validation_ok else "fail") if applicable else "not_applicable",
+                "scaling_eligible": validation_ok if applicable else None,
+                "episodes_checked": len(applicable),
+                "blocking_reasons": blocking,
+            }
             return {
                 "n_episodes": n,
                 "finish_reasons": {r: reasons.count(r) for r in sorted(set(reasons))},
                 "n_success": n_ok,
                 "n_failed": sum(e["failed"] for e in eps),
                 "success_rate": n_ok / n if n else None,
+                "validation": validation,
                 "episodes": eps,
             }
 
@@ -392,9 +413,58 @@ class EpisodeRecorder:
             "plan_s_first": float(finite[0]) if finite.size else None,
             "plan_s_mean": float(rest.mean()) if rest.size else None,
             "plan_s_max": float(rest.max()) if rest.size else None,
+            "planner_validation": self._plannerValidation(ep),
         }
         summary.update(ep.extra)
         return summary
+
+    def _plannerValidation(self, ep: _Episode) -> dict:
+        """Aggregate compact Kamino evidence without storing per-world traces."""
+        rollout = ep.configs.get("rollout_simulator", {})
+        applicable = rollout.get("class") == "Kamino"
+        iterations = int(ep.configs.get("planner", {}).get("config", {}).get("n_iterations", 1))
+        expected = ep.n_steps * iterations
+        diagnostics = [item for plan in ep.planner_diagnostics for item in plan]
+        if not applicable:
+            return {
+                "applicable": False,
+                "status": "not_applicable",
+                "scaling_eligible": None,
+                "expected_rollouts": expected,
+                "recorded_rollouts": len(diagnostics),
+                "blocking_reasons": {},
+            }
+
+        blocking: dict[str, int] = {}
+        for item in diagnostics:
+            for reason, count in item.get("blocking_reasons", {}).items():
+                blocking[reason] = blocking.get(reason, 0) + int(count)
+        if len(diagnostics) != expected:
+            blocking["missing_rollout_diagnostics"] = abs(expected - len(diagnostics))
+        invalid = sum(not bool(item.get("all_worlds_valid", False)) for item in diagnostics)
+        if invalid:
+            blocking["invalid_rollouts"] = invalid
+        ok = expected > 0 and len(diagnostics) == expected and invalid == 0 and not blocking
+        return {
+            "applicable": True,
+            "status": "pass" if ok else "fail",
+            "scaling_eligible": ok,
+            "expected_rollouts": expected,
+            "recorded_rollouts": len(diagnostics),
+            "valid_worlds": sum(int(item.get("valid_worlds", 0)) for item in diagnostics),
+            "invalid_worlds": sum(int(item.get("invalid_worlds", 0)) for item in diagnostics),
+            "planner_devices": sorted({str(item["gpu"]) for item in diagnostics if item.get("gpu") is not None}),
+            "max_iterations": max((int(item.get("max_iterations", 0)) for item in diagnostics), default=0),
+            "max_active_contacts": max(
+                (int(item.get("max_active_contacts", 0)) for item in diagnostics), default=0),
+            "max_primal_residual": max(
+                (float(item.get("max_primal_residual", 0.0)) for item in diagnostics), default=0.0),
+            "max_dual_residual": max(
+                (float(item.get("max_dual_residual", 0.0)) for item in diagnostics), default=0.0),
+            "max_complementarity_residual": max(
+                (float(item.get("max_complementarity_residual", 0.0)) for item in diagnostics), default=0.0),
+            "blocking_reasons": blocking,
+        }
 
     # -- output --------------------------------------------------------------
     def Save(self, path: str | Path, save_steps: bool = True) -> Path:
@@ -437,7 +507,9 @@ class EpisodeRecorder:
             entries.append(entry)
         doc = {"format_version": FORMAT_VERSION, "configs": self.configs,
                **batch, "episodes": entries}
-        path.write_text(json.dumps(doc, indent=2))
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(json.dumps(doc, indent=2))
+        temporary.replace(path)
         return path
 
     def Clear(self) -> None:

@@ -213,6 +213,9 @@ class SamplingBasedPlannerBase(abc.ABC):
         # Diagnostics a driver or an evaluation pass can read after a plan.
         self.last_action_seq: np.ndarray | None = None
         self.last_plan_ok: bool = False
+        #: One compact backend diagnostic per optimizer iteration of the last
+        #: plan. Empty for simulators without a strict rollout contract.
+        self.last_rollout_diagnostics: list[dict] = []
         #: ``(nu,)`` uncertainty of the last action, when ``return_uncertainty``
         #: is set; NaN after a failed plan.
         self.last_action_uncertainty: np.ndarray | None = None
@@ -337,11 +340,15 @@ class SamplingBasedPlannerBase(abc.ABC):
         self._setCommandBase(q, u)
         self._sampleNoise()
         self.last_plan_ok = False
+        self.last_rollout_diagnostics = []
 
         for _ in range(self.config.n_iterations):
             self._buildSamples()
             self._buildCommands()
             self._rollout(q, q_dot)
+            diagnostic = self.sim.RolloutDiagnostics(self.horizon * self.substeps)
+            if diagnostic is not None:
+                self.last_rollout_diagnostics.append(diagnostic)
             if not self._updateParams():
                 # The update may have written NaN into theta; clear it so the
                 # next call starts clean, and publish a zero tape — a driver
@@ -489,6 +496,14 @@ class SamplingBasedPlannerBase(abc.ABC):
                 inputs=[self._step_cost_wp],
                 outputs=[self.terminal_costs_wp if terminal else self.costs_wp],
             )
+        # Kamino uses this hook to turn any candidate that failed its complete
+        # fine-step validity contract into a NaN cost before MPPI computes
+        # weights. Other simulators intentionally leave the costs unchanged.
+        self.sim.FinalizeRolloutCosts(
+            self.costs_wp,
+            self.terminal_costs_wp,
+            self.horizon * self.substeps,
+        )
 
     def _captureRollout(self) -> None:
         """Record one rollout into a CUDA graph, after a warm-up pass.
@@ -583,6 +598,7 @@ class SamplingBasedPlannerBase(abc.ABC):
             self.U_wp.assign(np.tile(m, (self.horizon, 1)))
         self.last_action_seq = None
         self.last_plan_ok = False
+        self.last_rollout_diagnostics = []
         self._resetParams()
 
     def FirstActionDistribution(self) -> tuple[np.ndarray, np.ndarray]:
@@ -630,6 +646,7 @@ class SamplingBasedPlannerBase(abc.ABC):
             "u_prev": None if self._u_prev is None else self._u_prev.copy(),
             "last_action_seq": None if self.last_action_seq is None else self.last_action_seq.copy(),
             "last_plan_ok": self.last_plan_ok,
+            "last_rollout_diagnostics": self.last_rollout_diagnostics,
             "noise_seed": self._noise_seed,
             "resample_count": self._resample_count,
         }
@@ -647,6 +664,7 @@ class SamplingBasedPlannerBase(abc.ABC):
         self._u_prev = None if state["u_prev"] is None else np.asarray(state["u_prev"], dtype=float).copy()
         self.last_action_seq = state["last_action_seq"]
         self.last_plan_ok = bool(state["last_plan_ok"])
+        self.last_rollout_diagnostics = list(state.get("last_rollout_diagnostics", []))
         self._noise_seed = int(state["noise_seed"])
         self._resample_count = int(state["resample_count"])
 

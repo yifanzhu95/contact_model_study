@@ -308,6 +308,20 @@ class VectorizedSimulator(Simulator):
         """
         self.Step_GPU(steps)
 
+    def FinalizeRolloutCosts(self, running_costs, terminal_costs, expected_fine_steps: int) -> None:
+        """Apply backend-specific validity gates before a planner uses costs.
+
+        Most backends have no additional solver-status contract and therefore
+        leave the arrays unchanged.  Kamino overrides this to zero-weight any
+        candidate whose full fine-step solve was not strictly valid.  This is
+        part of the device rollout so it remains CUDA-graph capturable.
+        """
+        return None
+
+    def RolloutDiagnostics(self, expected_fine_steps: int) -> dict | None:
+        """Return compact evidence for the last rollout, when a backend has it."""
+        return None
+
     # -- batched state and control ------------------------------------------
     @abc.abstractmethod
     def SetState(self, q: np.ndarray, q_dot: np.ndarray | None = None) -> None:

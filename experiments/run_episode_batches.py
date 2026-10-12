@@ -75,6 +75,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from ContactModelStudy.Drivers import run_episodes as drv  # noqa: E402
 from ContactModelStudy.Tasks.LeapReorient import COST_WEIGHT_KEYS  # noqa: E402
+from ContactModelStudy.Utils.Provenance import run_provenance, scheduler_provenance  # noqa: E402
 
 #: Columns this script owns rather than forwards to the driver.
 OWN_COLUMNS = ("label", "video")
@@ -209,6 +210,19 @@ def isDone(outdir: Path, name: str) -> bool:
         return False
 
 
+def _resultValidation(path: Path) -> dict:
+    """The recorder's scientific gate, kept separate from process completion."""
+    try:
+        validation = json.loads(path.read_text()).get("validation", {})
+    except (OSError, ValueError):
+        validation = {}
+    return {
+        "validation_status": validation.get("status", "missing"),
+        "scaling_eligible": validation.get("scaling_eligible", False),
+        "validation_blocking_reasons": validation.get("blocking_reasons", {}),
+    }
+
+
 def runCell(index: int, row: dict[str, str], outdir: Path, overwrite: bool) -> bool:
     """Run one cell in this process. Returns whether it finished."""
     name = cellName(index, row)
@@ -217,16 +231,35 @@ def runCell(index: int, row: dict[str, str], outdir: Path, overwrite: bool) -> b
         return True
     argv = rowToArgv(row, outdir, name)
     outdir.mkdir(parents=True, exist_ok=True)
-    status = {"cell": index, "name": name, "row": row, "argv": argv,
-              "host": os.uname().nodename, "slurm_job": os.environ.get("SLURM_JOB_ID")}
+    status = {
+        "cell": index,
+        "name": name,
+        "row": row,
+        "argv": argv,
+        "host": os.uname().nodename,
+        "scheduler": scheduler_provenance(),
+        "provenance": run_provenance(REPO_ROOT),
+        # Kept for readers of existing status files.
+        "slurm_job": os.environ.get("SLURM_JOB_ID"),
+    }
     print(f"[{name}] run_episodes.py {' '.join(argv)}", flush=True)
     t0 = time.time()
     try:
         drv.main(argv)
-        status.update(status="done")
+        status.update(
+            status="done",
+            execution_status="completed",
+            **_resultValidation(outdir / f"{name}.json"),
+        )
     except BaseException as e:           # also KeyboardInterrupt / SIGTERM from SLURM
-        status.update(status="failed", error=f"{type(e).__name__}: {e}",
-                      traceback=traceback.format_exc())
+        status.update(
+            status="failed",
+            execution_status="failed",
+            validation_status="not_evaluated",
+            scaling_eligible=False,
+            error=f"{type(e).__name__}: {e}",
+            traceback=traceback.format_exc(),
+        )
         raise
     finally:
         status["wall_s"] = time.time() - t0
@@ -294,6 +327,9 @@ def summarize(csv_path: Path, rows: list[dict], outdir: Path) -> Path | None:
         try:
             status = json.loads(_statusPath(outdir, name).read_text())
             entry["status"], entry["wall_s"] = status.get("status"), round(status.get("wall_s", 0), 1)
+            entry["execution_status"] = status.get("execution_status")
+            entry["validation_status"] = status.get("validation_status")
+            entry["scaling_eligible"] = status.get("scaling_eligible")
         except (OSError, ValueError):
             entry["status"] = "not run"
         entry.update(cellResultMetrics(outdir / f"{name}.json"))
@@ -320,7 +356,8 @@ def summarize(csv_path: Path, rows: list[dict], outdir: Path) -> Path | None:
 # -- CLI -----------------------------------------------------------------------
 def defaultOutdir(csv_path: Path) -> Path:
     """``results/episode_batches_<csv>_<job id or time>``; one per job array."""
-    tag = os.environ.get("SLURM_ARRAY_JOB_ID") or os.environ.get("SLURM_JOB_ID") \
+    tag = os.environ.get("PBS_JOBID") or os.environ.get("SLURM_ARRAY_JOB_ID") \
+        or os.environ.get("SLURM_JOB_ID") \
         or time.strftime("%Y%m%d_%H%M%S")
     return REPO_ROOT / "results" / f"episode_batches_{csv_path.stem}_{tag}"
 

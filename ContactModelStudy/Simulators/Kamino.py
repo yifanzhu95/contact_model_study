@@ -516,6 +516,11 @@ class Kamino(VectorizedSimulator):
         self._time_wp = wp.zeros(N, dtype=wp.float32, device=dev)
         # Peak active contacts per world since the last Diagnostics() (see _checkContacts).
         self._contact_peak = wp.zeros(N, dtype=wp.int32, device=dev)
+        self._zero_contacts = wp.zeros(N, dtype=wp.int32, device=dev)
+        # Imported here, not at module import, so KaminoConfig remains usable
+        # in the main environment where the optional Newton package is absent.
+        from ContactModelStudy.Simulators._KaminoDiagnostics import KaminoRolloutDiagnostics
+        self._rollout_diagnostics = KaminoRolloutDiagnostics(N, dev)
         self._warned_contacts = False
 
     # -- control sequences ---------------------------------------------------
@@ -556,6 +561,9 @@ class Kamino(VectorizedSimulator):
         self.solver.step(self.state_0, self.state_1, self.control, None, self.config.timestep)
         self.state_0.assign(self.state_1)
         contacts = self.solver._contacts_kamino
+        active_contacts = self._zero_contacts if contacts is None else contacts.world_active_contacts
+        self._rollout_diagnostics.accumulate(
+            self.solver.status, active_contacts, self.config.padmm_tolerance)
         if contacts is not None:
             wp.launch(_peak_kernel, dim=self.N, inputs=[contacts.world_active_contacts],
                       outputs=[self._contact_peak], device=self.device)
@@ -595,6 +603,11 @@ class Kamino(VectorizedSimulator):
         self.control.clear(self.model)
         self._reset_success.zero_()
         self.solver.reset(self.state_0, config=self._reset_config, success_mask=self._reset_success)
+        # BroadcastState calls this at the start of every sampled rollout.  The
+        # clears are device operations, so a captured graph resets exactly the
+        # diagnostics it is about to fill rather than carrying warm-up/capture
+        # counts into the real replay.
+        self._rollout_diagnostics.reset()
         self._refreshMirror()
 
     # -- state ---------------------------------------------------------------
@@ -703,7 +716,55 @@ class Kamino(VectorizedSimulator):
         s = self.solver.status.numpy()
         return {"converged": s["converged"].astype(bool), "iterations": s["iterations"].astype(int),
                 "r_p": s["r_p"].astype(float), "r_d": s["r_d"].astype(float), "r_c": s["r_c"].astype(float),
-                "contacts": self._checkContacts(reset=True), "contact_capacity": self.contact_capacity}
+                "contacts": self._checkContacts(reset=True), "contact_capacity": self.contact_capacity,
+                "converged_steps": self._rollout_diagnostics.converged_steps.numpy().astype(int),
+                "contact_fine_steps": self._rollout_diagnostics.contact_fine_steps.numpy().astype(int),
+                "primal_failure_steps": self._rollout_diagnostics.primal_failure_steps.numpy().astype(int),
+                "dual_failure_steps": self._rollout_diagnostics.dual_failure_steps.numpy().astype(int),
+                "complementarity_failure_steps":
+                    self._rollout_diagnostics.complementarity_failure_steps.numpy().astype(int),
+                "max_iterations": self._rollout_diagnostics.max_iterations.numpy().astype(int),
+                "max_primal_residual": self._rollout_diagnostics.max_primal_residual.numpy().astype(float),
+                "max_dual_residual": self._rollout_diagnostics.max_dual_residual.numpy().astype(float),
+                "max_complementarity_residual":
+                    self._rollout_diagnostics.max_complementarity_residual.numpy().astype(float)}
+
+    def FinalizeRolloutCosts(self, running_costs, terminal_costs, expected_fine_steps: int) -> None:
+        """Fail closed before MPPI weights candidate costs.
+
+        A candidate is invalid when reset failed, any expected fine step did
+        not converge, a residual exceeded tolerance, PADMM reached its iteration
+        cap, contact capacity was reached, or its final state/cost is non-finite.
+        The device kernel changes its cost to NaN, which MPPI already assigns
+        exactly zero weight.
+        """
+        self._rollout_diagnostics.invalidate_costs(
+            reset_success=self._reset_success,
+            qpos=self.qpos_wp,
+            qvel=self.qvel_wp,
+            running_costs=running_costs,
+            terminal_costs=terminal_costs,
+            expected_fine_steps=expected_fine_steps,
+            iteration_limit=self.config.padmm_max_iterations,
+            contact_capacity=self.contact_capacity,
+        )
+
+    def RolloutDiagnostics(self, expected_fine_steps: int) -> dict:
+        """Compact strict-validity evidence for the rollout just completed."""
+        summary = self._rollout_diagnostics.summary(
+            expected_fine_steps,
+            self.config.padmm_max_iterations,
+            self.contact_capacity,
+        )
+        reset = self._reset_success.numpy().astype(bool)
+        reset_failures = int(np.count_nonzero(~reset))
+        if reset_failures:
+            summary["blocking_reasons"]["reset_failure_worlds"] = reset_failures
+            summary["valid_worlds"] = int(np.count_nonzero(
+                self._rollout_diagnostics.valid.numpy().astype(bool) & reset))
+            summary["invalid_worlds"] = self.N - summary["valid_worlds"]
+            summary["all_worlds_valid"] = False
+        return summary
 
     def Close(self) -> None:
         self.solver = None

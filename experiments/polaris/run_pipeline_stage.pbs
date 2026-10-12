@@ -1,0 +1,50 @@
+#!/bin/bash -l
+#PBS -N kamino_pipeline
+#PBS -l select=1:system=polaris
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:eagle
+#PBS -q debug
+#PBS -r n
+#PBS -m n
+# The submitter overrides G0 walltime to 30 minutes. Inner #PBS directives
+# are comments: this wrapper owns the allocation, status and final exit code.
+set -euo pipefail
+: "${PROJ_DIR:?}" "${ENV_DIR:?}" "${OUTDIR:?}" "${PBS_JOBID:?}"
+: "${PIPELINE_ROOT:?}" "${PIPELINE_STAGE:?}"
+child_pid=""
+finalize() {
+    job_rc=$?
+    trap - EXIT
+    set +e
+    "$ENV_DIR/bin/python" "$PROJ_DIR/experiments/polaris/pipeline.py" finish \
+        --root "$PIPELINE_ROOT" --stage "$PIPELINE_STAGE" --exit-code "$job_rc"
+    verdict_rc=$?
+    if [[ "$job_rc" -eq 0 && "$verdict_rc" -ne 0 ]]; then job_rc=$verdict_rc; fi
+    "$ENV_DIR/bin/python" "$PROJ_DIR/experiments/polaris/collect_manifest.py" \
+        --outdir "$OUTDIR" --job-exit-code "$job_rc"
+    manifest_rc=$?
+    if [[ "$job_rc" -eq 0 && "$manifest_rc" -ne 0 ]]; then job_rc=$manifest_rc; fi
+    exit "$job_rc"
+}
+stop_child() {
+    trap '' TERM INT
+    if [[ -n "$child_pid" ]]; then
+        kill -TERM -- "-$child_pid" 2>/dev/null || true
+        wait "$child_pid" || true
+    fi
+    exit 143
+}
+trap finalize EXIT
+trap stop_child TERM INT
+export PYTHONNOUSERSITE=1
+"$ENV_DIR/bin/python" "$PROJ_DIR/experiments/polaris/pipeline.py" start \
+    --root "$PIPELINE_ROOT" --stage "$PIPELINE_STAGE"
+case "$PIPELINE_STAGE" in
+    g0) inner="$PROJ_DIR/experiments/polaris/run_m5_smoke.pbs" ;;
+    g1|g2|g3) inner="$PROJ_DIR/experiments/polaris/run_stage.pbs" ;;
+    *) echo "unknown stage" >&2; exit 2 ;;
+esac
+setsid bash -l "$inner" &
+child_pid=$!
+wait "$child_pid"

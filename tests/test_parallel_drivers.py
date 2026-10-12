@@ -102,8 +102,10 @@ def test_pooled_results_do_not_depend_on_pool_size(tmp_path):
     assert all(np.abs(x.u[0] - y.u[0]).max() < 5e-3 for x, y in zip(a, b))
 
 
-def test_a_missing_scene_fails_before_anything_starts(tmp_path):
+def test_a_missing_scene_fails_before_anything_starts(tmp_path, monkeypatch):
     from ContactModelStudy.Drivers import run_episodes_pooled as pooled
+    # This CPU-only validation must not depend on a working NVML installation.
+    monkeypatch.setattr(pooled, "visibleGpus", lambda: ["0"])
     with pytest.raises(FileNotFoundError):
         pooled.main([*BASE, "--n-episodes", "2", "--steps", "3", "--obj-acc", "foam4",
                      "--workers", "2", "--results", str(tmp_path / "bad.json")])

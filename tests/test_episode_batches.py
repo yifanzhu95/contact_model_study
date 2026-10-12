@@ -104,6 +104,41 @@ def test_example_csv_is_valid(tmp_path):
                          "--outdir", str(tmp_path)]) == 0
 
 
+def test_scheduler_metadata_supports_pbs_and_slurm():
+    pbs = batches.scheduler_provenance({
+        "PBS_JOBID": "123.polaris-pbs-01.hsn.cm.polaris.alcf.anl.gov",
+        "PBS_ARRAY_INDEX": "2",
+        "PBS_QUEUE": "debug",
+        "PBS_ACCOUNT": "project-x",
+    })
+    assert pbs == {
+        "scheduler": "pbs",
+        "job_id": "123.polaris-pbs-01.hsn.cm.polaris.alcf.anl.gov",
+        "array_index": "2",
+        "queue": "debug",
+        "project": "project-x",
+        "job_name": None,
+    }
+    slurm = batches.scheduler_provenance({"SLURM_JOB_ID": "44", "SLURM_JOB_PARTITION": "gpu"})
+    assert slurm["scheduler"] == "slurm" and slurm["job_id"] == "44"
+
+
+def test_result_validation_never_confuses_completion_with_scaling(tmp_path):
+    path = tmp_path / "cell.json"
+    path.write_text(json.dumps({
+        "validation": {
+            "status": "fail",
+            "scaling_eligible": False,
+            "blocking_reasons": {"nonconverged_worlds": 1},
+        }
+    }))
+    assert batches._resultValidation(path) == {
+        "validation_status": "fail",
+        "scaling_eligible": False,
+        "validation_blocking_reasons": {"nonconverged_worlds": 1},
+    }
+
+
 # -- running -------------------------------------------------------------------
 @pytest.mark.gpu
 @pytest.mark.slow

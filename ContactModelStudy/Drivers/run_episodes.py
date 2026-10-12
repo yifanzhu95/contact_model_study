@@ -64,6 +64,7 @@ from ContactModelStudy.Utils.ContactModelPresets import (  # noqa: E402
 )
 from ContactModelStudy.Utils.EpisodeRecorder import EpisodeRecorder  # noqa: E402
 from ContactModelStudy.Utils.EvalSimulators import evalSimNames, makeEvalSim  # noqa: E402
+from ContactModelStudy.Utils.Provenance import run_provenance  # noqa: E402
 
 #: Tasks this driver can run, by the name passed to --task.
 TASKS = {"cube_reorient": CubeReorient, "duck_reorient": DuckReorient,
@@ -509,7 +510,21 @@ def main(argv=None) -> int:
     rollout_sim = GetContactModelSim(args.rollout_model, task.getModelPath(), N=args.n_samples,
                                      **rolloutSimOverrides(args, task))
     planner = MPPI(rollout_sim, task, buildPlannerConfig(args))
-    recorder = EpisodeRecorder(eval_task, sim, planner, cli_args=vars(args), eval_sim=args.eval_sim)
+    provenance = run_provenance(
+        _REPO_ROOT,
+        {
+            "eval_scene": eval_task.getModelPath(),
+            "rollout_scene": task.getModelPath(),
+        },
+    )
+    recorder = EpisodeRecorder(
+        eval_task,
+        sim,
+        planner,
+        cli_args=vars(args),
+        eval_sim=args.eval_sim,
+        provenance=provenance,
+    )
     printHeader(args, task, eval_task, rollout_sim.config, type(rollout_sim).__name__, repr(planner))
 
     try:

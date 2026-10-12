@@ -56,6 +56,10 @@ def build_parser():
     g.add_argument("--workers", type=int, default=None,
                    help="eval-sim worker processes (concurrent episodes); default: available "
                         "cores minus one per planner, at most --n-episodes")
+    g.add_argument("--checkpoint-every", type=int, default=0,
+                   help="save collected episodes every N completions (0: final save only)")
+    g.add_argument("--pool-stats", default=None,
+                   help="optional JSON file for process busy times and batch completion")
     return p
 
 
@@ -71,6 +75,8 @@ def main(argv=None) -> int:
     workers = args.workers if args.workers is not None else max(1, availableCpus() - n_planners)
     if workers < 1:
         parser.error("--workers must be >= 1")
+    if args.checkpoint_every < 0:
+        parser.error("--checkpoint-every must be >= 0")
     return runPool(args, n_workers=min(workers, args.n_episodes), gpus=gpus,
                    planners_per_gpu=args.planners_per_gpu)
 

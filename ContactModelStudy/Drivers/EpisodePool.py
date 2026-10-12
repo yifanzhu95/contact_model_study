@@ -56,6 +56,7 @@ planner process has chosen its GPU with ``CUDA_VISIBLE_DEVICES``.
 from __future__ import annotations
 
 import contextlib
+import json
 import multiprocessing as mp
 import os
 import queue
@@ -65,6 +66,7 @@ import sys
 import time
 import traceback
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 import numpy as np
 
@@ -178,6 +180,7 @@ class RemotePlanner:
         self.last_min_cost = float("nan")
         self.last_plan_seconds = None
         self.last_action_uncertainty = None
+        self.last_rollout_diagnostics = []
         self.wait_s = 0.0
         self._requests, self._replies = requests, replies
         self._worker, self._abort = worker, abort
@@ -206,6 +209,7 @@ class RemotePlanner:
     def startEpisode(self, episode: int, noise_seed: int) -> None:
         self._episode, self._noise_seed = episode, noise_seed
         self._state, self._reset, self._mean = None, True, None
+        self.last_rollout_diagnostics = []
 
     def Reset(self, mean=None) -> None:
         self._reset, self._mean = True, None if mean is None else np.asarray(mean, dtype=float)
@@ -233,6 +237,7 @@ class RemotePlanner:
         self._state, self._reset = rep["state"], False
         self.last_min_cost, self.last_plan_seconds = rep["min_cost"], rep["plan_s"]
         self.last_action_uncertainty = rep["sigma"]
+        self.last_rollout_diagnostics = rep.get("rollout_diagnostics", [])
         return rep["action"] if rep["sigma"] is None else (rep["action"], rep["sigma"])
 
 
@@ -320,6 +325,9 @@ def _plannerMain(args, gpu: str | None, planner_id: int, models: list[str],
                 action, sigma = out if isinstance(out, tuple) else (out, None)
                 replies[req["worker"]].put({"action": action, "sigma": sigma, "plan_s": plan_s,
                                             "min_cost": float(getattr(planner, "last_min_cost", np.nan)),
+                                            "rollout_diagnostics": [
+                                                {**d, "planner_id": planner_id, "gpu": gpu}
+                                                for d in planner.last_rollout_diagnostics],
                                             "state": planner.SaveState()})
                 n_plans += 1
             except Exception as e:
@@ -355,7 +363,10 @@ def _workerMain(args, worker_id: int, gpu: str | None, descs: dict, jobs, reques
         base_weights = dict(task.params["cost_weights"])
         sim = makeEvalSim(args.eval_sim, eval_task.getModelPath(), eval_task.timestep)
         planner = RemotePlanner(descs[args.rollout_model], task, requests, reply, worker_id, abort)
-        recorder = EpisodeRecorder(eval_task, sim, planner, cli_args=vars(args), eval_sim=args.eval_sim)
+        recorder = EpisodeRecorder(
+            eval_task, sim, planner,
+            cli_args={k: v for k, v in vars(args).items() if not k.startswith("_")},
+            eval_sim=args.eval_sim, **getattr(args, "_pool_metadata", {}))
         events.put(("worker_ready", worker_id))
     except BaseException as e:
         events.put(("worker_failed", worker_id, f"{type(e).__name__}: {e}\n{traceback.format_exc()}"))
@@ -388,6 +399,10 @@ def _workerMain(args, worker_id: int, gpu: str | None, descs: dict, jobs, reques
         episode = recorder.episodes.pop()
         episode.extra["worker"] = worker_id
         episode.extra["goal_seed"] = goal_seed
+        episode.extra["planner_request_wait_s"] = planner.wait_s - wait0
+        plan_seconds = float(np.nansum(episode.planning_time))
+        episode.extra["planner_wait_overhead_s"] = max(0.0, planner.wait_s - wait0 - plan_seconds)
+        summary.update(episode.extra)
         events.put(("episode", worker_id, job_id, episode, summary, error))
     events.put(("worker_stats", worker_id, busy))
 
@@ -571,7 +586,13 @@ class EpisodePool:
                 break
         for p in self._planners + self._workers:
             if p.is_alive():
-                p.terminate()
+                # Children intentionally ignore SIGTERM during graceful abort.
+                # The drain deadline has expired, so terminate() would not stop
+                # them; kill and reap rather than hanging at interpreter exit.
+                p.kill()
+                if "forced_process_shutdown" not in self.problems:
+                    self.problems.append("forced_process_shutdown")
+            p.join(timeout=1)
         out, self._finished = self._finished, []
         return out
 
@@ -648,6 +669,7 @@ def runPool(args, n_workers: int, gpus: list[str | None], planners_per_gpu: int 
     from ContactModelStudy.Drivers import run_episodes as drv
     from ContactModelStudy.Utils.EpisodeRecorder import EpisodeRecorder
     from ContactModelStudy.Utils.EvalSimulators import evalSimConfig
+    from ContactModelStudy.Utils.Provenance import run_provenance
 
     # Line-buffered, so a log file (an HPC job's, say) shows each episode as it
     # finishes rather than in large blocks.
@@ -658,6 +680,12 @@ def runPool(args, n_workers: int, gpus: list[str | None], planners_per_gpu: int 
     task, eval_task = drv.buildTasks(args)
     desc = describeRollout(args, task)
     n_workers = max(1, min(n_workers, args.n_episodes))
+    args._pool_metadata = {
+        "provenance": run_provenance(
+            Path(__file__).resolve().parents[2],
+            {"eval_scene": eval_task.getModelPath(), "rollout_scene": task.getModelPath()}),
+        "pool": {"gpus": gpus, "workers": n_workers, "planners_per_gpu": planners_per_gpu},
+    }
     pool = EpisodePool(args, n_workers, gpus, planners_per_gpu)
     drv.printHeader(args, task, eval_task, desc["sim_config"], desc["sim_class"],
                     f"MPPI(N={args.n_samples}), {len(pool.planner_gpus)} planner process(es)")
@@ -669,7 +697,10 @@ def runPool(args, n_workers: int, gpus: list[str | None], planners_per_gpu: int 
     eval_cls, eval_cfg = evalSimConfig(args.eval_sim, eval_task.timestep)
     sim_desc = SimStandIn(eval_cls, eval_cfg, nq=eval_task.nq, nv=eval_task.nv, nu=eval_task.nu)
     planner_desc = RemotePlanner(desc, task, None, None, -1, None)
-    recorder = EpisodeRecorder(eval_task, sim_desc, planner_desc, cli_args=vars(args), eval_sim=args.eval_sim)
+    recorder = EpisodeRecorder(
+        eval_task, sim_desc, planner_desc,
+        cli_args={k: v for k, v in vars(args).items() if not k.startswith("_")},
+        eval_sim=args.eval_sim, **args._pool_metadata)
     done: dict[int, dict] = {}
 
     def take(results: list[PoolResult]) -> None:
@@ -682,6 +713,10 @@ def runPool(args, n_workers: int, gpus: list[str | None], planners_per_gpu: int 
             drv._printEpisode(ep, r.summary, args)
             if r.error:
                 print(f"  ERROR in worker {r.worker}: {r.error}")
+            every = getattr(args, "checkpoint_every", 0)
+            if every and len(done) % every == 0:
+                recorder.episodes.sort(key=lambda e: e.extra.get("episode", 0))
+                drv.saveResults(args, recorder)
 
     with sigtermAsInterrupt():
         try:
@@ -702,7 +737,25 @@ def runPool(args, n_workers: int, gpus: list[str | None], planners_per_gpu: int 
             pool.t_start = time.time() - wall        # the line reports the run, not the shutdown
             pool.printUtilization(len(done))
             drv.saveResults(args, recorder)
+            stats_path = getattr(args, "pool_stats", None)
+            if stats_path:
+                document = {
+                    "schema": "contact_model_study.pool_stats.v1",
+                    "wall_s": wall, "requested_episodes": args.n_episodes,
+                    "recorded_episodes": len(done), "pending_episodes": pool.pending,
+                    "problems": pool.problems, "process_stats": pool.stats,
+                    "pool": args._pool_metadata["pool"],
+                    "provenance": args._pool_metadata["provenance"],
+                    "complete": not pool.problems and len(done) == args.n_episodes
+                        and not any(r.get("finish_reason") in ("interrupted", "error") for r in done.values()),
+                }
+                destination = Path(stats_path)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                temporary = destination.with_suffix(destination.suffix + ".tmp")
+                temporary.write_text(json.dumps(document, indent=2) + "\n")
+                temporary.replace(destination)
     if pool.problems:
         print("\nstopped early: " + "; ".join(pool.problems))
         return 1
-    return 0
+    return 1 if len(done) != args.n_episodes or any(
+        r.get("finish_reason") in ("interrupted", "error") for r in done.values()) else 0
