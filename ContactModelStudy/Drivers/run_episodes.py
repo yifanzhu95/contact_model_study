@@ -97,7 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = p.add_argument_group("episode")
     g.add_argument("--n-episodes", type=int, default=1)
-    g.add_argument("--steps", type=int, default=1000,
+    g.add_argument("--steps", type=int, default=4000,
                    help="control steps per episode")
     g.add_argument("--timestep", type=float, default=0.0005,
                    help="eval (fine) physics timestep (s); the rollout model runs "
@@ -151,7 +151,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "the alternative to --horizon")
     g.add_argument("--n-iterations", type=int, default=1)
     g.add_argument("--noise-sigma", type=float, default=0.2)#40.0)#0.01)
-    g.add_argument("--temperature", type=float, default=40.0,#40.0,#0.001,
+    g.add_argument("--temperature", type=float, default=50.0,#40.0,#0.001,
                    help="MPPI lambda; smaller is greedier")
     g.add_argument("--control-mode", default="pos_relative",
                    choices=["pos_relative", "ctrl_relative", "absolute"],
