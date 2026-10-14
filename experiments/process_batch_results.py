@@ -111,7 +111,11 @@ def argsFromCliArgs(cli_args: dict) -> argparse.Namespace:
     """The driver's ``args`` as recorded, with defaults for options added since."""
     from ContactModelStudy.Drivers import run_episodes as drv
     defaults = vars(drv.parseArgs(["--no-results", "--no-video"]))
-    return argparse.Namespace(**{**defaults, **cli_args, "results": None, "video": None})
+    args = {**defaults, **cli_args, "results": None, "video": None}
+    # Recorded when warm_start was on/off: off kept the last mean unshifted.
+    if isinstance(args["warm_start"], bool):
+        args["warm_start"] = "shift" if args["warm_start"] else "hold"
+    return argparse.Namespace(**args)
 
 
 def optimalArgs(args: argparse.Namespace, control_timestep: float, horizon_duration: float) -> argparse.Namespace:

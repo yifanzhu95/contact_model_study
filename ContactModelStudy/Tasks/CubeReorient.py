@@ -87,4 +87,18 @@ class CubeReorient(LeapReorient):
                 "w_pos_term":   300.0,
                 "w_fallen_term":  0.0,
             },
+            # "cost_weights": { #potetial cost that seem to work better with a more difficult goal
+            #     "w_quat":        25.0,#23.3929,
+            #     "w_pos_x":        7.0,#5.99412,
+            #     "w_pos_y":        60.0,#50.0,
+            #     "w_pos_z":        1.0,
+            #     "w_velo":         0.0,
+            #     "w_contact":      2.5,#2.48369,
+            #     "w_joint":        0.05,#20.0,
+            #     "w_joint_velo":   0.0,
+            #     "w_fallen":     100.0,
+            #     "w_quat_term":  100.0,
+            #     "w_pos_term":   300.0,
+            #     "w_fallen_term":  0.0,
+            # },
         }

@@ -95,7 +95,7 @@ def test_first_action_moments_match_the_old_weighted_moments(sim, cube_tasks, cu
 @pytest.mark.gpu
 def test_planner_state_is_restored(sim, cube_tasks, cube_initial):
     q0, v0, u0 = cube_initial
-    p = _mppi(sim, cube_tasks[0], warm_start=True)
+    p = _mppi(sim, cube_tasks[0], warm_start="shift")
     p.Plan(q0, v0, u=u0)
     before = p.SaveState()
     CalcPlannerKLDiv(q0, v0, p, (u0, 0.1), u=u0)

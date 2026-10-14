@@ -50,7 +50,7 @@ def test_planner_state_roundtrip(cube_initial, cube_tasks):
     from ContactModelStudy.Simulators.VectorizedMujoco import VectorizedMujoco, VectorizedMujocoConfig
     q0, v0, u0 = cube_initial
     p = MPPI(VectorizedMujoco(ROLLOUT_CUBE, VectorizedMujocoConfig(horizon=4, substeps=2), N=32),
-             cube_tasks[0], MPPI_Config(seed=0, warm_start=True, adaptive_temp=True))
+             cube_tasks[0], MPPI_Config(seed=0, warm_start="shift", adaptive_temp=True))
     p.Plan(q0, v0, u=u0)
     saved = p.SaveState()
     p.Reset()

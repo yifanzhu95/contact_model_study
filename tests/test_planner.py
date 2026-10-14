@@ -112,7 +112,8 @@ def test_uncertainty_limits(sim, cube_tasks, cube_initial):
     assert lo.max() < 1e-3                        # one dominant sample -> ~0
 
 
-@pytest.mark.parametrize("kw", [dict(warm_start=True), dict(control_mode="absolute"),
+@pytest.mark.parametrize("kw", [dict(warm_start="shift"), dict(warm_start="hold"),
+                                dict(control_mode="absolute"),
                                 dict(control_mode="ctrl_relative")])
 def test_uncertainty_in_every_mode(sim, cube_tasks, cube_initial, kw):
     q0, v0, u0 = cube_initial
@@ -122,6 +123,53 @@ def test_uncertainty_in_every_mode(sim, cube_tasks, cube_initial, kw):
     for _ in range(3):
         _, unc = p.Plan(q0, v0, u=u0)
     assert np.isfinite(unc).all() and unc.shape == (16,)
+
+
+# -- warm start ------------------------------------------------------------------
+@pytest.mark.parametrize("mode", ["pos_relative", "absolute"])
+def test_warm_start_none_starts_every_plan_from_the_reset_seed(sim, cube_tasks, cube_initial, mode):
+    q0, v0, u0 = cube_initial
+    seed = u0 if mode == "absolute" else None
+    p = _mppi(sim, cube_tasks[0], temperature=10.0, control_mode=mode)
+    p.Reset(seed)
+    p.Plan(q0, v0, u=u0)
+    second = p.Plan(q0, v0, u=u0)
+    # A fresh planner on the same noise draw: the first plan left nothing behind.
+    # (Repeat plans differ by ~2e-5 on the GPU; a carried-over mean, by ~1e-2.)
+    fresh = _mppi(sim, cube_tasks[0], temperature=10.0, control_mode=mode)
+    fresh.Reset(seed)
+    fresh._resample_count = 1
+    assert np.allclose(second, fresh.Plan(q0, v0, u=u0), atol=1e-4)
+
+
+@pytest.mark.parametrize("warm_start, rows", [("hold", 0), ("shift", 1)])
+def test_warm_start_carries_the_last_solution(sim, cube_tasks, cube_initial, warm_start, rows):
+    q0, v0, u0 = cube_initial
+    p = _mppi(sim, cube_tasks[0], temperature=10.0, warm_start=warm_start)
+    p.Reset()
+    p.Plan(q0, v0, u=u0)
+    solved = p.last_action_seq - q0[:16]          # pos_relative: the mean, before any shift
+    expect = np.zeros_like(solved)
+    expect[:len(solved) - rows] = solved[rows:]
+    assert np.allclose(p.U_wp.numpy(), expect, atol=1e-5)
+
+
+def test_warm_start_must_be_a_known_choice():
+    from ContactModelStudy.SamplingBasedPlanners.MPPI import MPPI_Config
+    assert MPPI_Config().warm_start == "none"
+    with pytest.raises(ValueError, match="warm_start"):
+        MPPI_Config(warm_start=True)
+
+
+def test_reset_seed_travels_with_the_state(sim, cube_tasks, cube_initial):
+    q0, v0, u0 = cube_initial
+    p = _mppi(sim, cube_tasks[0], control_mode="absolute")
+    p.Reset(u0)
+    state = p.SaveState()
+    p.Reset(None)
+    p.LoadState(state)
+    p.Plan(q0, v0, u=u0)
+    assert np.allclose(p._reset_mean, u0)
 
 
 def test_failed_plan_gives_zero_action_and_nan_uncertainty(sim, cube_tasks, cube_initial):

@@ -69,6 +69,11 @@ def test_optimal_args_plan_on_the_eval_model_over_the_same_durations():
     assert a.rollout_model == "M3"                                     # the original is untouched
 
 
+@pytest.mark.parametrize("recorded, replayed", [(False, "hold"), (True, "shift"), ("none", "none")])
+def test_recorded_on_off_warm_start_replays_as_it_ran(recorded, replayed):
+    assert pbr.argsFromCliArgs({"warm_start": recorded}).warm_start == replayed
+
+
 def test_metrics():
     q = np.array([[1.0, 0, 0, 0], [1.0, 0, 0, 0]])
     half = np.array([[np.cos(0.25), np.sin(0.25), 0, 0], [-1.0, 0, 0, 0]])   # 0.5 rad, and a sign flip

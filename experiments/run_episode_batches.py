@@ -24,7 +24,8 @@ CSV columns
   ``temperature``, ``control_mode``, ``settle``, ``seed``, ``goal_difficulty``,
   ``nconmax``, ``njmax``, ... (``python ContactModelStudy/Drivers/run_episodes.py
   --help`` lists them all). On/off flags take ``true``/``false``
-  (``stop_on_success``, ``warm_start``, ``uncertainty``, ``save_steps``, ...).
+  (``stop_on_success``, ``uncertainty``, ``save_steps``, ...); ``warm_start``
+  takes ``none``, ``hold`` or ``shift``.
 * **Cost weights.** ``w_quat``, ``w_pos_x``, ... (any of
   ``LeapReorient.COST_WEIGHT_KEYS``) override the object's tuned weight.
 * **``label``.** Optional name for the row; it goes into the output file names.

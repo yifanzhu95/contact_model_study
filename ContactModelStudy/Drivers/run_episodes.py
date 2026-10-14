@@ -97,12 +97,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = p.add_argument_group("episode")
     g.add_argument("--n-episodes", type=int, default=1)
-    g.add_argument("--steps", type=int, default=4000,
+    g.add_argument("--steps", type=int, default=1000,
                    help="control steps per episode")
-    g.add_argument("--timestep", type=float, default=0.0005,
+    g.add_argument("--timestep", type=float, default=0.004,#0.0005,
                    help="eval (fine) physics timestep (s); the rollout model runs "
                         "at timestep * --eval-steps-per-rollout-step")
-    g.add_argument("--eval-steps-per-rollout-step", type=int, default=8,
+    g.add_argument("--eval-steps-per-rollout-step", type=int, default=1,#8,
                    help="eval steps per rollout step (the old task used 8, with "
                         "a 0.5 ms eval timestep)")
     g.add_argument("--substeps", type=int, default=None,
@@ -110,7 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
                         f"1/(rollout timestep * substeps). Give this or "
                         f"--ctrl-time-step; neither means --ctrl-time-step "
                         f"{_PAIR_DEFAULTS[('substeps', 'ctrl_time_step')][1]}")
-    g.add_argument("--ctrl-time-step", type=float, default=None,
+    g.add_argument("--ctrl-time-step", type=float, default=0.064,#None,
                    help="control-step duration (s), rounded down to whole rollout "
                         "timesteps; the alternative to --substeps")
     g.add_argument("--eval-sim", default="mujoco", choices=evalSimNames(),
@@ -146,12 +146,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help=f"H: planning horizon in control steps. Give this or "
                         f"--time-horizon; neither means --time-horizon "
                         f"{_PAIR_DEFAULTS[('horizon', 'time_horizon')][1]}")
-    g.add_argument("--time-horizon", type=float, default=None,
+    g.add_argument("--time-horizon", type=float, default=0.384,#None,
                    help="planning horizon (s), rounded down to whole control steps; "
                         "the alternative to --horizon")
     g.add_argument("--n-iterations", type=int, default=1)
-    g.add_argument("--noise-sigma", type=float, default=0.2)#40.0)#0.01)
-    g.add_argument("--temperature", type=float, default=50.0,#40.0,#0.001,
+    g.add_argument("--noise-sigma", type=float, default=0.1)#40.0)#0.01)
+    g.add_argument("--temperature", type=float, default=1.0,#40.0,#0.001,
                    help="MPPI lambda; smaller is greedier")
     g.add_argument("--control-mode", default="pos_relative",
                    choices=["pos_relative", "ctrl_relative", "absolute"],
@@ -160,7 +160,10 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--delta", type=float, default=None,
                    help="symmetric per-step clip on the control delta; omitted "
                         "leaves it unclipped (the study's default)")
-    g.add_argument("--warm-start", action=argparse.BooleanOptionalAction, default=False)
+    g.add_argument("--warm-start", default="none", choices=["none", "hold", "shift"],
+                   help="where each plan starts its mean: none: afresh from the reset "
+                        "mean; hold: the last plan's solution as is; shift: the last "
+                        "solution moved one control step earlier")
     g.add_argument("--adaptive-temp", action=argparse.BooleanOptionalAction, default=False)
     g.add_argument("--graph", action=argparse.BooleanOptionalAction, default=True,
                    help="capture the rollout into a CUDA graph (much faster)")

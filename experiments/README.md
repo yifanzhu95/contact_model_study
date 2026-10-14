@@ -29,7 +29,10 @@ driver's default.
   contact model (`M1`–`M5`; M5, Kamino, needs the `contact_kamino` env).
   `plan_on_eval` (true/false) makes the planner roll out on the eval scene.
 - **On/off options.** These take `true` or `false`: `stop_on_success`,
-  `warm_start`, `uncertainty`, `save_steps`, `graph`, `debug`, ...
+  `uncertainty`, `save_steps`, `graph`, `debug`, ...
+- **`warm_start`.** Where each plan starts its mean: `none` (the default) starts
+  afresh from the reset mean, `hold` reuses the last plan's solution as is, and
+  `shift` moves that solution one control step earlier.
 - **Cost weights.** `w_quat`, `w_pos_x`, ..., `w_fallen_term` override the
   object's tuned weights.
 - **`label`.** Names the row in the output files.

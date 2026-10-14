@@ -45,13 +45,14 @@ def test_driver_cost_weight_flag():
 # -- CSV -> command line -----------------------------------------------------
 def test_row_to_argv(tmp_path):
     row = {"label": "a b", "rollout_model": "M3", "uncertainty": "false", "debug": "true",
-           "time_horizon": "0.2", "w_quat": "40", "video": "true"}
+           "time_horizon": "0.2", "w_quat": "40", "video": "true", "warm_start": "hold"}
     name = batches.cellName(3, row)
     assert name == "cell_0003_a-b"
     argv = batches.rowToArgv(row, tmp_path, name)
     assert argv[:2] == ["--rollout-model", "M3"]
     assert "--no-uncertainty" in argv and "--debug" in argv
     assert argv[argv.index("--time-horizon") + 1] == "0.2"
+    assert argv[argv.index("--warm-start") + 1] == "hold"
     assert argv[argv.index("--cost-weight") + 1] == "w_quat=40"
     assert argv[argv.index("--results") + 1] == str(tmp_path / f"{name}.json")
     assert argv[argv.index("--video") + 1] == str(tmp_path / f"{name}.mp4")

@@ -38,6 +38,7 @@ import warp as wp
 from ContactModelStudy.Simulators.VectorizedSimulator import VectorizedSimulator
 
 _CONTROL_MODES = ("absolute", "ctrl_relative", "pos_relative")
+_WARM_STARTS = ("none", "hold", "shift")
 
 
 @dataclass
@@ -52,8 +53,16 @@ class SamplingBasedPlannerConfig:
     Attributes:
         noise_sigma: Standard deviation of the Gaussian perturbations.
         n_iterations: Optimizer iterations per ``Plan`` call.
-        warm_start: Shift the mean one control step forward after each plan, so
-            the next call starts from the tail of the last solution.
+        warm_start: Where each ``Plan`` call starts its mean sequence:
+
+            * ``"none"`` — afresh, from the mean the last ``Reset`` seeded
+              (zero, a "hold still" mean, unless a seed command was given
+              there). No plan carries over to the next.
+            * ``"hold"`` — from the last plan's solution as it is, row for row;
+              row 0 is the action just applied.
+            * ``"shift"`` — from the last plan's solution moved one control step
+              earlier (row h takes row h + 1, the last row is zeroed), so it
+              lines up with the step now being planned.
         control_mode: How a planned value ``U_t`` becomes the command at
             rollout control step ``t``:
 
@@ -97,7 +106,7 @@ class SamplingBasedPlannerConfig:
 
     noise_sigma: float = 0.01
     n_iterations: int = 1
-    warm_start: bool = False
+    warm_start: str = "none"
     control_mode: str = "pos_relative"
     delta_range: tuple[float | None, float | None] = (None, None)
     seed: int | None = None
@@ -114,6 +123,10 @@ class SamplingBasedPlannerConfig:
         if self.control_mode not in _CONTROL_MODES:
             raise ValueError(
                 f"control_mode must be one of {_CONTROL_MODES}, got {self.control_mode!r}"
+            )
+        if self.warm_start not in _WARM_STARTS:
+            raise ValueError(
+                f"warm_start must be one of {_WARM_STARTS}, got {self.warm_start!r}"
             )
         low, high = self.delta_range
         if low is not None and high is not None and low > high:
@@ -160,7 +173,7 @@ class SamplingBasedPlannerBase(abc.ABC):
                 ``SamplingBasedPlannerConfig()``.
 
         Raises:
-            ValueError: If the simulator's horizon is 1 while warm starting,
+            ValueError: If the simulator's horizon is 1 under ``"shift"``,
                 which would shift the whole sequence off the end every plan.
         """
         self.sim = simulator
@@ -176,9 +189,9 @@ class SamplingBasedPlannerBase(abc.ABC):
         self.substeps = simulator.config.resolved_substeps
         self.device = simulator.config.device
 
-        if self.config.warm_start and self.horizon < 2:
+        if self.config.warm_start == "shift" and self.horizon < 2:
             raise ValueError(
-                f"warm_start needs a horizon of at least 2, got {self.horizon}"
+                f"warm_start='shift' needs a horizon of at least 2, got {self.horizon}"
             )
 
         # Where the robot's joints start in qpos, for the pos_relative mode.
@@ -192,6 +205,8 @@ class SamplingBasedPlannerBase(abc.ABC):
         self._rng = np.random.default_rng(self.config.seed)
         self._noise_seed = int(self._rng.integers(0, 2**31 - 1))
         self._resample_count = 0
+        # The command the last Reset seeded the mean with; None means zero.
+        self._reset_mean: np.ndarray | None = None
 
         if (self.config.return_uncertainty
                 and type(self)._actionUncertainty is SamplingBasedPlannerBase._actionUncertainty):
@@ -335,6 +350,8 @@ class SamplingBasedPlannerBase(abc.ABC):
             raise ValueError(f"q_dot must have shape ({self.nv},), got {q_dot.shape}")
 
         self._setCommandBase(q, u)
+        if self.config.warm_start == "none":
+            self._seedMean()
         self._sampleNoise()
         self.last_plan_ok = False
 
@@ -550,7 +567,7 @@ class SamplingBasedPlannerBase(abc.ABC):
         # otherwise with Plan(u=...).
         self._u_prev = action.astype(float)
 
-        if self.config.warm_start:
+        if self.config.warm_start == "shift":
             wp.launch(
                 _shift_kernel, dim=(self.horizon, self.nu),
                 inputs=[self.U_wp, self.horizon, 1],
@@ -573,17 +590,27 @@ class SamplingBasedPlannerBase(abc.ABC):
         mean commands every joint to zero, and on a grasping hand that opens it
         and drops the object on the first plan. Seed it with the task's initial
         control there.
+
+        Under ``warm_start="none"``, every ``Plan`` starts again from this seed.
         """
         if mean is None:
-            self.U_wp.zero_()
+            self._reset_mean = None
         else:
             m = np.asarray(mean, dtype=np.float32).ravel()
             if m.shape != (self.nu,):
                 raise ValueError(f"mean must have shape ({self.nu},), got {m.shape}")
-            self.U_wp.assign(np.tile(m, (self.horizon, 1)))
+            self._reset_mean = m.copy()
+        self._seedMean()
         self.last_action_seq = None
         self.last_plan_ok = False
         self._resetParams()
+
+    def _seedMean(self) -> None:
+        """Write the ``Reset`` seed into every row of the mean, in place."""
+        if self._reset_mean is None:
+            self.U_wp.zero_()
+        else:
+            self.U_wp.assign(np.tile(self._reset_mean, (self.horizon, 1)))
 
     def FirstActionDistribution(self) -> tuple[np.ndarray, np.ndarray]:
         """``(mu, cov)``: the last plan's first action, as a Gaussian in command space.
@@ -617,8 +644,9 @@ class SamplingBasedPlannerBase(abc.ABC):
     def SaveState(self) -> dict:
         """Everything that carries over from one ``Plan`` to the next, as plain data.
 
-        That is: the mean sequence, the control a ``ctrl_relative`` plan starts
-        from, the last plan's outputs, and the noise stream's seed and position.
+        That is: the mean sequence and the ``Reset`` seed it restarts from, the
+        control a ``ctrl_relative`` plan starts from, the last plan's outputs,
+        and the noise stream's seed and position.
         ``LoadState`` puts it back. Together they let one planner serve several
         episodes in turn: save one episode's state, load another's, plan, and
         swap back. The noise stream travels with it, so an episode's samples do
@@ -627,6 +655,7 @@ class SamplingBasedPlannerBase(abc.ABC):
         """
         return {
             "U": self.U_wp.numpy().copy(),
+            "reset_mean": None if self._reset_mean is None else self._reset_mean.copy(),
             "u_prev": None if self._u_prev is None else self._u_prev.copy(),
             "last_action_seq": None if self.last_action_seq is None else self.last_action_seq.copy(),
             "last_plan_ok": self.last_plan_ok,
@@ -644,6 +673,8 @@ class SamplingBasedPlannerBase(abc.ABC):
         if U.shape != (self.horizon, self.nu):
             raise ValueError(f"state mean has shape {U.shape}, planner needs {(self.horizon, self.nu)}")
         self.U_wp.assign(U)
+        m = state.get("reset_mean")
+        self._reset_mean = None if m is None else np.asarray(m, dtype=np.float32).copy()
         self._u_prev = None if state["u_prev"] is None else np.asarray(state["u_prev"], dtype=float).copy()
         self.last_action_seq = state["last_action_seq"]
         self.last_plan_ok = bool(state["last_plan_ok"])
