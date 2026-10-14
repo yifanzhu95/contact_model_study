@@ -166,9 +166,10 @@ class RemotePlanner:
     and its settings (model, planner params, cost weights), and waits for the
     action. ``Reset`` is sent with the next plan request. It exposes what the
     recorder reads from a planner: ``config``, ``sim`` and ``task`` (the
-    rollout ones, as set for the current job), ``class_name`` and
-    ``last_min_cost``, plus ``last_plan_seconds``, the solve time in the
-    planner process, so waiting for a free GPU is not counted as planning.
+    rollout ones, as set for the current job), ``class_name``,
+    ``last_min_cost``, ``last_plan_start`` and ``last_action_seq``, plus
+    ``last_plan_seconds``, the solve time in the planner process, so waiting
+    for a free GPU is not counted as planning.
     """
 
     def __init__(self, desc: dict, task, requests, replies, worker: int, abort):
@@ -176,6 +177,7 @@ class RemotePlanner:
         self._desc, self._model, self._params, self._weights = None, None, None, None
         self._useDesc(desc)
         self.last_min_cost = float("nan")
+        self.last_plan_start, self.last_action_seq = None, None
         self.last_plan_seconds = None
         self.last_action_uncertainty = None
         self.wait_s = 0.0
@@ -232,6 +234,7 @@ class RemotePlanner:
             raise RuntimeError(f"planner process failed: {rep['error']}")
         self._state, self._reset = rep["state"], False
         self.last_min_cost, self.last_plan_seconds = rep["min_cost"], rep["plan_s"]
+        self.last_plan_start, self.last_action_seq = rep["plan_start"], rep["action_seq"]
         self.last_action_uncertainty = rep["sigma"]
         return rep["action"] if rep["sigma"] is None else (rep["action"], rep["sigma"])
 
@@ -320,6 +323,8 @@ def _plannerMain(args, gpu: str | None, planner_id: int, models: list[str],
                 action, sigma = out if isinstance(out, tuple) else (out, None)
                 replies[req["worker"]].put({"action": action, "sigma": sigma, "plan_s": plan_s,
                                             "min_cost": float(getattr(planner, "last_min_cost", np.nan)),
+                                            "plan_start": planner.last_plan_start,
+                                            "action_seq": planner.last_action_seq,
                                             "state": planner.SaveState()})
                 n_plans += 1
             except Exception as e:
@@ -349,13 +354,14 @@ def _workerMain(args, worker_id: int, gpu: str | None, descs: dict, jobs, reques
     os.environ.setdefault("MUJOCO_GL", "egl")
     try:
         from ContactModelStudy.Drivers import run_episodes as drv
-        from ContactModelStudy.Utils.EpisodeRecorder import EpisodeRecorder
+        from ContactModelStudy.Utils.EpisodeRecorder import EpisodeRecorder, StepSaving
         from ContactModelStudy.Utils.EvalSimulators import makeEvalSim
         task, eval_task = drv.buildTasks(args)
         base_weights = dict(task.params["cost_weights"])
         sim = makeEvalSim(args.eval_sim, eval_task.getModelPath(), eval_task.timestep)
         planner = RemotePlanner(descs[args.rollout_model], task, requests, reply, worker_id, abort)
-        recorder = EpisodeRecorder(eval_task, sim, planner, cli_args=vars(args), eval_sim=args.eval_sim)
+        recorder = EpisodeRecorder(eval_task, sim, planner, steps=StepSaving.fromArgs(args),
+                                   cli_args=vars(args), eval_sim=args.eval_sim)
         events.put(("worker_ready", worker_id))
     except BaseException as e:
         events.put(("worker_failed", worker_id, f"{type(e).__name__}: {e}\n{traceback.format_exc()}"))
@@ -646,7 +652,7 @@ def _withModel(args, model: str):
 def runPool(args, n_workers: int, gpus: list[str | None], planners_per_gpu: int = 1) -> int:
     """Run ``args.n_episodes`` episodes with ``n_workers`` workers and planners on ``gpus``."""
     from ContactModelStudy.Drivers import run_episodes as drv
-    from ContactModelStudy.Utils.EpisodeRecorder import EpisodeRecorder
+    from ContactModelStudy.Utils.EpisodeRecorder import EpisodeRecorder, StepSaving
     from ContactModelStudy.Utils.EvalSimulators import evalSimConfig
 
     # Line-buffered, so a log file (an HPC job's, say) shows each episode as it
@@ -669,7 +675,8 @@ def runPool(args, n_workers: int, gpus: list[str | None], planners_per_gpu: int 
     eval_cls, eval_cfg = evalSimConfig(args.eval_sim, eval_task.timestep)
     sim_desc = SimStandIn(eval_cls, eval_cfg, nq=eval_task.nq, nv=eval_task.nv, nu=eval_task.nu)
     planner_desc = RemotePlanner(desc, task, None, None, -1, None)
-    recorder = EpisodeRecorder(eval_task, sim_desc, planner_desc, cli_args=vars(args), eval_sim=args.eval_sim)
+    recorder = EpisodeRecorder(eval_task, sim_desc, planner_desc, steps=StepSaving.fromArgs(args),
+                               cli_args=vars(args), eval_sim=args.eval_sim)
     done: dict[int, dict] = {}
 
     def take(results: list[PoolResult]) -> None:

@@ -24,9 +24,11 @@ Examples::
 Results are saved by default, to ``results/run_episodes_<date>_<time>.json``;
 ``--results PATH`` picks the file and ``--no-results`` turns saving off. That
 is the ``EpisodeRecorder`` output: the JSON (configs and one summary per
-episode) and, unless ``--no-save-steps``, one ``<stem>_<id>.npy`` per episode
-holding every control step's state, action, action uncertainty and planning
-time. Read it back with ``ContactModelStudy.Utils.EpisodeRecorder.EpisodeReplayer``.
+episode) and, with ``--save-steps``, one ``<stem>_<id>.npy`` per episode
+holding each control step's state, action, action uncertainty, planning time
+and where its plan started (every ``--save-stride``-th step; under a warm
+start also the plan's mean and action sequence). Read it back with
+``ContactModelStudy.Utils.EpisodeRecorder.EpisodeReplayer``.
 
 Offscreen rendering needs a GL context; with no DISPLAY this defaults
 MUJOCO_GL to "egl".
@@ -62,7 +64,7 @@ from ContactModelStudy.Utils.ContactModelPresets import (  # noqa: E402
     CONTACT_MODELS,
     GetContactModelSim,
 )
-from ContactModelStudy.Utils.EpisodeRecorder import EpisodeRecorder  # noqa: E402
+from ContactModelStudy.Utils.EpisodeRecorder import EpisodeRecorder, StepSaving  # noqa: E402
 from ContactModelStudy.Utils.EvalSimulators import evalSimNames, makeEvalSim  # noqa: E402
 
 #: Tasks this driver can run, by the name passed to --task.
@@ -199,8 +201,12 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--no-results", dest="results", action="store_const", const=None,
                    help="save nothing")
     g.add_argument("--save-steps", action=argparse.BooleanOptionalAction, default=False,
-                   help="save every step's state, action and uncertainty (the .npy "
-                        "files); with --no-save-steps only the JSON summary is saved")
+                   help="save the steps' state, action, uncertainty and plan start (the "
+                        ".npy files), and under a warm start the plan's mean and action "
+                        "sequence; with --no-save-steps only the JSON summary is saved")
+    g.add_argument("--save-stride", type=int, default=1,
+                   help="with --save-steps, save every k-th control step (0, k, 2k, ...), "
+                        "each with the state that followed it")
     g.add_argument("--uncertainty", action=argparse.BooleanOptionalAction, default=False,
                    help="have the planner report, and the recorder keep, the "
                         "uncertainty of each action")
@@ -382,6 +388,8 @@ def parseArgs(argv=None, parser: argparse.ArgumentParser | None = None,
                 parser.error(f"--cost-weight {name}: {value!r} is not a number")
     if args.settle < 0:
         parser.error(f"--settle must be >= 0, got {args.settle}")
+    if args.save_stride < 1:
+        parser.error(f"--save-stride must be >= 1, got {args.save_stride}")
     # Each pair is one setting given two ways; the rollout config rejects both
     # being set, but saying so here names the flags rather than the fields.
     for (a, b), (field, value) in _PAIR_DEFAULTS.items():
@@ -512,7 +520,8 @@ def main(argv=None) -> int:
     rollout_sim = GetContactModelSim(args.rollout_model, task.getModelPath(), N=args.n_samples,
                                      **rolloutSimOverrides(args, task))
     planner = MPPI(rollout_sim, task, buildPlannerConfig(args))
-    recorder = EpisodeRecorder(eval_task, sim, planner, cli_args=vars(args), eval_sim=args.eval_sim)
+    recorder = EpisodeRecorder(eval_task, sim, planner, steps=StepSaving.fromArgs(args),
+                               cli_args=vars(args), eval_sim=args.eval_sim)
     printHeader(args, task, eval_task, rollout_sim.config, type(rollout_sim).__name__, repr(planner))
 
     try:

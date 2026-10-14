@@ -69,6 +69,19 @@ def test_no_uncertainty_stores_nan(tmp_path):
     assert rp.configs["planner"]["config"]["return_uncertainty"] is False
 
 
+def test_strided_warm_started_steps(tmp_path):
+    e = EpisodeReplayer(run(tmp_path, "--steps", "10", "--save-stride", "3", "--warm-start", "hold"))[0]
+    assert len(e) == 10 and list(e.step) == [0, 3, 6, 9] and e.save_stride == 3 and e.has_plan_starts
+    assert e.mean_start.shape == e.action_seq.shape == (4, 8, 16)
+    assert np.allclose(e.action_seq[:, 0], e.u, atol=1e-5)
+    assert np.any(e.mean_start[1:] != 0)                 # hold: each plan starts from the last one's mean
+    assert np.allclose(e.q_next[-1], e.summary["q_end"])  # step 9 is the last: the end state followed
+    plain = EpisodeReplayer(run(tmp_path, "--steps", "4", name="none.json"))[0]
+    assert plain.mean_start is None and plain.has_plan_starts and list(plain.step) == [0, 1, 2, 3]
+    with pytest.raises(SystemExit):
+        drv.parseArgs([*BASE, "--save-stride", "0"])
+
+
 def test_save_flags(tmp_path):
     out = run(tmp_path, "--steps", "5", "--no-save-steps")
     assert [p.name for p in tmp_path.iterdir()] == ["run.json"]

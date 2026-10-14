@@ -154,6 +154,20 @@ def test_warm_start_carries_the_last_solution(sim, cube_tasks, cube_initial, war
     assert np.allclose(p.U_wp.numpy(), expect, atol=1e-5)
 
 
+@pytest.mark.parametrize("warm_start", ["hold", "shift"])
+def test_a_plan_replays_from_its_recorded_start(sim, cube_tasks, cube_initial, warm_start):
+    q0, v0, u0 = cube_initial
+    p = _mppi(sim, cube_tasks[0], temperature=10.0, warm_start=warm_start)
+    p.Reset()
+    p.Plan(q0, v0, u=u0)
+    second = p.Plan(q0, v0, u=u0)
+    start = p.last_plan_start
+    assert start["resample_count"] == 1 and np.any(start["U"] != 0)     # warm: the first plan's mean
+    fresh = _mppi(sim, cube_tasks[0], temperature=10.0, warm_start=warm_start)
+    fresh.LoadState(start)
+    assert np.allclose(fresh.Plan(q0, v0, u=start["u_prev"]), second, atol=1e-4)
+
+
 def test_warm_start_must_be_a_known_choice():
     from ContactModelStudy.SamplingBasedPlanners.MPPI import MPPI_Config
     assert MPPI_Config().warm_start == "none"

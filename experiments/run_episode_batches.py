@@ -25,7 +25,8 @@ CSV columns
   ``nconmax``, ``njmax``, ... (``python ContactModelStudy/Drivers/run_episodes.py
   --help`` lists them all). On/off flags take ``true``/``false``
   (``stop_on_success``, ``uncertainty``, ``save_steps``, ...); ``warm_start``
-  takes ``none``, ``hold`` or ``shift``.
+  takes ``none``, ``hold`` or ``shift``, and ``save_stride`` saves every k-th
+  step.
 * **Cost weights.** ``w_quat``, ``w_pos_x``, ... (any of
   ``LeapReorient.COST_WEIGHT_KEYS``) override the object's tuned weight.
 * **``label``.** Optional name for the row; it goes into the output file names.
@@ -41,8 +42,9 @@ Output
 All cells write into ``--outdir``, by default
 ``results/episode_batches_<csv name>_<job id or time>/``. Each cell writes:
 
-* ``cell_<row>[_<label>].json`` and, unless the row sets ``save_steps=false``,
-  one ``.npy`` per episode beside it: the ``EpisodeRecorder`` output.
+* ``cell_<row>[_<label>].json`` and, when the row sets ``save_steps=true``,
+  one ``.npy`` per episode beside it (every ``save_stride``-th step): the
+  ``EpisodeRecorder`` output.
 * ``cell_<row>[_<label>].status.json``: done or failed, the driver command line,
   the wall time and any error.
 * ``cell_<row>[_<label>].log``: the driver's output (when run as a subprocess).

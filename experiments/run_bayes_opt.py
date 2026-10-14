@@ -580,7 +580,7 @@ def saveTrial(spec: CellSpec, pool_args, cell_dir: Path, trial: _Trial, per_mode
               objective: float) -> dict:
     """Write the trial's recorders (one per model) and ``trial.json``; returns the record."""
     from ContactModelStudy.Drivers.EpisodePool import RemotePlanner, SimStandIn, describeRollout
-    from ContactModelStudy.Utils.EpisodeRecorder import EpisodeRecorder
+    from ContactModelStudy.Utils.EpisodeRecorder import EpisodeRecorder, StepSaving
     from ContactModelStudy.Utils.EvalSimulators import evalSimConfig
     tdir = cell_dir / trialName(trial.index)
     tdir.mkdir(parents=True, exist_ok=True)
@@ -596,6 +596,7 @@ def saveTrial(spec: CellSpec, pool_args, cell_dir: Path, trial: _Trial, per_mode
         rec = EpisodeRecorder(eval_task, SimStandIn(eval_cls, eval_cfg, nq=eval_task.nq, nv=eval_task.nv,
                                                     nu=eval_task.nu),
                               RemotePlanner(desc, task, None, None, -1, None),
+                              steps=StepSaving.fromArgs(pool_args),
                               cli_args=vars(pool_args), eval_sim=pool_args.eval_sim)
         rec.episodes = [r.episode for r in sorted(trial.results[m], key=lambda r: r.job.episode)]
         rec.Save(tdir / f"{m}.json", save_steps=pool_args.save_steps)

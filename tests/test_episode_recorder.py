@@ -12,7 +12,7 @@ from conftest import ROLLOUT_CUBE
 from ContactModelStudy.Tasks.CubeReorient import CubeReorient
 from ContactModelStudy.Tasks.LeapReorient import LeapReorientConfig
 from ContactModelStudy.Tasks.TaskBase import TaskRole
-from ContactModelStudy.Utils.EpisodeRecorder import EpisodeRecorder, EpisodeReplayer
+from ContactModelStudy.Utils.EpisodeRecorder import EpisodeRecorder, EpisodeReplayer, StepSaving
 
 pytestmark = pytest.mark.gpu
 STEPS = 15
@@ -69,7 +69,7 @@ def test_save_writes_one_json_and_one_npy_per_episode(saved):
     files = sorted(p.name for p in path.parent.iterdir())
     assert len([f for f in files if f.endswith(".npy")]) == 2
     assert len({e["id"] for e in doc["episodes"]}) == 2
-    assert doc["format_version"] == 2 and doc["finish_reasons"] == {"failure": 1, "timeout": 1}
+    assert doc["format_version"] == 3 and doc["finish_reasons"] == {"failure": 1, "timeout": 1}
 
 
 def test_configs_record_both_tasks_both_simulators_and_the_planner(saved, setup):
@@ -90,7 +90,8 @@ def test_npy_is_a_plain_structured_array(saved):
     _, path, _ = saved
     entry = json.loads(path.read_text())["episodes"][0]
     arr = np.load(path.parent / entry["file"])          # allow_pickle=False by default
-    assert arr.dtype.names == ("t", "q", "q_dot", "u", "sigma_u", "planning_time", "planner_cost")
+    assert arr.dtype.names == ("step", "t", "q", "q_dot", "u", "sigma_u", "planning_time", "planner_cost",
+                               "q_next", "q_dot_next", "u_prev", "noise_index", "temperature")
     assert arr.shape == (STEPS,)
 
 
@@ -131,6 +132,9 @@ def test_combine_and_clear(saved, setup):
     assert (len(both), len(rec), len(other)) == (3, 2, 1)
     with pytest.raises(ValueError, match="metadata"):
         rec.Combine(EpisodeRecorder(ev, sim, planner, note="different"))
+    with pytest.raises(ValueError, match="keep steps"):
+        rec.Combine(EpisodeRecorder(ev, sim, planner, steps=StepSaving(stride=2), note="test",
+                                    cli_args={"steps": STEPS}))
     other.Clear()
     assert len(other) == 0 and not other.recording
 
@@ -191,10 +195,57 @@ def test_version_1_files_are_still_readable(saved, tmp_path):
     _, path, _ = saved
     doc = json.loads(path.read_text())
     doc["format_version"] = 1
-    for e in doc["episodes"]:          # a v1 file has no planner_cost field
+    del doc["step_saving"]
+    for e in doc["episodes"]:          # v1 saved every step, with only these fields
         arr = np.load(path.parent / e["file"])
-        names = [n for n in arr.dtype.names if n != "planner_cost"]
-        np.save(tmp_path / e["file"], arr[names])
+        np.save(tmp_path / e["file"], arr[["t", "q", "q_dot", "u", "sigma_u", "planning_time"]])
     (tmp_path / "run.json").write_text(json.dumps(doc))
     e = EpisodeReplayer(tmp_path / "run.json")[0]
-    assert len(e) == STEPS and np.isnan(e.planner_cost).all()
+    assert len(e) == e.n_saved == STEPS and np.isnan(e.planner_cost).all()
+    assert list(e.step) == list(range(STEPS)) and e.save_stride == 1 and not e.has_plan_starts
+    assert np.allclose(e.q_next[:-1], e.q[1:]) and np.allclose(e.q_next[-1], e.summary["q_end"])
+    assert np.allclose(e.u_prev[1:], e.u[:-1]) and np.isnan(e.u_prev[0]).all()
+    assert e.mean_start is None and e.action_seq is None
+
+
+# -- StepSaving --------------------------------------------------------------
+def test_step_saving_from_args():
+    import argparse
+    s = StepSaving.fromArgs(argparse.Namespace(save_steps=True, save_stride=3, warm_start="hold"))
+    assert s == StepSaving(enabled=True, stride=3, plans=True) and s.keeps(6) and not s.keeps(7)
+    assert not StepSaving.fromArgs(argparse.Namespace(save_steps=True, save_stride=1, warm_start="none")).plans
+    assert not StepSaving(enabled=False).keeps(0)
+    with pytest.raises(ValueError, match="stride"):
+        StepSaving(stride=0)
+
+
+def test_stride_keeps_every_kth_step_with_the_state_that_followed(setup, tmp_path):
+    ev, _, sim, planner = setup
+    rec = EpisodeRecorder(ev, sim, planner, steps=StepSaving(stride=7, plans=True))
+    rows = _episode(rec, ev, sim, planner)
+    rec.episodeFinished("timeout")
+    rp = EpisodeReplayer(rec.Save(tmp_path / "run.json"))
+    e, kept = rp[0], [0, 7, 14]
+    assert len(e) == STEPS and list(e.step) == kept and e.save_stride == 7
+    assert np.allclose(e.q, [rows[k][0] for k in kept]) and np.allclose(e.u, [rows[k][1] for k in kept])
+    # The state after each kept step; the last kept step is the last step, so its end state.
+    assert np.allclose(e.q_next, [rows[1][0], rows[8][0], e.summary["q_end"]])
+    assert e.has_plan_starts and np.all(np.diff(e.noise_index) == 7)       # one noise draw per plan
+    assert e.mean_start.shape == e.action_seq.shape == (3, planner.horizon, 16)
+    assert np.all(e.mean_start == 0)                    # warm_start="none": every plan from the reset mean
+    assert np.allclose(e.action_seq[:, 0], e.u, atol=1e-5)
+    assert [step for _, step, *_ in rp.iterStates()] == kept
+    assert e.summary["noise_seed"] == planner.SaveState()["noise_seed"]
+    assert e.summary["plan_s_first"] is not None       # planning stats still cover every step
+
+
+def test_step_saving_off_keeps_only_the_summary(setup, tmp_path):
+    ev, _, sim, planner = setup
+    rec = EpisodeRecorder(ev, sim, planner, steps=StepSaving(enabled=False))
+    _episode(rec, ev, sim, planner)
+    rec.episodeFinished("timeout")
+    assert rec.episodes[0].steps == [] and rec.episodes[0].n_steps == STEPS
+    out = rec.Save(tmp_path / "run.json")
+    assert [p.name for p in tmp_path.iterdir()] == ["run.json"]
+    e = EpisodeReplayer(out)[0]
+    assert len(e) == STEPS and not e.has_steps

@@ -33,6 +33,11 @@ driver's default.
 - **`warm_start`.** Where each plan starts its mean: `none` (the default) starts
   afresh from the reset mean, `hold` reuses the last plan's solution as is, and
   `shift` moves that solution one control step earlier.
+- **`save_stride`.** With `save_steps=true`, save every k-th control step
+  (0, k, 2k, ...) instead of all of them. Each saved step keeps its state,
+  action, uncertainty, the state that followed it and where its plan started;
+  under a `hold` or `shift` warm start also the plan's starting mean and its
+  action sequence.
 - **Cost weights.** `w_quat`, `w_pos_x`, ..., `w_fallen_term` override the
   object's tuned weights.
 - **`label`.** Names the row in the output files.
@@ -49,8 +54,8 @@ Each run gets one folder, `results/episode_batches_<csv name>_<job id or time>/`
 (set it with `--outdir`, or `OUTDIR=` on the HPC). For each cell it holds:
 
 - **`cell_<row>_<label>.json`:** the `EpisodeRecorder` results, with one `.npy`
-  of per-step data per episode beside it unless the row sets
-  `save_steps=false`. Read it with `EpisodeReplayer`.
+  of per-step data (every `save_stride`-th step) per episode beside it when
+  the row sets `save_steps=true`. Read it with `EpisodeReplayer`.
 - **`cell_<row>_<label>.status.json`:** `done` or `failed`, the exact driver
   command line, the wall time and any error.
 - **`cell_<row>_<label>.log`:** the driver's output, when run locally.
@@ -271,20 +276,23 @@ row, validation first, and a summary job queued `afterany`.
 1. **KL to the optimal planner.**
    - **The used planner** is rebuilt from the cell's recorded command line.
    - **The optimal planner** is the same planner (sample count, temperature,
-     noise, weights, and the same control step and horizon as durations)
-     planning with the eval model: the eval scene at the eval timestep, with
-     the eval simulator's contact model.
-   - **The replay:** both walk every recorded episode, planning from the
-     recorded states with the recorded previous controls and each step's goal.
-     Each planner keeps its own warm state and resets where the episode did.
-     Both draw the same noise.
+     noise, weights, warm start, and the same control step and horizon as
+     durations) planning with the eval model: the eval scene at the eval
+     timestep, with the eval simulator's contact model.
+   - **The replay:** each saved step is planned on its own. Both planners
+     start from what the used planner started that step from (its mean, noise
+     draw, temperature and previous control, saved with the step) and plan
+     from the recorded state toward that step's goal. So both draw the same
+     noise around the same mean, and skipping steps does not change the
+     others. Older warm-started results, saved before the plan's mean was,
+     are walked in order instead, each planner keeping its own warm state.
    - **The measure:** each step's first actions become Gaussians, and both
      `KL(used‖opt)` and `KL(opt‖used)` are kept, along with the distance
      between their means.
-2. **Forward-simulation error.** From every recorded state, with that step's
+2. **Forward-simulation error.** From every saved state, with that step's
    action, the rollout model (rollout scene and timestep) and the eval
    simulator (eval scene and timestep) each take one control step. All the
-   steps of an episode run at once, as the worlds of one GPU simulator.
+   saved steps of an episode run at once, as the worlds of one GPU simulator.
    - **The comparison:** object position (m) and rotation (rad), hand joints
      (RMS rad), and the full `qpos`/`qvel`.
    - **A sanity column (`eval_vs_recorded_*`):** the eval prediction against
@@ -306,8 +314,8 @@ the reason.
 
 **Options:**
 
-- `--stride k` computes the KL only every k-th step. Each planner keeps its
-  warm state between the steps it plans.
+- `--stride k` computes the KL only at every k-th saved step. With a
+  `save_stride` too, that is every (k × save_stride)-th control step.
 - `--max-episodes` limits the episodes analysed per cell.
 - `--shrinkage` is the KL's covariance shrinkage (1e-3).
 - `--overwrite` redoes cells already analysed.
@@ -316,7 +324,8 @@ the reason.
 
 - **`analysis/<cell>.analysis.json`:** each metric's mean, median and p90,
   per episode and per cell, plus how the optimal planner was built.
-- **`analysis/<cell>.analysis.npz`:** the per-step arrays.
+- **`analysis/<cell>.analysis.npz`:** the per-saved-step arrays, with each
+  episode's step indices as `step__<id>`.
 - **`analysis/<cell>.analysis_status.json`:** `done` or `failed`, with the
   error.
 - **`final_results.csv` (and `.json`):** one row per cell. It holds the cell's

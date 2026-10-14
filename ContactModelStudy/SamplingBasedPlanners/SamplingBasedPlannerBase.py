@@ -228,6 +228,10 @@ class SamplingBasedPlannerBase(abc.ABC):
         # Diagnostics a driver or an evaluation pass can read after a plan.
         self.last_action_seq: np.ndarray | None = None
         self.last_plan_ok: bool = False
+        #: The ``SaveState`` this plan started from: its mean, the control it
+        #: accumulates from, its noise draw and (MPPI) temperature.
+        #: ``LoadState`` it and ``Plan(q, q_dot, u=start["u_prev"])`` repeats the plan.
+        self.last_plan_start: dict | None = None
         #: ``(nu,)`` uncertainty of the last action, when ``return_uncertainty``
         #: is set; NaN after a failed plan.
         self.last_action_uncertainty: np.ndarray | None = None
@@ -352,6 +356,7 @@ class SamplingBasedPlannerBase(abc.ABC):
         self._setCommandBase(q, u)
         if self.config.warm_start == "none":
             self._seedMean()
+        self.last_plan_start = {**self.SaveState(), "last_action_seq": None, "last_plan_ok": False}
         self._sampleNoise()
         self.last_plan_ok = False
 

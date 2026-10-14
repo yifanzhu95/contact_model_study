@@ -102,6 +102,21 @@ def test_pooled_results_do_not_depend_on_pool_size(tmp_path):
     assert all(np.abs(x.u[0] - y.u[0]).max() < 5e-3 for x, y in zip(a, b))
 
 
+@pytest.mark.gpu
+@pytest.mark.slow
+def test_pooled_run_saves_plan_starts(tmp_path):
+    from ContactModelStudy.Drivers import run_episodes_pooled as pooled
+    out = tmp_path / "p.json"
+    argv = [*BASE, "--n-episodes", "2", "--steps", "6", "--workers", "2", "--save-stride", "2",
+            "--warm-start", "shift", "--results", str(out)]
+    assert pooled.main(argv) == 0
+    rp = EpisodeReplayer(out)
+    e = rp[1]
+    assert list(e.step) == [0, 2, 4] and e.has_plan_starts and e.mean_start.shape == (3, 8, 16)
+    assert list(e.noise_index) == [0, 2, 4]               # the episode's own noise stream, from its start
+    assert e.summary["noise_seed"] == episodeSeeds(rp.configs["metadata"]["cli_args"]["seed"], 1)[1]
+
+
 def test_a_missing_scene_fails_before_anything_starts(tmp_path):
     from ContactModelStudy.Drivers import run_episodes_pooled as pooled
     with pytest.raises(FileNotFoundError):
