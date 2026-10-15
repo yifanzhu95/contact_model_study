@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Plot the processed batch results (``process_batch_results.py`` output).
 
+A bar chart of success rate per rollout model (one bar per hand accuracy, 95%
+Wilson interval) needs only the batch's own results and is always drawn. The
+plots below need the analysis metrics and are skipped if the tables lack them.
+
 From the per-episode table it draws, for each metric, a grid of histograms with
 one panel per cell (rows = rollout model, columns = hand accuracy), each
 episode's bar segment coloured by whether it succeeded. From the per-cell table
@@ -51,7 +55,36 @@ FAILURE_COLOR = "#eb6834"
 MODEL_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#4a3aa7", "#e87ba4", "#008300"]
 ACC_ORDER = ["high", "med", "low"]
 ACC_MARKERS = {"high": "o", "med": "s", "low": "^"}
+# hand accuracy is ordinal, so one hue from dark (high) to light (low)
+ACC_BAR_COLORS = {"high": "#0d4a8f", "med": "#2a78d6", "low": "#8dbbee"}
 N_BINS = 20
+
+
+def readTable(path: Path) -> pd.DataFrame:
+    """Read a processed table, dropping rows without a rollout model or hand accuracy
+    (a cell whose settings were not recorded)."""
+    return pd.read_csv(path).dropna(subset=["rollout_model", "hand_acc"]).reset_index(drop=True)
+
+
+def analysedRows(df: pd.DataFrame, path: Path, suffixes: tuple[str, ...]) -> pd.DataFrame | None:
+    """The rows of ``df`` whose analysis metrics are present, or None (with a message) if there are none.
+
+    Rows whose cell analysis has not run are dropped, so a partly analysed batch
+    still plots. ``suffixes`` are the metric column suffixes the plots need.
+    """
+    cols = [c.removesuffix("_mean") + s for c, *_ in METRICS for s in suffixes]
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        print(f"skipping analysis plots: {path} has no analysis metrics ({', '.join(missing)}); "
+              "run process_batch_results.py on the batch, then --summarize")
+        return None
+    if "analysis_status" in df.columns:
+        df = df[df["analysis_status"] == "done"]
+    df = df.dropna(subset=cols, how="all")
+    if df.empty:
+        print(f"skipping analysis plots: {path} has no analysed rows")
+        return None
+    return df.reset_index(drop=True)
 
 
 def styleAxes(ax):
@@ -171,6 +204,48 @@ def scatterCells(cells, x, y, xerr, yerr, xlabel, ylabel, title, xlog, ylog, pat
     print(f"wrote {path}")
 
 
+def plotSuccessBars(cells: pd.DataFrame, out_dir: Path):
+    """Success rate per rollout model, one bar per hand accuracy, with a 95% Wilson interval.
+
+    Needs only the batch's own results, not the analysis. Cells sharing a rollout
+    model and hand accuracy are pooled (their episodes summed).
+    """
+    cells = cells[cells["n_episodes_run"] > 0]
+    pooled = cells.groupby(["rollout_model", "hand_acc"])[["n_success", "n_episodes_run"]].sum()
+    models = orderedLevels(cells["rollout_model"], sorted(cells["rollout_model"].unique()))
+    accs = orderedLevels(cells["hand_acc"], ACC_ORDER)
+    width = 0.8 / len(accs)
+
+    fig, ax = plt.subplots(figsize=(max(6, 1.6 * len(models) + 2), 4.5))
+    for j, acc in enumerate(accs):
+        xs, rates, errs = [], [], []
+        for i, model in enumerate(models):
+            if (model, acc) not in pooled.index:
+                continue
+            n_success, n = pooled.loc[(model, acc)].to_numpy(float)
+            lo, hi = wilsonInterval(n_success, n)
+            rate = n_success / n
+            xs.append(i + (j - (len(accs) - 1) / 2) * width)
+            rates.append(rate)
+            errs.append((max(rate - lo, 0), max(hi - rate, 0)))
+        ax.bar(xs, rates, width, color=ACC_BAR_COLORS.get(acc, "#777777"), edgecolor="white",
+               linewidth=2, label=f"hand acc {acc}", zorder=2)
+        ax.errorbar(xs, rates, yerr=np.array(errs).T, fmt="none", ecolor="#444444",
+                    elinewidth=1.2, capsize=3, zorder=3)
+    ax.set_xticks(range(len(models)), [f"rollout {m}" for m in models])
+    ax.set_ylim(0, 1.05)
+    ax.set_ylabel("Success rate (95% Wilson interval)")
+    eval_sims = ", ".join(sorted(cells["eval_sim"].astype(str).unique()))
+    ax.set_title(f"Success rate by rollout contact model (eval sim {eval_sims})", loc="left")
+    styleAxes(ax)
+    ax.legend(frameon=False, loc="center left", bbox_to_anchor=(1.0, 0.5))
+    fig.tight_layout()
+    path = out_dir / "bar_success_by_model.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"wrote {path}")
+
+
 def plotSuccessScatter(cells: pd.DataFrame, out_dir: Path):
     lo, hi = wilsonInterval(cells["n_success"].to_numpy(float), cells["n_episodes_run"].to_numpy(float))
     rate = cells["success_rate"].to_numpy(float)
@@ -203,10 +278,16 @@ def main():
     args = p.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
-    plotEpisodeHistograms(pd.read_csv(args.episodes), args.out)
-    cells = pd.read_csv(args.cells)
-    plotSuccessScatter(cells, args.out)
-    plotKLvsForwardScatter(cells, args.out)
+    cells = readTable(args.cells)
+    plotSuccessBars(cells, args.out)
+
+    episodes = analysedRows(readTable(args.episodes), args.episodes, ("_mean",))
+    if episodes is not None:
+        plotEpisodeHistograms(episodes, args.out)
+    cells = analysedRows(cells, args.cells, ("_median", "_p90"))
+    if cells is not None:
+        plotSuccessScatter(cells, args.out)
+        plotKLvsForwardScatter(cells, args.out)
 
 
 if __name__ == "__main__":
