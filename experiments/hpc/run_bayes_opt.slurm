@@ -7,7 +7,7 @@
 #SBATCH --gpus=a5000:4
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=32G
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 # One array task = one CSV row (cell) = one whole Bayesian optimization. The cell
 # runs every trial's episodes on one pool sized from this allocation: a planner
 # process per GPU and an eval-sim worker per remaining core, with several trials
