@@ -3,34 +3,48 @@
 
 For every cell it measures how far the planner that ran was from an *optimal*
 planner, one that plans with the eval model itself, and how far the planner's
-rollout model is from the eval simulator:
+rollout model is from the eval simulator. It works in two passes:
 
-1. **KL divergence between the planners.** The *used* planner is rebuilt from
-   the cell's recorded command line. The *optimal* planner is the same planner
-   (sample count, temperature, noise, cost weights, warm start, control step
-   and horizon as durations) planning on the eval scene, at the eval
-   timestep, with the eval simulator's contact model (``--plan-on-eval``,
-   rollout model = eval sim). Each analysed step is planned on its own
-   (``PlannerPair``): both planners load what the used planner started that
-   step's plan from (its mean, noise draw, temperature and previous control,
-   saved with the steps) and plan from the recorded state toward that step's
-   goal. Both draw the same noise around the same mean (common random
-   numbers), so the KL measures the models rather than sampling luck or the
-   planners' histories, and analysing every k-th step (``--stride``) gives
-   the same values at those steps as analysing them all. Older warm-started
-   results, which did not save the mean, are walked in order instead, each
-   planner keeping its own warm state. Each step's first actions are moment-
-   matched to Gaussians (``Utils/PlannerKLDiv.py``); both ``KL(used || opt)``
-   and ``KL(opt || used)`` are kept.
-2. **Forward-simulation error between the simulators.** From every saved
-   state, with that step's recorded action, both the rollout model (rollout
-   scene, rollout timestep) and the eval simulator (eval scene, eval timestep)
-   are advanced one control step, all saved steps of an episode at once as the
-   worlds of a vectorized simulator. The two predictions are compared: object
-   position (m) and orientation (rad), hand joints (RMS rad), and the full
-   ``qpos`` / ``qvel``. The eval prediction is also compared with the state
-   the episode actually reached next (saved with each step), which shows what
-   restarting from a recorded state (without the solver's warm start) costs.
+1. **The analysed steps, saved.** Every k-th saved step of each episode
+   (``--stride``, 1 by default) is planned again by both planners and
+   stepped on both simulators, and the results are saved per episode
+   (``analysis/<cell>/<episode id>.npz``, below).
+
+   The *used* planner is rebuilt from the cell's recorded command line. The
+   *optimal* planner is the same planner (sample count, temperature, noise,
+   cost weights, warm start, control step and horizon as durations) planning
+   on the eval scene, at the eval timestep, with the eval simulator's contact
+   model (``--plan-on-eval``, rollout model = eval sim). ``--optimal-args``
+   gives it settings of its own instead (``OPTIMAL_FLAGS``: sample count,
+   horizon, noise, temperature, cost weights, ...), the same for every cell.
+   Each analysed step is planned on its own (``PlannerPair``): both planners
+   load what the used planner started that step's plan from (its mean, noise
+   draw, temperature and previous control, saved with the steps) and plan
+   from the recorded state toward that step's goal. Both draw the same noise
+   around the same mean (common random numbers), so the KL measures the
+   models rather than sampling luck or the planners' histories, and a stride
+   gives the same values at those steps as analysing them all. Older
+   warm-started results, which did not save the mean, are walked in order
+   instead, each planner keeping its own warm state; they cannot be strided.
+   Each step's first actions are moment-matched to Gaussians
+   (``Utils/PlannerKLDiv.py``).
+
+   From each analysed state, the action the episode took and the optimal
+   planner's mean action are each stepped one control step on the rollout
+   model (rollout scene, rollout timestep) and on the eval simulator (eval
+   scene, eval timestep), all of an episode's steps at once as the worlds of
+   a vectorized simulator.
+2. **The metrics, from the saved steps.** ``KL(used || opt)`` and
+   ``KL(opt || used)`` (the covariances shrunk by ``--shrinkage``) and the
+   distance between the means; the state errors (object position (m) and
+   orientation (rad), hand joints (RMS rad), full ``qpos`` / ``qvel``)
+   between the models under the episode's action (``fsim_*``) and under the
+   optimal action (``fsim_opt_*``), between the eval prediction and what the
+   episode actually reached next (``eval_vs_recorded_*``: what restarting
+   from a recorded state, without the solver's warm start, costs), and
+   between the eval simulator's next states under the two actions
+   (``eval_used_vs_opt_*``); and ``replay_action_err``, how far the replayed
+   used plan is from the action the episode took.
 
 The optimal planner and the eval prediction need the eval simulator to be a
 vectorized contact model (``eval_sim`` M1-M4); a cell with a CPU eval
@@ -43,6 +57,8 @@ analysed.
     python experiments/process_batch_results.py <batch dir> --count
     python experiments/process_batch_results.py <batch dir> --cell 3
     python experiments/process_batch_results.py <batch dir>               # every cell, in order
+    python experiments/process_batch_results.py <batch dir> --stride 4 \\
+        --optimal-args="--n-samples 1024 --temperature 0.1"
     python experiments/process_batch_results.py <batch dir> --summarize   # final tables only
 
 On the HPC, ``hpc/submit_process_batch_results.sh <batch dir>`` runs one array
@@ -50,16 +66,26 @@ task per cell and then the summary.
 
 Output, in the batch folder
 ---------------------------
+* ``analysis/<cell>/<episode id>.npz``: the episode's analysed steps, one row
+  each: ``step`` (control step) and ``row`` (saved row), ``goal``, the state
+  ``q`` / ``q_dot``, ``u_prev``, the action taken ``u_used``; each planner's
+  first-action Gaussian ``mu_used`` / ``cov_used`` and ``mu_opt`` / ``cov_opt``
+  (unshrunk); the next states ``q_next_<model>_<action>`` and
+  ``q_dot_next_<model>_<action>`` for model ``rollout`` / ``eval`` and action
+  ``used`` / ``opt`` (NaN where a plan failed), and ``q_next_recorded`` /
+  ``q_dot_next_recorded``; and ``noise_sigma_used`` / ``noise_sigma_opt``,
+  the task's state ``indices`` and the timesteps;
 * ``analysis/<cell>.analysis.json``: the cell's metrics (mean, median, p90 of
   each), per episode and overall, and how both planners were built;
-* ``analysis/<cell>.analysis.npz``: the per-saved-step arrays, with each
+* ``analysis/<cell>.analysis.npz``: the per-analysed-step metrics, with each
   episode's step indices as ``step__<id>``;
 * ``analysis/<cell>.analysis_status.json``: done or failed, with the error;
 * ``final_results.csv`` / ``.json``: one row per cell: its settings, the batch's
   own results (as in ``summary.csv``) and every analysis metric;
 * ``final_episodes.csv``: one row per episode, the same way.
 
-A cell whose analysis is done is skipped when run again (``--overwrite`` redoes it).
+A cell whose analysis is done is skipped when run again (``--overwrite`` redoes
+it, which is needed to rerun with another ``--stride`` or ``--optimal-args``).
 """
 
 from __future__ import annotations
@@ -68,6 +94,7 @@ import argparse
 import csv
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -104,7 +131,7 @@ def listCells(batch_dir: Path) -> list[dict]:
 def _analysisPaths(batch_dir: Path, name: str) -> dict[str, Path]:
     d = batch_dir / ANALYSIS_DIR
     return {"json": d / f"{name}.analysis.json", "npz": d / f"{name}.analysis.npz",
-            "status": d / f"{name}.analysis_status.json"}
+            "status": d / f"{name}.analysis_status.json", "steps": d / name}
 
 
 def analysisDone(batch_dir: Path, name: str) -> bool:
@@ -126,15 +153,67 @@ def argsFromCliArgs(cli_args: dict) -> argparse.Namespace:
     return argparse.Namespace(**args)
 
 
-def optimalArgs(args: argparse.Namespace, control_timestep: float, horizon_duration: float) -> argparse.Namespace:
+#: The planner settings ``--optimal-args`` may change. The rest define what is
+#: compared (the model, the control step and mode, the warm start) and stay the cell's.
+OPTIMAL_FLAGS = ("n_samples", "horizon", "time_horizon", "n_iterations", "noise_sigma", "temperature",
+                 "adaptive_temp", "delta", "cost_weight", "graph", "nconmax", "njmax", "debug")
+
+
+def parseOptimalArgs(text: str | None) -> dict:
+    """The settings ``--optimal-args`` gives the optimal planner, as ``args`` fields.
+
+    ``text`` holds ``run_episodes.py`` flags, e.g. ``"--n-samples 1024
+    --temperature 0.1"``. Only the flags given are returned, so every other
+    setting stays the cell's; ``--cost-weight`` comes back as ``cost_weights``.
+    Raises ``ValueError`` on a bad flag or one not in ``OPTIMAL_FLAGS``.
+    """
+    from ContactModelStudy.Drivers import run_episodes as drv
+    tokens = shlex.split(text or "")
+    if not tokens:
+        return {}
+
+    def fail(msg):
+        raise ValueError(f"--optimal-args: {msg}")
+    # Which flags were given: the driver's parser with no defaults.
+    p = drv.build_parser()
+    for action in p._actions:
+        action.default = argparse.SUPPRESS
+    p.error = fail
+    given, unknown = p.parse_known_args(tokens)
+    if unknown:
+        fail(f"unrecognised {' '.join(unknown)}")
+    given = vars(given)
+    bad = sorted(set(given) - set(OPTIMAL_FLAGS))
+    if bad:
+        fail(f"{', '.join('--' + b.replace('_', '-') for b in bad)} cannot be set for the optimal planner; "
+             f"it takes {', '.join('--' + f.replace('_', '-') for f in OPTIMAL_FLAGS)}")
+    # Their values, checked as the driver checks them.
+    full_parser = drv.build_parser()
+    full_parser.error = fail
+    full = drv.parseArgs(tokens + ["--no-results", "--no-video"], parser=full_parser)
+    out = {k: getattr(full, k) for k in given if k != "cost_weight"}
+    if "cost_weight" in given:
+        out["cost_weights"] = full.cost_weights
+    return out
+
+
+def optimalArgs(args: argparse.Namespace, control_timestep: float, horizon_duration: float,
+                overrides: dict | None = None) -> argparse.Namespace:
     """The used planner's settings, planning on the eval scene with the eval simulator's model.
 
     Control step and horizon are passed as durations, so the optimal planner
-    covers the same span of time at the eval timestep.
+    covers the same span of time at the eval timestep. ``overrides``
+    (``parseOptimalArgs``) then replace the settings they give: a horizon in
+    either form replaces the used one, and cost weights add to the cell's.
     """
-    return argparse.Namespace(**{**vars(args), "plan_on_eval": True, "rollout_model": args.eval_sim,
-                                 "substeps": None, "ctrl_time_step": control_timestep,
-                                 "horizon": None, "time_horizon": horizon_duration})
+    o = {**vars(args), "plan_on_eval": True, "rollout_model": args.eval_sim, "substeps": None,
+         "ctrl_time_step": control_timestep, "horizon": None, "time_horizon": horizon_duration}
+    overrides = dict(overrides or {})
+    if "horizon" in overrides or "time_horizon" in overrides:
+        o["horizon"] = o["time_horizon"] = None
+    if "cost_weights" in overrides:
+        overrides["cost_weights"] = {**(args.cost_weights or {}), **overrides["cost_weights"]}
+    return argparse.Namespace(**{**o, **overrides})
 
 
 def checkCell(rep, args) -> None:
@@ -230,8 +309,23 @@ def stats(prefix: str, values: np.ndarray) -> dict:
     return out
 
 
-# -- the two analyses ---------------------------------------------------------------------
+# -- planning the analysed steps ---------------------------------------------------------------
 KL_KEYS = ("kl_used_opt", "kl_opt_used", "mean_dist")
+PLAN_KEYS = ("mu_used", "cov_used", "mu_opt", "cov_opt")
+
+
+def _nanPlans(T: int, nu: int) -> dict[str, np.ndarray]:
+    return {"mu_used": np.full((T, nu), np.nan), "cov_used": np.full((T, nu, nu), np.nan),
+            "mu_opt": np.full((T, nu), np.nan), "cov_opt": np.full((T, nu, nu), np.nan)}
+
+
+def planGaussian(planner, q: np.ndarray, q_dot: np.ndarray, u) -> tuple[np.ndarray, np.ndarray]:
+    """A planner's first-action ``(mu, cov)`` planned from ``(q, q_dot)``, unshrunk; NaN if the plan failed."""
+    from ContactModelStudy.Utils.PlannerKLDiv import PlannerGaussian
+    try:
+        return PlannerGaussian(planner, q, q_dot, u=u, shrinkage=0.0, restore=False)
+    except RuntimeError:                                  # a failed plan
+        return np.full(planner.nu, np.nan), np.full((planner.nu, planner.nu), np.nan)
 
 
 class PlannerPair:
@@ -243,20 +337,25 @@ class PlannerPair:
     state toward that step's goal. They draw the same noise (common random
     numbers) around the same mean, so the KL measures the models rather than
     sampling luck or the planners' histories, and any subset of the steps
-    gives the same per-step values.
+    gives the same per-step values. An optimal planner given its own
+    temperature (``opt_temperature``, from ``--optimal-args``) starts every
+    step from it rather than the recorded one; given another sample count or
+    noise, its draws are no longer the used planner's.
 
     ``used`` and ``opt`` are ``(task, planner)`` pairs.
     """
 
-    def __init__(self, used, opt, reset_mean: np.ndarray | None, shrinkage: float):
+    def __init__(self, used, opt, reset_mean: np.ndarray | None, opt_temperature: float | None = None):
         (pu, po) = used[1], opt[1]
-        if (pu.horizon, pu.nu) != (po.horizon, po.nu):
-            raise ValueError(f"the used planner's mean is {pu.horizon} x {pu.nu}, the optimal one's "
-                             f"{po.horizon} x {po.nu}: they cannot start from the same mean")
-        self.used, self.opt, self.shrinkage = used, opt, shrinkage
+        self._same_shape = (pu.horizon, pu.nu) == (po.horizon, po.nu)
+        self.used, self.opt, self.opt_temperature = used, opt, opt_temperature
         self._goal = None
         for _, planner in (used, opt):
             planner.Reset(reset_mean)       # the seed a warm_start="none" plan starts from
+
+    def forgetGoal(self) -> None:
+        """Set the goal again on the next step: the tasks' goals were changed elsewhere."""
+        self._goal = None
 
     def _setGoal(self, goal: np.ndarray) -> None:
         if self._goal is None or not np.array_equal(self._goal, goal):
@@ -264,29 +363,29 @@ class PlannerPair:
                 task.setGoal(goal)
             self._goal = np.array(goal, copy=True)
 
-    def klAt(self, goal: np.ndarray, start: dict, q: np.ndarray, q_dot: np.ndarray) -> tuple[float, float, float]:
-        """``(KL(used || opt), KL(opt || used), |mu_used - mu_opt|)`` from ``start``; NaN if a plan failed."""
-        from ContactModelStudy.Utils.PlannerKLDiv import GaussianKL, PlannerGaussian
+    def distributionsAt(self, goal: np.ndarray, start: dict, q: np.ndarray,
+                        q_dot: np.ndarray) -> dict[str, np.ndarray]:
+        """Both planners' first-action Gaussians from ``start`` (``PLAN_KEYS``), unshrunk; NaN for a failed plan."""
+        if "U" in start and not self._same_shape:
+            pu, po = self.used[1], self.opt[1]
+            raise ValueError(f"the used planner's mean is {pu.horizon} x {pu.nu}, the optimal one's "
+                             f"{po.horizon} x {po.nu}: a warm-started step starts both from the used "
+                             f"planner's mean, so the optimal planner needs the same horizon")
         self._setGoal(goal)
-        gaussians = []
-        try:
-            for _, planner in (self.used, self.opt):
-                planner.LoadState({**planner.SaveState(), **start})
-                gaussians.append(PlannerGaussian(planner, q, q_dot, u=start.get("u_prev"),
-                                                 shrinkage=self.shrinkage, restore=False))
-        except RuntimeError:                              # a failed plan
-            return np.nan, np.nan, np.nan
-        (mu_u, cov_u), (mu_o, cov_o) = gaussians
-        return (GaussianKL(mu_u, cov_u, mu_o, cov_o), GaussianKL(mu_o, cov_o, mu_u, cov_u),
-                float(np.linalg.norm(mu_u - mu_o)))
+        opt_start = start if self.opt_temperature is None else {**start, "lam": self.opt_temperature}
+        out = {}
+        for name, (_, planner), s in (("used", self.used, start), ("opt", self.opt, opt_start)):
+            planner.LoadState({**planner.SaveState(), **s})
+            out[f"mu_{name}"], out[f"cov_{name}"] = planGaussian(planner, q, q_dot, start.get("u_prev"))
+        return out
 
-    def klAlong(self, ep, goals, rows: np.ndarray, starts: list[dict]) -> dict:
-        """``klAt`` at the saved rows ``rows`` of an episode; NaN at the other rows."""
-        out = {k: np.full(ep.n_saved, np.nan) for k in KL_KEYS}
-        gidx = goalIndexAt(goals, ep.step)
-        for i in rows:
-            for k, v in zip(KL_KEYS, self.klAt(goals[gidx[i]][1], starts[i], ep.q[i], ep.q_dot[i])):
-                out[k][i] = v
+    def planAlong(self, ep, goals, rows: np.ndarray, starts: list[dict]) -> dict[str, np.ndarray]:
+        """``distributionsAt`` the saved rows ``rows`` of an episode, one row each."""
+        out = _nanPlans(len(rows), self.used[1].nu)
+        gidx = goalIndexAt(goals, ep.step[rows])
+        for j, (i, g, start) in enumerate(zip(rows, gidx, starts)):
+            for k, v in self.distributionsAt(goals[g][1], start, ep.q[i], ep.q_dot[i]).items():
+                out[k][j] = v
         return out
 
 
@@ -316,6 +415,26 @@ def planStart(ep, i: int, args, u0: np.ndarray, noise_seed: int) -> dict | None:
     return {"noise_seed": noise_seed, "resample_count": step, "lam": float(args.temperature), "u_prev": u_prev}
 
 
+def replayMode(ep, starts: list, stride: int, warm_start: str) -> str:
+    """How an episode's plans are replayed: ``"independent"`` or ``"sequential"``.
+
+    Independent when every analysed step's start is known (``starts`` has no
+    ``None``). Otherwise the plans can only be walked in order from the first
+    step, which needs every step saved and analysed; raises ``ValueError`` when
+    they are not.
+    """
+    if all(s is not None for s in starts):
+        return "independent"
+    if stride > 1:
+        raise ValueError(f"episode {ep.id} was warm-started ({warm_start}) but did not save the mean each "
+                         f"plan started from, so its plans can only be replayed in order through every "
+                         f"step: rerun without --stride")
+    if ep.n_saved != ep.n_steps:
+        raise ValueError(f"episode {ep.id} was warm-started ({warm_start}) but saved neither the mean each "
+                         f"plan started from nor every step, so its plans cannot be replayed")
+    return "sequential"
+
+
 def _resetPlanner(planner, mean, noise_seed: int | None = None) -> None:
     planner.Reset(mean)
     if noise_seed is not None:
@@ -323,20 +442,18 @@ def _resetPlanner(planner, mean, noise_seed: int | None = None) -> None:
                            "noise_seed": int(noise_seed), "resample_count": 0})
 
 
-def klReplay(ep, goals, used, opt, args, u0, noise_seed: int, stride: int, shrinkage: float) -> dict:
-    """Both planners walked along one recorded episode in order; per-step KLs both ways.
+def planSequentially(ep, goals, used, opt, args, u0, noise_seed: int) -> dict[str, np.ndarray]:
+    """Both planners walked along one recorded episode in order; each step's Gaussians (``PLAN_KEYS``).
 
     The fallback for older warm-started results, which did not save the mean
     each plan started from: each planner keeps its own warm state from step to
-    step, as the episode ran, so every step must be replayed, and a ``stride``
-    skips only the KL, not the planning history it would have changed.
+    step, as the episode ran, so every step is replayed (no ``--stride``).
     ``used`` and ``opt`` are ``(task, planner)`` pairs.
     """
-    from ContactModelStudy.Utils.PlannerKLDiv import GaussianKL, PlannerGaussian
     T = ep.n_steps
     reset_mean = u0 if args.control_mode == "absolute" else None
     gidx = goalIndexPerStep(goals, T)
-    out = {k: np.full(T, np.nan) for k in ("kl_used_opt", "kl_opt_used", "mean_dist")}
+    out = _nanPlans(T, used[1].nu)
     current = None
     for t in range(T):
         if gidx[t] != current:                           # a new goal: as run_episode does
@@ -344,49 +461,89 @@ def klReplay(ep, goals, used, opt, args, u0, noise_seed: int, stride: int, shrin
             for task, planner in (used, opt):
                 task.setGoal(goals[current][1])
                 _resetPlanner(planner, reset_mean, noise_seed if t == 0 else None)
-        if t % stride:
-            continue
         u_prev = u0 if t == 0 else ep.u[t - 1]
-        try:
-            mu_u, cov_u = PlannerGaussian(used[1], ep.q[t], ep.q_dot[t], u=u_prev, shrinkage=shrinkage,
-                                          restore=False)
-            mu_o, cov_o = PlannerGaussian(opt[1], ep.q[t], ep.q_dot[t], u=u_prev, shrinkage=shrinkage,
-                                          restore=False)
-        except RuntimeError:                              # a failed plan
-            continue
-        out["kl_used_opt"][t] = GaussianKL(mu_u, cov_u, mu_o, cov_o)
-        out["kl_opt_used"][t] = GaussianKL(mu_o, cov_o, mu_u, cov_u)
-        out["mean_dist"][t] = float(np.linalg.norm(mu_u - mu_o))
+        for name, (_, planner) in (("used", used), ("opt", opt)):
+            out[f"mu_{name}"][t], out[f"cov_{name}"][t] = planGaussian(planner, ep.q[t], ep.q_dot[t], u_prev)
     return out
 
 
-def forwardSimErrors(ep, rollout_sim, eval_sim, rollout_steps: int, eval_steps: int, indices) -> dict:
-    """One control step from every saved state, on both simulators at once."""
-    T, N = ep.n_saved, rollout_sim.N
-    if T == 0:
-        return {}
+# -- stepping the simulators -------------------------------------------------------------------
+def stepFrom(sim, steps: int, q: np.ndarray, v: np.ndarray, u: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """One control step from each row's state under its action, all rows as worlds of ``sim`` at once."""
+    T, N = len(q), sim.N
     pad = lambda a: np.concatenate([a, np.repeat(a[-1:], N - T, axis=0)]) if N > T else a  # noqa: E731
-    q, v, u = pad(ep.q), pad(ep.q_dot), pad(ep.u)
-    preds = []
-    for sim, steps in ((rollout_sim, rollout_steps), (eval_sim, eval_steps)):
-        sim.ClearControlSequence()
-        sim.SetState(q, v)
-        sim.SetControl(u)
-        sim.Step(steps)
-        qn, vn = sim.GetState()
-        preds.append((np.asarray(qn, dtype=float)[:T], np.asarray(vn, dtype=float)[:T]))
-    (qr, vr), (qe, ve) = preds
-    errs = {f"fsim_{k}": e for k, e in stateErrors(qr, vr, qe, ve, indices).items()}
-    # The eval prediction against what the episode actually did next.
-    rec = stateErrors(qe, ve, ep.q_next, ep.q_dot_next, indices)
-    errs.update({f"eval_vs_recorded_{k}": e for k, e in rec.items()})
-    return errs
+    sim.ClearControlSequence()
+    sim.SetState(pad(q), pad(v))
+    sim.SetControl(pad(u))
+    sim.Step(steps)
+    qn, vn = sim.GetState()
+    return np.array(qn, dtype=float)[:T], np.array(vn, dtype=float)[:T]
+
+
+def nextStates(q, v, actions: dict[str, np.ndarray], sims: dict[str, tuple]) -> dict[str, np.ndarray]:
+    """``q_next_<model>_<action>`` / ``q_dot_next_<model>_<action>``: every action on every model.
+
+    ``sims`` maps a model name to ``(simulator, physics steps per control
+    step)``. A row whose action is NaN (a failed plan) is stepped with the
+    first action's row instead, and its result set to NaN.
+    """
+    out = {}
+    fallback = next(iter(actions.values()))
+    for a_name, u in actions.items():
+        ok = np.isfinite(u).all(axis=1)
+        u = np.where(ok[:, None], u, fallback).astype(fallback.dtype)
+        for m_name, (sim, steps) in sims.items():
+            qn, vn = stepFrom(sim, steps, q, v, u) if len(q) else (np.empty((0, q.shape[1])),
+                                                                   np.empty((0, v.shape[1])))
+            qn[~ok], vn[~ok] = np.nan, np.nan
+            out[f"q_next_{m_name}_{a_name}"], out[f"q_dot_next_{m_name}_{a_name}"] = qn, vn
+    return out
+
+
+# -- the metrics, from the saved steps ---------------------------------------------------------
+#: ``(prefix, a, b)``: the state errors between next states ``a`` and ``b``.
+STATE_COMPARISONS = (
+    ("fsim", "rollout_used", "eval_used"),          # the models, under the action the episode took
+    ("fsim_opt", "rollout_opt", "eval_opt"),        # the models, under the optimal planner's action
+    ("eval_vs_recorded", "eval_used", "recorded"),  # restarting from a recorded state vs what happened
+    ("eval_used_vs_opt", "eval_used", "eval_opt"),  # what the optimal action would have changed
+)
+
+
+def shrunk(cov: np.ndarray, sigma: float, shrinkage: float) -> np.ndarray:
+    """``(1 - shrinkage) * cov + shrinkage * sigma^2 I``, row by row; see ``Utils/PlannerKLDiv.py``."""
+    return (1.0 - shrinkage) * cov + shrinkage * sigma ** 2 * np.eye(cov.shape[-1])
+
+
+def episodeMetrics(d, shrinkage: float) -> dict[str, np.ndarray]:
+    """Per-analysed-step metrics from an episode's saved steps (an ``analysis/<cell>/<id>.npz``)."""
+    from ContactModelStudy.Utils.PlannerKLDiv import GaussianKL
+    mu_u, mu_o = d["mu_used"], d["mu_opt"]
+    cov_u = shrunk(d["cov_used"], float(d["noise_sigma_used"]), shrinkage)
+    cov_o = shrunk(d["cov_opt"], float(d["noise_sigma_opt"]), shrinkage)
+    out = {k: np.full(len(mu_u), np.nan) for k in KL_KEYS}
+    for i in range(len(mu_u)):
+        if np.isfinite(mu_u[i]).all() and np.isfinite(mu_o[i]).all():
+            out["kl_used_opt"][i] = GaussianKL(mu_u[i], cov_u[i], mu_o[i], cov_o[i])
+            out["kl_opt_used"][i] = GaussianKL(mu_o[i], cov_o[i], mu_u[i], cov_u[i])
+            out["mean_dist"][i] = float(np.linalg.norm(mu_u[i] - mu_o[i]))
+    # The replayed plan against the action the episode took: zero up to GPU noise when replayed exactly.
+    out["replay_action_err"] = np.linalg.norm(mu_u - d["u_used"], axis=1)
+    with np.errstate(invalid="ignore"):
+        for prefix, a, b in STATE_COMPARISONS:
+            errs = stateErrors(d[f"q_next_{a}"], d[f"q_dot_next_{a}"], d[f"q_next_{b}"], d[f"q_dot_next_{b}"],
+                               d["indices"])
+            out.update({f"{prefix}_{k}": e for k, e in errs.items()})
+    return out
 
 
 # -- one cell --------------------------------------------------------------------------------
 def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float = 1e-3,
-                max_episodes: int | None = None) -> dict:
-    """Both analyses for one cell; writes and returns its analysis record."""
+                max_episodes: int | None = None, optimal_args: str | None = None) -> dict:
+    """One cell: every episode's analysed steps saved, then the metrics computed from them.
+
+    Writes and returns its analysis record.
+    """
     from ContactModelStudy.Drivers import run_episodes as drv
     from ContactModelStudy.Drivers.EpisodePool import episodeSeeds
     from ContactModelStudy.SamplingBasedPlanners.MPPI import MPPI
@@ -404,6 +561,7 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
         raise ValueError(f"{res.name} does not record the command line it was run with")
     args = argsFromCliArgs(cli_args)
     checkCell(rep, args)
+    overrides = parseOptimalArgs(optimal_args)
     episodes = list(rep)[:max_episodes] if max_episodes else list(rep)
     all_goals = episodeGoals(rep, args)
 
@@ -412,63 +570,93 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
     used_sim = GetContactModelSim(args.rollout_model, task.getModelPath(), N=args.n_samples,
                                   **drv.rolloutSimOverrides(args, task))
     used = (task, MPPI(used_sim, task, drv.buildPlannerConfig(args)))
-    # The optimal planner: the same, with the eval model.
-    oargs = optimalArgs(args, used_sim.config.control_timestep, used_sim.config.horizon_duration)
+    # The optimal planner: the same, with the eval model, and any settings of its own.
+    oargs = optimalArgs(args, used_sim.config.control_timestep, used_sim.config.horizon_duration, overrides)
     otask, _ = drv.buildTasks(oargs)
     opt_sim = GetContactModelSim(oargs.rollout_model, otask.getModelPath(), N=oargs.n_samples,
                                  **drv.rolloutSimOverrides(oargs, otask))
     opt = (otask, MPPI(opt_sim, otask, drv.buildPlannerConfig(oargs)))
     _, _, u0 = eval_task.getInitialState()
     reset_mean = u0 if args.control_mode == "absolute" else None
-    pair = PlannerPair(used, opt, reset_mean, shrinkage)
+    pair = PlannerPair(used, opt, reset_mean,
+                       opt_temperature=oargs.temperature if "temperature" in overrides else None)
 
-    # The forward-simulation pair: one world per saved step.
-    n_worlds = max(1, max(ep.n_saved for ep in episodes))
+    # The forward-simulation pair: one world per analysed step.
+    n_worlds = max(1, max(len(range(0, ep.n_saved, stride)) for ep in episodes))
     rollout_steps = used_sim.config.resolved_substeps
     eval_steps = int(round(rollout_steps * task.timestep / eval_task.timestep))
-    overrides = drv.rolloutSimOverrides(args, task)
-    fs_rollout = GetContactModelSim(args.rollout_model, task.getModelPath(), N=n_worlds, **overrides)
+    overrides_sim = drv.rolloutSimOverrides(args, task)
+    fs_rollout = GetContactModelSim(args.rollout_model, task.getModelPath(), N=n_worlds, **overrides_sim)
     fs_eval = GetContactModelSim(args.eval_sim, eval_task.getModelPath(), N=n_worlds,
                                  timestep=eval_task.timestep,
-                                 **{k: v for k, v in overrides.items() if k in ("nconmax", "njmax")})
+                                 **{k: v for k, v in overrides_sim.items() if k in ("nconmax", "njmax")})
+    sims = {"rollout": (fs_rollout, rollout_steps), "eval": (fs_eval, eval_steps)}
+
+    paths = _analysisPaths(batch_dir, name)
+    steps_dir = paths["steps"]
+    steps_dir.mkdir(parents=True, exist_ok=True)
+    for old in steps_dir.glob("*.npz"):                # a rerun's episodes replace the last run's
+        old.unlink()
 
     print(f"[{name}] {len(episodes)} episodes; used planner {args.rollout_model} on "
           f"{Path(task.getModelPath()).name} ({rollout_steps} x {task.timestep * 1e3:g} ms), optimal "
           f"{args.eval_sim} on {Path(otask.getModelPath()).name} ({opt_sim.config.resolved_substeps} x "
-          f"{otask.timestep * 1e3:g} ms), steps saved every {rep.step_saving.get('stride', 1)}, "
-          f"KL every {stride} saved step(s)", flush=True)
-    analysed: dict[str, list[np.ndarray]] = {}       # the values each metric is computed over
-    ep_arrays: list[tuple[str, dict]] = []           # every episode's per-saved-step arrays
-    ep_records, replays = [], set()
+          f"{otask.timestep * 1e3:g} ms{', ' + optimal_args if overrides else ''}), steps saved every "
+          f"{rep.step_saving.get('stride', 1)}, analysed every {stride} saved step(s)", flush=True)
+    files, replays = [], set()
     t0 = time.time()
+    # 1. Each episode's analysed steps: the state, both planners' action distributions and
+    #    the next state under each planner's action on each model, saved per episode.
     for k, (ep, goals) in enumerate(zip(episodes, all_goals)):
         ep_index = int(ep.summary.get("episode", k))
         noise_seed = episodeSeeds(args.seed, ep_index)[1]
         rows = np.arange(0, ep.n_saved, stride)
-        starts = [planStart(ep, i, args, u0, noise_seed) for i in range(ep.n_saved)]
-        if all(s is not None for s in starts):
-            replays.add("independent")
-            kl = pair.klAlong(ep, goals, rows, starts)
-        elif ep.n_saved == ep.n_steps:
-            replays.add("sequential")
-            kl = klReplay(ep, goals, used, opt, args, u0, noise_seed, stride, shrinkage)
+        starts = [planStart(ep, i, args, u0, noise_seed) for i in rows]
+        mode = replayMode(ep, starts, stride, args.warm_start)
+        replays.add(mode)
+        if mode == "independent":
+            plans = pair.planAlong(ep, goals, rows, starts)
         else:
-            raise ValueError(f"episode {ep.id} was warm-started ({args.warm_start}) but saved neither the "
-                             f"mean each plan started from nor every step, so its plans cannot be replayed")
-        fs = forwardSimErrors(ep, fs_rollout, fs_eval, rollout_steps, eval_steps, eval_task.indices)
-        rec = {"id": ep.id, "episode": ep_index, "n_steps": ep.n_steps, "n_steps_analyzed": len(rows)}
-        for key, arr in {**kl, **fs}.items():
-            values = arr[rows] if key in KL_KEYS else arr
+            plans = planSequentially(ep, goals, used, opt, args, u0, noise_seed)
+            pair.forgetGoal()
+        q, v, u = ep.q[rows], ep.q_dot[rows], ep.u[rows]
+        data = {
+            "id": np.array(ep.id), "episode": ep_index, "n_steps": ep.n_steps,
+            "row": rows, "step": ep.step[rows],
+            "goal": np.array([goals[g][1] for g in goalIndexAt(goals, ep.step[rows])]),
+            "q": q, "q_dot": v, "u_prev": ep.u_prev[rows], "u_used": u, **plans,
+            "q_next_recorded": ep.q_next[rows], "q_dot_next_recorded": ep.q_dot_next[rows],
+            **nextStates(q, v, {"used": u, "opt": plans["mu_opt"]}, sims),
+            "noise_sigma_used": float(args.noise_sigma), "noise_sigma_opt": float(oargs.noise_sigma),
+            "indices": np.asarray(eval_task.indices),
+            "control_timestep": used_sim.config.control_timestep,
+            "rollout_timestep": task.timestep, "eval_timestep": eval_task.timestep,
+        }
+        path = steps_dir / f"{ep.id}.npz"
+        np.savez(path, **data)
+        files.append(path)
+        print(f"  episode {ep_index}: {ep.n_steps} steps, {len(rows)} analysed ({mode}) -> "
+              f"{path.relative_to(batch_dir)}  ({time.time() - t0:.0f} s)", flush=True)
+    for sim in (used_sim, opt_sim, fs_rollout, fs_eval):
+        sim.Close()
+
+    # 2. The metrics, from the saved steps.
+    analysed: dict[str, list[np.ndarray]] = {}         # the values each metric is computed over
+    ep_arrays: list[tuple[str, np.ndarray, dict]] = []  # every episode's per-analysed-step metrics
+    ep_records = []
+    for path in files:
+        with np.load(path) as f:
+            d = dict(f)
+        m = episodeMetrics(d, shrinkage)
+        rec = {"id": str(d["id"]), "episode": int(d["episode"]), "n_steps": int(d["n_steps"]),
+               "n_steps_analyzed": len(d["step"])}
+        for key, values in m.items():
             analysed.setdefault(key, []).append(values)
             rec.update({k2: v for k2, v in stats(key, values).items() if k2.endswith("_mean")})
         ep_records.append(rec)
-        ep_arrays.append((ep.id, {**kl, **fs}))
-        print(f"  episode {ep_index}: {ep.n_steps} steps ({len(rows)} analysed), KL(used||opt) "
-              f"{rec.get('kl_used_opt_mean') or float('nan'):.3f}, object pos err "
-              f"{1e3 * (rec.get('fsim_obj_pos_err_mean') or float('nan')):.2f} mm  "
-              f"({time.time() - t0:.0f} s)", flush=True)
-    for sim in (used_sim, opt_sim, fs_rollout, fs_eval):
-        sim.Close()
+        ep_arrays.append((rec["id"], d["step"], m))
+        print(f"  episode {rec['episode']}: KL(used||opt) {rec.get('kl_used_opt_mean') or float('nan'):.3f}, "
+              f"object pos err {1e3 * (rec.get('fsim_obj_pos_err_mean') or float('nan')):.2f} mm", flush=True)
 
     metrics = {}
     for key, arrs in analysed.items():
@@ -481,19 +669,21 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
         "replay": "+".join(sorted(replays)) or None, "warm_start": args.warm_start,
         "shrinkage": shrinkage, "n_episodes_analyzed": len(episodes),
         "n_steps_analyzed": sum(r["n_steps_analyzed"] for r in ep_records),
+        "optimal_args": optimal_args or "",
         "optimal_planner": {"rollout_model": oargs.rollout_model, "scene": Path(otask.getModelPath()).name,
                             "timestep": otask.timestep, "substeps": opt_sim.config.resolved_substeps,
-                            "horizon": opt_sim.config.resolved_horizon},
+                            "horizon": opt_sim.config.resolved_horizon, "n_samples": oargs.n_samples,
+                            "n_iterations": oargs.n_iterations, "noise_sigma": oargs.noise_sigma,
+                            "temperature": oargs.temperature, "adaptive_temp": oargs.adaptive_temp,
+                            "cost_weights": oargs.cost_weights},
         "forward_sim": {"rollout_steps": rollout_steps, "eval_steps": eval_steps,
                         "control_timestep": used_sim.config.control_timestep},
+        "steps_dir": str(steps_dir.relative_to(batch_dir)),
         "metrics": metrics, "episodes": ep_records, "wall_s": round(time.time() - t0, 1),
     }
-    paths = _analysisPaths(batch_dir, name)
-    paths["json"].parent.mkdir(parents=True, exist_ok=True)
     paths["json"].write_text(json.dumps(record, indent=2))
-    np.savez(paths["npz"], **{f"{key}__{ep_id}": arr for ep_id, arrays in ep_arrays
-                              for key, arr in arrays.items()},
-             **{f"step__{ep.id}": ep.step for ep in episodes if ep.has_steps})
+    np.savez(paths["npz"], **{f"{key}__{ep_id}": arr for ep_id, _, m in ep_arrays for key, arr in m.items()},
+             **{f"step__{ep_id}": step for ep_id, step, _ in ep_arrays})
     return record
 
 
@@ -589,13 +779,23 @@ def main(argv=None) -> int:
     p.add_argument("--count", action="store_true", help="print the number of cells and exit")
     p.add_argument("--summarize", action="store_true", help="only (re)build the final tables")
     p.add_argument("--overwrite", action="store_true", help="redo cells already analysed")
-    p.add_argument("--stride", type=int, default=1, help="compute the KL at every k-th saved step")
+    p.add_argument("--stride", type=int, default=1,
+                   help="analyse every k-th saved step (the plans, the forward simulation and the metrics)")
     p.add_argument("--shrinkage", type=float, default=1e-3,
                    help="covariance shrinkage toward noise_sigma^2 I for the KL")
     p.add_argument("--max-episodes", type=int, default=None, help="analyse at most this many episodes per cell")
+    p.add_argument("--optimal-args", default=None, metavar="FLAGS",
+                   help="run_episodes.py planner flags for the optimal planner, on top of each cell's own, "
+                        "e.g. --optimal-args=\"--n-samples 1024 --temperature 0.1\" (with '=': the value "
+                        "starts with --). It may set " + ", ".join("--" + f.replace("_", "-") for f in OPTIMAL_FLAGS))
     args = p.parse_args(argv)
     if args.stride < 1:
         p.error("--stride must be >= 1")
+    if args.optimal_args:
+        try:
+            parseOptimalArgs(args.optimal_args)
+        except ValueError as e:
+            p.error(str(e))
     batch_dir = args.batch_dir.resolve()
     if not batch_dir.is_dir():
         p.error(f"no such folder: {batch_dir}")
@@ -607,7 +807,8 @@ def main(argv=None) -> int:
         p.error(f"{batch_dir} has no cell_*.status.json files; is it an episode-batch results folder?")
     if args.summarize:
         return 0 if summarize(batch_dir) else 1
-    kw = dict(stride=args.stride, shrinkage=args.shrinkage, max_episodes=args.max_episodes)
+    kw = dict(stride=args.stride, shrinkage=args.shrinkage, max_episodes=args.max_episodes,
+              optimal_args=args.optimal_args)
     if args.cell is not None:
         if not 0 <= args.cell < len(cells):
             p.error(f"--cell {args.cell} is out of range: {batch_dir.name} has cells 0-{len(cells) - 1}")
@@ -619,6 +820,8 @@ def main(argv=None) -> int:
                "--shrinkage", str(args.shrinkage)]
         if args.max_episodes:
             cmd += ["--max-episodes", str(args.max_episodes)]
+        if args.optimal_args:
+            cmd.append(f"--optimal-args={args.optimal_args}")
         if args.overwrite:
             cmd.append("--overwrite")
         print(f"[{i + 1}/{len(cells)}] {c['name']} ...", flush=True)

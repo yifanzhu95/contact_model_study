@@ -7,7 +7,7 @@
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=16G
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 # One array task = one CSV row (cell) = one GPU. The resources above must cover
 # the most expensive row: sbatch options on the command line override them,
 # e.g. `sbatch --time=24:00:00 ...` for rows with long episodes or Pinocchio/Drake
