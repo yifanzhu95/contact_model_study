@@ -224,7 +224,7 @@ count toward `n_calls`, and each replaces one random trial.
 - `seed_defaults` (on unless `false`): the object's own weights, with the
   pinned temperature and noise. The default temperature must then lie inside
   `temperature_range`. Turn this off if it doesn't.
-- `seed_points`: a CSV of known settings (path relative to the batch CSV),
+- `seed_points`: a CSV of known settings (path relative to the repo root),
   with one row per point and columns named after the dimensions (`w_quat`,
   `temperature`, `noise_sigma`, ...). Anything a row leaves out takes its
   default. A value for a pinned setting must equal the pinned value.

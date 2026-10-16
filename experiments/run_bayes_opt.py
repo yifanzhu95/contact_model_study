@@ -23,6 +23,7 @@ contact model.
     python experiments/run_bayes_opt.py bo.csv             # every cell, in order
     python experiments/run_bayes_opt.py bo.csv --cell 2    # just row 2 (0-based)
     python experiments/run_bayes_opt.py bo.csv --cell 2 --gpus 0,1 --workers 12
+    python experiments/run_bayes_opt.py bo.csv --cell 2 --debug  # MPPI per-plan diagnostics
     python experiments/run_bayes_opt.py bo.csv --summarize --outdir results/my_bo
 
 On the HPC, ``hpc/submit_bayes_opt.sh`` submits one array task per row.
@@ -68,9 +69,9 @@ Seeds, evaluated first:
 
 * ``seed_defaults`` (true): a trial at the object's own weights and the pinned
   temperature and noise.
-* ``seed_points``: a CSV of known settings, relative to this CSV; one row per
-  point, with columns named after the dimensions. A dimension it leaves out
-  takes its default.
+* ``seed_points``: a CSV of known settings, relative to the repo root; one row
+  per point, with columns named after the dimensions. A dimension it leaves
+  out takes its default.
 * ``seed_from`` + ``seed_top_k`` (5): re-evaluate the best trials of an earlier
   cell folder.
 
@@ -299,9 +300,9 @@ def _bool(row: dict, column: str, default: bool) -> bool:
     return batches._parseBool(row[column], column) if column in row else default
 
 
-def _resolvePath(raw: str, csv_dir: Path) -> Path:
+def _resolvePath(raw: str, base: Path) -> Path:
     p = Path(raw).expanduser()
-    return p if p.is_absolute() else (csv_dir / p).resolve()
+    return p if p.is_absolute() else (base / p).resolve()
 
 
 def parseCell(row: dict[str, str], csv_dir: Path, cell_dir: Path) -> CellSpec:
@@ -424,7 +425,7 @@ def buildSeeds(spec: CellSpec, row: dict, csv_dir: Path) -> list[Seed]:
     if _bool(row, "seed_defaults", True):
         seeds.append(Seed(pointFromParams(spec, {}, "defaults"), "defaults"))
     if "seed_points" in row:
-        path = _resolvePath(row["seed_points"], csv_dir)
+        path = _resolvePath(row["seed_points"], REPO_ROOT)
         if not path.is_file():
             raise ValueError(f"seed_points: no such file {path}")
         with open(path, newline="") as f:
@@ -632,6 +633,10 @@ def runCell(index: int, row: dict[str, str], csv_dir: Path, outdir: Path, overwr
         shutil.rmtree(cell_dir)
     cell_dir.mkdir(parents=True, exist_ok=True)
     spec = parseCell(row, csv_dir, cell_dir)
+    if pool_opts.debug:
+        spec.args.debug = True                           # the planners are built from spec.args
+        # The planner processes print the lines; unbuffered, they reach a log as they happen.
+        os.environ["PYTHONUNBUFFERED"] = "1"
 
     done = _readTrials(cell_dir)
     checkResume(spec, cell_dir, done)
@@ -669,6 +674,8 @@ def runCell(index: int, row: dict[str, str], csv_dir: Path, outdir: Path, overwr
           f"({spec.acq_func}); {len(done)} already done")
     print(f"  pool: {len(gpus)} GPU(s) x {pool_opts.planners_per_gpu} planner(s), {workers} workers, "
           f"up to {in_flight_max} trials in flight")
+    if spec.args.debug:
+        print("  MPPI debug on: one [MPPI] line per plan, from every planner, interleaved")
     if len(done) >= spec.n_calls:
         cellSummary(index, row, outdir, spec)
         return 0
@@ -774,6 +781,8 @@ def runAll(csv_path: Path, rows: list[dict], outdir: Path, overwrite: bool, stop
             cmd += ["--workers", str(pool_opts.workers)]
         if overwrite:
             cmd.append("--overwrite")
+        if pool_opts.debug:
+            cmd.append("--debug")
         t0 = time.time()
         with open(outdir / f"{name}.log", "w") as log:
             rc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT).returncode
@@ -897,6 +906,9 @@ def main(argv=None) -> int:
     p.add_argument("--check", action="store_true", help="validate every row (space, seeds, driver); run nothing")
     p.add_argument("--count", action="store_true", help="print the number of rows and exit")
     p.add_argument("--summarize", action="store_true", help="only (re)build the summaries in --outdir")
+    p.add_argument("--debug", action="store_true",
+                   help="MPPI's per-plan diagnostics (run_episodes.py --debug) in every episode of every "
+                        "cell, as a debug=true column would; a lot of output")
     g = p.add_argument_group("pool (as run_episodes_pooled.py)")
     g.add_argument("--gpus", default="all", help="comma-separated GPU ids, or 'all' (default) for every visible GPU")
     g.add_argument("--planners-per-gpu", type=int, default=1, help="planner processes per GPU")

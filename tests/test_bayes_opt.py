@@ -111,21 +111,31 @@ def test_defaults_seed_is_the_objects_weights_and_pinned_knobs(tmp_path):
 
 def test_seed_points_file(tmp_path):
     (tmp_path / "seeds.csv").write_text("w_quat,temperature\n30,\n40,5\n")
-    s = cell(tmp_path, opt_weights="w_quat w_joint", temperature_range="1 100", seed_points="seeds.csv")
+    s = cell(tmp_path, opt_weights="w_quat w_joint", temperature_range="1 100",
+             seed_points=str(tmp_path / "seeds.csv"))
     assert [x.source for x in s.seeds] == ["defaults", "seed_points:0", "seed_points:1"]
     p0, p1 = s.params(s.seeds[1].x), s.params(s.seeds[2].x)
     assert p0 == {"w_quat": 30.0, "w_joint": 20.0, "temperature": s.pinned_temperature}   # filled in
     assert p1["temperature"] == 5.0
     (tmp_path / "out.csv").write_text("w_quat\n1000\n")
     with pytest.raises(ValueError, match="outside the search range"):
-        cell(tmp_path, opt_weights="w_quat", seed_points="out.csv")
+        cell(tmp_path, opt_weights="w_quat", seed_points=str(tmp_path / "out.csv"))
     (tmp_path / "pinned.csv").write_text("w_quat,w_joint\n30,3\n")
     with pytest.raises(ValueError, match="pins w_joint"):
-        cell(tmp_path, opt_weights="w_quat", seed_points="pinned.csv")
+        cell(tmp_path, opt_weights="w_quat", seed_points=str(tmp_path / "pinned.csv"))
     (tmp_path / "same.csv").write_text(f"w_quat,w_joint\n30,{20.0}\n")
-    assert len(cell(tmp_path, opt_weights="w_quat", seed_points="same.csv").seeds) == 2
+    assert len(cell(tmp_path, opt_weights="w_quat", seed_points=str(tmp_path / "same.csv")).seeds) == 2
     with pytest.raises(ValueError, match="no such file"):
-        cell(tmp_path, opt_weights="w_quat", seed_points="missing.csv")
+        cell(tmp_path, opt_weights="w_quat", seed_points=str(tmp_path / "missing.csv"))
+
+
+def test_seed_points_path_is_relative_to_the_repo_root(tmp_path):
+    (tmp_path / "seeds.csv").write_text("w_quat\n30\n")
+    with pytest.raises(ValueError, match="no such file"):           # not looked for beside the CSV
+        cell(tmp_path, opt_weights="w_quat", seed_points="seeds.csv")
+    s = cell(tmp_path, temperature_range="1 200", noise_sigma_range="0.02 0.5",
+             seed_points="experiments/example_bo_seeds.csv")
+    assert [x.source for x in s.seeds] == ["defaults", "seed_points:0", "seed_points:1"]
 
 
 def test_seed_from_an_earlier_run_takes_its_best(tmp_path):
@@ -143,7 +153,7 @@ def test_seed_from_an_earlier_run_takes_its_best(tmp_path):
 def test_n_calls_must_cover_the_seeds(tmp_path):
     (tmp_path / "seeds.csv").write_text("w_quat\n30\n40\n")
     with pytest.raises(ValueError, match="less than"):
-        cell(tmp_path, opt_weights="w_quat", seed_points="seeds.csv", n_calls="2")
+        cell(tmp_path, opt_weights="w_quat", seed_points=str(tmp_path / "seeds.csv"), n_calls="2")
 
 
 # -- scoring -----------------------------------------------------------------------------
