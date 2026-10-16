@@ -51,8 +51,10 @@ Search space:
   needed to contain the object's own value.
 * ``temperature_range`` / ``noise_sigma_range``: ``"lo hi"``. Blank pins it to
   the ``temperature`` / ``noise_sigma`` column, or the driver default.
-* ``per_model_temperature``: ``true`` gives each model its own temperature
-  dimension (``temperature_<model>``); the weights stay shared.
+* ``per_model_temperature`` / ``per_model_noise_sigma``: ``true`` gives each
+  model its own dimension (``temperature_<model>`` / ``noise_sigma_<model>``)
+  within the range; the weights stay shared. Each adds a dimension per model,
+  so the search needs more trials.
 
 Every dimension is log-uniform.
 
@@ -129,13 +131,20 @@ ACQ_FUNCS = ("gp_hedge", "EI", "LCB", "PI")
 
 BO_COLUMNS = (
     "rollout_models", "model_agg", "opt_weights", "temperature_range", "noise_sigma_range",
-    "per_model_temperature", "n_calls", "n_initial_points", "acq_func", "bo_seed",
+    "per_model_temperature", "per_model_noise_sigma", "n_calls", "n_initial_points", "acq_func", "bo_seed",
     "w_success", "w_cost", "err_clip", "trials_in_flight",
     "seed_defaults", "seed_points", "seed_from", "seed_top_k",
 )
 OWN_COLUMNS = ("label",) + BO_COLUMNS
 #: Set by this script, so not allowed as columns (``video``: sweeps never render).
 MANAGED_OPTIONS = batches.MANAGED_OPTIONS + ("rollout_model",)
+#: The MPPI knobs a cell can search, shared or one dimension per model (``<knob>_<model>``).
+KNOBS = ("temperature", "noise_sigma")
+
+
+def knobOf(name: str) -> str | None:
+    """The knob a dimension sets: ``"noise_sigma_M2"`` -> ``"noise_sigma"``; a weight -> ``None``."""
+    return next((k for k in KNOBS if name == k or name.startswith(k + "_")), None)
 
 
 # -- the cell's search space -------------------------------------------------------
@@ -207,21 +216,25 @@ class CellSpec:
         for d in self.dims:
             if d.name in COST_WEIGHT_KEYS:
                 out[d.name] = self.base_weights[d.name]
-            elif d.name.startswith("temperature"):
-                out[d.name] = self.pinned_temperature
             else:
-                out[d.name] = self.pinned_noise_sigma
+                out[d.name] = self.pinned(knobOf(d.name))
         return out
+
+    def pinned(self, knob: str) -> float:
+        return self.pinned_temperature if knob == "temperature" else self.pinned_noise_sigma
+
+    def searches(self, knob: str) -> bool:
+        """Whether ``knob`` is searched, shared or per model."""
+        return any(knobOf(n) == knob for n in self.names)
 
     def modelSettings(self, x, model: str) -> tuple[dict, dict]:
         """``(planner_params, cost_weights)`` of point ``x`` for one model."""
         p = self.params(x)
         planner = {}
-        temp = p.get(f"temperature_{model}", p.get("temperature"))
-        if temp is not None:
-            planner["temperature"] = temp
-        if "noise_sigma" in p:
-            planner["noise_sigma"] = p["noise_sigma"]
+        for knob in KNOBS:
+            v = p.get(f"{knob}_{model}", p.get(knob))
+            if v is not None:
+                planner[knob] = v
         weights = {k: v for k, v in p.items() if k in COST_WEIGHT_KEYS}
         return planner, weights
 
@@ -330,20 +343,16 @@ def parseCell(row: dict[str, str], csv_dir: Path, cell_dir: Path) -> CellSpec:
     pinned_w = [d.name for d in dims if d.name in row]
     if pinned_w:
         raise ValueError(f"{pinned_w} are both pinned (a w_* column) and searched (opt_weights)")
-    per_model = _bool(row, "per_model_temperature", False)
-    if "temperature_range" in row:
-        if "temperature" in row:
-            raise ValueError("temperature and temperature_range are both set: pin it or search it")
-        lo, hi = parseRange(row["temperature_range"], "temperature_range")
-        names = [f"temperature_{m}" for m in models] if per_model and len(models) > 1 else ["temperature"]
-        dims += [Dim(n, lo, hi) for n in names]
-    elif per_model:
-        raise ValueError("per_model_temperature needs a temperature_range to search")
-    if "noise_sigma_range" in row:
-        if "noise_sigma" in row:
-            raise ValueError("noise_sigma and noise_sigma_range are both set: pin it or search it")
-        lo, hi = parseRange(row["noise_sigma_range"], "noise_sigma_range")
-        dims.append(Dim("noise_sigma", lo, hi))
+    for knob in KNOBS:
+        per_model = _bool(row, f"per_model_{knob}", False)
+        if f"{knob}_range" in row:
+            if knob in row:
+                raise ValueError(f"{knob} and {knob}_range are both set: pin it or search it")
+            lo, hi = parseRange(row[f"{knob}_range"], f"{knob}_range")
+            names = [f"{knob}_{m}" for m in models] if per_model and len(models) > 1 else [knob]
+            dims += [Dim(n, lo, hi) for n in names]
+        elif per_model:
+            raise ValueError(f"per_model_{knob} needs a {knob}_range to search")
     if not dims:
         raise ValueError("the search space is empty: give opt_weights, temperature_range or noise_sigma_range")
 
@@ -379,18 +388,17 @@ def pointFromParams(spec: CellSpec, params: dict[str, float], source: str, stric
     pinned to (or it is an error); otherwise it is ignored.
     """
     values = {**spec.defaultParams(), **{k: v for k, v in params.items() if k in spec.names}}
-    if "temperature" in params and "temperature" not in spec.names:
-        # A shared temperature fills per-model dimensions the source leaves out.
-        for n in spec.names:
-            if n.startswith("temperature_") and n not in params:
-                values[n] = params["temperature"]
+    for n in spec.names:
+        # A shared temperature or noise fills the per-model dimensions the source leaves out.
+        knob = knobOf(n)
+        if knob and n != knob and n not in params and knob in params:
+            values[n] = params[knob]
     if strict:
         for k, v in params.items():
-            if k in spec.names or (k == "temperature" and any(n.startswith("temperature_") for n in spec.names)):
+            if k in spec.names or (k in KNOBS and spec.searches(k)):
                 continue
             pinned = (spec.base_weights.get(k) if k in COST_WEIGHT_KEYS else
-                      spec.pinned_temperature if k == "temperature" else
-                      spec.pinned_noise_sigma if k == "noise_sigma" else None)
+                      spec.pinned(k) if k in KNOBS else None)
             if pinned is None:
                 raise ValueError(f"{source}: {k!r} is not a search dimension or a pinned setting")
             if not math.isclose(v, pinned, rel_tol=1e-9):
@@ -440,13 +448,18 @@ def buildSeeds(spec: CellSpec, row: dict, csv_dir: Path) -> list[Seed]:
             raise ValueError(f"seed_from: no finished trials in {src}")
         k = _int(row.get("seed_top_k", "5"), "seed_top_k", 1)
         best = sorted(trials, key=lambda t: t["objective"])[:k]
-        unknown = sorted({n for t in best for n in t["params"]} - set(spec.names))
+        unknown = sorted({n for t in best for n in t["params"]
+                          if n not in spec.names and not (n in KNOBS and spec.searches(n))})
         if unknown:
             print(f"  note: seed_from {src.name}: {unknown} are not dimensions here; ignored")
         for t in best:
-            # Clipped into the box: an earlier run may have searched a wider one.
-            params = {n: min(max(v, d.lo), d.hi) for d in spec.dims
-                      for n, v in t["params"].items() if n == d.name}
+            # Clipped into the box: an earlier run may have searched a wider one. A
+            # shared temperature or noise fills this cell's per-model dimensions.
+            params = {}
+            for d in spec.dims:
+                v = t["params"].get(d.name, t["params"].get(knobOf(d.name) or d.name))
+                if v is not None:
+                    params[d.name] = min(max(v, d.lo), d.hi)
             seeds.append(Seed(pointFromParams(spec, params, f"seed_from:{t['trial']}", strict=False),
                               f"seed_from:{t['trial']}"))
     unique, seen = [], set()
@@ -663,11 +676,7 @@ def runCell(index: int, row: dict[str, str], csv_dir: Path, outdir: Path, overwr
           f"models {' '.join(spec.models)} ({spec.model_agg}), {spec.args.n_episodes} episodes each")
     for d in spec.dims:
         print(f"    {d.name:<20} [{d.lo:g}, {d.hi:g}]  log-uniform")
-    pinned = []
-    if not any(n.startswith("temperature") for n in spec.names):
-        pinned.append(f"temperature={spec.pinned_temperature:g}")
-    if "noise_sigma" not in spec.names:
-        pinned.append(f"noise_sigma={spec.pinned_noise_sigma:g}")
+    pinned = [f"{k}={spec.pinned(k):g}" for k in KNOBS if not spec.searches(k)]
     if pinned:
         print(f"    pinned: {', '.join(pinned)}")
     print(f"  budget {spec.n_calls} trials: {len(spec.seeds)} seeds, {spec.n_random} random, then GP "
@@ -800,7 +809,7 @@ def runAll(csv_path: Path, rows: list[dict], outdir: Path, overwrite: bool, stop
 
 # -- summaries -------------------------------------------------------------------------
 def replayCommands(row: dict[str, str], record: dict, models: list[str]) -> list[str]:
-    """``run_episodes.py`` command lines that replay a trial, one per distinct temperature."""
+    """``run_episodes.py`` command lines that replay a trial, one per model."""
     argv = batches.rowToArgv(row, Path("."), "x", own_columns=OWN_COLUMNS)
     flags = " ".join(argv[:argv.index("--results")])
     weights = " ".join(f"--cost-weight {k}={v:.6g}" for k, v in record.get("cost_weights", {}).items())
