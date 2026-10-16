@@ -81,7 +81,7 @@ _AUTO_RESULTS = "auto"
 #: collides with the other form given on the command line.
 _PAIR_DEFAULTS = {
     ("substeps", "ctrl_time_step"): ("ctrl_time_step", 0.064),
-    ("horizon", "time_horizon"): ("time_horizon", 0.352),
+    ("horizon", "time_horizon"): ("time_horizon", 0.384),
 }
 
 
@@ -112,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
                         f"1/(rollout timestep * substeps). Give this or "
                         f"--ctrl-time-step; neither means --ctrl-time-step "
                         f"{_PAIR_DEFAULTS[('substeps', 'ctrl_time_step')][1]}")
-    g.add_argument("--ctrl-time-step", type=float, default=0.064,#None,
+    g.add_argument("--ctrl-time-step", type=float, default=None,
                    help="control-step duration (s), rounded down to whole rollout "
                         "timesteps; the alternative to --substeps")
     g.add_argument("--eval-sim", default="mujoco", choices=evalSimNames(),
@@ -148,7 +148,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help=f"H: planning horizon in control steps. Give this or "
                         f"--time-horizon; neither means --time-horizon "
                         f"{_PAIR_DEFAULTS[('horizon', 'time_horizon')][1]}")
-    g.add_argument("--time-horizon", type=float, default=0.384,#None,
+    g.add_argument("--time-horizon", type=float, default=None,
                    help="planning horizon (s), rounded down to whole control steps; "
                         "the alternative to --horizon")
     g.add_argument("--n-iterations", type=int, default=1)

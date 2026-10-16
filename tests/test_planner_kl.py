@@ -127,7 +127,7 @@ def test_identical_planners_are_close_and_temperature_moves_them_apart(sim, cube
     sim2 = VectorizedMujoco(ROLLOUT_CUBE, VectorizedMujocoConfig(horizon=6, substeps=4), N=256)
     a, b = _mppi(sim, task), _mppi(sim2, task)                       # same config and seed
     same = CalcPlannerKLDiv(q0, v0, a, b, u=u0)
-    c = _mppi(sim2, task, temperature=0.5)
+    c = _mppi(sim2, task, temperature=0.02)                          # concentrated: ESS ~17 of 256
     different = CalcPlannerKLDiv(q0, v0, a, c, u=u0)
     assert np.isfinite(same) and np.isfinite(different)
     assert 0.0 <= same < different
