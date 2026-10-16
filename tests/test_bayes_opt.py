@@ -68,6 +68,17 @@ def test_cell_dims_and_settings(tmp_path):
     shared = cell(tmp_path, rollout_models="M2 M3", opt_weights="none", temperature_range="1 100")
     assert shared.names == ["temperature"]
     assert shared.modelSettings([7.0], "M2") == ({"temperature": 7.0}, {})
+    noise = cell(tmp_path, rollout_models="M2 M3", opt_weights="none", temperature_range="1 100",
+                 noise_sigma_range="0.01 0.3", per_model_noise_sigma="true")
+    assert noise.names == ["temperature", "noise_sigma_M2", "noise_sigma_M3"]
+    assert noise.modelSettings([7.0, 0.02, 0.2], "M3") == ({"temperature": 7.0, "noise_sigma": 0.2}, {})
+    both = cell(tmp_path, rollout_models="M2 M3", opt_weights="none", temperature_range="1 100",
+                per_model_temperature="true", noise_sigma_range="0.01 0.3", per_model_noise_sigma="true")
+    assert both.names == ["temperature_M2", "temperature_M3", "noise_sigma_M2", "noise_sigma_M3"]
+    assert both.modelSettings([2.0, 30.0, 0.02, 0.2], "M2") == ({"temperature": 2.0, "noise_sigma": 0.02}, {})
+    one = cell(tmp_path, rollout_models="M2", opt_weights="none", noise_sigma_range="0.01 0.3",
+               per_model_noise_sigma="true")
+    assert one.names == ["noise_sigma"]                                   # one model: nothing to split
 
 
 @pytest.mark.parametrize("row, message", [
@@ -76,6 +87,7 @@ def test_cell_dims_and_settings(tmp_path):
     ({"noise_sigma": "0.1", "noise_sigma_range": "0.01 1"}, "pin it or search it"),
     ({"w_quat": "5", "opt_weights": "w_quat"}, "pinned"),
     ({"per_model_temperature": "true"}, "needs a temperature_range"),
+    ({"per_model_noise_sigma": "true"}, "needs a noise_sigma_range"),
     ({"rollout_models": "M2 M9"}, "M9"),
     ({"rollout_models": "M2 M2"}, "twice"),
     ({"model_agg": "median"}, "model_agg"),
@@ -117,6 +129,11 @@ def test_seed_points_file(tmp_path):
     p0, p1 = s.params(s.seeds[1].x), s.params(s.seeds[2].x)
     assert p0 == {"w_quat": 30.0, "w_joint": CUBE_W["w_joint"], "temperature": s.pinned_temperature}   # filled in
     assert p1["temperature"] == 5.0
+    (tmp_path / "shared.csv").write_text("noise_sigma,noise_sigma_M3\n0.05,\n0.05,0.2\n")
+    per = cell(tmp_path, rollout_models="M2 M3", opt_weights="none", noise_sigma_range="0.01 0.3",
+               per_model_noise_sigma="true", seed_points=str(tmp_path / "shared.csv"))
+    assert [per.params(x.x) for x in per.seeds[1:]] == [                 # a shared noise fills each model's
+        {"noise_sigma_M2": 0.05, "noise_sigma_M3": 0.05}, {"noise_sigma_M2": 0.05, "noise_sigma_M3": 0.2}]
     (tmp_path / "out.csv").write_text("w_quat\n1000\n")
     with pytest.raises(ValueError, match="outside the search range"):
         cell(tmp_path, opt_weights="w_quat", seed_points=str(tmp_path / "out.csv"))
@@ -148,6 +165,13 @@ def test_seed_from_an_earlier_run_takes_its_best(tmp_path):
     assert [x.source for x in s.seeds] == ["seed_from:1", "seed_from:3"]
     hi = s.dims[0].hi
     assert [x.x[0] for x in s.seeds] == [20.0, hi]                       # clipped into this box
+    shared = tmp_path / "shared_cell"
+    (shared / bo.trialName(0)).mkdir(parents=True)
+    (shared / bo.trialName(0) / "trial.json").write_text(json.dumps(
+        {"trial": 0, "status": "done", "objective": 0.0, "params": {"noise_sigma": 0.05}}))
+    per = cell(tmp_path, rollout_models="M2 M3", opt_weights="none", noise_sigma_range="0.01 0.3",
+               per_model_noise_sigma="true", seed_defaults="false", seed_from="shared_cell")
+    assert per.params(per.seeds[0].x) == {"noise_sigma_M2": 0.05, "noise_sigma_M3": 0.05}
 
 
 def test_n_calls_must_cover_the_seeds(tmp_path):

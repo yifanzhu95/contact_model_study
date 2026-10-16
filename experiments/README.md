@@ -204,7 +204,7 @@ weight, `label`), except `rollout_model` and `video`, plus:
 | `model_agg` | `mean` or `worst` | `mean` |
 | `opt_weights` | Weights to search: `w_quat:1:50 w_contact` (bare name: x/4 to x4 around the object's value), or `none` | the old study's nine weights and bounds, widened to contain the object's own values |
 | `temperature_range`, `noise_sigma_range` | `lo hi` to search | pinned to the `temperature`/`noise_sigma` column or the driver default |
-| `per_model_temperature` | `true`: a `temperature_<model>` dimension per model | `false` |
+| `per_model_temperature`, `per_model_noise_sigma` | `true`: a `temperature_<model>` / `noise_sigma_<model>` dimension per model, each within the range (more dimensions, so more trials) | `false` |
 | `n_calls` | Trials in all, including seeds and resumed trials | 100 |
 | `n_initial_points` | Random trials before the GP, less one per seed | 10 |
 | `acq_func`, `bo_seed` | `gp_hedge`, `EI`, `LCB` or `PI`; the optimizer's seed | `gp_hedge`, 0 |
