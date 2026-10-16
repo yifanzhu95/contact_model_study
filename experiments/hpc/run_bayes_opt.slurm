@@ -4,7 +4,7 @@
 #SBATCH --error=logs/bayes_opt_%A_%a.err
 #SBATCH --array=0-0            # placeholder: submit_bayes_opt.sh sets it to the CSV's rows
 #SBATCH --partition=gpu
-#SBATCH --gpus=rtx_5000_ada:2
+#SBATCH --gpus=a5000:4
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=32G
 #SBATCH --time=24:00:00
