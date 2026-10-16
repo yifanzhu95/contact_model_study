@@ -5,13 +5,13 @@
 #SBATCH --array=0-0            # placeholder: submit_bayes_opt.sh sets it to the CSV's rows
 #SBATCH --partition=gpu
 #SBATCH --gpus=a5000:4
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=32G
+#SBATCH --cpus-per-task=24
+#SBATCH --mem=64G
 #SBATCH --time=48:00:00
 # One array task = one CSV row (cell) = one whole Bayesian optimization. The cell
-# runs every trial's episodes on one pool sized from this allocation: a planner
-# process per GPU and an eval-sim worker per remaining core, with several trials
-# in flight so they all stay busy. Each spawned process re-imports warp and
+# runs every trial's episodes on one pool: PLANNERS_PER_GPU planner processes per
+# GPU and WORKERS eval-sim workers (see below), with several trials in flight so
+# they all stay busy. Each spawned process re-imports warp and
 # mujoco, hence the memory. A cell's cost is n_calls x models x n_episodes
 # episodes, so --time must cover the largest row. Change the allocation per
 # submission with SBATCH_ARGS, e.g.
@@ -44,6 +44,15 @@ export MUJOCO_GL=egl
 echo "cell ${CELL} of ${CSV} -> ${OUTDIR} on $(hostname), ${SLURM_CPUS_PER_TASK:-?} CPUs"
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader || true
 
+# MPPI debug: one [MPPI] line per plan in the .out log. On by default; submit with
+# DEBUG=0 to turn it off.
+EXTRA=()
+[[ "${DEBUG:-1}" == 1 ]] && EXTRA+=(--debug)
+# Pool size. 2 planners per GPU ran M5 ~1.5x faster than 1 (3 added little), and
+# 8 planners + 12 workers fit the 24 CPUs above, at ~1.8 GB of memory each.
+# Override per submission, e.g. PLANNERS_PER_GPU=1 WORKERS=8.
+EXTRA+=(--planners-per-gpu "${PLANNERS_PER_GPU:-2}" --workers "${WORKERS:-12}")
+
 # The pool takes every GPU SLURM granted (CUDA_VISIBLE_DEVICES) and the CPUs of
 # this task; the out-of-range check is in the Python script.
-python experiments/run_bayes_opt.py "$CSV" --cell "$CELL" --outdir "$OUTDIR"
+python experiments/run_bayes_opt.py "$CSV" --cell "$CELL" --outdir "$OUTDIR" ${EXTRA[@]+"${EXTRA[@]}"}
