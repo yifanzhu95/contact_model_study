@@ -21,6 +21,7 @@ dependencies = [
     "matplotlib>=3.8",
     "scipy>=1.12",
     "scikit-optimize>=0.9",
+    "pandas",
 ]
 
 [project.optional-dependencies]
@@ -38,7 +39,7 @@ kamino = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["contact_study*"]
+include = ["ContactModelStudy*"]
 
 [tool.ruff]
 line-length = 100

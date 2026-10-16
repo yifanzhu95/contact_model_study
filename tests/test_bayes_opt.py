@@ -17,7 +17,7 @@ bo = importlib.util.module_from_spec(spec_)
 sys.modules["run_bayes_opt"] = bo           # its dataclasses look themselves up here
 spec_.loader.exec_module(bo)
 
-CUBE_W = {"w_quat": 23.3929, "w_contact": 2.48369, "w_joint": 20.0, "w_velo": 0.0}
+CUBE_W = {"w_quat": 25.0, "w_contact": 3.5, "w_joint": 0.05, "w_velo": 0.0}
 
 
 def write(tmp_path, text, name="bo.csv"):
@@ -34,7 +34,7 @@ def cell(tmp_path, **row):
 # -- the search space ------------------------------------------------------------------
 def test_weight_specs():
     dims = bo.parseWeightSpecs("w_quat w_contact:0.1:100", CUBE_W)
-    assert [(d.name, d.lo, d.hi) for d in dims] == [("w_quat", 23.3929 / 4, 23.3929 * 4),
+    assert [(d.name, d.lo, d.hi) for d in dims] == [("w_quat", CUBE_W["w_quat"] / 4, CUBE_W["w_quat"] * 4),
                                                    ("w_contact", 0.1, 100.0)]
     assert bo.parseWeightSpecs("none", CUBE_W) == []
     for bad, msg in (("w_nope", "not a cost weight"), ("w_quat w_quat", "twice"),
@@ -102,7 +102,7 @@ def test_example_csv_is_valid(tmp_path):
 def test_defaults_seed_is_the_objects_weights_and_pinned_knobs(tmp_path):
     s = cell(tmp_path, opt_weights="w_quat w_joint", noise_sigma_range="0.01 0.5")
     assert [x.source for x in s.seeds] == ["defaults"]
-    assert s.params(s.seeds[0].x) == {"w_quat": CUBE_W["w_quat"], "w_joint": 20.0,
+    assert s.params(s.seeds[0].x) == {"w_quat": CUBE_W["w_quat"], "w_joint": CUBE_W["w_joint"],
                                       "noise_sigma": s.pinned_noise_sigma}
     assert s.n_random == s.n_initial_points - 1
     off = cell(tmp_path, opt_weights="w_quat", seed_defaults="false")
@@ -115,7 +115,7 @@ def test_seed_points_file(tmp_path):
              seed_points=str(tmp_path / "seeds.csv"))
     assert [x.source for x in s.seeds] == ["defaults", "seed_points:0", "seed_points:1"]
     p0, p1 = s.params(s.seeds[1].x), s.params(s.seeds[2].x)
-    assert p0 == {"w_quat": 30.0, "w_joint": 20.0, "temperature": s.pinned_temperature}   # filled in
+    assert p0 == {"w_quat": 30.0, "w_joint": CUBE_W["w_joint"], "temperature": s.pinned_temperature}   # filled in
     assert p1["temperature"] == 5.0
     (tmp_path / "out.csv").write_text("w_quat\n1000\n")
     with pytest.raises(ValueError, match="outside the search range"):
@@ -123,7 +123,7 @@ def test_seed_points_file(tmp_path):
     (tmp_path / "pinned.csv").write_text("w_quat,w_joint\n30,3\n")
     with pytest.raises(ValueError, match="pins w_joint"):
         cell(tmp_path, opt_weights="w_quat", seed_points=str(tmp_path / "pinned.csv"))
-    (tmp_path / "same.csv").write_text(f"w_quat,w_joint\n30,{20.0}\n")
+    (tmp_path / "same.csv").write_text(f"w_quat,w_joint\n30,{CUBE_W['w_joint']}\n")
     assert len(cell(tmp_path, opt_weights="w_quat", seed_points=str(tmp_path / "same.csv")).seeds) == 2
     with pytest.raises(ValueError, match="no such file"):
         cell(tmp_path, opt_weights="w_quat", seed_points=str(tmp_path / "missing.csv"))
@@ -200,7 +200,7 @@ def test_resume_refuses_a_changed_space(tmp_path):
     bo.writeState(s, d, done)
     bo.checkResume(s, d, done)                                         # same space: fine
     with pytest.raises(ValueError, match="searched over"):
-        bo.checkResume(cell(tmp_path, opt_weights="w_joint:1:50"), d, done)
+        bo.checkResume(cell(tmp_path, opt_weights="w_joint:0.01:50"), d, done)
     with pytest.raises(ValueError, match="strands"):
         bo.checkResume(cell(tmp_path, opt_weights="w_quat:1:30"), d, done)
 
