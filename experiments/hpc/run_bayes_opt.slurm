@@ -4,6 +4,8 @@
 #SBATCH --error=logs/bayes_opt_%A_%a.err
 #SBATCH --array=0-0            # placeholder: submit_bayes_opt.sh sets it to the CSV's rows
 #SBATCH --partition=gpu
+#SBATCH --nodes=1              # the pool is one process tree: GPUs on a second node sit idle
+#SBATCH --ntasks=1
 #SBATCH --gpus=a5000:4
 #SBATCH --cpus-per-task=24
 #SBATCH --mem=64G
@@ -44,6 +46,13 @@ export MUJOCO_GL=egl
 
 echo "cell ${CELL} of ${CSV} -> ${OUTDIR} on $(hostname), ${SLURM_CPUS_PER_TASK:-?} CPUs"
 echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset}"
+# A job spread over several nodes runs here only, and the other nodes' GPUs idle until
+# the cluster kills it. Stop now instead.
+if (( ${SLURM_JOB_NUM_NODES:-1} > 1 )); then
+    echo "this job has ${SLURM_JOB_NUM_NODES} nodes (${SLURM_JOB_NODELIST:-?}); the pool uses one." \
+         "Submit with --nodes=1 (submit_bayes_opt.sh does)." >&2
+    exit 1
+fi
 # compute_mode must be Default: Exclusive_Process lets one process per GPU in, and the
 # pool puts several planners and workers on each.
 nvidia-smi --query-gpu=index,name,memory.total,compute_mode --format=csv,noheader || true

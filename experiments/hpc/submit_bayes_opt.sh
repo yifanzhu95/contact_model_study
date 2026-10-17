@@ -78,7 +78,8 @@ for key in "${ORDER[@]}"; do
     # --export=ALL,... keeps the environment `module load` needs inside the job. Every array
     # after the first writes into the first one's folder, so the summary finds every cell.
     EXPORT="ALL,CSV=$CSV,PROJ_DIR=$PROJ_DIR,PLANNERS_PER_GPU=$ppg,WORKERS=$workers${OUT:+,OUTDIR=$OUT}"
-    JOB=$(sbatch --parsable --array="$ARRAY" --export="$EXPORT" --gpus="$GPU_TYPE:$gpus" \
+    # --nodes=1: --gpus is a total for the job, and SLURM may otherwise split it over nodes.
+    JOB=$(sbatch --parsable --array="$ARRAY" --export="$EXPORT" --nodes=1 --ntasks=1 --gpus="$GPU_TYPE:$gpus" \
           --cpus-per-task="$cpus" --mem="${mem}G" ${SBATCH_ARGS:-} experiments/hpc/run_bayes_opt.slurm)
     JOB=${JOB%%;*}
     JOBS+=("$JOB")
