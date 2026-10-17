@@ -601,6 +601,11 @@ class EpisodePool:
             n_worker_failed = sum(p.startswith("worker_failed") for p in self.problems)
             if kind == "planner_failed" or n_worker_failed >= self.n_workers:
                 self.fatal = True
+        elif kind == "planner_ready":
+            # Built and waiting for work (its first plan still compiles and captures graphs). A
+            # GPU whose planners never print this is a GPU that sits idle.
+            print(f"planner {msg[1]} ready on GPU {msg[2]} after {time.time() - self.t_start:.0f} s",
+                  flush=True)
         elif kind == "worker_stats":
             self.stats["worker_busy"] += msg[2]
         elif kind == "planner_stats":

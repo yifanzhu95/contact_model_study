@@ -138,6 +138,11 @@ BO_COLUMNS = (
 OWN_COLUMNS = ("label",) + BO_COLUMNS
 #: Set by this script, so not allowed as columns (``video``: sweeps never render).
 MANAGED_OPTIONS = batches.MANAGED_OPTIONS + ("rollout_model",)
+#: ``--resources`` sizing: eval workers kept per planner (~2 kept planners busy, M1-M5),
+#: and memory per process (an M5 planner or worker peaks near 1.8 GB) plus the parent's.
+WORKERS_PER_PLANNER = 2
+MEM_PER_PROCESS_GB = 2.5
+MEM_BASE_GB = 4
 #: The MPPI knobs a cell can search, shared or one dimension per model (``<knob>_<model>``).
 KNOBS = ("temperature", "noise_sigma")
 
@@ -237,6 +242,23 @@ class CellSpec:
                 planner[knob] = v
         weights = {k: v for k, v in p.items() if k in COST_WEIGHT_KEYS}
         return planner, weights
+
+    def resources(self, max_gpus: int, planners_per_gpu: int) -> dict[str, int]:
+        """The allocation that runs every episode of the trials in flight at once.
+
+        Episodes per BO step are models x ``n_episodes`` x ``trials_in_flight`` (1
+        when unset). GPUs grow with them, ``WORKERS_PER_PLANNER`` workers per
+        planner, up to ``max_gpus``; one core per process plus the parent's.
+        """
+        in_flight = self.trials_in_flight or 1
+        episodes = self.episodes_per_trial * in_flight
+        per_gpu = planners_per_gpu * WORKERS_PER_PLANNER
+        gpus = max(1, min(max_gpus, math.ceil(episodes / per_gpu)))
+        workers = min(episodes, gpus * per_gpu)
+        procs = gpus * planners_per_gpu + workers
+        mem = 4 * math.ceil((MEM_BASE_GB + MEM_PER_PROCESS_GB * procs) / 4)
+        return {"episodes": episodes, "gpus": gpus, "planners_per_gpu": planners_per_gpu,
+                "workers": workers, "cpus": procs + 1, "mem_gb": mem}
 
     def describe(self, x) -> str:
         return "  ".join(f"{(n[2:] if n.startswith('w_') else n)}={v:.4g}"
@@ -914,6 +936,10 @@ def main(argv=None) -> int:
                    help="when running every row, stop at the first cell that stops early")
     p.add_argument("--check", action="store_true", help="validate every row (space, seeds, driver); run nothing")
     p.add_argument("--count", action="store_true", help="print the number of rows and exit")
+    p.add_argument("--resources", action="store_true",
+                   help="print each row's allocation, 'cell episodes gpus planners_per_gpu workers cpus "
+                        "mem_gb', sized from its episodes per BO step (submit_bayes_opt.sh uses this)")
+    p.add_argument("--max-gpus", type=int, default=4, help="with --resources: GPUs per cell at most")
     p.add_argument("--summarize", action="store_true", help="only (re)build the summaries in --outdir")
     p.add_argument("--debug", action="store_true",
                    help="MPPI's per-plan diagnostics (run_episodes.py --debug) in every episode of every "
@@ -960,6 +986,17 @@ def main(argv=None) -> int:
             print(f"{'OK ' if err is None else 'BAD'} {name}: " + (err or detail))
         print(f"\n{len(rows) - bad}/{len(rows)} rows valid")
         return 1 if bad else 0
+    if args.resources:
+        if args.max_gpus < 1:
+            p.error("--max-gpus must be >= 1")
+        for i, row in enumerate(rows):
+            try:
+                r = parseCell(row, csv_path.parent, outdir / batches.cellName(i, row)).resources(
+                    args.max_gpus, args.planners_per_gpu)
+            except (ValueError, FileNotFoundError) as e:
+                p.error(f"row {i}: {e}")
+            print(i, *r.values())
+        return 0
     if args.summarize:
         return 0 if summarize(csv_path, rows, outdir) else 1
     if args.cell is not None:

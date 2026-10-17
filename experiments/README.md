@@ -263,9 +263,16 @@ trials are kept.
 `hpc/summarize_bayes_opt.slurm` mirror the other pipelines: one array task per
 row, validation first, and a summary job queued `afterany`.
 
-- **Resources:** each task asks for 2 GPUs, 16 CPUs, 32 GB and 24 h. The pool
-  uses whatever SLURM grants. Change it per submission, for example
-  `SBATCH_ARGS="--gpus=rtx_5000_ada:4 --cpus-per-task=32 --time=48:00:00"`.
+- **Resources:** sized per row from its episodes per BO step,
+  `models × n_episodes × trials_in_flight` (1 trial when unset): one GPU per 4
+  of them (2 planners per GPU, 2 workers per planner), up to `MAX_GPUS` (4), a
+  CPU per process and about 2.5 GB each. `run_bayes_opt.py bo.csv --resources
+  --planners-per-gpu 2` prints the sizes. Rows that need the same allocation
+  share one job array, and every array writes into one results folder. The
+  time limit is 48 h. `PLANNERS_PER_GPU`, `MAX_GPUS` and `GPU_TYPE` (default
+  `a5000`) change the sizing; `SBATCH_ARGS` overrides it, for example
+  `SBATCH_ARGS="--time=24:00:00"`. An optional second argument caps how many
+  cells of each size run at once.
 - **Cost:** a cell is `n_calls × models × n_episodes` episodes.
 
 # Processing batch results: KL to the optimal planner, forward-simulation error

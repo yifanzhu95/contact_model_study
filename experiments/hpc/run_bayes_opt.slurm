@@ -13,8 +13,9 @@
 # GPU and WORKERS eval-sim workers (see below), with several trials in flight so
 # they all stay busy. Each spawned process re-imports warp and
 # mujoco, hence the memory. A cell's cost is n_calls x models x n_episodes
-# episodes, so --time must cover the largest row. Change the allocation per
-# submission with SBATCH_ARGS, e.g.
+# episodes, so --time must cover the largest row. submit_bayes_opt.sh sizes the
+# GPUs, CPUs, memory, PLANNERS_PER_GPU and WORKERS per row from its episodes per
+# BO step; the values here are for submitting by hand. Override with SBATCH_ARGS, e.g.
 #   SBATCH_ARGS="--gpus=rtx_5000_ada:4 --cpus-per-task=32 --time=48:00:00"
 # A cell that hits the limit keeps its finished trials, and resumes from them
 # when resubmitted with OUTDIR (see submit_bayes_opt.sh).
@@ -42,7 +43,27 @@ conda activate "${CONDA_ENV:-contact_kamino}"
 export MUJOCO_GL=egl
 
 echo "cell ${CELL} of ${CSV} -> ${OUTDIR} on $(hostname), ${SLURM_CPUS_PER_TASK:-?} CPUs"
-nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader || true
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset}"
+# compute_mode must be Default: Exclusive_Process lets one process per GPU in, and the
+# pool puts several planners and workers on each.
+nvidia-smi --query-gpu=index,name,memory.total,compute_mode --format=csv,noheader || true
+
+# Every GPU_LOG_S seconds (300), each GPU's utilization, memory and process count, so
+# an idle GPU shows in the .out log, with whether the pool has processes on it.
+gpuLog() {
+    while sleep "${GPU_LOG_S:-300}"; do
+        local apps line
+        apps=$(nvidia-smi --query-compute-apps=gpu_bus_id --format=csv,noheader 2>/dev/null)
+        line=$(nvidia-smi --query-gpu=index,pci.bus_id,utilization.gpu,memory.used --format=csv,noheader,nounits \
+               2>/dev/null | while IFS=', ' read -r i bus util mem; do
+                   echo -n "  gpu$i ${util}% ${mem}MiB $(grep -c "$bus" <<< "$apps") procs;"
+               done)
+        echo "[gpus $(date +%H:%M:%S)]$line"
+    done
+}
+gpuLog &
+GPU_LOG_PID=$!
+trap 'kill $GPU_LOG_PID 2>/dev/null' EXIT
 
 # MPPI debug: one [MPPI] line per plan in the .out log. On by default; submit with
 # DEBUG=0 to turn it off.

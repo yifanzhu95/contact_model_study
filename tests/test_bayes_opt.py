@@ -201,6 +201,16 @@ def test_scoring_and_folding(tmp_path):
 
 
 # -- the optimizer -----------------------------------------------------------------------
+def test_resources_grow_with_the_episodes_per_step(tmp_path):
+    small = cell(tmp_path, rollout_models="M2", opt_weights="w_quat").resources(4, 2)
+    assert small == {"episodes": 2, "gpus": 1, "planners_per_gpu": 2, "workers": 2, "cpus": 5, "mem_gb": 16}
+    mid = cell(tmp_path, rollout_models="M2 M3", n_episodes="4", opt_weights="w_quat").resources(4, 2)
+    assert (mid["episodes"], mid["gpus"], mid["workers"]) == (8, 2, 8)
+    big = cell(tmp_path, rollout_models="M2", n_episodes="16", trials_in_flight="2",
+               opt_weights="w_quat").resources(4, 2)
+    assert (big["episodes"], big["gpus"], big["workers"], big["cpus"]) == (32, 4, 16, 25)  # capped at 4 GPUs
+
+
 def test_constant_liar_proposes_distinct_points(tmp_path):
     s = cell(tmp_path, opt_weights="w_quat w_joint", noise_sigma_range="0.01 0.5")
     opt = bo.makeOptimizer(s)
