@@ -209,6 +209,9 @@ def test_resources_grow_with_the_episodes_per_step(tmp_path):
     big = cell(tmp_path, rollout_models="M2", n_episodes="16", trials_in_flight="2",
                opt_weights="w_quat").resources(4, 2)
     assert (big["episodes"], big["gpus"], big["workers"], big["cpus"]) == (32, 4, 16, 25)  # capped at 4 GPUs
+    m5 = cell(tmp_path, rollout_models="M5", n_episodes="4", trials_in_flight="2", eval_sim="M5",
+              opt_weights="w_quat").resources(4, 2)
+    assert (m5["episodes"], m5["gpus"], m5["workers"], m5["cpus"]) == (8, 4, 8, 17)  # a planner per episode
 
 
 def test_constant_liar_proposes_distinct_points(tmp_path):

@@ -265,7 +265,8 @@ row, validation first, and a summary job queued `afterany`.
 
 - **Resources:** sized per row from its episodes per BO step,
   `models × n_episodes × trials_in_flight` (1 trial when unset): one GPU per 4
-  of them (2 planners per GPU, 2 workers per planner), up to `MAX_GPUS` (4), a
+  of them (2 planners per GPU, 2 workers per planner), or per 2 when M5 is a
+  rollout model (1 worker per planner: its plans are slow), up to `MAX_GPUS` (4), a
   CPU per process and about 2.5 GB each. `run_bayes_opt.py bo.csv --resources
   --planners-per-gpu 2` prints the sizes. Rows that need the same allocation
   share one job array, and every array writes into one results folder. The

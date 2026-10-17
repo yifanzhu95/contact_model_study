@@ -10,7 +10,7 @@
 #   1. validates every row (search space, seeds) against the driver (so typos fail here, not on a node),
 #   2. sizes each row from its episodes per BO step (models x n_episodes x trials_in_flight): GPUs
 #      (PLANNERS_PER_GPU planners each, 2 by default; at most MAX_GPUS, 4), 2 eval workers per
-#      planner (never more than the episodes), a core per process and ~2.5 GB of memory each
+#      planner, 1 when M5 is a rollout model (never more than the episodes), a core per process and ~2.5 GB of memory each
 #      (run_bayes_opt.py --resources prints this),
 #   3. submits run_bayes_opt.slurm once per allocation, as a job array over the rows that share it,
 #      all writing into one results folder,

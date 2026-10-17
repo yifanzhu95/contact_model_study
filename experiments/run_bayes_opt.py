@@ -138,9 +138,12 @@ BO_COLUMNS = (
 OWN_COLUMNS = ("label",) + BO_COLUMNS
 #: Set by this script, so not allowed as columns (``video``: sweeps never render).
 MANAGED_OPTIONS = batches.MANAGED_OPTIONS + ("rollout_model",)
-#: ``--resources`` sizing: eval workers kept per planner (~2 kept planners busy, M1-M5),
-#: and memory per process (an M5 planner or worker peaks near 1.8 GB) plus the parent's.
+#: ``--resources`` sizing: eval workers per planner, and memory per process (an M5
+#: planner or worker peaks near 1.8 GB) plus the parent's. An episode waits on one
+#: plan at a time, so a planner needs a worker per plan it can run back to back: ~2
+#: for M1-M4's quick plans, 1 for M5's (1.6-3 s each, against a 3%-busy worker).
 WORKERS_PER_PLANNER = 2
+SLOW_MODEL_WORKERS_PER_PLANNER = {"M5": 1}
 MEM_PER_PROCESS_GB = 2.5
 MEM_BASE_GB = 4
 #: The MPPI knobs a cell can search, shared or one dimension per model (``<knob>_<model>``).
@@ -248,11 +251,14 @@ class CellSpec:
 
         Episodes per BO step are models x ``n_episodes`` x ``trials_in_flight`` (1
         when unset). GPUs grow with them, ``WORKERS_PER_PLANNER`` workers per
-        planner, up to ``max_gpus``; one core per process plus the parent's.
+        planner (fewer when a slow model is among the rollouts), up to
+        ``max_gpus``; one core per process plus the parent's.
         """
         in_flight = self.trials_in_flight or 1
         episodes = self.episodes_per_trial * in_flight
-        per_gpu = planners_per_gpu * WORKERS_PER_PLANNER
+        per_planner = min([WORKERS_PER_PLANNER] + [SLOW_MODEL_WORKERS_PER_PLANNER.get(m, WORKERS_PER_PLANNER)
+                                                    for m in self.models])
+        per_gpu = planners_per_gpu * per_planner
         gpus = max(1, min(max_gpus, math.ceil(episodes / per_gpu)))
         workers = min(episodes, gpus * per_gpu)
         procs = gpus * planners_per_gpu + workers
