@@ -59,6 +59,9 @@ class MPPI_Config(SamplingBasedPlannerConfig):
         super().__post_init__()
         if self.temperature <= 0.0:
             raise ValueError(f"temperature must be positive, got {self.temperature}")
+        if self.adaptive_temp and self.convergence_ratio is not None:
+            raise ValueError("convergence_ratio compares free energies across iterations, which "
+                             "adaptive_temp would compute at different temperatures")
 
 
 class MPPI(SamplingBasedPlannerBase):
@@ -90,9 +93,11 @@ class MPPI(SamplingBasedPlannerBase):
         self._unc_wp = wp.zeros(self.nu, dtype=wp.float32, device=dev)
         self._dbg_ess = float("nan")
         self._dbg_avg_cost = float("nan")
-        # Diagnostics from the last update.
+        # Diagnostics from the last update, and the lambda it weighted with
+        # (adaptive temperature moves self.lam on afterwards).
         self.last_min_cost = float("nan")
         self.last_eta = float("nan")
+        self.last_lam = self.lam
 
     # -- hooks ---------------------------------------------------------------
     def _buildSamples(self) -> None:
@@ -112,7 +117,7 @@ class MPPI(SamplingBasedPlannerBase):
         so there is no update to make.
         """
         eta, beta = self._weightUpdate()
-        self.last_eta, self.last_min_cost = eta, beta
+        self.last_eta, self.last_min_cost, self.last_lam = eta, beta, self.lam
 
         if self.config.debug:
             print(f"  [MPPI] min {beta:.4f}  avg {self._dbg_avg_cost:.4f}  "
@@ -183,6 +188,27 @@ class MPPI(SamplingBasedPlannerBase):
                   inputs=[self.w_wp, self.V_wp, self.U_wp, self.N],
                   outputs=[self._unc_wp])
         return self._unc_wp.numpy().copy()
+
+    def _freeEnergy(self) -> tuple[float, float]:
+        """Free energy of the last update's samples, and its standard error.
+
+        ``F = -lambda * log(mean_n exp(-J_n / lambda)) = beta - lambda *
+        log(eta / N)``, from the two scalars the update already brought back:
+        a soft minimum of the sampled costs, which MPPI's update descends. It
+        lies between the minimum cost (``lambda -> 0``) and the mean cost
+        (``lambda -> inf``), in the same units as the (folded) costs. NaN
+        rollouts count as infinitely expensive.
+
+        The standard error is the delta method's on the log of a sample mean:
+        with ``x_n = exp(-J_n / lambda)``, ``Var(log mean x) ~= Var(x) /
+        (N mean(x)^2) = sum_n w_n^2 - 1/N``, so ``se = lambda * sqrt(1/ESS -
+        1/N)`` — zero when every sample scores the same, and growing as fewer
+        samples carry the weight.
+        """
+        lam = self.last_lam
+        f = self.last_min_cost - lam * float(np.log(self.last_eta / self.N))
+        w = self.w_wp.numpy().astype(np.float64)
+        return f, lam * float(np.sqrt(max(float(w @ w) - 1.0 / self.N, 0.0)))
 
     # -- the update ----------------------------------------------------------
     def _weightUpdate(self) -> tuple[float, float]:

@@ -89,6 +89,15 @@ def test_optimal_args_give_the_optimal_planner_settings_of_its_own():
             pbr.parseOptimalArgs(bad)
 
 
+def test_the_optimal_planner_defaults_give_way_to_the_flags_given():
+    over, text = pbr.optimalOverrides(None)
+    assert over == {"convergence_ratio": 2.0, "noise_sigma": 0.38, "temperature": 0.001}
+    assert text == pbr.DEFAULT_OPTIMAL_ARGS
+    over, text = pbr.optimalOverrides("--temperature 0.1 --n-samples 64")
+    assert over == {"convergence_ratio": 2.0, "noise_sigma": 0.38, "temperature": 0.1, "n_samples": 64}
+    assert text == pbr.DEFAULT_OPTIMAL_ARGS + " --temperature 0.1 --n-samples 64"
+
+
 def test_bad_optimal_args_are_refused_before_anything_runs(tmp_path):
     fake_batch(tmp_path, 1)
     with pytest.raises(SystemExit):
@@ -98,6 +107,13 @@ def test_bad_optimal_args_are_refused_before_anything_runs(tmp_path):
 @pytest.mark.parametrize("recorded, replayed", [(False, "hold"), (True, "shift"), ("none", "none")])
 def test_recorded_on_off_warm_start_replays_as_it_ran(recorded, replayed):
     assert pbr.argsFromCliArgs({"warm_start": recorded}).warm_start == replayed
+
+
+def test_recordings_from_before_the_noise_flags_replay_with_the_old_noise():
+    old = pbr.argsFromCliArgs({"warm_start": "none"})
+    assert old.resample_noise is False and old.center_noise is False
+    new = pbr.argsFromCliArgs({"warm_start": "none", "resample_noise": True, "center_noise": True})
+    assert new.resample_noise is True and new.center_noise is True
 
 
 def test_metrics():
@@ -112,6 +128,22 @@ def test_metrics():
     assert np.allclose(pbr.goalIndexPerStep([(0, None), (3, None), (7, None)], 9), [0, 0, 0, 1, 1, 1, 1, 2, 2])
     s = pbr.stats("x", [1.0, 2.0, 3.0, np.nan])
     assert s["x_mean"] == 2.0 and s["x_median"] == 2.0 and s["x_n_nonfinite"] == 1
+    # The mean's 95% t-interval over the finite values: 2 +/- t(0.975, 2) * 1 / sqrt(3).
+    half = 4.302652729911275 / np.sqrt(3)
+    assert (s["x_mean_lo"], s["x_mean_hi"]) == (pytest.approx(2 - half), pytest.approx(2 + half))
+    assert list(s)[:3] == ["x_mean", "x_mean_lo", "x_mean_hi"]
+    one = pbr.stats("y", [5.0])
+    assert one["y_mean"] == 5.0 and one["y_mean_lo"] is None and one["y_mean_hi"] is None
+    assert pbr.stats("z", [np.nan])["z_mean"] is None
+
+
+def test_cell_and_episode_metrics_come_back_from_the_saved_steps(tmp_path):
+    a, b = {"m": np.array([1.0, 2.0])}, {"m": np.array([3.0, np.nan, 6.0])}
+    np.savez(tmp_path / "x.npz", m__aa=a["m"], step__aa=np.arange(2), m__bb=b["m"], step__bb=np.arange(3))
+    cell, eps = pbr.metricsFromNpz(tmp_path / "x.npz")
+    assert cell == pbr.stats("m", [1.0, 2.0, 3.0, np.nan, 6.0])           # pooled over every step
+    assert eps == {"aa": pbr.episodeStats(a), "bb": pbr.episodeStats(b)}
+    assert set(eps["bb"]) == {"m_mean", "m_mean_lo", "m_mean_hi"} and eps["bb"]["m_mean"] == 4.5
 
 
 # -- end to end --------------------------------------------------------------------------------
@@ -143,17 +175,48 @@ def test_process_a_batch(batch):
     o = json.loads((batch / "analysis" / "cell_0001_oracle.analysis.json").read_text())
     for rec in (a, o):
         assert np.isfinite(rec["metrics"]["kl_used_opt_mean"]) and np.isfinite(rec["metrics"]["fsim_qpos_err_mean"])
+        assert np.isfinite(rec["metrics"]["regret_mean"])
     assert a["optimal_planner"]["rollout_model"] == "M2" and a["optimal_planner"]["scene"] == "env_leap_eval_cube.xml"
+    op, zp = a["optimal_planner"], a["zero_gap_planner"]
+    assert (op["noise_sigma"], op["temperature"], op["convergence_ratio"]) == (0.38, 0.001, 2.0)
+    # The zero-gap planner: the used planner's own settings, on the eval model.
+    cli = json.loads((batch / "cell_0000_mismatch.json").read_text())["configs"]["metadata"]["cli_args"]
+    assert (zp["rollout_model"], zp["scene"]) == ("M2", "env_leap_eval_cube.xml")
+    assert (zp["noise_sigma"], zp["temperature"], zp["n_samples"], zp["convergence_ratio"]) == \
+        (cli["noise_sigma"], cli["temperature"], cli["n_samples"], cli.get("convergence_ratio"))
+    # The oracle already plans on the eval model, so its plan is the zero-gap plan: no regret.
+    assert abs(o["metrics"]["regret_mean"]) < 1e-3 * abs(np.mean(np.load(
+        batch / "analysis" / "cell_0001_oracle" / f"{o['episodes'][0]['id']}.npz")["regret_f_zero"]))
     # The oracle's planner and rollout model are the eval model: forward-sim error at MJWarp's noise.
     assert o["metrics"]["fsim_obj_pos_err_mean"] < 1e-4 < a["metrics"]["fsim_obj_pos_err_mean"]
     rows = list(csv.DictReader(open(batch / "final_results.csv")))
     assert [r["name"] for r in rows] == ["cell_0000_mismatch", "cell_0001_oracle", "cell_0002_strided"]
     for col in ("rollout_model", "success_rate", "batch_status", "analysis_status", "kl_used_opt_mean",
                 "kl_opt_used_mean", "fsim_obj_pos_err_mean", "eval_vs_recorded_qpos_err_mean",
-                "fsim_opt_obj_pos_err_mean", "eval_used_vs_opt_qpos_err_mean", "replay_action_err_mean"):
+                "fsim_opt_obj_pos_err_mean", "eval_used_vs_opt_qpos_err_mean", "replay_action_err_mean",
+                "regret_mean"):
         assert col in rows[0]
+    # Every mean and rate has its 95% interval around it.
+    for r in rows:
+        for col in ("success_rate", "kl_used_opt_mean", "regret_mean", "fsim_obj_pos_err_mean",
+                    "mean_goals_reached", "plan_ms_mean"):
+            if r[f"{col}_lo"] == "":                    # a mean over one episode has no interval
+                assert col in ("mean_goals_reached", "plan_ms_mean") and r["n_episodes_run"] == "1"
+                continue
+            lo, v, hi = (float(r[f"{col}{s}"]) for s in ("_lo", "", "_hi"))
+            assert lo <= v <= hi, (r["name"], col)
     eps = list(csv.DictReader(open(batch / "final_episodes.csv")))
     assert len(eps) == 4 and all(e["kl_used_opt_mean"] for e in eps)
+    assert all(float(e["regret_mean_lo"]) <= float(e["regret_mean"]) <= float(e["regret_mean_hi"]) for e in eps)
+    # An analysis from before the intervals gains them from its saved steps on --summarize.
+    path = batch / "analysis" / "cell_0000_mismatch.analysis.json"
+    old = json.loads(path.read_text())
+    stripped = {**old, "metrics": {k: v for k, v in old["metrics"].items() if not k.endswith(("_lo", "_hi"))}}
+    path.write_text(json.dumps(stripped))
+    assert pbr.main([str(batch), "--summarize"]) == 0
+    again = list(csv.DictReader(open(batch / "final_results.csv")))[0]
+    assert again["regret_mean_lo"] == rows[0]["regret_mean_lo"] != ""
+    path.write_text(json.dumps(old))
     assert a["replay"] == o["replay"] == "independent" and a["n_steps_analyzed"] == 12
     # Rerun: nothing is redone.
     mtime = (batch / "analysis" / "cell_0000_mismatch.analysis.json").stat().st_mtime
@@ -195,7 +258,8 @@ def test_the_optimal_planner_takes_its_own_settings(batch):
                           optimal_args="--n-samples 64 --temperature 0.5 --cost-weight w_quat=2")
     o = rec["optimal_planner"]
     assert (o["n_samples"], o["temperature"], o["cost_weights"]["w_quat"]) == (64, 0.5, 2.0)
-    assert rec["optimal_args"].startswith("--n-samples 64") and rec["n_steps_analyzed"] == 2
+    assert rec["optimal_args"] == pbr.DEFAULT_OPTIMAL_ARGS + " --n-samples 64 --temperature 0.5 --cost-weight w_quat=2"
+    assert o["noise_sigma"] == 0.38 and rec["n_steps_analyzed"] == 2
     assert np.isfinite(rec["metrics"]["kl_used_opt_mean"]) and np.isfinite(rec["metrics"]["fsim_opt_qpos_err_mean"])
 
 
@@ -241,6 +305,10 @@ def test_episode_metrics_from_the_saved_steps():
         key = f"{model}_{action}" if action else model
         d[f"q_next_{key}"], d[f"q_dot_next_{key}"] = q, np.zeros((T, 22))
     m = pbr.episodeMetrics(d, shrinkage=0.5)
+    assert np.isnan(m["regret"]).all()                                  # saved before the regret was
+    d["regret_f_used"], d["regret_f_zero"] = np.array([5.0, 3.0]), np.array([4.0, 3.5])
+    m = pbr.episodeMetrics(d, shrinkage=0.5)
+    assert np.allclose(m["regret"], [1.0, -0.5])
     assert m["kl_used_opt"][0] == pytest.approx(0.0) and np.isnan(m["kl_used_opt"][1])
     assert np.allclose(m["fsim_obj_pos_err"], 0.002) and np.allclose(m["fsim_opt_obj_pos_err"], 0.0)
     assert np.allclose(m["eval_vs_recorded_qpos_err"], 0.0) and np.allclose(m["replay_action_err"], 0.0)

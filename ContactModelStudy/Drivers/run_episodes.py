@@ -142,7 +142,7 @@ def build_parser() -> argparse.ArgumentParser:
                    choices=sorted(CONTACT_MODELS) + sorted(ALIASES), metavar="MODEL",
                    help="contact model the planner rolls out with: M1 (stiff MJWarp), "
                         "M2 (MJWarp soft, default), M3 (ComFree), M4 (XPBD), M5 (Kamino; contact_kamino env)")
-    g.add_argument("--n-samples", type=int, default=256,
+    g.add_argument("--n-samples", type=int, default=1024,#256,
                    help="N: rollout worlds, one per sampled control sequence")
     g.add_argument("--horizon", type=int, default=None,
                    help=f"H: planning horizon in control steps. Give this or "
@@ -152,8 +152,19 @@ def build_parser() -> argparse.ArgumentParser:
                    help="planning horizon (s), rounded down to whole control steps; "
                         "the alternative to --horizon")
     g.add_argument("--n-iterations", type=int, default=1)
-    g.add_argument("--noise-sigma", type=float, default=0.1)#40.0)#0.01)
-    g.add_argument("--temperature", type=float, default=1.0,#40.0,#0.001,
+    g.add_argument("--convergence-ratio", type=float, default=None,
+                   help="iterate until the free energy's drop between iterations is "
+                        "within this many standard errors (try 1-2); replaces --n-iterations")
+    g.add_argument("--max-iterations", type=int, default=100,
+                   help="iteration cap under --convergence-ratio")
+    g.add_argument("--resample-noise", action=argparse.BooleanOptionalAction, default=False,
+                   help="redraw the noise before every iteration; --no-resample-noise "
+                        "reuses one draw per plan")
+    g.add_argument("--center-noise", action=argparse.BooleanOptionalAction, default=True,
+                   help="subtract the sample mean from each noise draw, so uniform "
+                        "weights leave the planned mean in place")
+    g.add_argument("--noise-sigma", type=float, default=0.05)#0.05)#0.1)#40.0)#0.01)
+    g.add_argument("--temperature", type=float, default=1.0,#1.0,#40.0,#0.001,
                    help="MPPI lambda; smaller is greedier")
     g.add_argument("--control-mode", default="pos_relative",
                    choices=["pos_relative", "ctrl_relative", "absolute"],
@@ -442,6 +453,8 @@ def buildPlannerConfig(args) -> MPPI_Config:
     delta_range = (None, None) if args.delta is None else (-args.delta, args.delta)
     return MPPI_Config(
         noise_sigma=args.noise_sigma, n_iterations=args.n_iterations,
+        convergence_ratio=args.convergence_ratio, max_iterations=args.max_iterations,
+        resample_noise=args.resample_noise, center_noise=args.center_noise,
         temperature=args.temperature, adaptive_temp=args.adaptive_temp,
         control_mode=args.control_mode, delta_range=delta_range,
         warm_start=args.warm_start, seed=args.seed, use_graph=args.graph,

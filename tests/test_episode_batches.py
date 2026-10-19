@@ -130,3 +130,29 @@ def test_run_all_resume_and_summarize(tmp_path):
     assert (out / "cell_0000_ok.json").stat().st_mtime == mtime
     assert batches.main([str(csv_path), "--outdir", str(out), "--cell", "0", "--overwrite"]) == 0
     assert (out / "cell_0000_ok.json").stat().st_mtime > mtime
+
+
+def test_wilson_and_mean_intervals():
+    assert batches.wilsonInterval(5, 10) == (pytest.approx(0.2366, abs=1e-4), pytest.approx(0.7634, abs=1e-4))
+    assert batches.wilsonInterval(0, 10) == (0.0, pytest.approx(0.2775, abs=1e-4))
+    assert batches.wilsonInterval(10, 10) == (pytest.approx(0.7225, abs=1e-4), 1.0)
+    assert batches.wilsonInterval(0, 0) == (None, None)
+    mean, lo, hi = batches.meanInterval([1.0, 2.0, 3.0, float("nan"), None])
+    half = 4.302652729911275 / 3 ** 0.5                       # t(0.975, 2) * sd 1 / sqrt(3)
+    assert (mean, lo, hi) == (2.0, pytest.approx(2 - half), pytest.approx(2 + half))
+    assert batches.meanInterval([4.0]) == (4.0, None, None) and batches.meanInterval([]) == (None, None, None)
+
+
+def test_cell_results_carry_95_percent_intervals(tmp_path):
+    eps = [{"summary": {"plan_s_mean": 0.01 * k, "steps_to_success": 10 * k if k < 3 else None,
+                        "goals_reached": k}} for k in (1, 2, 3)]
+    res = tmp_path / "cell.json"
+    res.write_text(json.dumps({"n_episodes": 3, "n_success": 2, "n_failed": 0, "success_rate": 2 / 3,
+                               "episodes": eps}))
+    m = batches.cellResultMetrics(res)
+    assert (m["success_rate_lo"], m["success_rate_hi"]) == batches.wilsonInterval(2, 3)
+    assert m["mean_steps_to_success"] == 15.0
+    assert (m["mean_steps_to_success_lo"], m["mean_steps_to_success_hi"]) == batches.meanInterval([10, 20])[1:]
+    assert m["plan_ms_mean"] == pytest.approx(20.0)
+    assert m["plan_ms_mean_lo"] == pytest.approx(1e3 * batches.meanInterval([0.01, 0.02, 0.03])[1])
+    assert m["mean_goals_reached_lo"] < 2.0 < m["mean_goals_reached_hi"]

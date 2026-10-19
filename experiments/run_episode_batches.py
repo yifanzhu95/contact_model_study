@@ -63,6 +63,7 @@ import contextlib
 import csv
 import io
 import json
+import math
 import os
 import re
 import subprocess
@@ -266,11 +267,54 @@ def runAll(csv_path: Path, rows: list[dict], outdir: Path, overwrite: bool, stop
 
 
 # -- summary -------------------------------------------------------------------
+def wilsonInterval(successes: int, n: int, z: float = 1.96) -> tuple[float | None, float | None]:
+    """95% Wilson score interval ``(lo, hi)`` for ``successes`` out of ``n``; ``None`` for ``n = 0``."""
+    if not n:
+        return None, None
+    p = successes / n
+    denom = 1 + z ** 2 / n
+    center = (p + z ** 2 / (2 * n)) / denom
+    half = z * math.sqrt(p * (1 - p) / n + z ** 2 / (4 * n ** 2)) / denom
+    return max(0.0, center - half), min(1.0, center + half)
+
+
+def meanInterval(values, level: float = 0.95) -> tuple[float | None, float | None, float | None]:
+    """``(mean, lo, hi)``: the mean of the finite ``values`` and its t-interval.
+
+    ``mean +/- t * sd / sqrt(n)``, with every value an independent sample. The
+    bounds are ``None`` below two values; all three are with none.
+    """
+    v = [float(x) for x in values if x is not None and math.isfinite(float(x))]
+    n = len(v)
+    if n == 0:
+        return None, None, None
+    mean = sum(v) / n
+    if n < 2:
+        return mean, None, None
+    try:
+        from scipy.stats import t
+        q = float(t.ppf((1 + level) / 2, n - 1))
+    except ImportError:                                 # the normal quantile: exact as n grows
+        from statistics import NormalDist
+        q = NormalDist().inv_cdf((1 + level) / 2)
+    half = q * math.sqrt(sum((x - mean) ** 2 for x in v) / (n - 1) / n)
+    return mean, mean - half, mean + half
+
+
+def withInterval(name: str, values, scale: float = 1.0) -> dict:
+    """``{name, name_lo, name_hi}``: ``meanInterval`` of ``values``, times ``scale``."""
+    mean, lo, hi = (None if x is None else scale * x for x in meanInterval(values))
+    return {name: mean, f"{name}_lo": lo, f"{name}_hi": hi}
+
+
 def cellResultMetrics(res: Path) -> dict:
     """A cell's results file, boiled down: counts, success rate, mean steps and plan time.
 
-    Empty when the file does not exist. Shared with ``process_batch_results.py``,
-    so its final table reports the batch exactly as ``summary.csv`` does.
+    Each rate or mean comes with a 95% interval, ``<column>_lo`` / ``_hi``: a
+    Wilson score interval for the success rate, a t-interval over the episodes
+    for the means. Empty when the file does not exist. Shared with
+    ``process_batch_results.py``, so its final table reports the batch exactly
+    as ``summary.csv`` does.
     """
     if not res.exists():
         return {}
@@ -278,12 +322,15 @@ def cellResultMetrics(res: Path) -> dict:
     eps = [e["summary"] for e in doc.get("episodes", [])]
     plan = [e["plan_s_mean"] for e in eps if e.get("plan_s_mean") is not None]
     steps = [e["steps_to_success"] for e in eps if e.get("steps_to_success") is not None]
+    n, n_success = doc.get("n_episodes"), doc.get("n_success")
+    lo, hi = wilsonInterval(n_success, n) if n is not None and n_success is not None else (None, None)
     return dict(
-        n_episodes_run=doc.get("n_episodes"), n_success=doc.get("n_success"),
+        n_episodes_run=n, n_success=n_success,
         n_failed=doc.get("n_failed"), success_rate=doc.get("success_rate"),
-        mean_steps_to_success=(sum(steps) / len(steps)) if steps else None,
-        mean_goals_reached=(sum(e["goals_reached"] for e in eps) / len(eps)) if eps else None,
-        plan_ms_mean=(1e3 * sum(plan) / len(plan)) if plan else None,
+        success_rate_lo=lo, success_rate_hi=hi,
+        **withInterval("mean_steps_to_success", steps),
+        **withInterval("mean_goals_reached", [e["goals_reached"] for e in eps]),
+        **withInterval("plan_ms_mean", plan, scale=1e3),
         results=res.name,
     )
 
@@ -316,7 +363,8 @@ def summarize(csv_path: Path, rows: list[dict], outdir: Path) -> Path | None:
     for e in table:
         rate = e.get("success_rate")
         print(f"  {e['name']:<32} {e['status']:<8} "
-              + (f"success {rate:.0%} ({e['n_success']}/{e['n_episodes_run']})" if rate is not None else ""))
+              + (f"success {rate:.0%} ({e['n_success']}/{e['n_episodes_run']}, 95% "
+                 f"[{e['success_rate_lo']:.0%}, {e['success_rate_hi']:.0%}])" if rate is not None else ""))
     return outdir / "summary.csv"
 
 

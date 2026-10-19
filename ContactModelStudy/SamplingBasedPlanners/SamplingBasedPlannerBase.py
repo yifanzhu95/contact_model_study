@@ -52,7 +52,33 @@ class SamplingBasedPlannerConfig:
 
     Attributes:
         noise_sigma: Standard deviation of the Gaussian perturbations.
-        n_iterations: Optimizer iterations per ``Plan`` call.
+        n_iterations: Optimizer iterations per ``Plan`` call. Ignored when
+            ``convergence_ratio`` is set.
+        convergence_ratio: Iterate until the free energy stops improving,
+            instead of a fixed ``n_iterations``. Every update estimates the
+            free energy of the distribution it sampled, with a standard error
+            (see ``_freeEnergy``). From the second update on, the loop stops
+            once the drop from the previous estimate is within
+            ``convergence_ratio`` standard errors of their difference,
+            ``F_k-1 - F_k <= convergence_ratio * sqrt(se_k-1^2 + se_k^2)``:
+            the improvement can no longer be told apart from sampling noise.
+            The standard error treats the two estimates as independent, which
+            they are under ``resample_noise``; on a shared noise block their
+            errors are correlated, the drop is less noisy than that, and the
+            test stops on the early side. Around 1–2 is a reasonable start.
+            ``None`` (default) runs ``n_iterations``.
+        max_iterations: Cap on the iterations when ``convergence_ratio`` is
+            set; at least 2, since the test compares consecutive updates.
+        resample_noise: Redraw the noise block before every iteration. Off, one
+            block is drawn per ``Plan`` and every iteration re-centers it on the
+            new mean. Either way the first iteration's draw is the same, and
+            the plan's noise index (``resample_count``) advances once per plan.
+        center_noise: Subtract the mean over the ``N`` samples from every
+            ``(h, u)`` entry of each noise draw, so the block sums to zero. The
+            update ``U += sum_n w_n eps_n`` then moves the mean only where the
+            costs tell samples apart: uniform weights leave it exactly where it
+            was, instead of shifting it by the draw's sample mean. Shrinks each
+            sample's variance by ``(N - 1) / N``.
         warm_start: Where each ``Plan`` call starts its mean sequence:
 
             * ``"none"`` — afresh, from the mean the last ``Reset`` seeded
@@ -106,6 +132,10 @@ class SamplingBasedPlannerConfig:
 
     noise_sigma: float = 0.01
     n_iterations: int = 1
+    convergence_ratio: float | None = None
+    max_iterations: int = 10
+    resample_noise: bool = True
+    center_noise: bool = True
     warm_start: str = "none"
     control_mode: str = "pos_relative"
     delta_range: tuple[float | None, float | None] = (None, None)
@@ -120,6 +150,13 @@ class SamplingBasedPlannerConfig:
             raise ValueError(f"noise_sigma must be positive, got {self.noise_sigma}")
         if self.n_iterations < 1:
             raise ValueError(f"n_iterations must be >= 1, got {self.n_iterations}")
+        if self.convergence_ratio is not None and self.convergence_ratio <= 0.0:
+            raise ValueError(f"convergence_ratio must be positive or None, got {self.convergence_ratio}")
+        if self.max_iterations < 1:
+            raise ValueError(f"max_iterations must be >= 1, got {self.max_iterations}")
+        if self.convergence_ratio is not None and self.max_iterations < 2:
+            raise ValueError("convergence_ratio compares consecutive updates, so max_iterations "
+                             f"must be >= 2, got {self.max_iterations}")
         if self.control_mode not in _CONTROL_MODES:
             raise ValueError(
                 f"control_mode must be one of {_CONTROL_MODES}, got {self.control_mode!r}"
@@ -153,7 +190,8 @@ class SamplingBasedPlannerBase(abc.ABC):
     name = "SamplingBasedPlanner"
     #: Config fields ``UpdateConfig`` may change on a built planner: the ones
     #: read afresh on every plan, so no buffer or captured graph depends on them.
-    RUNTIME_FIELDS: tuple[str, ...] = ("noise_sigma",)
+    RUNTIME_FIELDS: tuple[str, ...] = ("noise_sigma", "convergence_ratio", "max_iterations",
+                                       "resample_noise", "center_noise")
 
     def __init__(
         self,
@@ -227,6 +265,10 @@ class SamplingBasedPlannerBase(abc.ABC):
 
         # Diagnostics a driver or an evaluation pass can read after a plan.
         self.last_action_seq: np.ndarray | None = None
+        #: ``(H, nu)`` mean the last successful plan ended at, before the
+        #: warm-start shift: the plan itself, in the planner's own
+        #: parameterization (``last_action_seq`` is the commands it implies).
+        self.last_mean: np.ndarray | None = None
         self.last_plan_ok: bool = False
         #: The ``SaveState`` this plan started from: its mean, the control it
         #: accumulates from, its noise draw and (MPPI) temperature.
@@ -235,6 +277,16 @@ class SamplingBasedPlannerBase(abc.ABC):
         #: ``(nu,)`` uncertainty of the last action, when ``return_uncertainty``
         #: is set; NaN after a failed plan.
         self.last_action_uncertainty: np.ndarray | None = None
+        #: Updates the last plan made, and — with ``convergence_ratio`` set —
+        #: whether its free energy stopped improving (``None`` without one);
+        #: the free energy of its final update, and that update's drop from
+        #: the one before with the drop's standard error (``None`` until a
+        #: second update).
+        self.last_n_iterations: int = 0
+        self.last_converged: bool | None = None
+        self.last_free_energy: float | None = None
+        self.last_free_energy_drop: float | None = None
+        self.last_free_energy_drop_se: float | None = None
 
         self._setupArrays()
 
@@ -316,6 +368,17 @@ class SamplingBasedPlannerBase(abc.ABC):
         """
         raise NotImplementedError
 
+    def _freeEnergy(self) -> tuple[float, float]:
+        """``(F, se)``: free energy of the distribution the last update sampled.
+
+        The objective ``convergence_ratio`` watches: lower is better, and the
+        loop stops once it stops dropping by more than its noise. Called after
+        every ``_updateParams`` when it is set; a planner that supports
+        convergence-terminated planning overrides this.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no free energy; "
+                                  f"set convergence_ratio=None")
+
     # -- the loop ------------------------------------------------------------
     def Plan(
         self, q: np.ndarray, q_dot: np.ndarray, u: np.ndarray | None = None
@@ -359,8 +422,20 @@ class SamplingBasedPlannerBase(abc.ABC):
         self.last_plan_start = {**self.SaveState(), "last_action_seq": None, "last_plan_ok": False}
         self._sampleNoise()
         self.last_plan_ok = False
+        self.last_mean = None
 
-        for _ in range(self.config.n_iterations):
+        ratio = self.config.convergence_ratio
+        cap = self.config.n_iterations if ratio is None else self.config.max_iterations
+        self.last_n_iterations = 0
+        self.last_converged = None if ratio is None else False
+        self.last_free_energy = None
+        self.last_free_energy_drop = None
+        self.last_free_energy_drop_se = None
+        prev_f = prev_se = None
+
+        for i in range(cap):
+            if i > 0 and self.config.resample_noise:
+                self._sampleNoise(iteration=i)
             self._buildSamples()
             self._buildCommands()
             self._rollout(q, q_dot)
@@ -372,11 +447,65 @@ class SamplingBasedPlannerBase(abc.ABC):
                 self.last_action_seq = np.zeros((self.horizon, self.nu), dtype=np.float32)
                 return self._result(np.zeros(self.nu, dtype=np.float32),
                                     np.full(self.nu, np.nan, dtype=np.float32))
+            self.last_n_iterations = i + 1
+            if ratio is None:
+                continue
+            f, se = self._freeEnergy()
+            self.last_free_energy = f
+            if prev_f is None:
+                if self.config.debug:
+                    print(f"  [{self.name}] iter {i + 1}/{cap}  F {f:.6g} (se {se:.2e})")
+                prev_f, prev_se = f, se
+                continue
+            drop, drop_se = prev_f - f, float(np.hypot(prev_se, se))
+            self.last_free_energy_drop, self.last_free_energy_drop_se = drop, drop_se
+            if self.config.debug:
+                print(f"  [{self.name}] iter {i + 1}/{cap}  F {f:.6g} (se {se:.2e})  "
+                      f"drop {drop:.3e}  drop/se {drop / drop_se if drop_se > 0 else float('inf'):.2f}")
+            if drop <= ratio * drop_se:
+                self.last_converged = True
+                break
+            prev_f, prev_se = f, se
+
+        if self.config.debug and ratio is not None:
+            status = "converged" if self.last_converged else "reached cap"
+            print(f"  [{self.name}] {status} in {self.last_n_iterations}/{cap} iterations "
+                  f"(F={self.last_free_energy:.6g}, drop={self.last_free_energy_drop:.3e}, "
+                  f"se={self.last_free_energy_drop_se:.3e}, ratio={ratio:g})")
 
         self.last_plan_ok = True
         # Before _extractAction, whose warm-start shift moves U_wp's row 0.
         unc = self._actionUncertainty() if self.config.return_uncertainty else None
         return self._result(self._extractAction(), unc)
+
+    def FreeEnergyOf(self, q: np.ndarray, q_dot: np.ndarray, U: np.ndarray,
+                     u: np.ndarray | None = None) -> tuple[float, float]:
+        """``(F, se)``: free energy of ``N(U, noise_sigma^2 I)`` from ``(q, q_dot)``.
+
+        Scores a given ``(H, nu)`` mean under this planner's model, cost and
+        temperature: one noise draw around ``U``, rolled out and weighted as an
+        update would, then ``_freeEnergy``. ``U`` is in this planner's own
+        parameterization (``last_mean``), ``u`` as for ``Plan``. NaN when every
+        rollout failed.
+
+        It leaves the planner as a one-iteration plan from ``U`` would: the
+        mean updated and the noise stream advanced. ``LoadState`` around it to
+        keep the planner's own state, or to choose the noise it draws.
+        """
+        U = np.asarray(U, dtype=np.float32)
+        if U.shape != (self.horizon, self.nu):
+            raise ValueError(f"U must have shape ({self.horizon}, {self.nu}), got {U.shape}")
+        q = np.asarray(q, dtype=float).ravel()
+        q_dot = np.asarray(q_dot, dtype=float).ravel()
+        self._setCommandBase(q, u)
+        self.U_wp.assign(U)
+        self._sampleNoise()
+        self._buildSamples()
+        self._buildCommands()
+        self._rollout(q, q_dot)
+        if not self._updateParams():
+            return float("nan"), float("nan")
+        return self._freeEnergy()
 
     def _result(self, action: np.ndarray, uncertainty: np.ndarray | None):
         """``action``, or ``(action, uncertainty)`` when the config asks for it."""
@@ -409,20 +538,31 @@ class SamplingBasedPlannerBase(abc.ABC):
             )
         self._u_prev_wp.assign(self._u_prev.astype(np.float32))
 
-    def _sampleNoise(self) -> None:
+    def _sampleNoise(self, iteration: int = 0) -> None:
         """Redraw the whole ``(N, H, nu)`` perturbation block on the device.
 
-        The seed advances every call, so no two draws in this planner's lifetime
-        replay the same block, and a fixed ``config.seed`` reproduces the whole
-        episode.
+        Iteration 0 starts a plan: the seed advances, so no two plans in this
+        planner's lifetime replay the same block, and a fixed ``config.seed``
+        reproduces the whole episode. A later iteration (``resample_noise``)
+        keeps the plan's seed and reads a disjoint stretch of its stream, so
+        the plan's noise index still identifies every draw it made.
         """
+        if iteration == 0:
+            self._plan_noise_seed = self._noise_seed + self._resample_count
+            self._resample_count += 1
+        size = self.N * self.horizon * self.nu
+        if (iteration + 1) * size >= 2**31:
+            raise ValueError(f"iteration {iteration} overruns the noise stream for "
+                             f"{size} elements per draw; lower max_iterations")
         wp.launch(
             _sample_noise_kernel,
             dim=(self.N, self.horizon, self.nu),
-            inputs=[self._noise_seed + self._resample_count, self.config.noise_sigma],
+            inputs=[self._plan_noise_seed, iteration * size, self.config.noise_sigma],
             outputs=[self.eps_wp],
         )
-        self._resample_count += 1
+        if self.config.center_noise:
+            wp.launch(_center_noise_kernel, dim=(self.horizon, self.nu),
+                      inputs=[self.N], outputs=[self.eps_wp])
 
     def _buildCommands(self) -> None:
         """Turn sampled values into commands, where that can be done up front.
@@ -557,6 +697,7 @@ class SamplingBasedPlannerBase(abc.ABC):
         a sequence aligned with the state it was planned from.
         """
         seq = self.U_wp.numpy().astype(float)
+        self.last_mean = seq.astype(np.float32)
         mode = self.config.control_mode
         if mode == "absolute":
             tape = seq
@@ -607,6 +748,7 @@ class SamplingBasedPlannerBase(abc.ABC):
             self._reset_mean = m.copy()
         self._seedMean()
         self.last_action_seq = None
+        self.last_mean = None
         self.last_plan_ok = False
         self._resetParams()
 
@@ -698,16 +840,32 @@ class SamplingBasedPlannerBase(abc.ABC):
 # ---------------------------------------------------------------------------
 
 @wp.kernel
-def _sample_noise_kernel(seed: int, sigma: float, eps: wp.array3d(dtype=float)):
+def _sample_noise_kernel(seed: int, offset: int, sigma: float, eps: wp.array3d(dtype=float)):
     """Redraw the perturbation block in place.
 
-    Each element gets its own RNG stream keyed by (seed, flat index), so a draw
-    is reproducible for a given seed and decorrelated across seeds.
+    Each element gets its own RNG stream keyed by (seed, offset + flat index),
+    so a draw is reproducible for a given seed and decorrelated across seeds;
+    ``offset`` separates a plan's per-iteration draws.
     """
     n, h, u = wp.tid()
     tid = (n * eps.shape[1] + h) * eps.shape[2] + u
-    state = wp.rand_init(seed, tid)
+    state = wp.rand_init(seed, offset + tid)
     eps[n, h, u] = sigma * wp.randn(state)
+
+
+@wp.kernel
+def _center_noise_kernel(N: int, eps: wp.array3d(dtype=float)):
+    """eps[n,h,u] -= mean_n eps[n,h,u], so every (h, u) column sums to zero.
+
+    One thread per (h, u) with the sum over N inside, as in the weighted mean.
+    """
+    h, u = wp.tid()
+    total = float(0.0)
+    for n in range(N):
+        total = total + eps[n, h, u]
+    mean = total / float(N)
+    for n in range(N):
+        eps[n, h, u] = eps[n, h, u] - mean
 
 
 @wp.kernel

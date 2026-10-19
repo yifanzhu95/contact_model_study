@@ -224,3 +224,144 @@ def test_plan_on_eval_scene_must_match_the_task_role(sim, cube_tasks):
         _mppi(sim, ro, plan_on_eval_scene=True)
     with pytest.raises(ValueError, match="role is 'eval'"):
         _mppi(sim, ev)
+
+
+# -- free-energy convergence stop ---------------------------------------------
+def test_convergence_config_is_validated():
+    from ContactModelStudy.SamplingBasedPlanners.MPPI import MPPI_Config
+    with pytest.raises(ValueError, match="convergence_ratio"):
+        MPPI_Config(convergence_ratio=0.0)
+    with pytest.raises(ValueError, match="max_iterations"):
+        MPPI_Config(convergence_ratio=2.0, max_iterations=1)
+    with pytest.raises(ValueError, match="adaptive_temp"):
+        MPPI_Config(convergence_ratio=2.0, adaptive_temp=True)
+
+
+def test_without_a_ratio_the_plan_runs_n_iterations(sim, cube_tasks, cube_initial):
+    q0, v0, u0 = cube_initial
+    p = _mppi(sim, cube_tasks[0], temperature=10.0, n_iterations=3)
+    p.Plan(q0, v0, u=u0)
+    assert p.last_n_iterations == 3 and p.last_converged is None
+    assert p.last_free_energy is None and p.last_free_energy_drop is None
+
+
+def _scripted_free_energy(p, values):
+    """Make ``p`` report the free energies ``values`` in turn, each with se 1."""
+    it = iter(values)
+    p._freeEnergy = lambda: (next(it), 1.0)
+
+
+def test_a_drop_within_the_noise_stops_the_plan(sim, cube_tasks, cube_initial):
+    q0, v0, u0 = cube_initial
+    p = _mppi(sim, cube_tasks[0], temperature=10.0, convergence_ratio=2.0, max_iterations=10)
+    _scripted_free_energy(p, [100.0, 90.0, 80.0, 79.0, 78.0])   # se of a drop: sqrt(2)
+    p.Plan(q0, v0, u=u0)
+    assert p.last_n_iterations == 4 and p.last_converged is True and p.last_plan_ok
+    assert p.last_free_energy == 79.0 and p.last_free_energy_drop == 1.0
+    assert p.last_free_energy_drop_se == pytest.approx(np.sqrt(2))
+
+
+def test_a_rise_stops_the_plan(sim, cube_tasks, cube_initial):
+    q0, v0, u0 = cube_initial
+    p = _mppi(sim, cube_tasks[0], temperature=10.0, convergence_ratio=1e-30, max_iterations=10)
+    _scripted_free_energy(p, [100.0, 90.0, 95.0, 0.0])
+    p.Plan(q0, v0, u=u0)
+    assert p.last_n_iterations == 3 and p.last_converged is True
+
+
+def test_a_steady_descent_runs_to_the_cap(sim, cube_tasks, cube_initial):
+    q0, v0, u0 = cube_initial
+    p = _mppi(sim, cube_tasks[0], temperature=10.0, convergence_ratio=2.0, max_iterations=4)
+    _scripted_free_energy(p, [100.0, 90.0, 80.0, 70.0])
+    p.Plan(q0, v0, u=u0)
+    assert p.last_n_iterations == 4 and p.last_converged is False and p.last_plan_ok
+
+
+def test_the_free_energy_is_the_soft_minimum_of_the_sampled_costs(sim, cube_tasks, cube_initial):
+    q0, v0, u0 = cube_initial
+    lam = 0.1
+    p = _mppi(sim, cube_tasks[0], temperature=lam, convergence_ratio=1e30, max_iterations=2)
+    p.Plan(q0, v0, u=u0)
+    J = p.costs_wp.numpy().astype(float)              # the last update's folded costs
+    expect = J.min() - lam * np.log(np.mean(np.exp(-(J - J.min()) / lam)))
+    assert p.last_free_energy == pytest.approx(expect, rel=1e-6)
+    assert J.min() <= p.last_free_energy <= J.mean()
+    # The delta-method standard error agrees with a bootstrap over the same costs.
+    f, se = p._freeEnergy()
+    rng = np.random.default_rng(0)
+    boot = [(lambda b: b.min() - lam * np.log(np.mean(np.exp(-(b - b.min()) / lam))))(rng.choice(J, J.size))
+            for _ in range(2000)]
+    assert se == pytest.approx(np.std(boot), rel=0.2)
+
+
+# -- noise resampling between iterations --------------------------------------
+@pytest.mark.parametrize("resample", [True, False])
+def test_the_first_draw_and_noise_index_do_not_depend_on_resampling(sim, cube_tasks, cube_initial, resample):
+    q0, v0, u0 = cube_initial
+    one = _mppi(sim, cube_tasks[0], temperature=10.0)
+    one.Plan(q0, v0, u=u0)
+    p = _mppi(sim, cube_tasks[0], temperature=10.0, n_iterations=3, resample_noise=resample)
+    p.Plan(q0, v0, u=u0)
+    assert p._resample_count == one._resample_count == 1
+    assert np.array_equal(p.eps_wp.numpy(), one.eps_wp.numpy()) != resample
+
+
+def test_a_resampled_plan_replays_from_its_recorded_start(sim, cube_tasks, cube_initial):
+    q0, v0, u0 = cube_initial
+    p = _mppi(sim, cube_tasks[0], temperature=10.0, n_iterations=3)
+    p.Plan(q0, v0, u=u0)
+    second = p.Plan(q0, v0, u=u0)
+    fresh = _mppi(sim, cube_tasks[0], temperature=10.0, n_iterations=3)
+    fresh.LoadState(p.last_plan_start)
+    assert np.allclose(fresh.Plan(q0, v0, u=u0), second, atol=1e-4)
+
+
+# -- noise centering ----------------------------------------------------------
+@pytest.mark.parametrize("center", [True, False])
+def test_centered_noise_sums_to_zero_over_samples(sim, cube_tasks, cube_initial, center):
+    q0, v0, u0 = cube_initial
+    p = _mppi(sim, cube_tasks[0], temperature=10.0, center_noise=center)
+    p.Plan(q0, v0, u=u0)
+    col_mean = np.abs(p.eps_wp.numpy().astype(float).mean(axis=0)).max()
+    assert (col_mean < 1e-6) == center
+
+
+@pytest.mark.parametrize("center", [True, False])
+def test_uniform_weights_leave_only_an_uncentered_mean_drifting(sim, cube_tasks, cube_initial, center):
+    q0, v0, u0 = cube_initial
+    p = _mppi(sim, cube_tasks[0], temperature=1e9, center_noise=center)
+    p.Plan(q0, v0, u=u0)
+    # The mean starts at zero. Uncentered, it moves by the noise's sample mean,
+    # about SIGMA / sqrt(N) per entry; centered, it stays put.
+    assert (np.abs(p.U_wp.numpy()).max() < 1e-6) == center
+
+
+# -- scoring a given mean ------------------------------------------------------
+@pytest.mark.parametrize("warm_start", ["none", "shift"])
+def test_last_mean_is_the_plan_before_the_warm_start_shift(sim, cube_tasks, cube_initial, warm_start):
+    q0, v0, u0 = cube_initial
+    p = _mppi(sim, cube_tasks[0], temperature=10.0, warm_start=warm_start)
+    p.Plan(q0, v0, u=u0)
+    assert np.allclose(p.last_action_seq, q0[:16] + p.last_mean, atol=1e-5)    # pos_relative tape
+    assert np.array_equal(p.last_mean, p.U_wp.numpy()) == (warm_start == "none")
+    p._updateParams = lambda: False
+    p.Plan(q0, v0, u=u0)
+    assert p.last_mean is None                                                  # a failed plan
+
+
+def test_free_energy_of_a_mean_is_the_soft_minimum_of_its_samples(sim, cube_tasks, cube_initial):
+    q0, v0, u0 = cube_initial
+    lam = 0.1
+    p = _mppi(sim, cube_tasks[0], temperature=lam)
+    p.Plan(q0, v0, u=u0)
+    U, state = p.last_mean, p.SaveState()
+    f, se = p.FreeEnergyOf(q0, v0, U, u=u0)
+    J = p.costs_wp.numpy().astype(float)
+    assert f == pytest.approx(J.min() - lam * np.log(np.mean(np.exp(-(J - J.min()) / lam))), rel=1e-6)
+    assert se > 0
+    # LoadState chooses the noise, so the same mean scores the same, up to MJWarp's run-to-run
+    # nondeterminism in contact-rich rollouts (about one standard error here).
+    p.LoadState(state)
+    assert abs(p.FreeEnergyOf(q0, v0, U, u=u0)[0] - f) < 3 * se
+    with pytest.raises(ValueError, match="shape"):
+        p.FreeEnergyOf(q0, v0, U[:-1], u=u0)

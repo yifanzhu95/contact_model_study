@@ -2,32 +2,44 @@
 """Analyse the results folder of an episode batch (``run_episode_batches.py``), cell by cell.
 
 For every cell it measures how far the planner that ran was from an *optimal*
-planner, one that plans with the eval model itself, and how far the planner's
-rollout model is from the eval simulator. It works in two passes:
+planner, one that plans with the eval model itself; what the planner's model
+error cost it (its *regret*); and how far the planner's rollout model is from
+the eval simulator. It works in two passes:
 
 1. **The analysed steps, saved.** Every k-th saved step of each episode
-   (``--stride``, 1 by default) is planned again by both planners and
+   (``--stride``, 1 by default) is planned again by three planners and
    stepped on both simulators, and the results are saved per episode
    (``analysis/<cell>/<episode id>.npz``, below).
 
    The *used* planner is rebuilt from the cell's recorded command line. The
-   *optimal* planner is the same planner (sample count, temperature, noise,
+   *zero-gap* planner is the same planner (sample count, temperature, noise,
    cost weights, warm start, control step and horizon as durations) planning
    on the eval scene, at the eval timestep, with the eval simulator's contact
-   model (``--plan-on-eval``, rollout model = eval sim). ``--optimal-args``
-   gives it settings of its own instead (``OPTIMAL_FLAGS``: sample count,
-   horizon, noise, temperature, cost weights, ...), the same for every cell.
-   Each analysed step is planned on its own (``PlannerPair``): both planners
-   load what the used planner started that step's plan from (its mean, noise
-   draw, temperature and previous control, saved with the steps) and plan
-   from the recorded state toward that step's goal. Both draw the same noise
+   model (``--plan-on-eval``, rollout model = eval sim): the used planner with
+   no sim-to-sim gap. The *optimal* planner is the zero-gap planner with
+   settings of its own: ``DEFAULT_OPTIMAL_ARGS`` (iterate to a convergence
+   ratio of 2, noise 0.38, temperature 0.001), with ``--optimal-args`` on top,
+   flag by flag (``OPTIMAL_FLAGS``: sample count, horizon, noise, temperature,
+   convergence, cost weights, ...), the same for every cell.
+   Each analysed step is planned on its own (``StepPlanners``): every planner
+   loads what the used planner started that step's plan from (its mean, noise
+   draw, temperature and previous control, saved with the steps) and plans
+   from the recorded state toward that step's goal. They draw the same noise
    around the same mean (common random numbers), so the KL measures the
    models rather than sampling luck or the planners' histories, and a stride
    gives the same values at those steps as analysing them all. Older
    warm-started results, which did not save the mean, are walked in order
-   instead, each planner keeping its own warm state; they cannot be strided.
-   Each step's first actions are moment-matched to Gaussians
-   (``Utils/PlannerKLDiv.py``).
+   instead, each planner keeping its own warm state; they cannot be strided,
+   and their regret is not computed. Each step's first actions are
+   moment-matched to Gaussians (``Utils/PlannerKLDiv.py``).
+
+   The **regret** of the used plan is ``F_A(U_B) - F_A(U_A)``: the free energy
+   on the ground-truth model A (the zero-gap planner's simulator, cost and
+   temperature) of the used planner's final mean ``U_B``, less that of the
+   zero-gap planner's ``U_A``. Both are scored on one shared noise block of
+   their own (``evalNoiseSeed``), not the noise the plans drew, so ``U_A`` is
+   not scored on the noise it was fitted to. Positive when the model gap cost
+   the plan; noise in the estimates can make it negative at a single step.
 
    From each analysed state, the action the episode took and the optimal
    planner's mean action are each stepped one control step on the rollout
@@ -36,7 +48,7 @@ rollout model is from the eval simulator. It works in two passes:
    a vectorized simulator.
 2. **The metrics, from the saved steps.** ``KL(used || opt)`` and
    ``KL(opt || used)`` (the covariances shrunk by ``--shrinkage``) and the
-   distance between the means; the state errors (object position (m) and
+   distance between the means; the ``regret``; the state errors (object position (m) and
    orientation (rad), hand joints (RMS rad), full ``qpos`` / ``qvel``)
    between the models under the episode's action (``fsim_*``) and under the
    optimal action (``fsim_opt_*``), between the eval prediction and what the
@@ -69,20 +81,31 @@ Output, in the batch folder
 * ``analysis/<cell>/<episode id>.npz``: the episode's analysed steps, one row
   each: ``step`` (control step) and ``row`` (saved row), ``goal``, the state
   ``q`` / ``q_dot``, ``u_prev``, the action taken ``u_used``; each planner's
-  first-action Gaussian ``mu_used`` / ``cov_used`` and ``mu_opt`` / ``cov_opt``
-  (unshrunk); the next states ``q_next_<model>_<action>`` and
+  first-action Gaussian ``mu_<planner>`` / ``cov_<planner>`` for ``used``,
+  ``opt`` and ``zero`` (unshrunk); the regret's free energies
+  ``regret_f_used`` (``F_A(U_B)``) and ``regret_f_zero`` (``F_A(U_A)``), each
+  with its standard error (``_se``); the next states ``q_next_<model>_<action>`` and
   ``q_dot_next_<model>_<action>`` for model ``rollout`` / ``eval`` and action
   ``used`` / ``opt`` (NaN where a plan failed), and ``q_next_recorded`` /
   ``q_dot_next_recorded``; and ``noise_sigma_used`` / ``noise_sigma_opt``,
   the task's state ``indices`` and the timesteps;
 * ``analysis/<cell>.analysis.json``: the cell's metrics (mean, median, p90 of
-  each), per episode and overall, and how both planners were built;
+  each), per episode and overall, and how the planners were built;
 * ``analysis/<cell>.analysis.npz``: the per-analysed-step metrics, with each
   episode's step indices as ``step__<id>``;
 * ``analysis/<cell>.analysis_status.json``: done or failed, with the error;
 * ``final_results.csv`` / ``.json``: one row per cell: its settings, the batch's
   own results (as in ``summary.csv``) and every analysis metric;
 * ``final_episodes.csv``: one row per episode, the same way.
+
+Every mean and rate comes with a 95% interval in the columns ``<column>_lo`` and
+``<column>_hi``: a Wilson score interval for ``success_rate``, and a t-interval
+for every other mean, taking each sample as independent (the analysed steps for
+the analysis metrics, over the cell or the one episode; the episodes for the
+batch's own means). Consecutive steps are correlated, so the step-level
+intervals are narrower than the episodes alone would support. ``--summarize``
+recomputes them from the saved ``analysis.npz``, so older analyses gain them
+without a rerun.
 
 A cell whose analysis is done is skipped when run again (``--overwrite`` redoes
 it, which is needed to rerun with another ``--stride`` or ``--optimal-args``).
@@ -150,13 +173,28 @@ def argsFromCliArgs(cli_args: dict) -> argparse.Namespace:
     # Recorded when warm_start was on/off: off kept the last mean unshifted.
     if isinstance(args["warm_start"], bool):
         args["warm_start"] = "shift" if args["warm_start"] else "hold"
+    # Recorded before these flags: one uncentered noise draw per plan.
+    for name in ("resample_noise", "center_noise"):
+        if name not in cli_args:
+            args[name] = False
     return argparse.Namespace(**args)
 
 
 #: The planner settings ``--optimal-args`` may change. The rest define what is
 #: compared (the model, the control step and mode, the warm start) and stay the cell's.
 OPTIMAL_FLAGS = ("n_samples", "horizon", "time_horizon", "n_iterations", "noise_sigma", "temperature",
-                 "adaptive_temp", "delta", "cost_weight", "graph", "nconmax", "njmax", "debug")
+                 "adaptive_temp", "delta", "cost_weight", "graph", "nconmax", "njmax", "debug",
+                 "convergence_ratio", "max_iterations", "resample_noise", "center_noise")
+
+#: The optimal planner's own settings unless ``--optimal-args`` gives others, flag by flag:
+#: iterate to convergence, with wide noise and a near-greedy temperature.
+DEFAULT_OPTIMAL_ARGS = "--convergence-ratio 2 --noise-sigma 0.38 --temperature 0.001"
+
+
+def optimalOverrides(optimal_args: str | None) -> tuple[dict, str]:
+    """``DEFAULT_OPTIMAL_ARGS`` with ``optimal_args`` on top: the overrides, and the flags as one string."""
+    merged = {**parseOptimalArgs(DEFAULT_OPTIMAL_ARGS), **parseOptimalArgs(optimal_args)}
+    return merged, " ".join(s for s in (DEFAULT_OPTIMAL_ARGS, optimal_args) if s)
 
 
 def parseOptimalArgs(text: str | None) -> dict:
@@ -298,25 +336,75 @@ def stateErrors(qa, va, qb, vb, indices) -> dict[str, np.ndarray]:
 
 
 def stats(prefix: str, values: np.ndarray) -> dict:
-    """``<prefix>_mean``, ``_median`` and ``_p90`` over the finite values (and how many were not)."""
+    """``<prefix>_mean`` with its 95% interval (``_mean_lo`` / ``_mean_hi``), ``_median`` and
+    ``_p90`` over the finite values (and how many were not).
+
+    The interval is a t-interval that takes every value as an independent
+    sample (``run_episode_batches.meanInterval``).
+    """
     v = np.asarray(values, dtype=float).ravel()
     ok = v[np.isfinite(v)]
-    out = {f"{prefix}_mean": float(ok.mean()) if ok.size else None,
-           f"{prefix}_median": float(np.median(ok)) if ok.size else None,
-           f"{prefix}_p90": float(np.percentile(ok, 90)) if ok.size else None}
+    out = batches.withInterval(f"{prefix}_mean", ok)
+    out.update({f"{prefix}_median": float(np.median(ok)) if ok.size else None,
+                f"{prefix}_p90": float(np.percentile(ok, 90)) if ok.size else None})
     if ok.size != v.size:
         out[f"{prefix}_n_nonfinite"] = int(v.size - ok.size)
     return out
 
 
+def episodeStats(m: dict[str, np.ndarray]) -> dict:
+    """An episode's per-step metrics boiled down: each one's mean, with its 95% interval."""
+    out = {}
+    for key, values in m.items():
+        out.update({k: v for k, v in stats(key, values).items() if k.startswith(f"{key}_mean")})
+    return out
+
+
+def cellStats(episodes: list[dict[str, np.ndarray]]) -> dict:
+    """Every metric over all the episodes' analysed steps pooled: ``stats`` of each."""
+    out = {}
+    for key in dict.fromkeys(k for m in episodes for k in m):
+        out.update(stats(key, np.concatenate([np.ravel(m[key]) for m in episodes if key in m])))
+    return out
+
+
+def metricsFromNpz(path: Path) -> tuple[dict, dict[str, dict]]:
+    """A cell's metrics, recomputed from its ``analysis.npz``: ``(cell metrics, {episode id: metrics})``."""
+    per_episode: dict[str, dict[str, np.ndarray]] = {}
+    with np.load(path) as f:
+        for name in f.files:
+            key, ep_id = name.rsplit("__", 1)
+            if key != "step":
+                per_episode.setdefault(ep_id, {})[key] = f[name]
+    return cellStats(list(per_episode.values())), {i: episodeStats(m) for i, m in per_episode.items()}
+
+
 # -- planning the analysed steps ---------------------------------------------------------------
 KL_KEYS = ("kl_used_opt", "kl_opt_used", "mean_dist")
-PLAN_KEYS = ("mu_used", "cov_used", "mu_opt", "cov_opt")
+PLANNERS = ("used", "opt", "zero")
+PLAN_KEYS = tuple(f"{k}_{p}" for p in PLANNERS for k in ("mu", "cov"))
+#: The two free energies on the ground-truth model the regret is the difference of, with their
+#: standard errors: ``F_A(U_B)`` (the deployed plan) and ``F_A(U_A)`` (the zero-gap plan).
+REGRET_KEYS = ("regret_f_used", "regret_f_zero", "regret_f_used_se", "regret_f_zero_se")
 
 
 def _nanPlans(T: int, nu: int) -> dict[str, np.ndarray]:
-    return {"mu_used": np.full((T, nu), np.nan), "cov_used": np.full((T, nu, nu), np.nan),
-            "mu_opt": np.full((T, nu), np.nan), "cov_opt": np.full((T, nu, nu), np.nan)}
+    out = {}
+    for p in PLANNERS:
+        out[f"mu_{p}"], out[f"cov_{p}"] = np.full((T, nu), np.nan), np.full((T, nu, nu), np.nan)
+    out.update({k: np.full(T, np.nan) for k in REGRET_KEYS})
+    return out
+
+
+def evalNoiseSeed(start: dict) -> int:
+    """The seed of the noise a step's free energies are evaluated on.
+
+    Fixed by the step's recorded noise index, so a rerun or a stride gives the
+    same values, but a different stream from the one the plans drew: the
+    zero-gap plan is not scored on the noise it was fitted to.
+    """
+    ss = np.random.SeedSequence([int(start["noise_seed"]), int(start["resample_count"]), 0xF1E])
+    return int(ss.generate_state(1)[0] % (2**31 - 1))
 
 
 def planGaussian(planner, q: np.ndarray, q_dot: np.ndarray, u) -> tuple[np.ndarray, np.ndarray]:
@@ -328,29 +416,40 @@ def planGaussian(planner, q: np.ndarray, q_dot: np.ndarray, u) -> tuple[np.ndarr
         return np.full(planner.nu, np.nan), np.full((planner.nu, planner.nu), np.nan)
 
 
-class PlannerPair:
-    """The used planner and the optimal one, each analysed step planned on its own.
+class StepPlanners:
+    """The used, optimal and zero-gap planners, each analysed step planned on its own.
 
-    For a step, both planners load the start the used planner recorded for it
+    For a step, every planner loads the start the used planner recorded for it
     (``planStart``): the mean it started from, its noise draw, its temperature
-    and the control it accumulated from. Both then plan from the recorded
+    and the control it accumulated from. Each then plans from the recorded
     state toward that step's goal. They draw the same noise (common random
     numbers) around the same mean, so the KL measures the models rather than
     sampling luck or the planners' histories, and any subset of the steps
     gives the same per-step values. An optimal planner given its own
-    temperature (``opt_temperature``, from ``--optimal-args``) starts every
-    step from it rather than the recorded one; given another sample count or
-    noise, its draws are no longer the used planner's.
+    temperature (``opt_temperature``, from its args) starts every step from it
+    rather than the recorded one; given another sample count or noise, its
+    draws are no longer the used planner's.
 
-    ``used`` and ``opt`` are ``(task, planner)`` pairs.
+    The zero-gap planner has the used planner's settings on the ground-truth
+    model, so it draws exactly the used planner's noise. After both have
+    planned, each one's final mean is scored on the zero-gap planner's model
+    (``FreeEnergyOf``), on one shared noise block of its own
+    (``evalNoiseSeed``): ``F_A(U_B)`` and ``F_A(U_A)``, whose difference is the
+    used planner's regret.
+
+    ``used``, ``opt`` and ``zero`` are ``(task, planner)`` pairs.
     """
 
-    def __init__(self, used, opt, reset_mean: np.ndarray | None, opt_temperature: float | None = None):
-        (pu, po) = used[1], opt[1]
+    def __init__(self, used, opt, zero, reset_mean: np.ndarray | None, opt_temperature: float | None = None):
+        pu, po, pz = used[1], opt[1], zero[1]
         self._same_shape = (pu.horizon, pu.nu) == (po.horizon, po.nu)
-        self.used, self.opt, self.opt_temperature = used, opt, opt_temperature
+        if (pz.horizon, pz.nu) != (pu.horizon, pu.nu):
+            raise ValueError(f"the used planner's mean is {pu.horizon} x {pu.nu}, the zero-gap one's "
+                             f"{pz.horizon} x {pz.nu}: the regret scores the used plan on the zero-gap "
+                             f"planner, so both need the same control step and horizon")
+        self.used, self.opt, self.zero, self.opt_temperature = used, opt, zero, opt_temperature
         self._goal = None
-        for _, planner in (used, opt):
+        for _, planner in (used, opt, zero):
             planner.Reset(reset_mean)       # the seed a warm_start="none" plan starts from
 
     def forgetGoal(self) -> None:
@@ -359,13 +458,14 @@ class PlannerPair:
 
     def _setGoal(self, goal: np.ndarray) -> None:
         if self._goal is None or not np.array_equal(self._goal, goal):
-            for task, _ in (self.used, self.opt):
+            for task, _ in (self.used, self.opt, self.zero):
                 task.setGoal(goal)
             self._goal = np.array(goal, copy=True)
 
     def distributionsAt(self, goal: np.ndarray, start: dict, q: np.ndarray,
                         q_dot: np.ndarray) -> dict[str, np.ndarray]:
-        """Both planners' first-action Gaussians from ``start`` (``PLAN_KEYS``), unshrunk; NaN for a failed plan."""
+        """Every planner's first-action Gaussian from ``start`` (``PLAN_KEYS``), unshrunk, and the
+        free energies the regret is computed from (``REGRET_KEYS``); NaN for a failed plan."""
         if "U" in start and not self._same_shape:
             pu, po = self.used[1], self.opt[1]
             raise ValueError(f"the used planner's mean is {pu.horizon} x {pu.nu}, the optimal one's "
@@ -374,9 +474,26 @@ class PlannerPair:
         self._setGoal(goal)
         opt_start = start if self.opt_temperature is None else {**start, "lam": self.opt_temperature}
         out = {}
-        for name, (_, planner), s in (("used", self.used, start), ("opt", self.opt, opt_start)):
+        means = {}
+        for name, (_, planner), s in (("used", self.used, start), ("opt", self.opt, opt_start),
+                                      ("zero", self.zero, start)):
             planner.LoadState({**planner.SaveState(), **s})
             out[f"mu_{name}"], out[f"cov_{name}"] = planGaussian(planner, q, q_dot, start.get("u_prev"))
+            means[name] = planner.last_mean
+        out.update(self._regretTerms(start, q, q_dot, means["used"], means["zero"]))
+        return out
+
+    def _regretTerms(self, start: dict, q, q_dot, U_used, U_zero) -> dict[str, float]:
+        """``F_A(U_B)``, ``F_A(U_A)`` and their standard errors, on one shared evaluation noise block."""
+        out = {k: float("nan") for k in REGRET_KEYS}
+        if U_used is None or U_zero is None:                # a failed plan
+            return out
+        planner = self.zero[1]
+        eval_start = {**start, "noise_seed": evalNoiseSeed(start), "resample_count": 0}
+        for name, U in (("used", U_used), ("zero", U_zero)):
+            planner.LoadState({**planner.SaveState(), **eval_start})
+            out[f"regret_f_{name}"], out[f"regret_f_{name}_se"] = planner.FreeEnergyOf(
+                q, q_dot, U, u=start.get("u_prev"))
         return out
 
     def planAlong(self, ep, goals, rows: np.ndarray, starts: list[dict]) -> dict[str, np.ndarray]:
@@ -442,27 +559,30 @@ def _resetPlanner(planner, mean, noise_seed: int | None = None) -> None:
                            "noise_seed": int(noise_seed), "resample_count": 0})
 
 
-def planSequentially(ep, goals, used, opt, args, u0, noise_seed: int) -> dict[str, np.ndarray]:
-    """Both planners walked along one recorded episode in order; each step's Gaussians (``PLAN_KEYS``).
+def planSequentially(ep, goals, used, opt, zero, args, u0, noise_seed: int) -> dict[str, np.ndarray]:
+    """Every planner walked along one recorded episode in order; each step's Gaussians (``PLAN_KEYS``).
 
     The fallback for older warm-started results, which did not save the mean
     each plan started from: each planner keeps its own warm state from step to
     step, as the episode ran, so every step is replayed (no ``--stride``).
-    ``used`` and ``opt`` are ``(task, planner)`` pairs.
+    The regret is left NaN: without a recorded start per step there is no
+    noise index to fix its evaluation noise by. ``used``, ``opt`` and
+    ``zero`` are ``(task, planner)`` pairs.
     """
     T = ep.n_steps
     reset_mean = u0 if args.control_mode == "absolute" else None
     gidx = goalIndexPerStep(goals, T)
     out = _nanPlans(T, used[1].nu)
+    planners = (("used", used), ("opt", opt), ("zero", zero))
     current = None
     for t in range(T):
         if gidx[t] != current:                           # a new goal: as run_episode does
             current = gidx[t]
-            for task, planner in (used, opt):
+            for _, (task, planner) in planners:
                 task.setGoal(goals[current][1])
                 _resetPlanner(planner, reset_mean, noise_seed if t == 0 else None)
         u_prev = u0 if t == 0 else ep.u[t - 1]
-        for name, (_, planner) in (("used", used), ("opt", opt)):
+        for name, (_, planner) in planners:
             out[f"mu_{name}"][t], out[f"cov_{name}"][t] = planGaussian(planner, ep.q[t], ep.q_dot[t], u_prev)
     return out
 
@@ -529,6 +649,10 @@ def episodeMetrics(d, shrinkage: float) -> dict[str, np.ndarray]:
             out["mean_dist"][i] = float(np.linalg.norm(mu_u[i] - mu_o[i]))
     # The replayed plan against the action the episode took: zero up to GPU noise when replayed exactly.
     out["replay_action_err"] = np.linalg.norm(mu_u - d["u_used"], axis=1)
+    # Regret = F_A(U_B) - F_A(U_A); NaN for steps saved before it was computed.
+    nan = np.full(len(mu_u), np.nan)
+    out["regret"] = np.asarray(d.get("regret_f_used", nan), dtype=float) - \
+        np.asarray(d.get("regret_f_zero", nan), dtype=float)
     with np.errstate(invalid="ignore"):
         for prefix, a, b in STATE_COMPARISONS:
             errs = stateErrors(d[f"q_next_{a}"], d[f"q_dot_next_{a}"], d[f"q_next_{b}"], d[f"q_dot_next_{b}"],
@@ -538,6 +662,28 @@ def episodeMetrics(d, shrinkage: float) -> dict[str, np.ndarray]:
 
 
 # -- one cell --------------------------------------------------------------------------------
+def _fmt(v) -> str:
+    return f"{v:.4g}" if v is not None else "nan"
+
+
+def _fmtInterval(record: dict, key: str) -> str:
+    """``value [lo, hi]``, or the value alone when it has no interval."""
+    lo, hi = record.get(f"{key}_lo"), record.get(f"{key}_hi")
+    return _fmt(record.get(key)) + (f" [{_fmt(lo)}, {_fmt(hi)}]" if lo is not None and hi is not None else "")
+
+
+def _plannerRecord(pargs: argparse.Namespace, task, sim) -> dict:
+    """How an analysis planner was built, for the cell's record."""
+    return {"rollout_model": pargs.rollout_model, "scene": Path(task.getModelPath()).name,
+            "timestep": task.timestep, "substeps": sim.config.resolved_substeps,
+            "horizon": sim.config.resolved_horizon, "n_samples": pargs.n_samples,
+            "n_iterations": pargs.n_iterations, "convergence_ratio": pargs.convergence_ratio,
+            "max_iterations": pargs.max_iterations, "noise_sigma": pargs.noise_sigma,
+            "temperature": pargs.temperature, "adaptive_temp": pargs.adaptive_temp,
+            "resample_noise": pargs.resample_noise, "center_noise": pargs.center_noise,
+            "cost_weights": pargs.cost_weights}
+
+
 def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float = 1e-3,
                 max_episodes: int | None = None, optimal_args: str | None = None) -> dict:
     """One cell: every episode's analysed steps saved, then the metrics computed from them.
@@ -561,7 +707,7 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
         raise ValueError(f"{res.name} does not record the command line it was run with")
     args = argsFromCliArgs(cli_args)
     checkCell(rep, args)
-    overrides = parseOptimalArgs(optimal_args)
+    overrides, effective_args = optimalOverrides(optimal_args)
     episodes = list(rep)[:max_episodes] if max_episodes else list(rep)
     all_goals = episodeGoals(rep, args)
 
@@ -576,10 +722,16 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
     opt_sim = GetContactModelSim(oargs.rollout_model, otask.getModelPath(), N=oargs.n_samples,
                                  **drv.rolloutSimOverrides(oargs, otask))
     opt = (otask, MPPI(opt_sim, otask, drv.buildPlannerConfig(oargs)))
+    # The zero-gap planner: the used planner's own settings, on the eval model.
+    zargs = optimalArgs(args, used_sim.config.control_timestep, used_sim.config.horizon_duration)
+    ztask, _ = drv.buildTasks(zargs)
+    zero_sim = GetContactModelSim(zargs.rollout_model, ztask.getModelPath(), N=zargs.n_samples,
+                                  **drv.rolloutSimOverrides(zargs, ztask))
+    zero = (ztask, MPPI(zero_sim, ztask, drv.buildPlannerConfig(zargs)))
     _, _, u0 = eval_task.getInitialState()
     reset_mean = u0 if args.control_mode == "absolute" else None
-    pair = PlannerPair(used, opt, reset_mean,
-                       opt_temperature=oargs.temperature if "temperature" in overrides else None)
+    planners = StepPlanners(used, opt, zero, reset_mean,
+                            opt_temperature=oargs.temperature if "temperature" in overrides else None)
 
     # The forward-simulation pair: one world per analysed step.
     n_worlds = max(1, max(len(range(0, ep.n_saved, stride)) for ep in episodes))
@@ -601,7 +753,7 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
     print(f"[{name}] {len(episodes)} episodes; used planner {args.rollout_model} on "
           f"{Path(task.getModelPath()).name} ({rollout_steps} x {task.timestep * 1e3:g} ms), optimal "
           f"{args.eval_sim} on {Path(otask.getModelPath()).name} ({opt_sim.config.resolved_substeps} x "
-          f"{otask.timestep * 1e3:g} ms{', ' + optimal_args if overrides else ''}), steps saved every "
+          f"{otask.timestep * 1e3:g} ms, {effective_args}), zero-gap {zargs.rollout_model}, steps saved every "
           f"{rep.step_saving.get('stride', 1)}, analysed every {stride} saved step(s)", flush=True)
     files, replays = [], set()
     t0 = time.time()
@@ -615,10 +767,10 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
         mode = replayMode(ep, starts, stride, args.warm_start)
         replays.add(mode)
         if mode == "independent":
-            plans = pair.planAlong(ep, goals, rows, starts)
+            plans = planners.planAlong(ep, goals, rows, starts)
         else:
-            plans = planSequentially(ep, goals, used, opt, args, u0, noise_seed)
-            pair.forgetGoal()
+            plans = planSequentially(ep, goals, used, opt, zero, args, u0, noise_seed)
+            planners.forgetGoal()
         q, v, u = ep.q[rows], ep.q_dot[rows], ep.u[rows]
         data = {
             "id": np.array(ep.id), "episode": ep_index, "n_steps": ep.n_steps,
@@ -637,11 +789,10 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
         files.append(path)
         print(f"  episode {ep_index}: {ep.n_steps} steps, {len(rows)} analysed ({mode}) -> "
               f"{path.relative_to(batch_dir)}  ({time.time() - t0:.0f} s)", flush=True)
-    for sim in (used_sim, opt_sim, fs_rollout, fs_eval):
+    for sim in (used_sim, opt_sim, zero_sim, fs_rollout, fs_eval):
         sim.Close()
 
     # 2. The metrics, from the saved steps.
-    analysed: dict[str, list[np.ndarray]] = {}         # the values each metric is computed over
     ep_arrays: list[tuple[str, np.ndarray, dict]] = []  # every episode's per-analysed-step metrics
     ep_records = []
     for path in files:
@@ -649,18 +800,14 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
             d = dict(f)
         m = episodeMetrics(d, shrinkage)
         rec = {"id": str(d["id"]), "episode": int(d["episode"]), "n_steps": int(d["n_steps"]),
-               "n_steps_analyzed": len(d["step"])}
-        for key, values in m.items():
-            analysed.setdefault(key, []).append(values)
-            rec.update({k2: v for k2, v in stats(key, values).items() if k2.endswith("_mean")})
+               "n_steps_analyzed": len(d["step"]), **episodeStats(m)}
         ep_records.append(rec)
         ep_arrays.append((rec["id"], d["step"], m))
         print(f"  episode {rec['episode']}: KL(used||opt) {rec.get('kl_used_opt_mean') or float('nan'):.3f}, "
+              f"regret {_fmt(rec.get('regret_mean'))}, "
               f"object pos err {1e3 * (rec.get('fsim_obj_pos_err_mean') or float('nan')):.2f} mm", flush=True)
 
-    metrics = {}
-    for key, arrs in analysed.items():
-        metrics.update(stats(key, np.concatenate(arrs)))
+    metrics = cellStats([m for _, _, m in ep_arrays])
     record = {
         "cell": cell["index"], "name": name, "results": res.name,
         "rollout_model": args.rollout_model, "eval_sim": args.eval_sim,
@@ -669,13 +816,9 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
         "replay": "+".join(sorted(replays)) or None, "warm_start": args.warm_start,
         "shrinkage": shrinkage, "n_episodes_analyzed": len(episodes),
         "n_steps_analyzed": sum(r["n_steps_analyzed"] for r in ep_records),
-        "optimal_args": optimal_args or "",
-        "optimal_planner": {"rollout_model": oargs.rollout_model, "scene": Path(otask.getModelPath()).name,
-                            "timestep": otask.timestep, "substeps": opt_sim.config.resolved_substeps,
-                            "horizon": opt_sim.config.resolved_horizon, "n_samples": oargs.n_samples,
-                            "n_iterations": oargs.n_iterations, "noise_sigma": oargs.noise_sigma,
-                            "temperature": oargs.temperature, "adaptive_temp": oargs.adaptive_temp,
-                            "cost_weights": oargs.cost_weights},
+        "optimal_args": effective_args,
+        "optimal_planner": _plannerRecord(oargs, otask, opt_sim),
+        "zero_gap_planner": _plannerRecord(zargs, ztask, zero_sim),
         "forward_sim": {"rollout_steps": rollout_steps, "eval_steps": eval_steps,
                         "control_timestep": used_sim.config.control_timestep},
         "steps_dir": str(steps_dir.relative_to(batch_dir)),
@@ -736,13 +879,18 @@ def summarize(batch_dir: Path) -> Path | None:
             entry["analysis_status"] = "not run"
         analysis = json.loads(paths["json"].read_text()) if paths["json"].exists() and \
             entry["analysis_status"] == "done" else None
+        by_id = {e["id"]: e for e in (analysis or {}).get("episodes", [])}
         if analysis:
             entry.update(analysis["metrics"])
+            if paths["npz"].exists():        # recomputed, so older analyses gain what stats adds
+                metrics, ep_metrics = metricsFromNpz(paths["npz"])
+                entry.update(metrics)
+                for i, m in ep_metrics.items():
+                    by_id[i] = {**by_id.get(i, {}), **m}
         rows.append(entry)
 
         res = batch_dir / f"{name}.json"
         if res.exists():
-            by_id = {e["id"]: e for e in (analysis or {}).get("episodes", [])}
             for e in json.loads(res.read_text()).get("episodes", []):
                 summary = {k: v for k, v in e.get("summary", {}).items() if _scalar(v)}
                 metrics = {k: v for k, v in by_id.get(e["id"], {}).items() if k not in ("id", "n_steps")}
@@ -764,8 +912,9 @@ def summarize(batch_dir: Path) -> Path | None:
         kl = r.get("kl_used_opt_mean")
         pos = r.get("fsim_obj_pos_err_mean")
         print(f"  {r['name']:<32} {r['analysis_status']:<8} "
-              + (f"KL(used||opt) {kl:.3f}  object pos err {1e3 * pos:.2f} mm" if kl is not None and pos is not None
-                 else (r.get("analysis_error") or "")))
+              + (f"KL(used||opt) {kl:.3f}  regret {_fmtInterval(r, 'regret_mean')}  "
+                 f"object pos err {1e3 * pos:.2f} mm"
+                 if kl is not None and pos is not None else (r.get("analysis_error") or "")))
     return batch_dir / "final_results.csv"
 
 
@@ -785,7 +934,8 @@ def main(argv=None) -> int:
                    help="covariance shrinkage toward noise_sigma^2 I for the KL")
     p.add_argument("--max-episodes", type=int, default=None, help="analyse at most this many episodes per cell")
     p.add_argument("--optimal-args", default=None, metavar="FLAGS",
-                   help="run_episodes.py planner flags for the optimal planner, on top of each cell's own, "
+                   help="run_episodes.py planner flags for the optimal planner, on top of each cell's own "
+                        f"and of the defaults ({DEFAULT_OPTIMAL_ARGS}), flag by flag, "
                         "e.g. --optimal-args=\"--n-samples 1024 --temperature 0.1\" (with '=': the value "
                         "starts with --). It may set " + ", ".join("--" + f.replace("_", "-") for f in OPTIMAL_FLAGS))
     args = p.parse_args(argv)
