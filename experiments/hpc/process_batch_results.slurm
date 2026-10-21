@@ -7,7 +7,7 @@
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=12:00:00
+#SBATCH --time=30:00:00
 # One array task = one cell of an episode-batch results folder = one GPU. At
 # every analysed step of every recorded episode it plans with the used planner
 # and the optimal (eval-model) planner, steps the action taken and the optimal
@@ -26,16 +26,17 @@
 
 # -- analysis settings ---------------------------------------------------------
 # The optimal planner's own settings, the same for every cell: run_episodes.py
-# planner flags applied on top of each cell's recorded ones. Set to the
-# driver's defaults, so every cell is compared with the same optimal planner
-# whatever its own planner ran with. It may also set --horizon (instead of
+# planner flags applied on top of each cell's recorded ones, so every cell is
+# compared with the same optimal planner whatever its own planner ran with:
+# iterate to a convergence ratio of 2, capped at 20 iterations, with wide
+# noise and a near-greedy temperature. It may also set --horizon (instead of
 # --time-horizon), --delta, --cost-weight NAME=VALUE, --(no-)graph, --nconmax
 # and --njmax; empty, each cell's own planner is used on the eval model.
-OPTIMAL_ARGS="--n-samples 1024 --n-iterations 5 --noise-sigma 0.1 --temperature 1.0 --no-adaptive-temp --warm-start shift"
+OPTIMAL_ARGS="--n-samples 1024 --convergence-ratio 2 --max-iterations 20 --noise-sigma 0.38 --temperature 0.001 --no-adaptive-temp"
 # Analyse every STRIDE-th saved step of each episode (plans and forward
 # simulation). Warm-started results that did not save each plan's starting
 # mean must be replayed through every step: they fail with STRIDE > 1.
-STRIDE=2
+STRIDE=4
 
 set -euo pipefail
 
