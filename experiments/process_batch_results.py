@@ -7,9 +7,10 @@ error cost it (its *regret*); and how far the planner's rollout model is from
 the eval simulator. It works in two passes:
 
 1. **The analysed steps, saved.** Every k-th saved step of each episode
-   (``--stride``, 1 by default) is planned again by three planners and
-   stepped on both simulators, and the results are saved per episode
-   (``analysis/<cell>/<episode id>.npz``, below).
+   (``--stride``, 1 by default), or ``--n-steps-analysed`` of them spread
+   evenly over the episode (all of a shorter one's), is planned again by
+   three planners and stepped on both simulators, and the results are saved
+   per episode (``analysis/<cell>/<episode id>.npz``, below).
 
    The *used* planner is rebuilt from the cell's recorded command line. The
    *zero-gap* planner is the same planner (sample count, temperature, noise,
@@ -71,6 +72,7 @@ analysed.
     python experiments/process_batch_results.py <batch dir>               # every cell, in order
     python experiments/process_batch_results.py <batch dir> --stride 4 \\
         --optimal-args="--n-samples 1024 --temperature 0.1"
+    python experiments/process_batch_results.py <batch dir> --n-steps-analysed 500
     python experiments/process_batch_results.py <batch dir> --summarize   # final tables only
 
 On the HPC, ``hpc/submit_process_batch_results.sh <batch dir>`` runs one array
@@ -108,7 +110,8 @@ recomputes them from the saved ``analysis.npz``, so older analyses gain them
 without a rerun.
 
 A cell whose analysis is done is skipped when run again (``--overwrite`` redoes
-it, which is needed to rerun with another ``--stride`` or ``--optimal-args``).
+it, which is needed to rerun with another ``--stride``, ``--n-steps-analysed``
+or ``--optimal-args``).
 """
 
 from __future__ import annotations
@@ -532,20 +535,36 @@ def planStart(ep, i: int, args, u0: np.ndarray, noise_seed: int) -> dict | None:
     return {"noise_seed": noise_seed, "resample_count": step, "lam": float(args.temperature), "u_prev": u_prev}
 
 
-def replayMode(ep, starts: list, stride: int, warm_start: str) -> str:
+def analysedRows(n_saved: int, stride: int = 1, n_steps_analysed: int | None = None) -> np.ndarray:
+    """The saved rows of an episode to analyse.
+
+    Every ``stride``-th row, or with ``n_steps_analysed`` set (it overrides
+    ``stride``) that many rows spaced evenly from the first to the last: a
+    stride of its own per episode, fractional so the count is exact. An
+    episode with no more rows than that has all of them analysed.
+    """
+    if n_steps_analysed is None:
+        return np.arange(0, n_saved, stride)
+    if n_saved <= n_steps_analysed:
+        return np.arange(n_saved)
+    # Spaced more than one row apart, so rounding keeps them distinct.
+    return np.round(np.linspace(0, n_saved - 1, n_steps_analysed)).astype(int)
+
+
+def replayMode(ep, starts: list, every_row: bool, warm_start: str) -> str:
     """How an episode's plans are replayed: ``"independent"`` or ``"sequential"``.
 
     Independent when every analysed step's start is known (``starts`` has no
     ``None``). Otherwise the plans can only be walked in order from the first
-    step, which needs every step saved and analysed; raises ``ValueError`` when
-    they are not.
+    step, which needs every step saved and analysed (``every_row``); raises
+    ``ValueError`` when they are not.
     """
     if all(s is not None for s in starts):
         return "independent"
-    if stride > 1:
+    if not every_row:
         raise ValueError(f"episode {ep.id} was warm-started ({warm_start}) but did not save the mean each "
                          f"plan started from, so its plans can only be replayed in order through every "
-                         f"step: rerun without --stride")
+                         f"step: rerun without --stride or --n-steps-analysed")
     if ep.n_saved != ep.n_steps:
         raise ValueError(f"episode {ep.id} was warm-started ({warm_start}) but saved neither the mean each "
                          f"plan started from nor every step, so its plans cannot be replayed")
@@ -685,7 +704,8 @@ def _plannerRecord(pargs: argparse.Namespace, task, sim) -> dict:
 
 
 def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float = 1e-3,
-                max_episodes: int | None = None, optimal_args: str | None = None) -> dict:
+                max_episodes: int | None = None, optimal_args: str | None = None,
+                n_steps_analysed: int | None = None) -> dict:
     """One cell: every episode's analysed steps saved, then the metrics computed from them.
 
     Writes and returns its analysis record.
@@ -734,7 +754,8 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
                             opt_temperature=oargs.temperature if "temperature" in overrides else None)
 
     # The forward-simulation pair: one world per analysed step.
-    n_worlds = max(1, max(len(range(0, ep.n_saved, stride)) for ep in episodes))
+    all_rows = [analysedRows(ep.n_saved, stride, n_steps_analysed) for ep in episodes]
+    n_worlds = max(1, max(len(rows) for rows in all_rows))
     rollout_steps = used_sim.config.resolved_substeps
     eval_steps = int(round(rollout_steps * task.timestep / eval_task.timestep))
     overrides_sim = drv.rolloutSimOverrides(args, task)
@@ -754,17 +775,18 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
           f"{Path(task.getModelPath()).name} ({rollout_steps} x {task.timestep * 1e3:g} ms), optimal "
           f"{args.eval_sim} on {Path(otask.getModelPath()).name} ({opt_sim.config.resolved_substeps} x "
           f"{otask.timestep * 1e3:g} ms, {effective_args}), zero-gap {zargs.rollout_model}, steps saved every "
-          f"{rep.step_saving.get('stride', 1)}, analysed every {stride} saved step(s)", flush=True)
+          f"{rep.step_saving.get('stride', 1)}, analysed "
+          + (f"{n_steps_analysed} saved steps per episode, evenly spaced" if n_steps_analysed is not None
+             else f"every {stride} saved step(s)"), flush=True)
     files, replays = [], set()
     t0 = time.time()
     # 1. Each episode's analysed steps: the state, both planners' action distributions and
     #    the next state under each planner's action on each model, saved per episode.
-    for k, (ep, goals) in enumerate(zip(episodes, all_goals)):
+    for k, (ep, goals, rows) in enumerate(zip(episodes, all_goals, all_rows)):
         ep_index = int(ep.summary.get("episode", k))
         noise_seed = episodeSeeds(args.seed, ep_index)[1]
-        rows = np.arange(0, ep.n_saved, stride)
         starts = [planStart(ep, i, args, u0, noise_seed) for i in rows]
-        mode = replayMode(ep, starts, stride, args.warm_start)
+        mode = replayMode(ep, starts, len(rows) == ep.n_saved, args.warm_start)
         replays.add(mode)
         if mode == "independent":
             plans = planners.planAlong(ep, goals, rows, starts)
@@ -812,7 +834,8 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
         "cell": cell["index"], "name": name, "results": res.name,
         "rollout_model": args.rollout_model, "eval_sim": args.eval_sim,
         "plan_on_eval": bool(getattr(args, "plan_on_eval", False)),
-        "stride": stride, "save_stride": int(rep.step_saving.get("stride", 1)),
+        "stride": None if n_steps_analysed is not None else stride, "n_steps_analysed": n_steps_analysed,
+        "save_stride": int(rep.step_saving.get("stride", 1)),
         "replay": "+".join(sorted(replays)) or None, "warm_start": args.warm_start,
         "shrinkage": shrinkage, "n_episodes_analyzed": len(episodes),
         "n_steps_analyzed": sum(r["n_steps_analyzed"] for r in ep_records),
@@ -930,6 +953,9 @@ def main(argv=None) -> int:
     p.add_argument("--overwrite", action="store_true", help="redo cells already analysed")
     p.add_argument("--stride", type=int, default=1,
                    help="analyse every k-th saved step (the plans, the forward simulation and the metrics)")
+    p.add_argument("--n-steps-analysed", type=int, default=None, metavar="N",
+                   help="analyse N saved steps of each episode, spaced evenly from its first to its last "
+                        "(every step of a shorter episode); overrides --stride")
     p.add_argument("--shrinkage", type=float, default=1e-3,
                    help="covariance shrinkage toward noise_sigma^2 I for the KL")
     p.add_argument("--max-episodes", type=int, default=None, help="analyse at most this many episodes per cell")
@@ -941,6 +967,8 @@ def main(argv=None) -> int:
     args = p.parse_args(argv)
     if args.stride < 1:
         p.error("--stride must be >= 1")
+    if args.n_steps_analysed is not None and args.n_steps_analysed < 1:
+        p.error("--n-steps-analysed must be >= 1")
     if args.optimal_args:
         try:
             parseOptimalArgs(args.optimal_args)
@@ -958,7 +986,7 @@ def main(argv=None) -> int:
     if args.summarize:
         return 0 if summarize(batch_dir) else 1
     kw = dict(stride=args.stride, shrinkage=args.shrinkage, max_episodes=args.max_episodes,
-              optimal_args=args.optimal_args)
+              optimal_args=args.optimal_args, n_steps_analysed=args.n_steps_analysed)
     if args.cell is not None:
         if not 0 <= args.cell < len(cells):
             p.error(f"--cell {args.cell} is out of range: {batch_dir.name} has cells 0-{len(cells) - 1}")
@@ -970,6 +998,8 @@ def main(argv=None) -> int:
                "--shrinkage", str(args.shrinkage)]
         if args.max_episodes:
             cmd += ["--max-episodes", str(args.max_episodes)]
+        if args.n_steps_analysed is not None:
+            cmd += ["--n-steps-analysed", str(args.n_steps_analysed)]
         if args.optimal_args:
             cmd.append(f"--optimal-args={args.optimal_args}")
         if args.overwrite:

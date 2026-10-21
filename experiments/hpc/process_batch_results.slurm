@@ -16,9 +16,9 @@
 # forward-simulation errors from those files. The optimal planner runs at the
 # eval timestep, so a step costs a few times a normal plan: about 1-2 s per
 # analysed step at the defaults. A cell with many long episodes can trade
-# resolution for time with STRIDE below.
+# resolution for time with STRIDE or N_STEPS_ANALYSED below.
 # A cell already analysed is skipped, so resubmitting resumes; to rerun with
-# another STRIDE or OPTIMAL_ARGS, add ANALYSIS_ARGS="--overwrite".
+# another STRIDE, N_STEPS_ANALYSED or OPTIMAL_ARGS, add ANALYSIS_ARGS="--overwrite".
 #
 # Submit with experiments/hpc/submit_process_batch_results.sh. By hand:
 #   sbatch --array=0-4 --export=ALL,BATCH_DIR=/abs/results/episode_batches_x_123 \
@@ -37,6 +37,11 @@ OPTIMAL_ARGS="--n-samples 1024 --convergence-ratio 2 --max-iterations 20 --noise
 # simulation). Warm-started results that did not save each plan's starting
 # mean must be replayed through every step: they fail with STRIDE > 1.
 STRIDE=4
+# Or analyse this many saved steps of each episode, spaced evenly from its
+# first to its last (every step of a shorter episode), so every episode gets
+# the same number however long it ran. Set, it overrides STRIDE; empty, STRIDE
+# is used.
+N_STEPS_ANALYSED=500
 
 set -euo pipefail
 
@@ -57,8 +62,13 @@ export MUJOCO_GL=egl
 echo "cell ${CELL} of ${BATCH_DIR} on $(hostname)"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
-echo "stride ${STRIDE}; optimal planner args: ${OPTIMAL_ARGS:-none, as each cell ran}"
-ARGS=(--stride "$STRIDE")
+if [[ -n "$N_STEPS_ANALYSED" ]]; then
+    echo "${N_STEPS_ANALYSED} steps analysed per episode; optimal planner args: ${OPTIMAL_ARGS:-none, as each cell ran}"
+    ARGS=(--n-steps-analysed "$N_STEPS_ANALYSED")
+else
+    echo "stride ${STRIDE}; optimal planner args: ${OPTIMAL_ARGS:-none, as each cell ran}"
+    ARGS=(--stride "$STRIDE")
+fi
 # With '=': the value itself starts with --.
 if [[ -n "$OPTIMAL_ARGS" ]]; then
     ARGS+=("--optimal-args=$OPTIMAL_ARGS")

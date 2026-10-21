@@ -249,6 +249,10 @@ def test_a_strided_warm_started_cell_replays_each_saved_step_on_its_own(batch):
                 "q_next_eval_opt", "q_next_recorded"):
         assert len(d[key]) == 2 and np.isfinite(d[key]).all(), key
     assert d["cov_opt"].shape[1:] == (d["mu_opt"].shape[1],) * 2 and len(d["goal"]) == 2
+    # A step count picks the first and last saved rows here, as stride 2 does.
+    counted = pbr.processCell(batch, cell, stride=1, n_steps_analysed=2)
+    assert (counted["n_steps_analyzed"], counted["n_steps_analysed"], counted["stride"]) == (2, 2, None)
+    assert list(np.load(steps)["row"]) == [0, 2]
 
 
 @pytest.mark.gpu
@@ -285,12 +289,28 @@ def test_plan_starts_come_from_the_record_or_are_rebuilt():
 
 def test_unsaved_plan_starts_are_replayed_in_order_and_only_without_a_stride():
     every = types.SimpleNamespace(id="a", n_saved=6, n_steps=6)
-    assert pbr.replayMode(every, [{}, {}], 3, "hold") == "independent"
-    assert pbr.replayMode(every, [None] * 6, 1, "hold") == "sequential"
-    with pytest.raises(ValueError, match="without --stride"):
-        pbr.replayMode(every, [None, None], 3, "hold")
+    assert pbr.replayMode(every, [{}, {}], False, "hold") == "independent"
+    assert pbr.replayMode(every, [None] * 6, True, "hold") == "sequential"
+    with pytest.raises(ValueError, match="without --stride or --n-steps-analysed"):
+        pbr.replayMode(every, [None, None], False, "hold")
     with pytest.raises(ValueError, match="cannot be replayed"):
-        pbr.replayMode(types.SimpleNamespace(id="b", n_saved=3, n_steps=6), [None] * 3, 1, "hold")
+        pbr.replayMode(types.SimpleNamespace(id="b", n_saved=3, n_steps=6), [None] * 3, True, "hold")
+
+
+def test_a_step_count_spreads_the_analysed_rows_evenly_and_overrides_the_stride():
+    assert list(pbr.analysedRows(10, 3)) == [0, 3, 6, 9]
+    assert list(pbr.analysedRows(10, 3, n_steps_analysed=4)) == [0, 3, 6, 9]
+    assert list(pbr.analysedRows(4000, 7, n_steps_analysed=5)) == [0, 1000, 2000, 2999, 3999]
+    assert list(pbr.analysedRows(11, 1, n_steps_analysed=3)) == [0, 5, 10]
+    assert list(pbr.analysedRows(1000, 1, n_steps_analysed=1)) == [0]
+    # An episode with no more saved rows than that has all of them analysed.
+    assert list(pbr.analysedRows(3, 2, n_steps_analysed=3)) == [0, 1, 2]
+    assert list(pbr.analysedRows(3, 2, n_steps_analysed=500)) == [0, 1, 2]
+    # Always exactly that many distinct rows, however close the count is to the episode's length.
+    for n_saved in range(2, 60):
+        for n in range(1, n_saved):
+            rows = pbr.analysedRows(n_saved, 1, n_steps_analysed=n)
+            assert len(np.unique(rows)) == n and rows[0] == 0 and rows[-1] == (n_saved - 1 if n > 1 else 0)
 
 
 def test_episode_metrics_from_the_saved_steps():

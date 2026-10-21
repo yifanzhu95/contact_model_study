@@ -5,7 +5,7 @@
 #   experiments/hpc/submit_process_batch_results.sh results/episode_batches_my_123456 8   # at most 8 cells at once
 #   ANALYSIS_ARGS="--overwrite --max-episodes 5" experiments/hpc/submit_process_batch_results.sh <batch dir>
 #
-# The stride and the optimal planner's settings are set in process_batch_results.slurm's
+# The stride (or steps per episode) and the optimal planner's settings are set in process_batch_results.slurm's
 # header; other flags go in ANALYSIS_ARGS.
 #
 # Run from the repo root. It:
