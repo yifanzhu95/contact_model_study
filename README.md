@@ -1,5 +1,29 @@
 # Contact Model Study
 
+I added PPO training and shared RL/MPPI evaluation to the existing LEAP manipulation
+code. The current implementation is under `ContactModelStudy/`; the earlier
+`contact_study/` workflows remain for compatibility and comparison.
+
+| RL integration | Current scope |
+|---|---|
+| Tasks and models | Cube, duck and ball; 24 existing scenes; native M1–M5 |
+| Training | skrl PPO, all 16 actuators, multiple environments on one GPU, budgets and checkpoint restart |
+| Evaluation | Shared RL/MPPI cases, cross-model matrices, optional video and continuous targets |
+| Validation | Structural and bounded interface checks; no validated learning-performance claim |
+| Pending | Actual domain randomization, joint multi-GPU training, shared parallel evaluation, within-episode controller switching and hardware integration |
+
+I describe installation, configuration, commands, result files and limitations in
+[the RL guide](ContactModelStudy/RL/README.md), with evidence boundaries in
+[the validation notes](ContactModelStudy/RL/VALIDATION.md). For the existing MPC
+architecture and experiments, see [the package guide](ContactModelStudy/README.md)
+and [the experiment guide](experiments/README.md).
+
+## Repository background and earlier workflows
+
+The older `contact_study` interfaces and model aliases below are retained as
+background. In the current `ContactModelStudy` implementation, M5 means Kamino;
+it is not the old M5 geometry alias.
+
 > **What matters about contact models in dexterous manipulation?**
 > A systematic empirical study of contact model fidelity for sampling-based MPC.
 
@@ -77,9 +101,9 @@ families. Other drivers retain the general scene-selection behavior above.
 
 | ID  | Description                                                        |
 |-----|--------------------------------------------------------------------|
-| M1  | Wanted an Anitescu model, for now just use MuJoCo but with hard contact |
+| M1  | MuJoCo with stiff contact |
 | M2  | MuJoCo default soft contact                                        |
-| M3  | Jin 2024 complementarity-free model (`comfree_warp`)               |
+| M3  | Complementarity-free contact model (`comfree_warp`)               |
 | M4  | XPBD-style penalty model (`contact_models/xpbd_backend.py`)        |
 
 ### Old M5..M10 mapping
@@ -211,7 +235,6 @@ To edit comfree, check that branch out somewhere else and install it over the
 pinned one:
 
 ```bash
-git clone -b comfree-warp1.17 https://github.com/yifanzhu95/contact_model_study.git /path/to/comfree_warp
 pip install -e /path/to/comfree_warp --no-deps
 ```
 

@@ -158,6 +158,15 @@ class MujocoVideoRenderer(VideoRendererBase):
         Runs ``mj_forward`` so geom and site poses match ``q`` before the scene
         is drawn. Velocities are left at zero — nothing visible depends on them.
         """
+        self._frames.append(self.RenderImage(q))
+
+    def RenderImage(self, q: np.ndarray, *, body_poses=None) -> np.ndarray:
+        """Draw one image without retaining it; optional actual world body poses.
+
+        Only this renderer's scratch data is changed. Maximal-coordinate
+        backends can supply body-id -> xyz/wxyz poses instead of reconstructing
+        all visible geometry from reduced joint coordinates.
+        """
         a = np.asarray(q, dtype=float).ravel()
         if a.shape != (self.mjm.nq,):
             raise ValueError(f"q must have shape ({self.mjm.nq},), got {np.shape(q)}")
@@ -166,8 +175,10 @@ class MujocoVideoRenderer(VideoRendererBase):
 
         self.mjd.qpos[:] = a
         mujoco.mj_forward(self.mjm, self.mjd)
+        if body_poses is not None:
+            apply_body_poses(self.mjm, self.mjd, body_poses)
         self._renderer.update_scene(self.mjd, camera=self._camera)
-        self._frames.append(self._renderer.render())
+        return self._renderer.render()
 
     def Close(self) -> None:
         """Write the video if an ``output_path`` is configured, then free the context.
@@ -226,3 +237,24 @@ class MujocoVideoRenderer(VideoRendererBase):
     def frame_count(self) -> int:
         """Frames captured since construction or the last ``Reset``."""
         return len(self._frames)
+
+
+def apply_body_poses(model, data, poses):
+    """Override only scratch visual transforms after FK; never solve or integrate."""
+    for body, pose in poses.items():
+        if not 0 < body < model.nbody or model.body_mocapid[body] >= 0:
+            raise ValueError('Actual body overrides must exclude world and goal mocap bodies')
+        pose = np.asarray(pose, dtype=float)
+        if pose.shape != (7,) or not np.isfinite(pose).all() or np.linalg.norm(pose[3:]) < 1e-12:
+            raise ValueError('Expected a finite xyz/wxyz body pose')
+        quat = pose[3:] / np.linalg.norm(pose[3:])
+        rot = np.empty(9); mujoco.mju_quat2Mat(rot, quat); rot = rot.reshape(3, 3)
+        data.xpos[body], data.xquat[body], data.xmat[body] = pose[:3], quat, rot.ravel()
+        for owners, local_pos, local_quat, world_pos, world_mat in (
+            (model.geom_bodyid, model.geom_pos, model.geom_quat, data.geom_xpos, data.geom_xmat),
+            (model.site_bodyid, model.site_pos, model.site_quat, data.site_xpos, data.site_xmat)):
+            for index in np.flatnonzero(owners == body):
+                local_rot = np.empty(9); mujoco.mju_quat2Mat(local_rot, local_quat[index])
+                world_pos[index] = pose[:3] + rot @ local_pos[index]
+                world_mat[index] = (rot @ local_rot.reshape(3, 3)).ravel()
+    mujoco.mj_camlight(model, data)

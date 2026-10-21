@@ -1,5 +1,8 @@
 # ContactModelStudy
 
+I added PPO training and shared RL/MPPI evaluation alongside this MPC architecture.
+See [the RL guide](RL/README.md) for supported features, commands and limitations.
+
 A package for studying how the choice of contact model affects sampling-based
 control. A planner (MPPI) chooses actions by rolling out many sampled futures
 in a fast GPU simulator, the *rollout model*. Those actions are then applied
@@ -283,7 +286,7 @@ parameters, for example
 | --- | --- | --- |
 | M1 | `VectorizedMujoco` | Stiff limit of MuJoCo's soft contact: impedance about 1, solref time constant 2·dt, Newton to 200 iterations and 1e-10 |
 | M2 | `VectorizedMujoco` | MuJoCo's default soft contact (pyramidal cone), Newton, 25 iterations, 1e-6 |
-| M3 | `ComFree` | Complementarity-free contact (Jin 2024) |
+| M3 | `ComFree` | Complementarity-free contact |
 | M4 | `XPBD` | XPBD relaxation over MJWarp's constraint rows |
 | M5 | `Kamino` | Full NCP solved by PADMM (Newton's `SolverKamino`): ρ₀ = 0.1, full warm start, tolerance 5e-4, up to 100 iterations, contact and joint stabilization 0.05 and 0.1, dense dynamics and a 128-contact buffer per world (tuned against sticking; see [Why M5 objects stuck](#why-m5-objects-stuck)). The accuracy reference, and the slowest model |
 

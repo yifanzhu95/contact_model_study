@@ -54,9 +54,7 @@ if str(_REPO_ROOT) not in sys.path:
 from ContactModelStudy.Renderers.MujocoVideoRenderer import MujocoVideoRenderer  # noqa: E402
 from ContactModelStudy.Renderers.RendererBase import VideoRendererBaseConfig  # noqa: E402
 from ContactModelStudy.SamplingBasedPlanners.MPPI import MPPI, MPPI_Config  # noqa: E402
-from ContactModelStudy.Tasks.BallReorient import BallReorient  # noqa: E402
-from ContactModelStudy.Tasks.CubeReorient import CubeReorient  # noqa: E402
-from ContactModelStudy.Tasks.DuckReorient import DuckReorient  # noqa: E402
+from ContactModelStudy.Tasks.Registry import task_classes  # noqa: E402
 from ContactModelStudy.Tasks.LeapReorient import COST_WEIGHT_KEYS, LeapReorientConfig  # noqa: E402
 from ContactModelStudy.Tasks.TaskBase import TaskRole  # noqa: E402
 from ContactModelStudy.Utils.ContactModelPresets import (  # noqa: E402
@@ -68,8 +66,7 @@ from ContactModelStudy.Utils.EpisodeRecorder import EpisodeRecorder, StepSaving 
 from ContactModelStudy.Utils.EvalSimulators import evalSimNames, makeEvalSim  # noqa: E402
 
 #: Tasks this driver can run, by the name passed to --task.
-TASKS = {"cube_reorient": CubeReorient, "duck_reorient": DuckReorient,
-         "ball_reorient": BallReorient}
+TASKS = task_classes()
 
 #: --results default: a fresh, time-stamped file under results/, chosen at start.
 _AUTO_RESULTS = "auto"
@@ -89,6 +86,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
+    p.add_argument("--protocol", choices=("legacy_mpc", "finite_case_bank"), default="legacy_mpc",
+                   help="finite_case_bank switches to the shared RL/MPPI executor; use "
+                        "--protocol finite_case_bank --help for its flags")
 
     g = p.add_argument_group("task")
     g.add_argument("--task", default="cube_reorient", choices=sorted(TASKS))
@@ -372,6 +372,9 @@ def parseArgs(argv=None, parser: argparse.ArgumentParser | None = None,
     """
     parser = parser or build_parser()
     args = parser.parse_args(argv)
+    if args.protocol != "legacy_mpc":
+        parser.error("finite_case_bank uses run_episodes main or run_controller_episodes; "
+                     "it is not supported by legacy/parallel argument consumers")
     args.cost_weights = None
     if args.cost_weight:
         args.cost_weights = {}
@@ -512,6 +515,16 @@ def saveResults(args, recorder) -> None:
 
 
 def main(argv=None) -> int:
+    # Route before parsing the legacy flags: the finite protocol has its own
+    # explicit config and case bank, so legacy MPC defaults cannot leak into it.
+    argv = list(sys.argv[1:] if argv is None else argv)
+    probe = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    probe.add_argument("--protocol", choices=("legacy_mpc", "finite_case_bank"), default="legacy_mpc")
+    protocol, _ = probe.parse_known_args(argv)
+    if protocol.protocol == "finite_case_bank":
+        from ContactModelStudy.Drivers.run_controller_episodes import main as run_controllers
+        run_controllers(argv)
+        return 0
     args = parseArgs(argv)
     task, eval_task = buildTasks(args)
     # Each simulator at its own task's timestep: the eval sim fine, the rollout

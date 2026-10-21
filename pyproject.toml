@@ -26,6 +26,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "black", "ruff"]
+# Validated with Python 3.12. Choose a working Torch CUDA runtime before using
+# GPU physics. Inference does not import or require the PPO implementation.
+rl-inference = ["torch==2.14.1", "gymnasium==1.4.0", "warp-lang==1.17.0"]
+rl = ["torch==2.14.1", "gymnasium==1.4.0", "skrl==2.1.0", "warp-lang==1.17.0"]
+rl-video = ["mediapy==1.2.7"]
 # M5 (Kamino, ContactModelStudy/Simulators/Kamino.py): Newton's SolverKamino.
 # Needs Python >= 3.11 (Newton's Kamino code does not import on 3.10) and
 # exactly Warp 1.17 (the Kamino reference measured 1.18 as much slower). The
@@ -43,3 +48,6 @@ include = ["ContactModelStudy*"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.pytest.ini_options]
+markers = ["ppo_update: runs an actual PPO optimization update; exclude for structural checks"]
