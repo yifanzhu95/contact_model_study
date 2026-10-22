@@ -109,10 +109,12 @@ def validate_policy_environment(training, current, *, allow_scene_transfer=False
     keys = ("observation_profile", "observation_size", "observation_frame", "quaternion_order",
             "observation_scales", "action", "actuator_names", "joint_ranges", "joint_qpos_indices",
             "joint_qvel_indices", "scene_xml_sha256", "reward_profile", "cost_weights", "task_protocol")
+    if 'scene_model_fingerprint' in training:
+        keys += ('scene_model_fingerprint',)
     for key in keys:
-        if allow_scene_transfer and key in ("scene_xml_sha256", "cost_weights"):
+        if allow_scene_transfer and key in ("scene_xml_sha256", "scene_model_fingerprint", "cost_weights"):
             continue
-        if current[key] != training[key]:
+        if current.get(key) != training[key]:
             raise ValueError(f"Evaluation/policy contract mismatch: {key}")
 
 

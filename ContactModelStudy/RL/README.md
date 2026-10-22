@@ -112,6 +112,9 @@ Task-bound v2 banks reject a different task. Historical v1 banks remain cube-onl
 Example configurations are under `configs/rl/`: `cube_mjwarp_smoke.json`,
 `cube_kamino_smoke.json`, `duck_mjwarp_smoke.json`, `ball_mjwarp_smoke.json` and
 `duck_foam4_mjwarp_smoke.json`. Their short durations check interfaces, not learning.
+For example, eight control steps at 16 ms give only 0.128 seconds per episode.
+I select a separate task duration, rollout batch and sample budget for learning;
+increasing `--updates` alone does not turn a smoke configuration into a learning task.
 
 ## Observation, actions and task ending
 
@@ -184,6 +187,24 @@ bundles also appear under `checkpoints/`. Restart restores network, optimizer an
 RNG state, then begins new physical episodes and discards a partial rollout. It
 does not restore a partly completed physical episode or guarantee cross-hardware
 CUDA RNG compatibility. Outputs must be new directories; existing results are retained.
+
+New actors and checkpoints include a fingerprint of the compiled source scene,
+covering included XML, meshes and textures as well as the top-level XML hash.
+The fingerprint is computed before backend-specific contact settings, once at
+environment construction. It clears the compiler asset cache to avoid stale
+mesh reads and does not change live physics/solver arrays. Moving the checkout
+preserves the identity; changing compiled scene content is rejected by restart
+and strict policy evaluation. Explicit scene-transfer evaluation can bypass the
+scene identity check while retaining action, observation and clock checks.
+Legacy checkpoint restart warns when only the older top-level XML check is available;
+the identity of its historical included assets cannot be reconstructed.
+
+`transitions.jsonl` records accepted samples before optimizer execution, so an
+optimizer fault retains the last sampled step in failure counts and diagnostics.
+These sample counts are distinct from completed PPO updates and complete saved
+checkpoints. `ppo_updates.jsonl` saves the library's update diagnostics; consumed
+diagnostics are released from memory at each update instead of accumulating for
+the lifetime of a run. Detailed transition logs still grow with the sample count.
 
 Time limits and supported stop signals are checked between complete PPO updates.
 A cooperative stop saves the last completed update and stops before starting another.
@@ -350,6 +371,13 @@ clocks, and two continuous clips decoded and were visually checked. These used
 untrained hold actors, easy initial goals and microsecond timesteps to check
 boundaries. They do not demonstrate learned rotation or realistic task performance.
 Further qualification and unresolved scope are described in [VALIDATION.md](VALIDATION.md).
+
+The subsequent pre-training audit passed all 259 available core tests, including
+the GPU and real PPO-update tests; the same two optional engine tests were skipped.
+It fixed diagnostic retention, optimizer-fault sample accounting and scene dependency
+identity. A separate M2 driver check completed two updates, restarted one saved
+update, restored without sampling and evaluated two independent cases. That check
+used only 12 training transitions and checks execution, not learning.
 
 Selected checks can be run without real PPO optimization or GPU physics tests:
 

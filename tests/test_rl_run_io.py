@@ -254,7 +254,7 @@ def test_collect_boundary_after_last_transition_and_reset(inputs):
         def post_interaction(self, **kw): events.append('post')
     collect_updates(EventEnv(EnvConfig(**manifest['config']), bank), NoOptimizerAgent(), updates=1,
         on_transition=lambda *args: events.append('transition'), on_boundary=lambda n: events.append('checkpoint'))
-    assert events[-3:] == ['transition', 'reset', 'checkpoint']
+    assert events == ['transition', 'post', 'transition', 'post', 'reset', 'checkpoint']
 
 
 def test_failure_retains_last_complete_periodic_checkpoint(inputs, monkeypatch):
@@ -314,6 +314,27 @@ def test_resume_allows_checkout_relocation_but_not_changed_scene_content(inputs)
     restore_training_checkpoint(agent, env, cfg, source)
     FakeEnv.manifest['scene_xml_sha256'] = 'changed'
     with pytest.raises(ValueError, match='same PPO/environment/case-bank'):
+        restore_training_checkpoint(agent, env, cfg, source)
+
+
+def test_resume_checks_included_scene_identity_and_warns_for_legacy_metadata(inputs, monkeypatch):
+    tmp, manifest, bank = inputs
+    monkeypatch.setattr(FakeEnv, 'manifest', manifest)
+    env = FakeEnv(EnvConfig(**manifest['config']), bank)
+    cfg = PPOConfig(); agent, actor = fake_build(env, cfg)
+    source = tmp/'training.pt'
+    save_training_checkpoint(agent, actor, env, cfg, source)
+    changed = deepcopy(manifest)
+    changed['scene_model_fingerprint']['sha256'] = 'changed_dependency'
+    monkeypatch.setattr(FakeEnv, 'manifest', changed)
+    with pytest.raises(ValueError, match='same PPO/environment/case-bank'):
+        restore_training_checkpoint(agent, env, cfg, source)
+    monkeypatch.setattr(FakeEnv, 'manifest', manifest)
+    metadata_path = source.with_suffix('.resume.pt')
+    metadata = torch.load(metadata_path, weights_only=True)
+    del metadata['environment']['scene_model_fingerprint']
+    torch.save(metadata, metadata_path)
+    with pytest.warns(UserWarning, match='Legacy checkpoint'):
         restore_training_checkpoint(agent, env, cfg, source)
 
 

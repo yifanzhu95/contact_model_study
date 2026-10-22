@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from importlib.metadata import version
 import math
 from pathlib import Path
+import warnings
 
 import torch
 from torch import nn
@@ -121,25 +122,31 @@ def collect_updates(env, agent, *, updates: int, on_transition=None, on_update=N
                                     next_states=None, terminated=tr.terminated,
                                     truncated=tr.truncated & ~tr.terminated, infos={},
                                     timestep=step, timesteps=total_steps)
+        # Account for accepted samples before an optimizer failure can abort
+        # post_interaction. Do not reset: PPO still needs the final observation.
+        if on_transition:
+            on_transition(step, tr, tuple(env.case_ids))
+        for reason in tr.reasons:
+            if reason in outcomes:
+                outcomes[reason] += 1
         # post_interaction can call backward(), so it must be outside no_grad.
         agent.post_interaction(timestep=step, timesteps=total_steps)
         if not all(torch.isfinite(p).all().item() for p in agent.models["policy"].parameters()):
             raise FloatingPointError("Nonfinite policy parameters after update")
         if not all(torch.isfinite(p).all().item() for p in agent.models["value"].parameters()):
             raise FloatingPointError("Nonfinite value parameters after update")
-        if on_update and (step + 1) % agent.cfg.rollouts == 0:
-            # Read the library's measurements; do not replace its update or
-            # sample extra actions merely to produce a diagnostic.
-            metrics = {key: float(agent.tracking_data[key][-1]) for key in
-                       ("Loss / Policy loss", "Loss / Value loss", "Policy / Standard deviation")}
-            if not all(math.isfinite(x) for x in metrics.values()):
-                raise FloatingPointError("Nonfinite PPO update diagnostics")
-            on_update((step + 1) // agent.cfg.rollouts, metrics)
-        if on_transition:
-            on_transition(step, tr, tuple(env.case_ids))
-        for reason in tr.reasons:
-            if reason in outcomes:
-                outcomes[reason] += 1
+        if (step + 1) % agent.cfg.rollouts == 0:
+            if on_update:
+                # Read the library's measurements; do not replace its update or
+                # sample extra actions merely to produce a diagnostic.
+                metrics = {key: float(agent.tracking_data[key][-1]) for key in
+                           ("Loss / Policy loss", "Loss / Value loss", "Policy / Standard deviation")}
+                if not all(math.isfinite(x) for x in metrics.values()):
+                    raise FloatingPointError("Nonfinite PPO update diagnostics")
+                on_update((step + 1) // agent.cfg.rollouts, metrics)
+            # skrl's write_interval=0 disables its automatic draining. Metrics
+            # have been persisted by the callback and must not grow in RAM.
+            agent.tracking_data.clear()
         ids = tr.done_ids
         if ids.numel():
             reset_count += ids.numel()
@@ -182,6 +189,10 @@ def restore_training_checkpoint(agent, env, config, path):
     # The scene content hash is contractual; its absolute checkout path is not.
     saved, current = dict(metadata["environment"]), dict(env.describe())
     saved.pop("scene_path", None); current.pop("scene_path", None)
+    if 'scene_model_fingerprint' not in saved:
+        current.pop('scene_model_fingerprint', None)
+        warnings.warn('Legacy checkpoint has only a top-level XML hash; included scene and mesh identity '
+                      'cannot be verified. New checkpoints record the compiled source scene.', UserWarning)
     saved["config"] = recorded_environment_config(saved).to_dict()
     current["config"] = recorded_environment_config(current).to_dict()
     if (metadata["ppo"] != asdict(config) or saved != current

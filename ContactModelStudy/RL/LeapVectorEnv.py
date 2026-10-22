@@ -11,6 +11,7 @@ import torch
 from ContactModelStudy.RL.Backends import make_backend
 from ContactModelStudy.RL.CaseBank import CaseBank
 from ContactModelStudy.RL.Randomization import FixedDomainLifecycle
+from ContactModelStudy.RL.SceneIdentity import scene_model_fingerprint
 from ContactModelStudy.RL.Contracts import EnvConfig, Frame, NumericalTransitionError, Transition
 from ContactModelStudy.RL.Encoding import (ActionCodec, OBSERVATION_PROFILE, REWARD_PROFILE,
                                           encode_observation, finite_reward, task_terms)
@@ -32,6 +33,7 @@ class LeapVectorEnv:
         self.reset_domains = {}
         self.num_envs, self.device = config.num_envs, torch.device(config.device)
         self.task = task_from_environment(config)
+        self._scene_model_fingerprint = scene_model_fingerprint(self.task.getModelPath())
         self.backend = make_backend(self.task, config)
         model = self.backend.model
         if (model.nq, model.nv, model.nu) != (23, 22, 16):
@@ -217,6 +219,7 @@ class LeapVectorEnv:
                 "physics": self.backend.describe(), "case_bank_sha256": self.case_bank.sha256,
                 "scene_path": str(Path(self.task.getModelPath()).resolve()),
                 "scene_xml_sha256": hashlib.sha256(Path(self.task.getModelPath()).read_bytes()).hexdigest(),
+                "scene_model_fingerprint": dict(self._scene_model_fingerprint),
                 "observation_profile": OBSERVATION_PROFILE, "observation_size": 73,
                 "observation_frame": "world", "quaternion_order": "wxyz",
                 "observation_scales": {"joint_velocity": 20.0, "position_multiplier": 10.0,
