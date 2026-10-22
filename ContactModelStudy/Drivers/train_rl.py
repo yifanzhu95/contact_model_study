@@ -104,15 +104,17 @@ def main(argv=None):
             def log_update(index, metrics):
                 nonlocal completed_updates
                 completed_updates = index
+                # A validated update is complete even if the following reset
+                # or observation fails. Saved checkpoint progress is separate.
+                local = dict(completed_ppo_updates=index, vector_steps=index*ppo_config.steps_per_update,
+                             transitions=index*ppo_config.steps_per_update*env.num_envs)
+                progress.update({k: prior[k]+local[k] if prior[k] is not None else None for k in COUNTERS})
                 updates_stream.write(json.dumps({'update': index,
                     'cumulative_update': prior['completed_ppo_updates']+index if prior['completed_ppo_updates'] is not None else None,
                     'run_seconds': time.monotonic()-started, **metrics}, allow_nan=False)+'\n')
                 updates_stream.flush()
             def boundary(index):
                 nonlocal latest, latest_progress
-                local = dict(completed_ppo_updates=index, vector_steps=index*ppo_config.steps_per_update,
-                             transitions=index*ppo_config.steps_per_update*env.num_envs)
-                progress.update({k: prior[k]+local[k] if prior[k] is not None else None for k in COUNTERS})
                 if args.checkpoint_interval and index % args.checkpoint_interval == 0:
                     latest = save_run_checkpoint(agent, actor, env, ppo_config,
                         args.output/'checkpoints'/f'update_{index:08d}', dict(progress))

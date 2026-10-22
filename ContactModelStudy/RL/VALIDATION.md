@@ -19,6 +19,9 @@ Passing interface checks does not establish that PPO has learned the task.
 - Consumed PPO diagnostics are released after each update, including runs without a logging callback.
 - An optimizer fault preserves already accepted samples and terminal outcomes in failure accounting.
 - Compiled source-scene fingerprints detect included XML/mesh changes and survive checkout relocation.
+- Completed-update progress remains accurate when subsequent reset or readout fails.
+- Nonfinite PPO diagnostics stop collection with or without a logging callback.
+- Mixed episode endings stop return propagation at resets and retain nonterminal rollout bootstrapping.
 
 Native GPU reset checks require exact preservation of the unselected worlds'
 state, control history and relevant caches at the reset boundary. Subsequent
@@ -29,10 +32,19 @@ ordering is changed to meet these checks.
 
 ## Recorded evidence
 
-The pre-training audit passed 259 core tests with two optional Pinocchio/Drake
+The pre-training audit and follow-up passed 266 core tests with two optional Pinocchio/Drake
 tests skipped. This run included the GPU tests, all 24 scene choices, native
-M1–M5 object/FOAM interface cases and six real PPO-update tests. Each update test
-used two environments and four control steps (eight training samples).
+M1–M5 object/FOAM interface cases and seven real PPO-update tests. Six update tests
+used two environments and four control steps (eight training samples each).
+The seventh used four synthetic samples and an analytic critic to verify mixed
+episode endings and the bootstrap at a nonterminal rollout boundary.
+
+Four injected post-update reset/readout faults, after the first or second update,
+check that completed-update progress remains distinct from the last saved bundle.
+Nonfinite diagnostic injection checks both logging-callback modes. An actual CPU
+driver check used four samples in normal execution and four with a reset fault
+after a real PPO update; both reports retained the correct completed progress,
+and the faulting run did not publish an incomplete checkpoint.
 
 A separate actual M2 driver check ran two updates, resumed one periodic checkpoint
 for one additional update, restored without sampling and evaluated two independent
@@ -41,9 +53,11 @@ actor parameters changed, complete checkpoint counters/hashes agreed and the
 restore-only actor matched exactly. This tests consecutive updates and the full
 launch/save/restart/evaluation path; it does not measure learning progress.
 
-The audit corrected three issues: retained library diagnostics grew with the
+The reviews corrected five issues: retained library diagnostics grew with the
 number of updates; an optimizer failure omitted its last accepted sample from
-failure counts; and top-level XML checks did not cover changed included assets.
+failure counts; top-level XML checks did not cover changed included assets;
+post-update reset/readout failures left cumulative completion counters stale;
+and loss diagnostic validation depended on a logging callback.
 Regression tests cover each issue. Native GPU future-trajectory thresholds were
 also replaced by diagnostic-only reporting, while exact reset-boundary isolation
 checks were retained and strengthened. The initial failing assertion and all

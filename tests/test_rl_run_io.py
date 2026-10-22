@@ -277,6 +277,62 @@ def test_failure_retains_last_complete_periodic_checkpoint(inputs, monkeypatch):
     assert not (tmp/'failed/training.pt').exists()
 
 
+@pytest.mark.parametrize('stage', ['reset', 'observe'])
+@pytest.mark.parametrize('failed_update', [1, 2])
+def test_post_update_environment_fault_retains_completed_progress(inputs, monkeypatch, stage, failed_update):
+    """A valid update can finish before reset/readout fails; no optimizer is run."""
+    from collections import defaultdict
+    tmp, manifest, _ = inputs
+    class FaultEnv(FakeEnv):
+        case_ids = ('a', 'b')
+        resets = 0
+        def step(self, latent):
+            return self.step_command(self.current_target)
+        def reset_indices(self, ids):
+            self.resets += 1
+            if stage == 'reset' and self.resets == failed_update:
+                raise RuntimeError('injected post-update environment fault')
+            super().reset_indices(ids)
+        def observe(self):
+            if stage == 'observe' and self.resets == failed_update:
+                raise RuntimeError('injected post-update environment fault')
+            return super().observe()
+    monkeypatch.setattr(FaultEnv, 'manifest', manifest)
+    class NoOptimizerAgent(FakeAgent):
+        def __init__(self, config):
+            super().__init__(Actor(hidden_sizes=config.hidden_sizes), config.steps_per_update)
+            self.models = {'policy': self.actor, 'value': torch.nn.Linear(73, 1)}
+            self.tracking_data = defaultdict(list)
+        def pre_interaction(self, **kw): pass
+        def act(self, obs, states, **kw):
+            return torch.zeros(2, 16), {'log_prob': torch.zeros(2, 1)}
+        def record_transition(self, **kw): pass
+        def post_interaction(self, *, timestep, **kw):
+            if (timestep+1) % self.cfg.rollouts == 0:
+                for key in ('Loss / Policy loss', 'Loss / Value loss', 'Policy / Standard deviation'):
+                    self.tracking_data[key].append(0.)
+    monkeypatch.setattr(train_rl, 'LeapVectorEnv', FaultEnv)
+    monkeypatch.setattr(train_rl, 'build_agent', lambda e, c: (a := NoOptimizerAgent(c), a.actor))
+    config = tmp/'config.json'
+    config.write_text(json.dumps({'environment': manifest['config'], 'ppo': {'steps_per_update': 2}}))
+    with pytest.raises(RuntimeError, match='post-update environment fault'):
+        train_rl.main(['--config', str(config), '--case-bank', str(tmp/'cases.json'), '--updates', '3',
+                       '--checkpoint-interval', '1', '--output', str(tmp/'failed')])
+    result = json.loads((tmp/'failed/summary.json').read_text())
+    expected = dict(completed_ppo_updates=failed_update, vector_steps=failed_update*2,
+                    transitions=failed_update*4)
+    assert result['completed_ppo_updates'] == failed_update
+    assert result['current_completed_update_progress'] == expected
+    assert result['transitions'] == expected['transitions']
+    if failed_update == 1:
+        assert result['latest_complete_checkpoint'] is None
+    else:
+        saved = checkpoint_metadata(result['latest_complete_checkpoint'])
+        assert saved['progress']['completed_ppo_updates'] == failed_update-1
+        assert result['latest_checkpoint_progress'] == saved['progress']
+    assert not (tmp/'failed/checkpoint.json').exists()
+
+
 def test_resume_preflight_rejects_changed_settings_before_allocating_environment(inputs, monkeypatch):
     tmp, manifest, bank = inputs
     FakeEnv.manifest = manifest

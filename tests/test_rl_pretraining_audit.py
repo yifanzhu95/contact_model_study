@@ -68,6 +68,23 @@ def test_collector_releases_consumed_metrics_at_each_update(with_callback):
         env.close()
 
 
+@pytest.mark.parametrize('with_callback', [False, True])
+def test_update_diagnostic_safety_does_not_depend_on_logging(with_callback):
+    class InvalidMetricsAgent(CollectorAgent):
+        def post_interaction(self, **kwargs):
+            super().post_interaction(**kwargs)
+            if self.tracking_data:
+                self.tracking_data['Loss / Value loss'][-1] = float('inf')
+    env = LeapVectorEnv(EnvConfig(num_envs=2, episode_steps=2),
+                        CaseBank.development(count=2, seed=0, difficulty=8))
+    try:
+        with pytest.raises(FloatingPointError, match='Nonfinite PPO update diagnostics'):
+            collect_updates(env, InvalidMetricsAgent(), updates=1,
+                            on_update=(lambda i, m: None) if with_callback else None)
+    finally:
+        env.close()
+
+
 def test_update_failure_counts_already_sampled_terminal_transition(tmp_path, monkeypatch):
     bank = CaseBank.development(count=2, seed=0, difficulty=8)
     bank.save(tmp_path/'cases.json')

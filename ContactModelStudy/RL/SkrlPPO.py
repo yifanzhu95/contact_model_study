@@ -136,13 +136,13 @@ def collect_updates(env, agent, *, updates: int, on_transition=None, on_update=N
         if not all(torch.isfinite(p).all().item() for p in agent.models["value"].parameters()):
             raise FloatingPointError("Nonfinite value parameters after update")
         if (step + 1) % agent.cfg.rollouts == 0:
+            # Read the library's measurements; safety must not depend on
+            # whether the caller logs them. No extra actions or local update.
+            metrics = {key: float(agent.tracking_data[key][-1]) for key in
+                       ("Loss / Policy loss", "Loss / Value loss", "Policy / Standard deviation")}
+            if not all(math.isfinite(x) for x in metrics.values()):
+                raise FloatingPointError("Nonfinite PPO update diagnostics")
             if on_update:
-                # Read the library's measurements; do not replace its update or
-                # sample extra actions merely to produce a diagnostic.
-                metrics = {key: float(agent.tracking_data[key][-1]) for key in
-                           ("Loss / Policy loss", "Loss / Value loss", "Policy / Standard deviation")}
-                if not all(math.isfinite(x) for x in metrics.values()):
-                    raise FloatingPointError("Nonfinite PPO update diagnostics")
                 on_update((step + 1) // agent.cfg.rollouts, metrics)
             # skrl's write_interval=0 disables its automatic draining. Metrics
             # have been persisted by the callback and must not grow in RAM.

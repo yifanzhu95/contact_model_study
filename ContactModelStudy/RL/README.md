@@ -205,6 +205,11 @@ These sample counts are distinct from completed PPO updates and complete saved
 checkpoints. `ppo_updates.jsonl` saves the library's update diagnostics; consumed
 diagnostics are released from memory at each update instead of accumulating for
 the lifetime of a run. Detailed transition logs still grow with the sample count.
+Nonfinite update diagnostics stop collection even without a logging callback.
+I record validated completed-update progress before the subsequent environment
+reset/readout. If that operation fails, the failure summary retains completed
+update counts separately from the last complete saved checkpoint. Only the
+reported complete checkpoint is available for restart.
 
 Time limits and supported stop signals are checked between complete PPO updates.
 A cooperative stop saves the last completed update and stops before starting another.
@@ -372,10 +377,11 @@ untrained hold actors, easy initial goals and microsecond timesteps to check
 boundaries. They do not demonstrate learned rotation or realistic task performance.
 Further qualification and unresolved scope are described in [VALIDATION.md](VALIDATION.md).
 
-The subsequent pre-training audit passed all 259 available core tests, including
+The pre-training audit and follow-up passed all 266 available core tests, including
 the GPU and real PPO-update tests; the same two optional engine tests were skipped.
-It fixed diagnostic retention, optimizer-fault sample accounting and scene dependency
-identity. A separate M2 driver check completed two updates, restarted one saved
+The reviews fixed diagnostic retention, fault accounting and scene dependency
+identity, and checked asynchronous episode endings and nonterminal rollout bootstrap.
+A separate M2 driver check completed two updates, restarted one saved
 update, restored without sampling and evaluated two independent cases. That check
 used only 12 training transitions and checks execution, not learning.
 
