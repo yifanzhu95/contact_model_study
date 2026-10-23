@@ -1,7 +1,7 @@
 # ContactModelStudy
 
-I added PPO training and shared RL/MPPI evaluation alongside this MPC architecture.
-See [the RL guide](RL/README.md) for supported features, commands and limitations.
+PPO policies can be trained on the same tasks and contact models and run in
+`run_episodes` in MPPI's place (`--planner rl`); see [the RL guide](RL/README.md).
 
 A package for studying how the choice of contact model affects sampling-based
 control. A planner (MPPI) chooses actions by rolling out many sampled futures
@@ -32,14 +32,20 @@ ContactModelStudy/
 │   ├── TaskBase.py             TaskBase, TaskBaseConfig, TaskRole
 │   ├── LeapReorient.py         shared LEAP-hand reorientation machinery + cost
 │   └── CubeReorient.py, DuckReorient.py, BallReorient.py   per-object numbers
+├── Planners/
+│   └── PlannerBase.py          what run_episodes drives: Plan, Reset, Close
 ├── SamplingBasedPlanners/
-│   ├── SamplingBasedPlannerBase.py   rollout loop, control modes, graph capture
+│   ├── SamplingBasedPlannerBase.py   rollout loop, control modes, graph capture (a PlannerBase)
 │   └── MPPI.py
+├── RL/                     PPO on the same tasks and simulators; see RL/README.md
+│   ├── TrainEnv.py, Agent.py   skrl environment and PPO agent
+│   └── PolicyPlanner.py        a trained actor as a PlannerBase (run_episodes --planner rl)
 ├── Renderers/
 │   ├── RendererBase.py         RendererBase / VideoRendererBase + configs
 │   └── MujocoVideoRenderer.py  draws any simulator's state with MuJoCo
 ├── Drivers/
-│   ├── run_episodes.py            closed-loop episodes, one at a time
+│   ├── run_episodes.py            closed-loop episodes, one at a time (MPPI or a trained policy)
+│   ├── train_rl_policy.py         train a PPO policy on one contact model
 │   ├── run_episodes_interwoven.py two episodes at once: one plans on the GPU while the other steps on the CPU
 │   ├── run_episodes_pooled.py     many at once, across the GPUs and CPU cores of a machine
 │   └── EpisodePool.py             the engine behind the parallel drivers and the BO search

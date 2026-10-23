@@ -609,8 +609,12 @@ class LeapReorient(TaskBase):
         return None
 
     # -- cost ----------------------------------------------------------------
-    def calcCosts(self, sim, terminal: bool = False, out=None):
+    def calcCosts(self, sim, terminal: bool = False, out=None, goals=None):
         """Score every world of ``sim`` on the device; see ``TaskBase``.
+
+        ``goals`` optionally gives each world its own goal: an ``(N, len(goal))``
+        float32 device array of rows laid out like ``goal`` (see ``goalRow``).
+        Omitted, every world is scored against the task's own goal.
 
         Terms, matching ``grasp_reorient_cost_wp`` exactly:
 
@@ -654,11 +658,12 @@ class LeapReorient(TaskBase):
         if out is None:
             out = self._buffer("cost", n, device, wp.float32)
         g = self._gpu_arrays(device)
+        table, per_world = self._goalTable(goals, n, device)
         wp.launch(
             _leap_reorient_cost_kernel,
             dim=n,
-            inputs=[state.qpos, state.qvel, state.site_xpos, g["goal"], g["indices"],
-                    g["weights"], 1 if terminal else 0],
+            inputs=[state.qpos, state.qvel, state.site_xpos, g["goal"], table, per_world,
+                    g["indices"], g["weights"], 1 if terminal else 0],
             outputs=[out],
         )
         return out
@@ -683,8 +688,11 @@ class LeapReorient(TaskBase):
             "vel": float(np.linalg.norm(vel)),
         }
 
-    def isSuccess(self, sim, out=None):
+    def isSuccess(self, sim, out=None, goals=None):
         """Every goal error below its threshold; see ``TaskBase.isSuccess``.
+
+        ``goals`` gives each world of a vectorized ``sim`` its own goal, as for
+        ``calcCosts``; a single simulator is always judged on the task's goal.
 
         A state with a NaN or inf anywhere — hand or object, position or
         velocity — is never a success, even when the object's own pose happens
@@ -708,11 +716,12 @@ class LeapReorient(TaskBase):
         if out is None:
             out = self._buffer("success", n, device, wp.bool)
         g = self._gpu_arrays(device)
+        table, per_world = self._goalTable(goals, n, device)
         thr = self.SUCCESS_THRESHOLDS
         wp.launch(
             _leap_success_kernel,
             dim=n,
-            inputs=[state.qpos, state.qvel, g["goal"], int(self.indices[0]),
+            inputs=[state.qpos, state.qvel, g["goal"], table, per_world, int(self.indices[0]),
                     int(self.indices[1]), float(thr["pos"]), float(thr["quat"]),
                     float(thr["vel"])],
             outputs=[out],
@@ -786,10 +795,32 @@ class LeapReorient(TaskBase):
             self._gpu = {
                 "device": str(device),
                 "goal": wp.array(self.goal, dtype=wp.float32, device=device),
+                # Stands in for the per-world table when there is none; never read.
+                "no_goals": wp.zeros((1, self.goal.size), dtype=wp.float32, device=device),
                 "indices": wp.array(self.indices, dtype=wp.int32, device=device),
                 "weights": wp.array(self.weights, dtype=wp.float32, device=device),
             }
         return self._gpu
+
+    def _goalTable(self, goals, n: int, device: str):
+        """``(table, per_world)`` kernel arguments for an optional per-world goal table."""
+        if goals is None:
+            return self._gpu_arrays(device)["no_goals"], 0
+        want = (n, self.goal.size)
+        if tuple(goals.shape) != want or str(goals.device) != str(self._gpu_arrays(device)["goal"].device):
+            raise ValueError(f"goals must be a {want} array on {device}, got "
+                             f"{tuple(goals.shape)} on {goals.device}")
+        return goals, 1
+
+    def goalRow(self, quat: np.ndarray) -> np.ndarray:
+        """``goal`` with its orientation replaced by ``quat`` (wxyz): one row of a goal table.
+
+        Position, home command and ``fallen_z`` stay the task's own; only the
+        orientation is sampled per episode. Does not change the task's goal.
+        """
+        row = self.goal.copy()
+        row[3:7] = self._unitQuat(quat)
+        return row
 
     def __repr__(self) -> str:
         return (
@@ -803,12 +834,22 @@ class LeapReorient(TaskBase):
 try:
     import warp as wp
 
+    @wp.func
+    def _goal_at(goal: wp.array(dtype=float), goals: wp.array2d(dtype=float),
+                 per_world: int, n: int, k: int):
+        """Entry ``k`` of world ``n``'s goal: its own row, or the shared vector."""
+        if per_world == 1:
+            return goals[n, k]
+        return goal[k]
+
     @wp.kernel
     def _leap_reorient_cost_kernel(
         qpos: wp.array2d(dtype=float),          # (N, nq)
         qvel: wp.array2d(dtype=float),          # (N, nv)
         site_xpos: wp.array2d(dtype=wp.vec3),   # (N, nsite)
         goal: wp.array(dtype=float),
+        goals: wp.array2d(dtype=float),         # (N, len(goal)) when per_world
+        per_world: int,
         indices: wp.array(dtype=int),
         weights: wp.array(dtype=float),
         terminal: int,
@@ -823,8 +864,10 @@ try:
         p_obj = wp.vec3(qpos[n, obj_q], qpos[n, obj_q + 1], qpos[n, obj_q + 2])
         quat_obj = wp.vec4(qpos[n, obj_q + 3], qpos[n, obj_q + 4],
                            qpos[n, obj_q + 5], qpos[n, obj_q + 6])
-        p_target = wp.vec3(goal[0], goal[1], goal[2])
-        q_target = wp.vec4(goal[3], goal[4], goal[5], goal[6])
+        p_target = wp.vec3(_goal_at(goal, goals, per_world, n, 0), _goal_at(goal, goals, per_world, n, 1),
+                           _goal_at(goal, goals, per_world, n, 2))
+        q_target = wp.vec4(_goal_at(goal, goals, per_world, n, 3), _goal_at(goal, goals, per_world, n, 4),
+                           _goal_at(goal, goals, per_world, n, 5), _goal_at(goal, goals, per_world, n, 6))
 
         dot = wp.dot(q_target, quat_obj)
         c_quat = 1.0 - dot * dot
@@ -840,7 +883,7 @@ try:
         c_joint = float(0.0)
         c_joint_velo = float(0.0)
         for i in range(n_manip):
-            dq = qpos[n, robot_q + i] - goal[7 + i]
+            dq = qpos[n, robot_q + i] - _goal_at(goal, goals, per_world, n, 7 + i)
             c_joint += dq * dq
             dv = qvel[n, robot_q + i]
             c_joint_velo += dv * dv
@@ -850,7 +893,7 @@ try:
             c_contact += wp.length(p_obj - site_xpos[n, indices[i]])
 
         fallen = float(0.0)
-        if qpos[n, obj_q + 2] < goal[7 + n_manip]:
+        if qpos[n, obj_q + 2] < _goal_at(goal, goals, per_world, n, 7 + n_manip):
             fallen = 1.0
 
         if terminal == 1:
@@ -871,6 +914,8 @@ try:
         qpos: wp.array2d(dtype=float),   # (N, nq)
         qvel: wp.array2d(dtype=float),   # (N, nv)
         goal: wp.array(dtype=float),     # target pos(3) + quat(4) lead the vector
+        goals: wp.array2d(dtype=float),  # (N, len(goal)) when per_world
+        per_world: int,
         obj_q: int,
         obj_v: int,
         pos_thr: float,
@@ -880,11 +925,13 @@ try:
     ):
         """Device twin of goalErrors + the threshold test, one world per thread."""
         n = wp.tid()
-        d = wp.vec3(qpos[n, obj_q] - goal[0], qpos[n, obj_q + 1] - goal[1],
-                    qpos[n, obj_q + 2] - goal[2])
+        d = wp.vec3(qpos[n, obj_q] - _goal_at(goal, goals, per_world, n, 0),
+                    qpos[n, obj_q + 1] - _goal_at(goal, goals, per_world, n, 1),
+                    qpos[n, obj_q + 2] - _goal_at(goal, goals, per_world, n, 2))
         quat = wp.vec4(qpos[n, obj_q + 3], qpos[n, obj_q + 4],
                        qpos[n, obj_q + 5], qpos[n, obj_q + 6])
-        dot = wp.dot(quat, wp.vec4(goal[3], goal[4], goal[5], goal[6]))
+        dot = wp.dot(quat, wp.vec4(_goal_at(goal, goals, per_world, n, 3), _goal_at(goal, goals, per_world, n, 4),
+                                   _goal_at(goal, goals, per_world, n, 5), _goal_at(goal, goals, per_world, n, 6)))
         speed2 = float(0.0)
         for i in range(6):
             speed2 += qvel[n, obj_v + i] * qvel[n, obj_v + i]
@@ -920,6 +967,7 @@ try:
         out[n] = bad
 
 except ImportError:  # pragma: no cover - warp is optional for the host path
+    _goal_at = None
     _leap_reorient_cost_kernel = None
     _leap_success_kernel = None
     _leap_failure_kernel = None

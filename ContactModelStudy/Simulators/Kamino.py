@@ -633,6 +633,52 @@ class Kamino(VectorizedSimulator):
     def DeviceState(self) -> DeviceState:
         return DeviceState(qpos=self.qpos_wp, qvel=self.qvel_wp, ctrl=self.ctrl_wp, site_xpos=self.site_xpos_wp)
 
+    def ResetWorlds(self, ids, q, q_dot=None, u=None) -> None:
+        """Reset only the worlds in ``ids``, through Kamino's masked FK reset.
+
+        The other worlds' bodies, solver buffers, clocks and contact peaks are
+        untouched. Joint targets need no reset: every step rewrites them from
+        ``ctrl``.
+
+        Raises:
+            RuntimeError: If the FK reset did not converge in a reset world.
+        """
+        ids, q, q_dot, u = self._resetRows(ids, q, q_dot, u)
+        dev, m = self.device, self.model
+        ids_wp = wp.array(ids, dtype=wp.int32, device=dev)
+        for src, dst in ((q, self.qpos_wp), (q_dot, self.qvel_wp), (u, self.ctrl_wp)):
+            wp.launch(_scatter_rows_kernel, dim=src.shape,
+                      inputs=[ids_wp, wp.array(src, dtype=wp.float32, device=dev)], outputs=[dst], device=dev)
+        # The joint-space scratch is rebuilt for every world, but only the masked
+        # worlds read it.
+        wp.launch(_mujoco_to_newton_kernel, dim=self.N,
+                  inputs=[self.qpos_wp, self.qvel_wp, m.joint_coord_world_start, m.joint_dof_world_start,
+                          self._q_src, self._d_src, *self._free, self._n_free],
+                  outputs=[self._reset_q, self._reset_qd], device=dev)
+        # One entry per world plus Newton's global world, which is never reset.
+        mask = np.zeros(self.N + 1, dtype=bool)
+        mask[ids] = True
+        self._reset_success.zero_()
+        self.solver.reset(self.state_0, world_mask=wp.array(mask, dtype=wp.bool, device=dev),
+                          config=self._reset_config, success_mask=self._reset_success)
+        ok = self._reset_success.numpy()[ids]
+        if not ok.all():
+            raise RuntimeError(f"Kamino's FK reset did not converge in worlds {ids[~ok].tolist()}")
+        # state_1 is the step's output buffer and already equals state_0 in the
+        # other worlds, so a full copy changes only the reset ones.
+        self.state_1.assign(self.state_0)
+        wp.launch(_reset_counters_kernel, dim=ids.size, inputs=[ids_wp],
+                  outputs=[self._time_wp, self._contact_peak], device=dev)
+        self._refreshMirror()
+
+    def CheckCapacity(self) -> None:
+        """Raise when a world has reached its contact capacity since its last reset."""
+        cap = self.contact_capacity
+        peak = self._contact_peak.numpy()
+        if cap and (peak >= cap).any():
+            raise RuntimeError(f"Kamino: {int((peak >= cap).sum())} world(s) reached the contact capacity "
+                               f"of {cap}; raise max_contacts_per_world.")
+
     # -- control -------------------------------------------------------------
     def SetControl(self, u) -> None:
         if isinstance(u, wp.array):
@@ -716,6 +762,21 @@ class Kamino(VectorizedSimulator):
 def _broadcast_kernel(src: wp.array(dtype=float), dst: wp.array2d(dtype=float)):
     n, i = wp.tid()
     dst[n, i] = src[i]
+
+
+@wp.kernel
+def _scatter_rows_kernel(ids: wp.array(dtype=wp.int32), src: wp.array2d(dtype=float),
+                         dst: wp.array2d(dtype=float)):
+    k, i = wp.tid()
+    dst[ids[k], i] = src[k, i]
+
+
+@wp.kernel
+def _reset_counters_kernel(ids: wp.array(dtype=wp.int32), time: wp.array(dtype=float),
+                           peak: wp.array(dtype=wp.int32)):
+    k = wp.tid()
+    time[ids[k]] = 0.0
+    peak[ids[k]] = 0
 
 
 @wp.kernel
