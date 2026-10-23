@@ -1,0 +1,7 @@
+{
+  "environment": {"task_name": "cube_reorient", "rollout_model": "M2", "num_envs": 1024,
+                  "physics_dt": 0.004, "control_dt": 0.064, "episode_steps": 150, "settle_s": 1.0,
+                  "target_rate": 1.0, "cost_reference": 100.0, "goal_difficulty": 8, "seed": 0},
+  "ppo": {"rollout_steps": 32, "learning_epochs": 5, "mini_batches": 8, "learning_rate": 0.0003,
+          "hidden_sizes": [256, 128], "initial_log_std": -1.0}
+}

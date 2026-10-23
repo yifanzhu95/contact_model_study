@@ -1,0 +1,5 @@
+{
+  "environment": {"task_name": "cube_reorient", "rollout_model": "M1", "num_envs": 8,
+                  "episode_steps": 10, "settle_s": 0.2},
+  "ppo": {"rollout_steps": 4, "mini_batches": 2, "learning_epochs": 2, "hidden_sizes": [64, 64]}
+}

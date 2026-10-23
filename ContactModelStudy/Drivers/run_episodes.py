@@ -7,6 +7,11 @@ the cost; one of the study's rollout contact models (M1-M5, see
 against it; a CPU simulator stands in for reality; a ``MujocoVideoRenderer``
 films it; and an ``EpisodeRecorder`` keeps every step and owns the summaries.
 
+``--planner rl --policy actor.pt`` runs a policy trained by
+``train_rl_policy`` in MPPI's place, scored by the same eval simulator and
+recorder. Its control step, episode length and settle time are the policy's
+own, and its episodes are single-goal.
+
 The planner and the evaluator load *different scenes from the same task* — the
 rollout scene the planner predicts with, and the accurate eval scene it is
 judged on. That gap is what the study measures, so it is the default here
@@ -20,6 +25,8 @@ Examples::
     python -m ContactModelStudy.Drivers.run_episodes --rollout-model M3
     python -m ContactModelStudy.Drivers.run_episodes --n-samples 512 --temperature 5 \\
         --results results/run.json
+    python -m ContactModelStudy.Drivers.run_episodes --planner rl \\
+        --policy results/rl/cube_m2/actor.pt --n-episodes 20 --eval-sim mujoco
 
 Results are saved by default, to ``results/run_episodes_<date>_<time>.json``;
 ``--results PATH`` picks the file and ``--no-results`` turns saving off. That
@@ -54,9 +61,7 @@ if str(_REPO_ROOT) not in sys.path:
 from ContactModelStudy.Renderers.MujocoVideoRenderer import MujocoVideoRenderer  # noqa: E402
 from ContactModelStudy.Renderers.RendererBase import VideoRendererBaseConfig  # noqa: E402
 from ContactModelStudy.SamplingBasedPlanners.MPPI import MPPI, MPPI_Config  # noqa: E402
-from ContactModelStudy.Tasks.BallReorient import BallReorient  # noqa: E402
-from ContactModelStudy.Tasks.CubeReorient import CubeReorient  # noqa: E402
-from ContactModelStudy.Tasks.DuckReorient import DuckReorient  # noqa: E402
+from ContactModelStudy.Tasks.Registry import task_classes  # noqa: E402
 from ContactModelStudy.Tasks.LeapReorient import COST_WEIGHT_KEYS, LeapReorientConfig  # noqa: E402
 from ContactModelStudy.Tasks.TaskBase import TaskRole  # noqa: E402
 from ContactModelStudy.Utils.ContactModelPresets import (  # noqa: E402
@@ -68,8 +73,7 @@ from ContactModelStudy.Utils.EpisodeRecorder import EpisodeRecorder, StepSaving 
 from ContactModelStudy.Utils.EvalSimulators import evalSimNames, makeEvalSim  # noqa: E402
 
 #: Tasks this driver can run, by the name passed to --task.
-TASKS = {"cube_reorient": CubeReorient, "duck_reorient": DuckReorient,
-         "ball_reorient": BallReorient}
+TASKS = task_classes()
 
 #: --results default: a fresh, time-stamped file under results/, chosen at start.
 _AUTO_RESULTS = "auto"
@@ -89,7 +93,6 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-
     g = p.add_argument_group("task")
     g.add_argument("--task", default="cube_reorient", choices=sorted(TASKS))
     g.add_argument("--hand-acc", default="high", choices=["low", "med", "high"],
@@ -99,8 +102,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = p.add_argument_group("episode")
     g.add_argument("--n-episodes", type=int, default=1)
-    g.add_argument("--steps", type=int, default=1000,
-                   help="control steps per episode")
+    g.add_argument("--steps", type=int, default=None,
+                   help="control steps per episode; 1000, or under --planner rl the policy's own "
+                        "episode length, which it must equal")
     g.add_argument("--timestep", type=float, default=0.004,#0.0005,
                    help="eval (fine) physics timestep (s); the rollout model runs "
                         "at timestep * --eval-steps-per-rollout-step")
@@ -119,10 +123,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="simulator the episode is scored in, on the eval MJCF: a CPU "
                         "simulator (mujoco, pinocchio, drake) or a GPU contact model "
                         "(M1-M5, as for --rollout-model, with one world)")
-    g.add_argument("--settle", type=float, default=1.0,
+    g.add_argument("--settle", type=float, default=None,
                    help="seconds to let the hand and object come to rest, holding "
                         "the initial grasp, before planning starts (filmed, not "
-                        "counted in --steps)")
+                        "counted in --steps); 1.0, or under --planner rl the "
+                        "policy's own, which it must equal")
     g.add_argument("--seed", type=int, default=0)
     g.add_argument("--goal-difficulty", type=int, default=8, choices=range(10),
                    metavar="{0..9}",
@@ -138,6 +143,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "a new goal and the episode carries on to --steps")
 
     g = p.add_argument_group("planner")
+    g.add_argument("--planner", default="mppi", choices=["mppi", "rl"],
+                   help="mppi: plan with MPPI on --rollout-model (the options below); "
+                        "rl: run a trained policy, --policy, which sets its own control step")
+    g.add_argument("--policy", default=None, metavar="ACTOR",
+                   help="with --planner rl, the actor.pt written by train_rl_policy")
     g.add_argument("--rollout-model", default="M2",
                    choices=sorted(CONTACT_MODELS) + sorted(ALIASES), metavar="MODEL",
                    help="contact model the planner rolls out with: M1 (stiff MJWarp), "
@@ -360,7 +370,7 @@ def _printEpisode(episode: int, s: dict, args) -> None:
 
 
 def parseArgs(argv=None, parser: argparse.ArgumentParser | None = None,
-              results_prefix: str = "run_episodes") -> argparse.Namespace:
+              results_prefix: str = "run_episodes", allow_rl: bool = False) -> argparse.Namespace:
     """Parse and check the command line, filling in the defaults that depend on it.
 
     Everything ``main`` rejects before building anything is rejected here, as
@@ -368,10 +378,21 @@ def parseArgs(argv=None, parser: argparse.ArgumentParser | None = None,
     without running it. ``args.cost_weights`` holds the parsed
     ``--cost-weight`` overrides as a dict, or ``None``. A driver that adds
     options of its own passes its extended ``parser``, and names its default
-    results file with ``results_prefix``.
+    results file with ``results_prefix``. Only a driver that can run a policy
+    passes ``allow_rl``; the others keep ``--planner mppi``.
     """
     parser = parser or build_parser()
     args = parser.parse_args(argv)
+    if args.planner == "rl":
+        if not allow_rl:
+            parser.error("--planner rl is supported by run_episodes only")
+        _checkPolicyArgs(args, parser)
+    elif args.policy is not None:
+        parser.error("--policy needs --planner rl")
+    if args.steps is None:
+        args.steps = 1000
+    if args.settle is None:
+        args.settle = 1.0
     args.cost_weights = None
     if args.cost_weight:
         args.cost_weights = {}
@@ -395,13 +416,51 @@ def parseArgs(argv=None, parser: argparse.ArgumentParser | None = None,
     for (a, b), (field, value) in _PAIR_DEFAULTS.items():
         if getattr(args, a) is not None and getattr(args, b) is not None:
             parser.error(f"give --{a.replace('_', '-')} or --{b.replace('_', '-')}, not both")
-        if getattr(args, a) is None and getattr(args, b) is None:
+        if getattr(args, a) is None and getattr(args, b) is None and args.planner == "mppi":
             setattr(args, field, value)
     if args.results == _AUTO_RESULTS:
         # Time-stamped so runs never overwrite one another, and so the per-step
         # files of different runs, which sit side by side, never mix.
         args.results = str(_REPO_ROOT / "results" / f"{results_prefix}_{time.strftime('%Y%m%d_%H%M%S')}.json")
     return args
+
+
+def _checkPolicyArgs(args, parser) -> None:
+    """Fit ``--planner rl`` to the policy: its task, episode length, settle and control step.
+
+    A policy observes the time left in its episode and was trained on episodes
+    that start after a fixed settle and end at the first success, so those are
+    the policy's, not free choices. Fills ``--steps`` and ``--settle`` from it
+    when they are not given.
+    """
+    if args.policy is None:
+        parser.error("--planner rl needs --policy ACTOR")
+    if not Path(args.policy).is_file():
+        parser.error(f"--policy {args.policy} does not exist")
+    if not args.stop_on_success:
+        parser.error("--planner rl runs single-goal episodes; --no-stop-on-success is for MPPI")
+    if args.uncertainty:
+        parser.error("--uncertainty needs a planner that reports one; a policy does not")
+    from ContactModelStudy.RL.PolicyPlanner import policyContract
+    env = policyContract(args.policy)
+    if env["task_name"] != args.task:
+        parser.error(f"the policy was trained on --task {env['task_name']}, not {args.task}")
+    for flag, dest, value in (("--steps", "steps", env["episode_steps"]), ("--settle", "settle", env["settle_s"])):
+        given = getattr(args, dest)
+        if given is None:
+            setattr(args, dest, value)
+        elif given != value:
+            parser.error(f"{flag} {given} differs from the policy's {value}")
+    for flag in ("substeps", "ctrl_time_step"):
+        if getattr(args, flag) is not None:
+            parser.error(f"--{flag.replace('_', '-')} is the policy's own under --planner rl "
+                         f"({env['control_dt'] * 1e3:g} ms)")
+    # The policy runs on the rollout task's timestep; its control step must be a whole number of them.
+    rollout_dt = args.timestep * args.eval_steps_per_rollout_step
+    ratio = env["control_dt"] / rollout_dt
+    if abs(ratio - round(ratio)) > 1e-6 or round(ratio) < 1:
+        parser.error(f"the policy's control step {env['control_dt']} s is not a whole number of "
+                     f"--timestep * --eval-steps-per-rollout-step = {rollout_dt} s")
 
 
 # -- building blocks, shared with the parallel drivers ---------------------------
@@ -511,18 +570,35 @@ def saveResults(args, recorder) -> None:
         print(f"\nresults {out}  ({len(recorder)} episodes{what})")
 
 
+def printPolicyHeader(args, eval_task, planner) -> None:
+    control_dt = planner.substeps * planner.task.timestep
+    print(f"task       {args.task}")
+    print(f"eval scene {Path(eval_task.getModelPath()).name}  (on {args.eval_sim})")
+    print(f"planner    {planner!r}")
+    print(f"control    {1.0 / control_dt:.1f} Hz: {control_dt * 1e3:g} ms per control step  "
+          f"({args.steps} steps = {args.steps * control_dt:.2f} s per episode)")
+
+
 def main(argv=None) -> int:
-    args = parseArgs(argv)
+    args = parseArgs(argv, allow_rl=True)
     task, eval_task = buildTasks(args)
     # Each simulator at its own task's timestep: the eval sim fine, the rollout
     # model coarse (they are equal when eval_steps_per_rollout_step == 1).
     sim = makeEvalSim(args.eval_sim, eval_task.getModelPath(), eval_task.timestep)
-    rollout_sim = GetContactModelSim(args.rollout_model, task.getModelPath(), N=args.n_samples,
-                                     **rolloutSimOverrides(args, task))
-    planner = MPPI(rollout_sim, task, buildPlannerConfig(args))
+    rollout_sim = None
+    if args.planner == "rl":
+        from ContactModelStudy.RL.PolicyPlanner import RLPolicyPlanner
+        planner = RLPolicyPlanner(args.policy, task)
+    else:
+        rollout_sim = GetContactModelSim(args.rollout_model, task.getModelPath(), N=args.n_samples,
+                                         **rolloutSimOverrides(args, task))
+        planner = MPPI(rollout_sim, task, buildPlannerConfig(args))
     recorder = EpisodeRecorder(eval_task, sim, planner, steps=StepSaving.fromArgs(args),
                                cli_args=vars(args), eval_sim=args.eval_sim)
-    printHeader(args, task, eval_task, rollout_sim.config, type(rollout_sim).__name__, repr(planner))
+    if rollout_sim is None:
+        printPolicyHeader(args, eval_task, planner)
+    else:
+        printHeader(args, task, eval_task, rollout_sim.config, type(rollout_sim).__name__, repr(planner))
 
     try:
         for episode in range(args.n_episodes):
@@ -537,7 +613,9 @@ def main(argv=None) -> int:
             recorder.episodeFinished("interrupted")
         saveResults(args, recorder)
 
-    rollout_sim.Close()
+    planner.Close()
+    if rollout_sim is not None:
+        rollout_sim.Close()
     return 0
 
 

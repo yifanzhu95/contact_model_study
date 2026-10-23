@@ -378,6 +378,54 @@ class VectorizedSimulator(Simulator):
             f"needed to capture a rollout into a CUDA graph."
         )
 
+    def ResetWorlds(self, ids, q: np.ndarray, q_dot: np.ndarray | None = None,
+                    u: np.ndarray | None = None) -> None:
+        """Reset only the worlds in ``ids``; every other world is left exactly as it was.
+
+        What a training environment needs when some of its worlds finish an
+        episode and the rest are mid-episode. ``SetState`` cannot do it: it
+        overwrites every world and recomputes all of them. Solver state carried
+        between steps (warm starts, contact caches) is cleared for the reset
+        worlds only.
+
+        Derived quantities of the reset worlds — site poses, contacts — are
+        recomputed by the next step, not here: refreshing them would mean a
+        forward pass over every world, which would perturb the ones not reset.
+
+        Args:
+            ids: World indices to reset, unique and in range.
+            q: Positions, ``(len(ids), nq)``.
+            q_dot: Velocities, ``(len(ids), nv)``. ``None`` zeroes them.
+            u: Held controls, ``(len(ids), nu)``. ``None`` zeroes them.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not implement ResetWorlds().")
+
+    def CheckCapacity(self) -> None:
+        """Raise ``RuntimeError`` if any world has outgrown its contact or constraint buffers.
+
+        A world that runs out of room drops contacts silently and carries on with
+        wrong physics. A planner can tolerate that in a few of its samples; a
+        learner training on the result cannot, so a training loop calls this
+        after every control step.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not implement CheckCapacity().")
+
+    def _resetRows(self, ids, q, q_dot, u):
+        """Validate ``ResetWorlds`` arguments into ``(ids, q, q_dot, u)`` host arrays, float32."""
+        ids = np.asarray(ids, dtype=np.int32).ravel()
+        if ids.size == 0:
+            raise ValueError("ResetWorlds needs at least one world")
+        if len(np.unique(ids)) != ids.size or ids.min() < 0 or ids.max() >= self._n_worlds:
+            raise ValueError(f"ids must be unique worlds in [0, {self._n_worlds}), got {ids.tolist()}")
+
+        def rows(x, dim, name):
+            a = np.zeros((ids.size, dim)) if x is None else np.asarray(x, dtype=float)
+            if a.shape != (ids.size, dim):
+                raise ValueError(f"{name} must have shape ({ids.size}, {dim}), got {a.shape}")
+            return a.astype(np.float32)
+
+        return ids, rows(q, self.nq, "q"), rows(q_dot, self.nv, "q_dot"), rows(u, self.nu, "u")
+
     def DeviceState(self) -> "DeviceState":
         """Return the backend's live device arrays, without copying to the host.
 

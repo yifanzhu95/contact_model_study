@@ -14,9 +14,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import warp as wp
+
 from ContactModelStudy.Simulators.VectorizedMujoco import (
     VectorizedMujoco,
     VectorizedMujocoConfig,
+    _zero_rows_kernel,
 )
 
 
@@ -96,6 +99,14 @@ class ComFree(VectorizedMujoco):
 
     def _forwardPhysics(self) -> None:
         self._cfw.forward(self.m, self.d)
+
+    def _resetData(self, mask) -> None:
+        self._cfw.reset_data(self.m, self.d, mask)
+
+    def _resetExtraState(self, ids) -> None:
+        # Fields comfree_warp's make_data adds, which its reset_data leaves alone.
+        for arr in (self.d.qvel_smooth_pred, self.d.qfrc_total, self.d.efc.efc_dist, self.d.efc.efc_mass):
+            wp.launch(_zero_rows_kernel, dim=(ids.shape[0], arr.shape[1]), inputs=[ids], outputs=[arr])
 
 
 def _comfree_warp():

@@ -1,5 +1,25 @@
 # Contact Model Study
 
+The current implementation is under `ContactModelStudy/`; the earlier
+`contact_study/` workflows remain for compatibility and comparison.
+
+| RL integration | Current scope |
+|---|---|
+| Tasks and models | Cube, duck and ball on any of M1–M5, the same simulators and task costs MPPI uses |
+| Training | skrl PPO on one GPU (`train_rl_policy`), checkpoint and resume, clean stop on a time budget or SIGTERM |
+| Evaluation | A trained policy runs in `run_episodes --planner rl`, scored exactly as MPPI is |
+| Pending | A validated learning baseline, domain randomization, multi-GPU training, hardware integration |
+
+See [the RL guide](ContactModelStudy/RL/README.md) for training and evaluation,
+[the package guide](ContactModelStudy/README.md) for the MPC architecture, and
+[the experiment guide](experiments/README.md) for the experiments.
+
+## Repository background and earlier workflows
+
+The older `contact_study` interfaces and model aliases below are retained as
+background. In the current `ContactModelStudy` implementation, M5 means Kamino;
+it is not the old M5 geometry alias.
+
 > **What matters about contact models in dexterous manipulation?**
 > A systematic empirical study of contact model fidelity for sampling-based MPC.
 
@@ -77,9 +97,9 @@ families. Other drivers retain the general scene-selection behavior above.
 
 | ID  | Description                                                        |
 |-----|--------------------------------------------------------------------|
-| M1  | Wanted an Anitescu model, for now just use MuJoCo but with hard contact |
+| M1  | MuJoCo with stiff contact |
 | M2  | MuJoCo default soft contact                                        |
-| M3  | Jin 2024 complementarity-free model (`comfree_warp`)               |
+| M3  | Complementarity-free contact model (`comfree_warp`)               |
 | M4  | XPBD-style penalty model (`contact_models/xpbd_backend.py`)        |
 
 ### Old M5..M10 mapping
@@ -211,7 +231,6 @@ To edit comfree, check that branch out somewhere else and install it over the
 pinned one:
 
 ```bash
-git clone -b comfree-warp1.17 https://github.com/yifanzhu95/contact_model_study.git /path/to/comfree_warp
 pip install -e /path/to/comfree_warp --no-deps
 ```
 
