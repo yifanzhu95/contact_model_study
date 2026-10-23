@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Plot the processed batch results (``process_batch_results.py`` output).
 
-A bar chart of success rate per rollout model (one bar per hand accuracy, 95%
-Wilson interval) needs only the batch's own results and is always drawn. The
-plots below need the analysis metrics and are skipped if the tables lack them.
+Everything is plotted per cell (a row of the batch CSV), never pooled across
+cells, so cells that differ only in a setting such as the temperature stay
+apart. A bar chart of success rate, one bar per cell (95% Wilson interval),
+needs only the batch's own results and is always drawn. The plots below need
+the analysis metrics and are skipped if the tables lack them.
 
 From the per-episode table it draws, for each metric, a grid of histograms with
-one panel per cell (rows = rollout model, columns = hand accuracy), each
-episode's bar segment coloured by whether it succeeded. From the per-cell table
-it draws success rate against each metric, one marker per cell. The x position is
+one panel per cell (a row of panels per rollout model, wrapped at
+``MAX_COLS``), each episode's bar segment coloured by whether it succeeded.
+From the per-cell table it draws success rate against each metric, one
+labelled marker per cell. The x position is
 the cell's median with a whisker up to its p90; ``process_batch_results.stats``
 computes both over every analysed step of every episode in the cell pooled
 together (no lower percentile is stored, so the whisker is one-sided). The
@@ -58,6 +61,8 @@ ACC_MARKERS = {"high": "o", "med": "s", "low": "^"}
 # hand accuracy is ordinal, so one hue from dark (high) to light (low)
 ACC_BAR_COLORS = {"high": "#0d4a8f", "med": "#2a78d6", "low": "#8dbbee"}
 N_BINS = 20
+#: Histogram panels per row; a rollout model with more cells wraps onto further rows.
+MAX_COLS = 9
 
 
 def readTable(path: Path) -> pd.DataFrame:
@@ -98,6 +103,42 @@ def orderedLevels(values, preferred):
     return [v for v in preferred if v in levels] + sorted(v for v in levels if v not in preferred)
 
 
+def cellLabel(row) -> str:
+    """A cell's CSV label, or its name when the row had none."""
+    label = row.get("label")
+    return str(label) if isinstance(label, str) and label else str(row["name"])
+
+
+def shortLabels(cells: pd.DataFrame) -> list[str]:
+    """Each cell's label without the ``_``-separated parts every label shares in the same place.
+
+    ``cube_M1_M5_high_T_0.5`` among cells that all start ``cube_`` and share
+    the eval sim ``M5`` becomes ``M1_high_T_0.5``. Labels with differing
+    numbers of parts are kept whole.
+    """
+    parts = [cellLabel(row).split("_") for _, row in cells.iterrows()]
+    if len(parts) < 2 or len({len(p) for p in parts}) != 1:
+        return ["_".join(p) for p in parts]
+    keep = [k for k in range(len(parts[0])) if len({p[k] for p in parts}) > 1]
+    return ["_".join(p[k] for k in keep) for p in parts]
+
+
+def cellsInOrder(df: pd.DataFrame) -> pd.DataFrame:
+    """One row per cell of ``df`` (its first), in batch order."""
+    order = "cell" if "cell" in df.columns else "name"
+    return df.sort_values(order, kind="stable").drop_duplicates("name").reset_index(drop=True)
+
+
+def cellGrid(cells: pd.DataFrame) -> list[list]:
+    """Rows of cell rows for a panel grid: each rollout model's cells in batch order, ``MAX_COLS`` a row."""
+    models = orderedLevels(cells["rollout_model"], sorted(cells["rollout_model"].unique()))
+    grid = []
+    for model in models:
+        mine = [row for _, row in cells[cells["rollout_model"] == model].iterrows()]
+        grid += [mine[k:k + MAX_COLS] for k in range(0, len(mine), MAX_COLS)]
+    return grid
+
+
 def sharedBins(values, log):
     values = values[np.isfinite(values)]
     if log:
@@ -115,40 +156,57 @@ def wilsonInterval(successes, n, z=1.96):
     return center - half, center + half
 
 
-def plotEpisodeHistograms(episodes: pd.DataFrame, out_dir: Path):
-    success = episodes["success"].astype(str).str.lower() == "true"
-    models = orderedLevels(episodes["rollout_model"], sorted(episodes["rollout_model"].unique()))
-    accs = orderedLevels(episodes["hand_acc"], ACC_ORDER)
+def plotEpisodeHistograms(episodes: pd.DataFrame, out_dir: Path, layout: pd.DataFrame | None = None):
+    """One histogram panel per cell of ``layout`` (default: the cells in ``episodes``).
+
+    Laying out every cell of the batch keeps the panels in step from row to row
+    when some cells are not analysed yet; those panels are left empty.
+    """
+    success = (episodes["success"].astype(str).str.lower() == "true").to_numpy()
+    grid = cellGrid(cellsInOrder(episodes if layout is None else layout))
+    n_rows, n_cols = len(grid), max(len(r) for r in grid)
 
     for col, label, scale, log in METRICS:
         values = episodes[col].to_numpy(dtype=float) * scale
         bins = sharedBins(values, log)
-        fig, axes = plt.subplots(len(models), len(accs), figsize=(4 * len(accs), 3 * len(models)),
-                                 sharex=True, squeeze=False)
-        for i, model in enumerate(models):
-            for j, acc in enumerate(accs):
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 3 * n_rows), sharex=True, squeeze=False)
+        for i, row in enumerate(grid):
+            for j in range(n_cols):
                 ax = axes[i, j]
-                cell = (episodes["rollout_model"] == model) & (episodes["hand_acc"] == acc)
-                if not cell.any():
+                if j >= len(row):
                     ax.set_visible(False)
                     continue
-                v = values[cell.to_numpy()]
-                s = success[cell].to_numpy()
+                cell = (episodes["name"] == row[j]["name"]).to_numpy()
+                if not cell.any():
+                    # An empty but otherwise normal panel: the x axis is shared, so hiding this
+                    # one's ticks would hide them for its whole column when it is in the bottom row.
+                    ax.set_title(cellLabel(row[j]), fontsize=10, color="#777777")
+                    ax.text(0.5, 0.5, "not analysed", transform=ax.transAxes, ha="center", va="center",
+                            color="#777777")
+                    ax.set_yticks([])
+                    if log:
+                        ax.set_xscale("log")
+                    styleAxes(ax)
+                    continue
+                v, s = values[cell], success[cell]
                 ax.hist([v[s], v[~s]], bins=bins, stacked=True, color=[SUCCESS_COLOR, FAILURE_COLOR],
                         edgecolor="white", linewidth=1)
-                name = episodes.loc[cell, "label"].iloc[0]
-                ax.set_title(f"{name}   ({s.sum()}/{len(s)} success)", fontsize=10)
+                ax.set_title(f"{cellLabel(row[j])}   ({s.sum()}/{len(s)} success)", fontsize=10)
                 if log:
                     ax.set_xscale("log")
                 styleAxes(ax)
                 if j == 0:
                     ax.set_ylabel("Episodes")
-                if i == len(models) - 1:
-                    ax.set_xlabel(label)
+        # Shared x: only the bottom row is labelled, so a column whose bottom slot is empty
+        # gets its labels on its lowest panel instead.
+        for j in range(n_cols):
+            lowest = max(i for i, row in enumerate(grid) if j < len(row))
+            axes[lowest, j].tick_params(axis="x", which="both", labelbottom=True)
+        fig.supxlabel(label)
         fig.legend(handles=[Patch(color=SUCCESS_COLOR, label="Success"),
                             Patch(color=FAILURE_COLOR, label="Not success")],
                    loc="upper right", frameon=False, ncol=2)
-        fig.suptitle(f"{label} per episode", x=0.02, ha="left", fontsize=13)
+        fig.suptitle(f"{label} per episode, one panel per cell", x=0.02, ha="left", fontsize=13)
         fig.tight_layout(rect=(0, 0, 1, 0.96))
         path = out_dir / f"hist_{col}.png"
         fig.savefig(path, dpi=150)
@@ -178,15 +236,19 @@ def medianP90(cells: pd.DataFrame, col: str, scale: float):
 
 
 def scatterCells(cells, x, y, xerr, yerr, xlabel, ylabel, title, xlog, ylog, path, ylim=None):
-    """One marker per cell with its error bars; saved to ``path``."""
+    """One marker per cell with its error bars, labelled with the cell's label; saved to ``path``."""
     model_color, acc_marker, handles = cellStyles(cells)
-    fig, ax = plt.subplots(figsize=(7, 5))
+    labels = shortLabels(cells)
+    fig, ax = plt.subplots(figsize=(9, 6))
     for k, (_, row) in enumerate(cells.iterrows()):
         color = model_color[row["rollout_model"]]
         ax.errorbar(x[k], y[k], xerr=xerr[:, k:k + 1], yerr=yerr[:, k:k + 1], fmt="none", ecolor=color,
                     alpha=0.5, elinewidth=1.5, capsize=3, zorder=2)
         ax.scatter(x[k], y[k], s=90, color=color, marker=acc_marker[row["hand_acc"]],
                    edgecolor="white", linewidth=1.5, zorder=3)
+        if np.isfinite(x[k]) and np.isfinite(y[k]):
+            ax.annotate(labels[k], (x[k], y[k]), xytext=(5, 4), textcoords="offset points",
+                        fontsize=6, color="#444444", zorder=4)
     if xlog:
         ax.set_xscale("log")
     if ylog:
@@ -205,42 +267,42 @@ def scatterCells(cells, x, y, xerr, yerr, xlabel, ylabel, title, xlog, ylog, pat
 
 
 def plotSuccessBars(cells: pd.DataFrame, out_dir: Path):
-    """Success rate per rollout model, one bar per hand accuracy, with a 95% Wilson interval.
+    """Success rate of each cell, with a 95% Wilson interval, grouped by rollout model.
 
-    Needs only the batch's own results, not the analysis. Cells sharing a rollout
-    model and hand accuracy are pooled (their episodes summed).
+    Needs only the batch's own results, not the analysis. One bar per cell,
+    coloured by hand accuracy; a gap separates the rollout models.
     """
-    cells = cells[cells["n_episodes_run"] > 0]
-    pooled = cells.groupby(["rollout_model", "hand_acc"])[["n_success", "n_episodes_run"]].sum()
+    cells = cellsInOrder(cells[cells["n_episodes_run"] > 0])
     models = orderedLevels(cells["rollout_model"], sorted(cells["rollout_model"].unique()))
     accs = orderedLevels(cells["hand_acc"], ACC_ORDER)
-    width = 0.8 / len(accs)
 
-    fig, ax = plt.subplots(figsize=(max(6, 1.6 * len(models) + 2), 4.5))
-    for j, acc in enumerate(accs):
-        xs, rates, errs = [], [], []
-        for i, model in enumerate(models):
-            if (model, acc) not in pooled.index:
-                continue
-            n_success, n = pooled.loc[(model, acc)].to_numpy(float)
-            lo, hi = wilsonInterval(n_success, n)
-            rate = n_success / n
-            xs.append(i + (j - (len(accs) - 1) / 2) * width)
-            rates.append(rate)
-            errs.append((max(rate - lo, 0), max(hi - rate, 0)))
-        ax.bar(xs, rates, width, color=ACC_BAR_COLORS.get(acc, "#777777"), edgecolor="white",
-               linewidth=2, label=f"hand acc {acc}", zorder=2)
-        ax.errorbar(xs, rates, yerr=np.array(errs).T, fmt="none", ecolor="#444444",
-                    elinewidth=1.2, capsize=3, zorder=3)
-    ax.set_xticks(range(len(models)), [f"rollout {m}" for m in models])
+    xs, rows, x = [], [], 0
+    for model in models:
+        for _, row in cells[cells["rollout_model"] == model].iterrows():
+            xs.append(x)
+            rows.append(row)
+            x += 1
+        x += 1                                       # the gap before the next rollout model
+    n_success = np.array([r["n_success"] for r in rows], dtype=float)
+    n = np.array([r["n_episodes_run"] for r in rows], dtype=float)
+    rate = n_success / n
+    lo, hi = wilsonInterval(n_success, n)
+
+    fig, ax = plt.subplots(figsize=(max(6, 0.35 * len(rows) + 3), 5.5))
+    ax.bar(xs, rate, 0.8, color=[ACC_BAR_COLORS.get(r["hand_acc"], "#777777") for r in rows],
+           edgecolor="white", linewidth=1, zorder=2)
+    ax.errorbar(xs, rate, yerr=np.vstack([rate - lo, hi - rate]).clip(min=0), fmt="none", ecolor="#444444",
+                elinewidth=1.2, capsize=3, zorder=3)
+    ax.set_xticks(xs, [cellLabel(r) for r in rows], rotation=90, fontsize=7)
     ax.set_ylim(0, 1.05)
     ax.set_ylabel("Success rate (95% Wilson interval)")
     eval_sims = ", ".join(sorted(cells["eval_sim"].astype(str).unique()))
-    ax.set_title(f"Success rate by rollout contact model (eval sim {eval_sims})", loc="left")
+    ax.set_title(f"Success rate per cell, grouped by rollout model (eval sim {eval_sims})", loc="left")
     styleAxes(ax)
-    ax.legend(frameon=False, loc="center left", bbox_to_anchor=(1.0, 0.5))
+    ax.legend(handles=[Patch(color=ACC_BAR_COLORS.get(a, "#777777"), label=f"hand acc {a}") for a in accs],
+              frameon=False, loc="center left", bbox_to_anchor=(1.0, 0.5))
     fig.tight_layout()
-    path = out_dir / "bar_success_by_model.png"
+    path = out_dir / "bar_success_by_cell.png"
     fig.savefig(path, dpi=150)
     plt.close(fig)
     print(f"wrote {path}")
@@ -281,9 +343,10 @@ def main():
     cells = readTable(args.cells)
     plotSuccessBars(cells, args.out)
 
-    episodes = analysedRows(readTable(args.episodes), args.episodes, ("_mean",))
+    all_episodes = readTable(args.episodes)
+    episodes = analysedRows(all_episodes, args.episodes, ("_mean",))
     if episodes is not None:
-        plotEpisodeHistograms(episodes, args.out)
+        plotEpisodeHistograms(episodes, args.out, layout=all_episodes)
     cells = analysedRows(cells, args.cells, ("_median", "_p90"))
     if cells is not None:
         plotSuccessScatter(cells, args.out)
