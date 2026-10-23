@@ -18,6 +18,15 @@ together (no lower percentile is stored, so the whisker is one-sided). The
 vertical bar is a 95% Wilson interval on the success rate. It also draws each KL
 against each forward error, both axes as median with a whisker to p90.
 
+The regret (``regret_mean``: what the model gap cost the used plan, in free
+energy on the eval model) gets a bar chart, one bar per cell laid out as the
+success bars, and its own scatters: success rate against it, and it against
+each KL and each forward error. Regret is skewed and can be negative, so it is
+shown as the cell's mean with its 95% interval on a linear axis, the bar chart
+marking the median too. It is scored at each cell's own temperature, so it
+compares cells within a temperature, not across them. Tables without it skip
+these plots.
+
 Metrics:
     KL divergence           KL(used || opt)       kl_used_opt_mean
     Reverse KL              KL(opt || used)       kl_opt_used_mean
@@ -60,6 +69,8 @@ ACC_ORDER = ["high", "med", "low"]
 ACC_MARKERS = {"high": "o", "med": "s", "low": "^"}
 # hand accuracy is ordinal, so one hue from dark (high) to light (low)
 ACC_BAR_COLORS = {"high": "#0d4a8f", "med": "#2a78d6", "low": "#8dbbee"}
+#: The regret's label in the plots.
+REGRET_LABEL = "Regret  F_A(U_used) − F_A(U_zero-gap)"
 N_BINS = 20
 #: Histogram panels per row; a rollout model with more cells wraps onto further rows.
 MAX_COLS = 9
@@ -235,6 +246,22 @@ def medianP90(cells: pd.DataFrame, col: str, scale: float):
     return median, np.vstack([np.zeros_like(median), p90 - median])
 
 
+def regretMean(cells: pd.DataFrame):
+    """Each cell's mean regret and the two-sided error to its 95% interval, as errorbar expects."""
+    mean = cells["regret_mean"].to_numpy(float)
+    lo = cells["regret_mean_lo"].to_numpy(float) if "regret_mean_lo" in cells else mean
+    hi = cells["regret_mean_hi"].to_numpy(float) if "regret_mean_hi" in cells else mean
+    return mean, np.vstack([mean - lo, hi - mean]).clip(min=0)
+
+
+def hasRegret(cells: pd.DataFrame) -> bool:
+    """Whether any cell has a regret; says so when none has."""
+    if "regret_mean" in cells and np.isfinite(cells["regret_mean"].to_numpy(float)).any():
+        return True
+    print("skipping regret plots: the cells table has no regret (analysed before it was computed?)")
+    return False
+
+
 def scatterCells(cells, x, y, xerr, yerr, xlabel, ylabel, title, xlog, ylog, path, ylim=None):
     """One marker per cell with its error bars, labelled with the cell's label; saved to ``path``."""
     model_color, acc_marker, handles = cellStyles(cells)
@@ -266,16 +293,13 @@ def scatterCells(cells, x, y, xerr, yerr, xlabel, ylabel, title, xlog, ylog, pat
     print(f"wrote {path}")
 
 
-def plotSuccessBars(cells: pd.DataFrame, out_dir: Path):
-    """Success rate of each cell, with a 95% Wilson interval, grouped by rollout model.
+def cellBars(cells: pd.DataFrame):
+    """Bar positions for a per-cell bar chart: each rollout model's cells in batch order, a gap between models.
 
-    Needs only the batch's own results, not the analysis. One bar per cell,
-    coloured by hand accuracy; a gap separates the rollout models.
+    Returns the cells as a list of rows, their x positions, a figure and its axes.
     """
-    cells = cellsInOrder(cells[cells["n_episodes_run"] > 0])
+    cells = cellsInOrder(cells)
     models = orderedLevels(cells["rollout_model"], sorted(cells["rollout_model"].unique()))
-    accs = orderedLevels(cells["hand_acc"], ACC_ORDER)
-
     xs, rows, x = [], [], 0
     for model in models:
         for _, row in cells[cells["rollout_model"] == model].iterrows():
@@ -283,29 +307,75 @@ def plotSuccessBars(cells: pd.DataFrame, out_dir: Path):
             rows.append(row)
             x += 1
         x += 1                                       # the gap before the next rollout model
+    fig, ax = plt.subplots(figsize=(max(6, 0.35 * len(rows) + 3), 5.5))
+    return rows, np.array(xs), fig, ax
+
+
+def finishCellBars(fig, ax, rows, xs, title: str, path: Path, extra_handles=()):
+    """Cell labels under the bars, the hand-accuracy legend, the title; saved to ``path``."""
+    accs = orderedLevels([r["hand_acc"] for r in rows], ACC_ORDER)
+    ax.set_xticks(xs, [cellLabel(r) for r in rows], rotation=90, fontsize=7)
+    ax.set_title(title, loc="left")
+    styleAxes(ax)
+    handles = [Patch(color=ACC_BAR_COLORS.get(a, "#777777"), label=f"hand acc {a}") for a in accs]
+    ax.legend(handles=handles + list(extra_handles), frameon=False, loc="center left",
+              bbox_to_anchor=(1.0, 0.5))
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"wrote {path}")
+
+
+def barColors(rows) -> list[str]:
+    return [ACC_BAR_COLORS.get(r["hand_acc"], "#777777") for r in rows]
+
+
+def plotSuccessBars(cells: pd.DataFrame, out_dir: Path):
+    """Success rate of each cell, with a 95% Wilson interval, grouped by rollout model.
+
+    Needs only the batch's own results, not the analysis. One bar per cell,
+    coloured by hand accuracy; a gap separates the rollout models.
+    """
+    cells = cells[cells["n_episodes_run"] > 0]
+    rows, xs, fig, ax = cellBars(cells)
     n_success = np.array([r["n_success"] for r in rows], dtype=float)
     n = np.array([r["n_episodes_run"] for r in rows], dtype=float)
     rate = n_success / n
     lo, hi = wilsonInterval(n_success, n)
 
-    fig, ax = plt.subplots(figsize=(max(6, 0.35 * len(rows) + 3), 5.5))
-    ax.bar(xs, rate, 0.8, color=[ACC_BAR_COLORS.get(r["hand_acc"], "#777777") for r in rows],
-           edgecolor="white", linewidth=1, zorder=2)
+    ax.bar(xs, rate, 0.8, color=barColors(rows), edgecolor="white", linewidth=1, zorder=2)
     ax.errorbar(xs, rate, yerr=np.vstack([rate - lo, hi - rate]).clip(min=0), fmt="none", ecolor="#444444",
                 elinewidth=1.2, capsize=3, zorder=3)
-    ax.set_xticks(xs, [cellLabel(r) for r in rows], rotation=90, fontsize=7)
     ax.set_ylim(0, 1.05)
     ax.set_ylabel("Success rate (95% Wilson interval)")
     eval_sims = ", ".join(sorted(cells["eval_sim"].astype(str).unique()))
-    ax.set_title(f"Success rate per cell, grouped by rollout model (eval sim {eval_sims})", loc="left")
-    styleAxes(ax)
-    ax.legend(handles=[Patch(color=ACC_BAR_COLORS.get(a, "#777777"), label=f"hand acc {a}") for a in accs],
-              frameon=False, loc="center left", bbox_to_anchor=(1.0, 0.5))
-    fig.tight_layout()
-    path = out_dir / "bar_success_by_cell.png"
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-    print(f"wrote {path}")
+    finishCellBars(fig, ax, rows, xs, f"Success rate per cell, grouped by rollout model (eval sim {eval_sims})",
+                   out_dir / "bar_success_by_cell.png")
+
+
+def plotRegretBars(cells: pd.DataFrame, out_dir: Path):
+    """Mean regret of each cell, with its 95% interval and a dot at the median, laid out as the success bars.
+
+    Cells not analysed yet keep their place, marked n/a, so the two charts line up.
+    """
+    rows, xs, fig, ax = cellBars(cells[cells["n_episodes_run"] > 0])
+    sub = pd.DataFrame(rows)
+    mean, err = regretMean(sub)
+    median = sub["regret_median"].to_numpy(float) if "regret_median" in sub else np.full(len(sub), np.nan)
+    ok = np.isfinite(mean)
+
+    ax.axhline(0, color="#444444", linewidth=0.8, zorder=1)
+    ax.bar(xs[ok], mean[ok], 0.8, color=[c for c, k in zip(barColors(rows), ok) if k], edgecolor="white",
+           linewidth=1, zorder=2)
+    ax.errorbar(xs[ok], mean[ok], yerr=err[:, ok], fmt="none", ecolor="#444444", elinewidth=1.2, capsize=3,
+                zorder=3)
+    ax.scatter(xs[ok], median[ok], s=14, color="#111111", zorder=4)
+    for x in xs[~ok]:
+        ax.text(x, 0, "n/a", rotation=90, ha="center", va="bottom", fontsize=7, color="#777777")
+    ax.set_ylabel("Regret, cell mean (95% interval)")
+    median_handle = Line2D([], [], linestyle="", marker="o", markersize=4, color="#111111", label="median")
+    finishCellBars(fig, ax, rows, xs, f"{REGRET_LABEL} per cell (at each cell's own temperature)",
+                   out_dir / "bar_regret_by_cell.png", extra_handles=[median_handle])
 
 
 def plotSuccessScatter(cells: pd.DataFrame, out_dir: Path):
@@ -332,6 +402,25 @@ def plotKLvsForwardScatter(cells: pd.DataFrame, out_dir: Path):
                          out_dir / f"scatter_{kcol}_vs_{ecol}.png")
 
 
+def plotRegretScatter(cells: pd.DataFrame, out_dir: Path):
+    """Success rate against the regret, and the regret against each KL and each forward error.
+
+    The regret is its cell mean with the 95% interval; the other metrics are
+    median with a whisker to p90, as in the other scatters.
+    """
+    regret, regret_err = regretMean(cells)
+    regret_label = f"{REGRET_LABEL}, cell mean (95% interval)"
+    lo, hi = wilsonInterval(cells["n_success"].to_numpy(float), cells["n_episodes_run"].to_numpy(float))
+    rate = cells["success_rate"].to_numpy(float)
+    scatterCells(cells, regret, rate, regret_err, np.vstack([rate - lo, hi - rate]).clip(min=0), regret_label,
+                 "Success rate (95% Wilson interval)", "Success rate vs regret", False, False,
+                 out_dir / "scatter_success_vs_regret_mean.png", ylim=(-0.05, 1.05))
+    for col, label, scale, log in METRICS:
+        x, xerr = medianP90(cells, col, scale)
+        scatterCells(cells, x, regret, xerr, regret_err, f"{label}, cell median (whisker to p90)", regret_label,
+                     f"Regret vs {label}", log, False, out_dir / f"scatter_regret_mean_vs_{col}.png")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--episodes", type=Path, default=Path("results/final_episodes.csv"))
@@ -340,17 +429,21 @@ def main():
     args = p.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
-    cells = readTable(args.cells)
-    plotSuccessBars(cells, args.out)
+    all_cells = readTable(args.cells)
+    plotSuccessBars(all_cells, args.out)
+    if hasRegret(all_cells):
+        plotRegretBars(all_cells, args.out)
 
     all_episodes = readTable(args.episodes)
     episodes = analysedRows(all_episodes, args.episodes, ("_mean",))
     if episodes is not None:
         plotEpisodeHistograms(episodes, args.out, layout=all_episodes)
-    cells = analysedRows(cells, args.cells, ("_median", "_p90"))
+    cells = analysedRows(all_cells, args.cells, ("_median", "_p90"))
     if cells is not None:
         plotSuccessScatter(cells, args.out)
         plotKLvsForwardScatter(cells, args.out)
+        if hasRegret(cells):
+            plotRegretScatter(cells, args.out)
 
 
 if __name__ == "__main__":
