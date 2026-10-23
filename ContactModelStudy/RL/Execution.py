@@ -1,4 +1,4 @@
-"""Single-process launch and bounded, update-boundary execution; no PPO algorithm."""
+"""Single-process launch, and stopping a training run at a PPO update boundary."""
 from contextlib import AbstractContextManager
 import math
 import os
@@ -16,25 +16,6 @@ def require_single_process():
         if value != expected:
             raise ValueError(f'Multi-GPU joint PPO training is not integrated: {name}={raw}. '
                              'Use the single-process entry; distributed launching is deferred.')
-
-
-def update_budget(updates, num_envs, steps_per_update, max_transitions=None):
-    """Caps are additional samples for this invocation, rounded down to whole updates."""
-    if isinstance(updates, bool) or not isinstance(updates, int) or updates < 0:
-        raise ValueError('updates must be a nonnegative integer')
-    batch = num_envs * steps_per_update
-    if max_transitions is not None:
-        if isinstance(max_transitions, bool) or not isinstance(max_transitions, int) or max_transitions < 0:
-            raise ValueError('max_transitions must be a nonnegative integer')
-        effective = min(updates, max_transitions // batch)
-        if updates and not effective:
-            raise ValueError(f'max_transitions must cover one complete PPO update ({batch} transitions)')
-    else:
-        effective = updates
-    return {'requested_updates': updates, 'effective_updates': effective,
-            'transitions_per_update': batch, 'max_transitions': max_transitions,
-            'effective_transition_limit': effective * batch,
-            'semantics': 'additional_budget_this_invocation_whole_updates'}
 
 
 class BoundaryStop(AbstractContextManager):

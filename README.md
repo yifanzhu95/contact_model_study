@@ -1,22 +1,18 @@
 # Contact Model Study
 
-I added PPO training and shared RL/MPPI evaluation to the existing LEAP manipulation
-code. The current implementation is under `ContactModelStudy/`; the earlier
+The current implementation is under `ContactModelStudy/`; the earlier
 `contact_study/` workflows remain for compatibility and comparison.
 
 | RL integration | Current scope |
 |---|---|
-| Tasks and models | Cube, duck and ball; 24 existing scenes; native M1–M5 |
-| Training | skrl PPO, all 16 actuators, multiple environments on one GPU, budgets and checkpoint restart |
-| Evaluation | Shared RL/MPPI cases, cross-model matrices, optional video and continuous targets |
-| Validation | Structural and bounded interface checks; no validated learning-performance claim |
-| Pending | Actual domain randomization, joint multi-GPU training, shared parallel evaluation, within-episode controller switching and hardware integration |
+| Tasks and models | Cube, duck and ball on any of M1–M5, the same simulators and task costs MPPI uses |
+| Training | skrl PPO on one GPU (`train_rl_policy`), checkpoint and resume, clean stop on a time budget or SIGTERM |
+| Evaluation | A trained policy runs in `run_episodes --planner rl`, scored exactly as MPPI is |
+| Pending | A validated learning baseline, domain randomization, multi-GPU training, hardware integration |
 
-I describe installation, configuration, commands, result files and limitations in
-[the RL guide](ContactModelStudy/RL/README.md), with evidence boundaries in
-[the validation notes](ContactModelStudy/RL/VALIDATION.md). For the existing MPC
-architecture and experiments, see [the package guide](ContactModelStudy/README.md)
-and [the experiment guide](experiments/README.md).
+See [the RL guide](ContactModelStudy/RL/README.md) for training and evaluation,
+[the package guide](ContactModelStudy/README.md) for the MPC architecture, and
+[the experiment guide](experiments/README.md) for the experiments.
 
 ## Repository background and earlier workflows
 

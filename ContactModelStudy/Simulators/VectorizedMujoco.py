@@ -51,6 +51,27 @@ def _broadcast_kernel(
     dst[n, i] = src[i]
 
 
+@wp.kernel
+def _scatter_rows_kernel(
+    ids: wp.array(dtype=int),       # (k,)
+    src: wp.array2d(dtype=float),   # (k, n)
+    dst: wp.array2d(dtype=float),   # (N, n)  [out]
+):
+    """Write row k of src into world ids[k] of dst."""
+    k, i = wp.tid()
+    dst[ids[k], i] = src[k, i]
+
+
+@wp.kernel
+def _zero_rows_kernel(
+    ids: wp.array(dtype=int),       # (k,)
+    dst: wp.array2d(dtype=float),   # (N, n)  [out]
+):
+    """Zero the rows of the listed worlds."""
+    k, i = wp.tid()
+    dst[ids[k], i] = 0.0
+
+
 @dataclass
 class VectorizedMujocoConfig(VectorizedSimulatorConfig):
     """Physics parameters for the MJWarp backend.
@@ -197,6 +218,13 @@ class VectorizedMujoco(VectorizedSimulator):
     def _forwardPhysics(self) -> None:
         """Recompute derived quantities (poses, contacts) without integrating."""
         self._mjw.forward(self.m, self.d)
+
+    def _resetData(self, mask) -> None:
+        """Clear the data of the worlds set in ``mask``, an ``(N,)`` bool device array."""
+        self._mjw.reset_data(self.m, self.d, mask)
+
+    def _resetExtraState(self, ids) -> None:
+        """Zero any per-world scratch the backend keeps outside MJWarp's own data; ``ids`` on the device."""
 
     # -- control sequences ---------------------------------------------------
     def SetControlSequence(self, U_n) -> None:
@@ -362,6 +390,37 @@ class VectorizedMujoco(VectorizedSimulator):
             qpos=self.d.qpos, qvel=self.d.qvel, ctrl=self.d.ctrl,
             site_xpos=self.d.site_xpos,
         )
+
+    # -- per-world reset -----------------------------------------------------
+    def ResetWorlds(self, ids, q, q_dot=None, u=None) -> None:
+        """Reset only the worlds in ``ids``; see ``VectorizedSimulator.ResetWorlds``.
+
+        MJWarp's masked ``reset_data`` clears those worlds' data (warm starts
+        included), then their state and controls are written row by row.
+        """
+        ids, q, q_dot, u = self._resetRows(ids, q, q_dot, u)
+        dev = self.config.device
+        mask = np.zeros(self.N, dtype=bool)
+        mask[ids] = True
+        ids_wp = wp.array(ids, dtype=wp.int32, device=dev)
+        self._resetData(wp.array(mask, dtype=wp.bool, device=dev))
+        self._resetExtraState(ids_wp)
+        for src, dst in ((q, self.d.qpos), (q_dot, self.d.qvel), (u, self.d.ctrl)):
+            wp.launch(_scatter_rows_kernel, dim=src.shape,
+                      inputs=[ids_wp, wp.array(src, dtype=wp.float32, device=dev)], outputs=[dst])
+
+    def CheckCapacity(self) -> None:
+        """Raise when a world's contacts or constraint rows reached what ``make_data`` allocated.
+
+        MJWarp keeps counting past the allocation, so a count at or beyond it
+        means rows were dropped from that step's solve.
+        """
+        contacts = int(self.d.nacon.numpy()[0])
+        rows = int(self.d.nefc.numpy().max())
+        if contacts > self.d.naconmax or rows >= self.d.njmax:
+            raise RuntimeError(
+                f"{type(self).__name__} buffers overflowed: {contacts}/{self.d.naconmax} contacts, "
+                f"{rows}/{self.d.njmax} constraint rows in the fullest world. Raise nconmax/njmax.")
 
     # -- lifecycle -----------------------------------------------------------
     def Close(self) -> None:

@@ -35,6 +35,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 import warp as wp
 
+from ContactModelStudy.Planners.PlannerBase import PlannerBase
 from ContactModelStudy.Simulators.VectorizedSimulator import VectorizedSimulator
 
 _CONTROL_MODES = ("absolute", "ctrl_relative", "pos_relative")
@@ -133,7 +134,7 @@ class SamplingBasedPlannerConfig:
             raise ValueError(f"delta_range low > high: {self.delta_range}")
 
 
-class SamplingBasedPlannerBase(abc.ABC):
+class SamplingBasedPlannerBase(PlannerBase):
     """Base class for all sampling-based planners.
 
     Subclasses implement ``_buildSamples`` and ``_updateParams``.
