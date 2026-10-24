@@ -9,6 +9,7 @@ the HPC:
 | Check a CSV (runs nothing) | `python experiments/run_episode_batches.py my.csv --check` |
 | Run every cell, in order | `python experiments/run_episode_batches.py my.csv` |
 | Run one cell (0-based row) | `python experiments/run_episode_batches.py my.csv --cell 3` |
+| Run one cell's episodes at once | `python experiments/run_episode_batches.py my.csv --cell 3 --pool --planners-per-gpu 2 --workers 8` |
 | Rebuild the summary | `python experiments/run_episode_batches.py my.csv --summarize --outdir <results dir>` |
 | Submit to the HPC | `experiments/hpc/submit_episode_batches.sh my.csv [max concurrent]` |
 
@@ -69,13 +70,22 @@ are named by row number.
 
 **Failures.** Run locally, each cell runs in its own process, so a failing cell
 is marked `failed` and the rest carry on (`--stop-on-error` stops instead).
+SIGTERM (`scancel`, the time limit) stops a cell as Ctrl-C does: the episodes
+finished so far are saved, and the cell is marked `failed`, so a resumed run
+redoes it.
+
+**Episodes at once (`--pool`).** A cell's episodes run together through
+`run_episodes_pooled.py`: planner processes on the GPUs (`--planners-per-gpu`)
+serve one eval-sim worker per episode in flight (`--workers`). Episode k then
+draws its goals and noise from `(seed, k)`, as the BO's episodes do, so give
+the batch another `seed` than the BO to keep the tuning episodes out of it.
 
 ## On the HPC (`hpc/`)
 
 | File | Role |
 | --- | --- |
 | `submit_episode_batches.sh` | **What you run**, from the repo root, on the login node. It loads `miniconda` and activates the `contact_kamino` env (`CONDA_ENV=` picks another, and the jobs inherit it) so it can run Python there, then validates the CSV, submits the array sized to its rows (an optional second argument caps how many cells run at once), and queues the summary. Extra `sbatch` options go in `SBATCH_ARGS`, for example `SBATCH_ARGS="--time=24:00:00"`. |
-| `run_episode_batches.slurm` | The job array: task *i* runs `--cell i` on its own GPU node. Every task writes into one folder. |
+| `run_episode_batches.slurm` | The job array: task *i* runs `--cell i` on its own GPU node, its episodes at once (`--pool` with `PLANNERS_PER_GPU=2` planners and `WORKERS=8` workers, on 11 CPUs and 32 GB; `POOL=0` runs them one after another). Five minutes before the time limit it signals the cell to stop and save. Every task writes into one folder. |
 | `summarize_batches.slurm` | Builds `summary.csv` after the array. It is queued with `afterany`, so it also runs when some cells fail. |
 
 ```bash
@@ -318,6 +328,7 @@ the reason.
 | Analyse every cell, then the final tables | `python experiments/process_batch_results.py <batch dir>` |
 | One cell | `python experiments/process_batch_results.py <batch dir> --cell 2` |
 | Only the final tables | `python experiments/process_batch_results.py <batch dir> --summarize` |
+| One cell, split over 4 jobs | `python experiments/process_batch_results.py <batch dir> --cell 2 --shard 0 --n-shards 4` (and shards 1-3) |
 | Submit to the HPC | `experiments/hpc/submit_process_batch_results.sh <batch dir> [max concurrent]` |
 
 **Options:**
@@ -327,6 +338,15 @@ the reason.
 - `--max-episodes` limits the episodes analysed per cell.
 - `--shrinkage` is the KL's covariance shrinkage (1e-3).
 - `--overwrite` redoes cells already analysed.
+- `--shard i --n-shards n` (with `--cell`) analyses only the episodes i, i + n,
+  ... of the cell; the job that saves its last episode computes its metrics.
+
+**Resuming.** Each episode is saved as soon as it is analysed, so a cell cut
+off by the time limit resumes from its next episode when rerun. An episode
+saved under other `--optimal-args`, other analysed rows, or from an earlier run
+of the batch cell is redone. `--summarize` completes any cell whose episodes
+are all saved but which no shard marked done, and lists the rest as `partial`
+(with how many episodes are done) or `failed`.
 
 **Output**, written into the batch folder:
 
@@ -350,9 +370,46 @@ from the recorded seed, and checked against the saved goal labels.
 costs a few plans: about 1–2 s at 0.5 ms eval and 64 ms control steps.
 
 **On the HPC.** `submit_process_batch_results.sh <batch dir> [max concurrent]`
-counts the cells, submits `process_batch_results.slurm` (one GPU per cell,
-12 h), and queues `summarize_batch_results.slurm` `afterany` to build
+counts the cells, submits `process_batch_results.slurm` (one GPU per shard,
+30 h), and queues `summarize_batch_results.slurm` `afterany` to build
 `final_results.csv`.
 
+- **Shards:** each cell's episodes are split over `N_SHARDS` jobs (5 by
+  default), so the array has cells × `N_SHARDS` tasks.
+- **The optimal planner** is set in the slurm file's `OPTIMAL_ARGS`. Setting
+  `OPTIMAL_ARGS` when submitting replaces it.
 - **Extra flags** go in `ANALYSIS_ARGS`, e.g. `ANALYSIS_ARGS="--stride 4"`.
-- **Resubmitting** skips the cells already done.
+- **Resubmitting** skips the cells already done and the episodes already saved.
+
+# The final batch CSV from the searches
+
+`make_final_batch_csv.py` turns a BO cell folder into the batch CSV for the
+final runs: one row per rollout model × temperature scale × hand accuracy (5 ×
+3 × 3 = 45 by default). Each row has:
+
+- the best trial's cost weights, as `w_*` columns;
+- that model's tuned temperature times the scale (0.5, 1 and 2 by default);
+- the noise the search ran with;
+- the search's other settings: task, eval sim, control step, horizon, samples,
+  warm start, goal difficulty;
+- `save_steps=true`, for `process_batch_results.py`.
+
+```bash
+python experiments/make_final_batch_csv.py results/bayes_opt_bo_123/cell_0000_cube_all \
+    --out experiments/final_batches.csv --set uncertainty=true \
+    --optimal-bo results/bayes_opt_opt_456/cell_0000_opt_temp
+```
+
+- **The trial:** the best one, unless `--trial` picks another.
+- **The seed:** the search's seed + 1 by default. Its own seed would replay the
+  episodes the weights were tuned on.
+- **Other options:** `--models`, `--temp-scales`, `--hand-accs`, `--n-episodes`
+  (30) and `--steps` (4000) change the grid; `--set COLUMN=VALUE` adds a column
+  to every row.
+- **`--optimal-bo`:** the search over the optimal (convergence) planner's
+  temperature. The script prints the `OPTIMAL_ARGS` to submit the analysis
+  with: that search's planner flags and its best temperature. It warns if that
+  search pinned other weights than the batch rows carry, since the optimal
+  planner uses each row's own.
+
+The CSV is checked against the driver before the script exits.

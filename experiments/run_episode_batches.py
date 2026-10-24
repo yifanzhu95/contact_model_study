@@ -9,7 +9,15 @@ or every cell in turn on a workstation::
     python experiments/run_episode_batches.py batches.csv --check          # validate only
     python experiments/run_episode_batches.py batches.csv                  # every cell, in order
     python experiments/run_episode_batches.py batches.csv --cell 3         # just row 3 (0-based)
+    python experiments/run_episode_batches.py batches.csv --cell 3 --pool --planners-per-gpu 2 --workers 8
     python experiments/run_episode_batches.py batches.csv --summarize --outdir results/my_run
+
+``--pool`` runs a cell's episodes at once through
+``ContactModelStudy/Drivers/run_episodes_pooled.py`` (planner processes on the
+GPUs, one eval-sim worker per episode in flight) instead of one after another
+through ``run_episodes.py``. Its episodes then draw their goals and noise from
+``(seed, episode index)``, as the BO's do, rather than from one stream, so set
+another ``seed`` than the BO's to keep them apart from the tuning episodes.
 
 On the HPC, ``hpc/submit_episode_batches.sh`` submits
 ``hpc/run_episode_batches.slurm`` as a job array with one task per row; each
@@ -213,20 +221,44 @@ def isDone(outdir: Path, name: str) -> bool:
         return False
 
 
-def runCell(index: int, row: dict[str, str], outdir: Path, overwrite: bool) -> bool:
-    """Run one cell in this process. Returns whether it finished."""
+def poolArgv(pool: dict) -> list[str]:
+    """``run_episodes_pooled.py``'s pool flags from ``{gpus, planners_per_gpu, workers}``."""
+    argv = ["--gpus", str(pool["gpus"]), "--planners-per-gpu", str(pool["planners_per_gpu"])]
+    return argv + (["--workers", str(pool["workers"])] if pool.get("workers") else [])
+
+
+def runCell(index: int, row: dict[str, str], outdir: Path, overwrite: bool, pool: dict | None = None) -> bool:
+    """Run one cell in this process. Returns whether it finished.
+
+    ``pool`` (``{gpus, planners_per_gpu, workers}``) runs the cell's episodes
+    at once through ``run_episodes_pooled.py``; without it they run one after
+    another, as ``run_episodes.py`` runs them. Either way SIGTERM (``scancel``,
+    the time limit) stops the cell as Ctrl-C does: the episodes finished so far
+    are saved, and the cell is marked failed, so a resumed run redoes it.
+    """
+    from ContactModelStudy.Drivers.EpisodePool import sigtermAsInterrupt
     name = cellName(index, row)
     if not overwrite and isDone(outdir, name):
         print(f"[{name}] already done; skipping (--overwrite to redo)")
         return True
     argv = rowToArgv(row, outdir, name)
+    driver = "run_episodes_pooled.py" if pool else "run_episodes.py"
+    if pool:
+        argv += poolArgv(pool)
     outdir.mkdir(parents=True, exist_ok=True)
-    status = {"cell": index, "name": name, "row": row, "argv": argv,
+    status = {"cell": index, "name": name, "row": row, "argv": argv, "driver": driver,
               "host": os.uname().nodename, "slurm_job": os.environ.get("SLURM_JOB_ID")}
-    print(f"[{name}] run_episodes.py {' '.join(argv)}", flush=True)
+    print(f"[{name}] {driver} {' '.join(argv)}", flush=True)
     t0 = time.time()
     try:
-        drv.main(argv)
+        with sigtermAsInterrupt():
+            if pool:
+                from ContactModelStudy.Drivers import run_episodes_pooled
+                rc = run_episodes_pooled.main(argv)
+            else:
+                rc = drv.main(argv)
+        if rc:
+            raise RuntimeError(f"{driver} stopped early (exit {rc}); the episodes it finished are saved")
         status.update(status="done")
     except BaseException as e:           # also KeyboardInterrupt / SIGTERM from SLURM
         status.update(status="failed", error=f"{type(e).__name__}: {e}",
@@ -238,7 +270,8 @@ def runCell(index: int, row: dict[str, str], outdir: Path, overwrite: bool) -> b
     return True
 
 
-def runAll(csv_path: Path, rows: list[dict], outdir: Path, overwrite: bool, stop_on_error: bool) -> int:
+def runAll(csv_path: Path, rows: list[dict], outdir: Path, overwrite: bool, stop_on_error: bool,
+           pool: dict | None = None) -> int:
     """Every cell in order, each in its own process, so one failure does not stop the rest."""
     failed = []
     for i, row in enumerate(rows):
@@ -249,6 +282,8 @@ def runAll(csv_path: Path, rows: list[dict], outdir: Path, overwrite: bool, stop
         outdir.mkdir(parents=True, exist_ok=True)
         print(f"[{i + 1}/{len(rows)}] {name} ...", flush=True)
         cmd = [sys.executable, __file__, str(csv_path), "--cell", str(i), "--outdir", str(outdir)]
+        if pool:
+            cmd += ["--pool"] + poolArgv(pool)
         if overwrite:
             cmd.append("--overwrite")
         t0 = time.time()
@@ -390,7 +425,22 @@ def main(argv=None) -> int:
                    help="validate every row against the driver and print its command line; run nothing")
     p.add_argument("--count", action="store_true", help="print the number of rows and exit")
     p.add_argument("--summarize", action="store_true", help="only (re)build summary.csv/json in --outdir")
+    g = p.add_argument_group("pool (as run_episodes_pooled.py)")
+    g.add_argument("--pool", action="store_true",
+                   help="run each cell's episodes at once, through run_episodes_pooled.py: planner processes "
+                        "on the GPUs serving eval-sim workers")
+    g.add_argument("--gpus", default="all", help="with --pool: comma-separated GPU ids, or 'all' (default)")
+    g.add_argument("--planners-per-gpu", type=int, default=1, help="with --pool: planner processes per GPU")
+    g.add_argument("--workers", type=int, default=None,
+                   help="with --pool: eval-sim workers (episodes at once); default: available cores minus one "
+                        "per planner, at most the cell's n_episodes")
     args = p.parse_args(argv)
+    if args.planners_per_gpu < 1:
+        p.error("--planners-per-gpu must be >= 1")
+    if args.workers is not None and args.workers < 1:
+        p.error("--workers must be >= 1")
+    pool = ({"gpus": args.gpus, "planners_per_gpu": args.planners_per_gpu, "workers": args.workers}
+            if args.pool else None)
 
     csv_path = args.csv.resolve()
     if not csv_path.is_file():
@@ -425,10 +475,10 @@ def main(argv=None) -> int:
     if args.cell is not None:
         if not 0 <= args.cell < len(rows):
             p.error(f"--cell {args.cell} is out of range: {csv_path.name} has rows 0-{len(rows) - 1}")
-        runCell(args.cell, rows[args.cell], outdir, args.overwrite)
+        runCell(args.cell, rows[args.cell], outdir, args.overwrite, pool)
         return 0
     print(f"{len(rows)} cells from {csv_path} -> {outdir}")
-    return runAll(csv_path, rows, outdir, args.overwrite, args.stop_on_error)
+    return runAll(csv_path, rows, outdir, args.overwrite, args.stop_on_error, pool)
 
 
 if __name__ == "__main__":

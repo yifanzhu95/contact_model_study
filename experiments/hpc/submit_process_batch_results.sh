@@ -4,15 +4,19 @@
 #   experiments/hpc/submit_process_batch_results.sh results/episode_batches_my_123456
 #   experiments/hpc/submit_process_batch_results.sh results/episode_batches_my_123456 8   # at most 8 cells at once
 #   ANALYSIS_ARGS="--overwrite --max-episodes 5" experiments/hpc/submit_process_batch_results.sh <batch dir>
+#   N_SHARDS=10 experiments/hpc/submit_process_batch_results.sh <batch dir>   # 10 jobs per cell
+#   OPTIMAL_ARGS="--n-samples 1024 ... --temperature 0.02" experiments/hpc/submit_process_batch_results.sh <batch dir>
 #
 # The stride (or steps per episode) and the optimal planner's settings are set in process_batch_results.slurm's
-# header; other flags go in ANALYSIS_ARGS.
+# header (OPTIMAL_ARGS set here replaces the latter); other flags go in ANALYSIS_ARGS. Each cell's episodes are
+# split over N_SHARDS jobs (default 5), so the array has cells x N_SHARDS tasks; the max concurrent count caps
+# those tasks.
 #
 # Run from the repo root. It:
 #   1. counts the folder's cells (its cell_*.status.json files),
-#   2. submits process_batch_results.slurm with --array sized to them,
+#   2. submits process_batch_results.slurm with --array sized to them times N_SHARDS,
 #   3. queues summarize_batch_results.slurm to build final_results.csv once the array has finished.
-# Cells already analysed are skipped, so resubmitting resumes. Extra sbatch
+# Cells already analysed, and episodes already saved, are skipped, so resubmitting resumes. Extra sbatch
 # options can go in SBATCH_ARGS, e.g. SBATCH_ARGS="--time=24:00:00".
 set -euo pipefail
 
@@ -48,13 +52,17 @@ set -u
 N=$(python experiments/process_batch_results.py "$BATCH_DIR" --count)
 (( N >= 1 )) || { echo "$BATCH_DIR has no cells (no cell_*.status.json); is it an episode-batch results folder?" >&2; exit 1; }
 
-ARRAY="0-$((N - 1))${THROTTLE:+%$THROTTLE}"
-EXPORT="ALL,BATCH_DIR=$BATCH_DIR,PROJ_DIR=$PROJ_DIR${ANALYSIS_ARGS:+,ANALYSIS_ARGS=$ANALYSIS_ARGS}"
+N_SHARDS="${N_SHARDS:-5}"
+(( N_SHARDS >= 1 )) || { echo "N_SHARDS must be >= 1, got $N_SHARDS" >&2; exit 1; }
+ARRAY="0-$((N * N_SHARDS - 1))${THROTTLE:+%$THROTTLE}"
+# OPTIMAL_ARGS reaches the jobs through ALL: it holds spaces and may hold commas, which --export cannot.
+[[ -n "${OPTIMAL_ARGS+x}" ]] && export OPTIMAL_ARGS && echo "optimal planner args: ${OPTIMAL_ARGS:-none}"
+EXPORT="ALL,BATCH_DIR=$BATCH_DIR,PROJ_DIR=$PROJ_DIR,N_SHARDS=$N_SHARDS${ANALYSIS_ARGS:+,ANALYSIS_ARGS=$ANALYSIS_ARGS}"
 # --export=ALL,... keeps the environment `module load` needs inside the job.
 JOB=$(sbatch --parsable --array="$ARRAY" --export="$EXPORT" ${SBATCH_ARGS:-} \
       experiments/hpc/process_batch_results.slurm)
 JOB=${JOB%%;*}
-echo "submitted $N cells of $BATCH_DIR as array job $JOB (--array=$ARRAY)"
+echo "submitted $N cells x $N_SHARDS shards of $BATCH_DIR as array job $JOB (--array=$ARRAY)"
 
 sbatch --parsable --dependency=afterany:"$JOB" --export="ALL,BATCH_DIR=$BATCH_DIR,PROJ_DIR=$PROJ_DIR" \
     experiments/hpc/summarize_batch_results.slurm >/dev/null \

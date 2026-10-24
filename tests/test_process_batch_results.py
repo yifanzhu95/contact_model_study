@@ -267,6 +267,43 @@ def test_the_optimal_planner_takes_its_own_settings(batch):
     assert np.isfinite(rec["metrics"]["kl_used_opt_mean"]) and np.isfinite(rec["metrics"]["fsim_opt_qpos_err_mean"])
 
 
+@pytest.mark.gpu
+@pytest.mark.slow
+def test_a_cell_resumes_by_episode_and_splits_into_shards(batch, tmp_path):
+    import shutil
+    b = tmp_path / "b"
+    shutil.copytree(batch, b, ignore=shutil.ignore_patterns("analysis", "final_*"))
+    cell = pbr.listCells(b)[0]                            # mismatch: two episodes
+    name = cell["name"]
+    # Shard 0 of 2 saves one episode; the metrics wait for the other.
+    assert pbr.runCell(b, cell, False, shard=(0, 2), stride=3) == 0
+    assert not pbr.analysisDone(b, name)
+    missing, total = pbr.missingEpisodes(b, name)
+    assert total == 2 and len(missing) == 1
+    assert json.loads((b / "analysis" / f"{name}.shard_0of2.status.json").read_text())["status"] == "done"
+    pbr.summarize(b)
+    assert list(csv.DictReader(open(b / "final_results.csv")))[0]["analysis_status"] == "partial"
+    # Shard 1 saves the other, and completes the cell.
+    assert pbr.runCell(b, cell, False, shard=(1, 2), stride=3) == 0
+    assert pbr.analysisDone(b, name)
+    rec = json.loads((b / "analysis" / f"{name}.analysis.json").read_text())
+    assert rec["n_episodes_analyzed"] == 2 and np.isfinite(rec["metrics"]["kl_used_opt_mean"])
+    # Rerun with the same settings: every episode is reused, nothing planned again.
+    steps = sorted((b / "analysis" / name).glob("*.npz"))
+    mtimes = [p.stat().st_mtime_ns for p in steps]
+    again = pbr.processCell(b, cell, stride=3)
+    assert [p.stat().st_mtime_ns for p in steps] == mtimes
+    assert again["metrics"]["kl_used_opt_mean"] == rec["metrics"]["kl_used_opt_mean"]
+    # Other settings redo them.
+    pbr.processCell(b, cell, stride=2)
+    assert all(p.stat().st_mtime_ns != t for p, t in zip(steps, mtimes))
+    # Every episode saved but the cell not marked done (two shards finished at once): the summary does it.
+    (b / "analysis" / f"{name}.analysis_status.json").unlink()
+    pbr.summarize(b)
+    assert pbr.analysisDone(b, name)
+    assert list(csv.DictReader(open(b / "final_results.csv")))[0]["analysis_status"] == "done"
+
+
 def test_plan_starts_come_from_the_record_or_are_rebuilt():
     u0 = np.array([1.0, 2.0])
     old = types.SimpleNamespace(step=np.array([0, 3]), u_prev=np.full((2, 2), np.nan), has_plan_starts=False,

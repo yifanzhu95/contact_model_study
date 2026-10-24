@@ -132,6 +132,37 @@ def test_run_all_resume_and_summarize(tmp_path):
     assert (out / "cell_0000_ok.json").stat().st_mtime > mtime
 
 
+def test_a_cell_whose_driver_stops_early_is_marked_failed(tmp_path, monkeypatch):
+    monkeypatch.setattr(batches.drv, "main", lambda argv: 1)       # as after a SIGTERM: partial results
+    with pytest.raises(RuntimeError, match="stopped early"):
+        batches.runCell(0, {"label": "x"}, tmp_path, overwrite=False)
+    st = json.loads((tmp_path / "cell_0000_x.status.json").read_text())
+    assert st["status"] == "failed" and st["driver"] == "run_episodes.py"
+
+
+def test_pool_flags_reach_the_pooled_driver():
+    assert batches.poolArgv({"gpus": "0,1", "planners_per_gpu": 2, "workers": 8}) == \
+        ["--gpus", "0,1", "--planners-per-gpu", "2", "--workers", "8"]
+    assert batches.poolArgv({"gpus": "all", "planners_per_gpu": 1, "workers": None}) == \
+        ["--gpus", "all", "--planners-per-gpu", "1"]
+
+
+@pytest.mark.gpu
+@pytest.mark.slow
+def test_a_pooled_cell_runs_its_episodes_at_once(tmp_path):
+    from ContactModelStudy.Utils.EpisodeRecorder import EpisodeReplayer
+    csv_path = write(tmp_path, "label,rollout_model,n_episodes,steps,settle,substeps,horizon,n_samples,save_steps\n"
+                               "pooled,M2,3,3,0,4,4,32,true\n")
+    out = tmp_path / "out"
+    assert batches.main([str(csv_path), "--outdir", str(out), "--cell", "0", "--pool", "--gpus", "0",
+                         "--workers", "2"]) == 0
+    st = json.loads((out / "cell_0000_pooled.status.json").read_text())
+    assert st["status"] == "done" and st["driver"] == "run_episodes_pooled.py" and "--workers" in st["argv"]
+    rep = EpisodeReplayer(out / "cell_0000_pooled.json")
+    # Saved as process_batch_results.py needs them: every step with where its plan started.
+    assert len(rep) == 3 and all(ep.has_plan_starts for ep in rep)
+
+
 def test_wilson_and_mean_intervals():
     assert batches.wilsonInterval(5, 10) == (pytest.approx(0.2366, abs=1e-4), pytest.approx(0.7634, abs=1e-4))
     assert batches.wilsonInterval(0, 10) == (0.0, pytest.approx(0.2775, abs=1e-4))
