@@ -9,8 +9,9 @@
 # Run from the repo root. It:
 #   1. validates every row (search space, seeds) against the driver (so typos fail here, not on a node),
 #   2. sizes each row from its episodes per BO step (models x n_episodes x trials_in_flight): GPUs
-#      (PLANNERS_PER_GPU planners each, 2 by default; at most MAX_GPUS, 4), 2 eval workers per
-#      planner, 1 when M5 is a rollout model (never more than the episodes), a core per process and ~2.5 GB of memory each
+#      (PLANNERS_PER_GPU planners each, 2 by default; at most MAX_GPUS, 4), eval workers per planner
+#      2 for M1-M4 and 1 for M5, averaged over the row's models (1.8 for M1-M5; WORKERS_PER_PLANNER
+#      sets it), never more than the episodes, a core per process and ~2.5 GB of memory each
 #      (run_bayes_opt.py --resources prints this),
 #   3. submits run_bayes_opt.slurm once per allocation, as a job array over the rows that share it,
 #      all writing into one results folder,
@@ -57,7 +58,8 @@ PLANNERS_PER_GPU="${PLANNERS_PER_GPU:-2}"
 GPU_TYPE="${GPU_TYPE:-a5000}"
 # One line per row: cell episodes gpus planners_per_gpu workers cpus mem_gb.
 SIZES=$(python experiments/run_bayes_opt.py "$CSV" --resources --planners-per-gpu "$PLANNERS_PER_GPU" \
-            --max-gpus "${MAX_GPUS:-4}" --outdir /tmp/bayes_opt_check | grep -E '^[0-9]+( [0-9]+){6}$')
+            --max-gpus "${MAX_GPUS:-4}" ${WORKERS_PER_PLANNER:+--workers-per-planner "$WORKERS_PER_PLANNER"} \
+            --outdir /tmp/bayes_opt_check | grep -E '^[0-9]+( [0-9]+){6}$')
 (( $(wc -l <<< "$SIZES") == N )) || { echo "could not size every row:" >&2; echo "$SIZES" >&2; exit 1; }
 
 # Rows that need the same allocation share a job array.

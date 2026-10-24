@@ -274,10 +274,12 @@ trials are kept.
 row, validation first, and a summary job queued `afterany`.
 
 - **Resources:** sized per row from its episodes per BO step,
-  `models × n_episodes × trials_in_flight` (1 trial when unset): one GPU per 4
-  of them (2 planners per GPU, 2 workers per planner), or per 2 when M5 is a
-  rollout model (1 worker per planner: its plans are slow), up to `MAX_GPUS` (4), a
-  CPU per process and about 2.5 GB each. `run_bayes_opt.py bo.csv --resources
+  `models × n_episodes × trials_in_flight` (1 trial when unset).
+  - **Workers per planner:** 2 for M1–M4, 1 for M5 (its plans are slow). A row
+    with several models gets the mean over them: 1.8 for M1–M5, so 15 workers
+    on 4 GPUs × 2 planners. `WORKERS_PER_PLANNER` overrides it.
+  - **GPUs:** as many as those workers need, 2 planners each, up to `MAX_GPUS` (4).
+  - **CPU and memory:** a CPU per process and about 2.5 GB each. `run_bayes_opt.py bo.csv --resources
   --planners-per-gpu 2` prints the sizes. Rows that need the same allocation
   share one job array, and every array writes into one results folder. The
   time limit is 48 h. `PLANNERS_PER_GPU`, `MAX_GPUS` and `GPU_TYPE` (default
