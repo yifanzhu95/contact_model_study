@@ -1,2 +1,2 @@
-w_quat,w_pos_x,w_pos_y,w_pos_z,w_contact,w_joint,w_fallen,w_quat_term,w_pos_term,temperature,noise_sigma
-9.29366,100.0,38.8977,100.0,0.0879367,1.53065,165.111,195.532,290.442,1.0,0.1
+w_quat,w_pos_x,w_pos_y,w_pos_z,w_contact,w_joint,w_fallen,w_quat_term,w_pos_term,temperature
+9.29366,100.0,38.8977,100.0,0.0879367,1.53065,165.111,195.532,290.442,1.0

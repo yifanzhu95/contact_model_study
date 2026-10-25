@@ -90,7 +90,11 @@ Output, in the batch folder
   ``q_dot_next_<model>_<action>`` for model ``rollout`` / ``eval`` and action
   ``used`` / ``opt`` (NaN where a plan failed), and ``q_next_recorded`` /
   ``q_dot_next_recorded``; and ``noise_sigma_used`` / ``noise_sigma_opt``,
-  the task's state ``indices`` and the timesteps;
+  the task's state ``indices`` and the timesteps; and ``analysis_key`` (the
+  settings it was analysed under), ``replay`` and ``wall_s``;
+* ``analysis/<cell>/_cell.json``: the cell's episodes and how its planners
+  were built, from which its record is computed once every episode is saved;
+* ``analysis/<cell>.shard_<i>of<n>.status.json``: a shard's done or failed;
 * ``analysis/<cell>.analysis.json``: the cell's metrics (mean, median, p90 of
   each), per episode and overall, and how the planners were built;
 * ``analysis/<cell>.analysis.npz``: the per-analysed-step metrics, with each
@@ -112,6 +116,16 @@ without a rerun.
 A cell whose analysis is done is skipped when run again (``--overwrite`` redoes
 it, which is needed to rerun with another ``--stride``, ``--n-steps-analysed``
 or ``--optimal-args``).
+
+**Resuming and sharding.** Each episode's steps are saved as soon as it is
+analysed, so a cell cut off by the wall clock resumes from its next episode.
+An episode saved under other ``--optimal-args``, other analysed rows, or from
+an earlier run of the batch cell is redone. ``--cell c --shard i --n-shards
+n`` analyses only the episodes ``i, i + n, ...`` of cell ``c``, so ``n`` jobs
+split it; the one that saves the last episode computes the cell's metrics.
+``--summarize`` does that for any cell whose episodes are all saved but which
+no shard completed, and reports the others as ``partial`` (with how many
+episodes are done) or ``failed``.
 """
 
 from __future__ import annotations
@@ -157,14 +171,38 @@ def listCells(batch_dir: Path) -> list[dict]:
 def _analysisPaths(batch_dir: Path, name: str) -> dict[str, Path]:
     d = batch_dir / ANALYSIS_DIR
     return {"json": d / f"{name}.analysis.json", "npz": d / f"{name}.analysis.npz",
-            "status": d / f"{name}.analysis_status.json", "steps": d / name}
+            "status": d / f"{name}.analysis_status.json", "steps": d / name,
+            "meta": d / name / "_cell.json"}
+
+
+def _shardStatusPath(batch_dir: Path, name: str, shard: tuple[int, int]) -> Path:
+    return batch_dir / ANALYSIS_DIR / f"{name}.shard_{shard[0]}of{shard[1]}.status.json"
+
+
+def _readJson(path: Path) -> dict | None:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _writeJson(path: Path, obj) -> None:
+    """Write ``obj`` through a temporary file, so a job killed mid-write leaves the old file whole."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(obj, indent=2))
+    os.replace(tmp, path)
+
+
+def _saveNpz(path: Path, **arrays) -> None:
+    """``np.savez`` through a temporary file, so a job killed mid-write leaves no partial episode."""
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "wb") as f:
+        np.savez(f, **arrays)
+    os.replace(tmp, path)
 
 
 def analysisDone(batch_dir: Path, name: str) -> bool:
-    try:
-        return json.loads(_analysisPaths(batch_dir, name)["status"].read_text()).get("status") == "done"
-    except (OSError, ValueError):
-        return False
+    return (_readJson(_analysisPaths(batch_dir, name)["status"]) or {}).get("status") == "done"
 
 
 # -- rebuilding what ran ---------------------------------------------------------------
@@ -691,11 +729,11 @@ def _fmtInterval(record: dict, key: str) -> str:
     return _fmt(record.get(key)) + (f" [{_fmt(lo)}, {_fmt(hi)}]" if lo is not None and hi is not None else "")
 
 
-def _plannerRecord(pargs: argparse.Namespace, task, sim) -> dict:
+def _plannerRecord(pargs: argparse.Namespace, task, sim_config) -> dict:
     """How an analysis planner was built, for the cell's record."""
     return {"rollout_model": pargs.rollout_model, "scene": Path(task.getModelPath()).name,
-            "timestep": task.timestep, "substeps": sim.config.resolved_substeps,
-            "horizon": sim.config.resolved_horizon, "n_samples": pargs.n_samples,
+            "timestep": task.timestep, "substeps": sim_config.resolved_substeps,
+            "horizon": sim_config.resolved_horizon, "n_samples": pargs.n_samples,
             "n_iterations": pargs.n_iterations, "convergence_ratio": pargs.convergence_ratio,
             "max_iterations": pargs.max_iterations, "noise_sigma": pargs.noise_sigma,
             "temperature": pargs.temperature, "adaptive_temp": pargs.adaptive_temp,
@@ -703,17 +741,40 @@ def _plannerRecord(pargs: argparse.Namespace, task, sim) -> dict:
             "cost_weights": pargs.cost_weights}
 
 
+def _analysisKey(effective_args: str) -> str:
+    """What a saved episode was analysed under: it is reused only when this matches."""
+    return json.dumps({"optimal_args": effective_args})
+
+
+def _savedEpisode(path: Path, key: str, rows: np.ndarray, q: np.ndarray) -> bool:
+    """Whether ``path`` holds this episode's analysed steps: the same settings, rows and states.
+
+    The states guard against a stale file from before the batch cell was rerun.
+    """
+    try:
+        with np.load(path) as d:
+            return (str(d["analysis_key"]) == key and np.array_equal(d["row"], rows)
+                    and np.array_equal(d["q"], q))
+    except Exception:                                   # missing, cut short, or from before the key
+        return False
+
+
 def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float = 1e-3,
                 max_episodes: int | None = None, optimal_args: str | None = None,
-                n_steps_analysed: int | None = None) -> dict:
+                n_steps_analysed: int | None = None, shard: tuple[int, int] = (0, 1),
+                overwrite: bool = False) -> dict | None:
     """One cell: every episode's analysed steps saved, then the metrics computed from them.
 
-    Writes and returns its analysis record.
+    Each episode's steps are saved as soon as it is analysed, and an episode
+    already saved under the same settings is not redone (``overwrite`` redoes
+    it), so a cell cut off by the wall clock resumes episode by episode.
+    ``shard = (i, n)`` analyses only the episodes ``i, i + n, i + 2n, ...``, so
+    n jobs can split a cell. Once every episode is saved, whichever shard saved
+    it, the metrics are computed (``finalizeCell``): returns the cell's analysis
+    record then, ``None`` while episodes are missing.
     """
     from ContactModelStudy.Drivers import run_episodes as drv
-    from ContactModelStudy.Drivers.EpisodePool import episodeSeeds
-    from ContactModelStudy.SamplingBasedPlanners.MPPI import MPPI
-    from ContactModelStudy.Utils.ContactModelPresets import GetContactModelSim
+    from ContactModelStudy.Utils.ContactModelPresets import _presetConfig
     from ContactModelStudy.Utils.EpisodeRecorder import EpisodeReplayer
 
     name = cell["name"]
@@ -728,8 +789,65 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
     args = argsFromCliArgs(cli_args)
     checkCell(rep, args)
     overrides, effective_args = optimalOverrides(optimal_args)
+    key = _analysisKey(effective_args)
     episodes = list(rep)[:max_episodes] if max_episodes else list(rep)
-    all_goals = episodeGoals(rep, args)
+    all_rows = [analysedRows(ep.n_saved, stride, n_steps_analysed) for ep in episodes]
+
+    # The three planners' settings, resolved without building anything on the GPU.
+    task, eval_task = drv.buildTasks(args)
+    used_cfg = _presetConfig(args.rollout_model, **drv.rolloutSimOverrides(args, task))
+    oargs = optimalArgs(args, used_cfg.control_timestep, used_cfg.horizon_duration, overrides)
+    otask, _ = drv.buildTasks(oargs)
+    opt_cfg = _presetConfig(oargs.rollout_model, **drv.rolloutSimOverrides(oargs, otask))
+    zargs = optimalArgs(args, used_cfg.control_timestep, used_cfg.horizon_duration)
+    ztask, _ = drv.buildTasks(zargs)
+    zero_cfg = _presetConfig(zargs.rollout_model, **drv.rolloutSimOverrides(zargs, ztask))
+    rollout_steps = used_cfg.resolved_substeps
+    eval_steps = int(round(rollout_steps * task.timestep / eval_task.timestep))
+
+    paths = _analysisPaths(batch_dir, name)
+    steps_dir = paths["steps"]
+    steps_dir.mkdir(parents=True, exist_ok=True)
+    # What finalizeCell needs to build the record without these objects; every shard writes the same.
+    _writeJson(paths["meta"], {
+        "cell": cell["index"], "name": name, "results": res.name, "key": key,
+        "episode_ids": [ep.id for ep in episodes],
+        "rollout_model": args.rollout_model, "eval_sim": args.eval_sim,
+        "plan_on_eval": bool(getattr(args, "plan_on_eval", False)),
+        "stride": None if n_steps_analysed is not None else stride, "n_steps_analysed": n_steps_analysed,
+        "save_stride": int(rep.step_saving.get("stride", 1)), "warm_start": args.warm_start,
+        "optimal_args": effective_args,
+        "optimal_planner": _plannerRecord(oargs, otask, opt_cfg),
+        "zero_gap_planner": _plannerRecord(zargs, ztask, zero_cfg),
+        "forward_sim": {"rollout_steps": rollout_steps, "eval_steps": eval_steps,
+                        "control_timestep": used_cfg.control_timestep},
+        "steps_dir": str(steps_dir.relative_to(batch_dir)),
+    })
+
+    k_shard, n_shards = shard
+    mine = [k for k in range(len(episodes)) if k % n_shards == k_shard]
+    todo = [k for k in mine if overwrite or not _savedEpisode(
+        steps_dir / f"{episodes[k].id}.npz", key, all_rows[k], episodes[k].q[all_rows[k]])]
+    where = f"shard {k_shard}/{n_shards}: " if n_shards > 1 else ""
+    print(f"[{name}] {where}{len(episodes)} episodes, {len(mine)} here, {len(mine) - len(todo)} already "
+          f"analysed", flush=True)
+    if todo:
+        _analyseEpisodes(batch_dir, name, rep, args, oargs, overrides, zargs,
+                         [(k, episodes[k], all_rows[k]) for k in todo], key, effective_args, stride,
+                         n_steps_analysed)
+    return finalizeCell(batch_dir, name, shrinkage)
+
+
+def _analyseEpisodes(batch_dir: Path, name: str, rep, args, oargs, overrides: dict, zargs, todo: list,
+                     key: str, effective_args: str, stride: int, n_steps_analysed: int | None) -> None:
+    """Plan and step the analysed rows of each ``(position in the cell, episode, rows)`` of ``todo``,
+    saving each episode as ``analysis/<cell>/<id>.npz``."""
+    from ContactModelStudy.Drivers import run_episodes as drv
+    from ContactModelStudy.Drivers.EpisodePool import episodeSeeds
+    from ContactModelStudy.SamplingBasedPlanners.MPPI import MPPI
+    from ContactModelStudy.Utils.ContactModelPresets import GetContactModelSim
+
+    goals_by_id = dict(zip(rep.ids, episodeGoals(rep, args)))
 
     # The used planner, as run_episodes.main built it.
     task, eval_task = drv.buildTasks(args)
@@ -737,13 +855,11 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
                                   **drv.rolloutSimOverrides(args, task))
     used = (task, MPPI(used_sim, task, drv.buildPlannerConfig(args)))
     # The optimal planner: the same, with the eval model, and any settings of its own.
-    oargs = optimalArgs(args, used_sim.config.control_timestep, used_sim.config.horizon_duration, overrides)
     otask, _ = drv.buildTasks(oargs)
     opt_sim = GetContactModelSim(oargs.rollout_model, otask.getModelPath(), N=oargs.n_samples,
                                  **drv.rolloutSimOverrides(oargs, otask))
     opt = (otask, MPPI(opt_sim, otask, drv.buildPlannerConfig(oargs)))
     # The zero-gap planner: the used planner's own settings, on the eval model.
-    zargs = optimalArgs(args, used_sim.config.control_timestep, used_sim.config.horizon_duration)
     ztask, _ = drv.buildTasks(zargs)
     zero_sim = GetContactModelSim(zargs.rollout_model, ztask.getModelPath(), N=zargs.n_samples,
                                   **drv.rolloutSimOverrides(zargs, ztask))
@@ -754,8 +870,7 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
                             opt_temperature=oargs.temperature if "temperature" in overrides else None)
 
     # The forward-simulation pair: one world per analysed step.
-    all_rows = [analysedRows(ep.n_saved, stride, n_steps_analysed) for ep in episodes]
-    n_worlds = max(1, max(len(rows) for rows in all_rows))
+    n_worlds = max(1, max(len(rows) for _, _, rows in todo))
     rollout_steps = used_sim.config.resolved_substeps
     eval_steps = int(round(rollout_steps * task.timestep / eval_task.timestep))
     overrides_sim = drv.rolloutSimOverrides(args, task)
@@ -764,30 +879,25 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
                                  timestep=eval_task.timestep,
                                  **{k: v for k, v in overrides_sim.items() if k in ("nconmax", "njmax")})
     sims = {"rollout": (fs_rollout, rollout_steps), "eval": (fs_eval, eval_steps)}
+    steps_dir = _analysisPaths(batch_dir, name)["steps"]
 
-    paths = _analysisPaths(batch_dir, name)
-    steps_dir = paths["steps"]
-    steps_dir.mkdir(parents=True, exist_ok=True)
-    for old in steps_dir.glob("*.npz"):                # a rerun's episodes replace the last run's
-        old.unlink()
-
-    print(f"[{name}] {len(episodes)} episodes; used planner {args.rollout_model} on "
+    print(f"[{name}] {len(todo)} episodes to analyse; used planner {args.rollout_model} on "
           f"{Path(task.getModelPath()).name} ({rollout_steps} x {task.timestep * 1e3:g} ms), optimal "
           f"{args.eval_sim} on {Path(otask.getModelPath()).name} ({opt_sim.config.resolved_substeps} x "
           f"{otask.timestep * 1e3:g} ms, {effective_args}), zero-gap {zargs.rollout_model}, steps saved every "
           f"{rep.step_saving.get('stride', 1)}, analysed "
           + (f"{n_steps_analysed} saved steps per episode, evenly spaced" if n_steps_analysed is not None
              else f"every {stride} saved step(s)"), flush=True)
-    files, replays = [], set()
     t0 = time.time()
-    # 1. Each episode's analysed steps: the state, both planners' action distributions and
-    #    the next state under each planner's action on each model, saved per episode.
-    for k, (ep, goals, rows) in enumerate(zip(episodes, all_goals, all_rows)):
+    # Each episode's analysed steps: the state, both planners' action distributions and
+    # the next state under each planner's action on each model, saved per episode.
+    for k, ep, rows in todo:
+        t_ep = time.time()
+        goals = goals_by_id[ep.id]
         ep_index = int(ep.summary.get("episode", k))
         noise_seed = episodeSeeds(args.seed, ep_index)[1]
         starts = [planStart(ep, i, args, u0, noise_seed) for i in rows]
         mode = replayMode(ep, starts, len(rows) == ep.n_saved, args.warm_start)
-        replays.add(mode)
         if mode == "independent":
             plans = planners.planAlong(ep, goals, rows, starts)
         else:
@@ -805,68 +915,105 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
             "indices": np.asarray(eval_task.indices),
             "control_timestep": used_sim.config.control_timestep,
             "rollout_timestep": task.timestep, "eval_timestep": eval_task.timestep,
+            "analysis_key": np.array(key), "replay": np.array(mode), "wall_s": time.time() - t_ep,
         }
         path = steps_dir / f"{ep.id}.npz"
-        np.savez(path, **data)
-        files.append(path)
+        _saveNpz(path, **data)
         print(f"  episode {ep_index}: {ep.n_steps} steps, {len(rows)} analysed ({mode}) -> "
               f"{path.relative_to(batch_dir)}  ({time.time() - t0:.0f} s)", flush=True)
     for sim in (used_sim, opt_sim, zero_sim, fs_rollout, fs_eval):
         sim.Close()
 
-    # 2. The metrics, from the saved steps.
+
+def missingEpisodes(batch_dir: Path, name: str) -> tuple[list[str], int] | None:
+    """``(ids not yet analysed under the cell's current settings, episodes in all)``; ``None``
+    when the cell has no ``_cell.json`` (never analysed, or analysed before it was written)."""
+    paths = _analysisPaths(batch_dir, name)
+    meta = _readJson(paths["meta"])
+    if meta is None:
+        return None
+    missing = []
+    for ep_id in meta["episode_ids"]:
+        try:
+            with np.load(paths["steps"] / f"{ep_id}.npz") as d:
+                ok = str(d["analysis_key"]) == meta["key"]
+        except Exception:
+            ok = False
+        if not ok:
+            missing.append(ep_id)
+    return missing, len(meta["episode_ids"])
+
+
+def finalizeCell(batch_dir: Path, name: str, shrinkage: float = 1e-3) -> dict | None:
+    """The metrics from a cell's saved episodes (``_cell.json`` names them), written as its record.
+
+    Needs no GPU, so ``summarize`` can finish a cell whose shards all saved
+    their episodes. Returns the record, or ``None`` (writing nothing) while an
+    episode is missing or was saved under other settings.
+    """
+    paths = _analysisPaths(batch_dir, name)
+    progress = missingEpisodes(batch_dir, name)
+    if progress is None or progress[0]:
+        return None
+    meta = _readJson(paths["meta"])
     ep_arrays: list[tuple[str, np.ndarray, dict]] = []  # every episode's per-analysed-step metrics
-    ep_records = []
-    for path in files:
-        with np.load(path) as f:
+    ep_records, replays, wall = [], set(), 0.0
+    for ep_id in meta["episode_ids"]:
+        with np.load(paths["steps"] / f"{ep_id}.npz") as f:
             d = dict(f)
         m = episodeMetrics(d, shrinkage)
         rec = {"id": str(d["id"]), "episode": int(d["episode"]), "n_steps": int(d["n_steps"]),
                "n_steps_analyzed": len(d["step"]), **episodeStats(m)}
         ep_records.append(rec)
         ep_arrays.append((rec["id"], d["step"], m))
+        replays.add(str(d["replay"]))
+        wall += float(d["wall_s"])
         print(f"  episode {rec['episode']}: KL(used||opt) {rec.get('kl_used_opt_mean') or float('nan'):.3f}, "
               f"regret {_fmt(rec.get('regret_mean'))}, "
               f"object pos err {1e3 * (rec.get('fsim_obj_pos_err_mean') or float('nan')):.2f} mm", flush=True)
 
-    metrics = cellStats([m for _, _, m in ep_arrays])
     record = {
-        "cell": cell["index"], "name": name, "results": res.name,
-        "rollout_model": args.rollout_model, "eval_sim": args.eval_sim,
-        "plan_on_eval": bool(getattr(args, "plan_on_eval", False)),
-        "stride": None if n_steps_analysed is not None else stride, "n_steps_analysed": n_steps_analysed,
-        "save_stride": int(rep.step_saving.get("stride", 1)),
-        "replay": "+".join(sorted(replays)) or None, "warm_start": args.warm_start,
-        "shrinkage": shrinkage, "n_episodes_analyzed": len(episodes),
+        **{k: v for k, v in meta.items() if k not in ("key", "episode_ids", "steps_dir")},
+        "replay": "+".join(sorted(replays)) or None, "shrinkage": shrinkage,
+        "n_episodes_analyzed": len(ep_records),
         "n_steps_analyzed": sum(r["n_steps_analyzed"] for r in ep_records),
-        "optimal_args": effective_args,
-        "optimal_planner": _plannerRecord(oargs, otask, opt_sim),
-        "zero_gap_planner": _plannerRecord(zargs, ztask, zero_sim),
-        "forward_sim": {"rollout_steps": rollout_steps, "eval_steps": eval_steps,
-                        "control_timestep": used_sim.config.control_timestep},
-        "steps_dir": str(steps_dir.relative_to(batch_dir)),
-        "metrics": metrics, "episodes": ep_records, "wall_s": round(time.time() - t0, 1),
+        "steps_dir": meta["steps_dir"],
+        "metrics": cellStats([m for _, _, m in ep_arrays]), "episodes": ep_records,
+        "wall_s": round(wall, 1),                         # planning and stepping, summed over the episodes
     }
-    paths["json"].write_text(json.dumps(record, indent=2))
-    np.savez(paths["npz"], **{f"{key}__{ep_id}": arr for ep_id, _, m in ep_arrays for key, arr in m.items()},
+    _writeJson(paths["json"], record)
+    _saveNpz(paths["npz"], **{f"{key}__{ep_id}": arr for ep_id, _, m in ep_arrays for key, arr in m.items()},
              **{f"step__{ep_id}": step for ep_id, step, _ in ep_arrays})
     return record
 
 
-def runCell(batch_dir: Path, cell: dict, overwrite: bool, **kw) -> int:
-    """Analyse one cell, recording its status; returns 0 when done."""
+def runCell(batch_dir: Path, cell: dict, overwrite: bool, shard: tuple[int, int] = (0, 1), **kw) -> int:
+    """Analyse one cell, or one shard of it, recording its status; returns 0 when done.
+
+    Unsharded, the status is the cell's (``<cell>.analysis_status.json``).
+    Sharded, each shard writes its own (``<cell>.shard_<i>of<n>.status.json``),
+    and the shard that saves the last episode marks the cell done.
+    """
     name = cell["name"]
     if not overwrite and analysisDone(batch_dir, name):
         print(f"[{name}] analysis already done; skipping (--overwrite to redo)")
         return 0
     paths = _analysisPaths(batch_dir, name)
     paths["status"].parent.mkdir(parents=True, exist_ok=True)
+    sharded = shard[1] > 1
     status = {"cell": cell["index"], "name": name, "host": os.uname().nodename,
               "slurm_job": os.environ.get("SLURM_JOB_ID"), **kw}
+    if sharded:
+        status["shard"] = list(shard)
+    record = None
     t0 = time.time()
     try:
-        processCell(batch_dir, cell, **kw)
+        record = processCell(batch_dir, cell, shard=shard, overwrite=overwrite, **kw)
+        if record is None and not sharded:
+            raise RuntimeError(f"episodes {missingEpisodes(batch_dir, name)[0]} were not saved")
         status["status"] = "done"
+        if record is None:
+            print(f"[{name}] shard {shard[0]}/{shard[1]} done; the metrics wait for the other shards")
         return 0
     except Exception as e:
         status.update(status="failed", error=f"{type(e).__name__}: {e}", traceback=traceback.format_exc())
@@ -874,7 +1021,9 @@ def runCell(batch_dir: Path, cell: dict, overwrite: bool, **kw) -> int:
         return 1
     finally:
         status["wall_s"] = round(time.time() - t0, 1)
-        paths["status"].write_text(json.dumps(status, indent=2))
+        _writeJson(_shardStatusPath(batch_dir, name, shard) if sharded else paths["status"], status)
+        if sharded and record is not None:
+            _writeJson(paths["status"], {**status, "status": "done", "completed_by_shard": list(shard)})
 
 
 # -- the final tables ------------------------------------------------------------------------
@@ -882,24 +1031,56 @@ def _scalar(v) -> bool:
     return v is None or isinstance(v, (str, int, float, bool))
 
 
-def summarize(batch_dir: Path) -> Path | None:
-    """``final_results.csv`` (one row per cell) and ``final_episodes.csv`` (one per episode)."""
+def _completeShardedCell(batch_dir: Path, name: str, shrinkage: float) -> None:
+    """Mark a cell done if every episode is saved but no shard did (two finished at once, or
+    one finished after another failed); its metrics are computed here."""
+    if analysisDone(batch_dir, name) or finalizeCell(batch_dir, name, shrinkage) is None:
+        return
+    _writeJson(_analysisPaths(batch_dir, name)["status"],
+               {"name": name, "status": "done", "completed_by": "summarize", "shrinkage": shrinkage})
+
+
+def _unfinishedStatus(batch_dir: Path, name: str) -> tuple[str, str | None]:
+    """``(analysis_status, error)`` of a cell that is not done: a cell-level status, else its
+    shards' (``failed`` if any failed, else ``partial``), else ``not run``."""
+    st = _readJson(_analysisPaths(batch_dir, name)["status"])
+    if st is not None:
+        return st.get("status"), st.get("error")
+    shards = [s for s in (_readJson(p) for p in sorted((batch_dir / ANALYSIS_DIR).glob(
+        f"{name}.shard_*of*.status.json"))) if s]
+    if not shards:
+        return "not run", None
+    progress = missingEpisodes(batch_dir, name)
+    count = f"{progress[1] - len(progress[0])}/{progress[1]} episodes analysed" if progress else None
+    failed = [s for s in shards if s.get("status") == "failed"]
+    if failed:
+        return "failed", "; ".join(f"shard {s['shard'][0]}: {s.get('error')}" for s in failed) + \
+            (f" ({count})" if count else "")
+    return "partial", count
+
+
+def summarize(batch_dir: Path, shrinkage: float = 1e-3) -> Path | None:
+    """``final_results.csv`` (one row per cell) and ``final_episodes.csv`` (one per episode).
+
+    A sharded cell whose episodes are all saved, but which no shard marked
+    done, is completed first (``shrinkage`` is its KL's).
+    """
     cells = listCells(batch_dir)
     if not cells:
         return None
     rows, ep_rows = [], []
     for c in cells:
         st, name = c["status"], c["name"]
+        _completeShardedCell(batch_dir, name, shrinkage)
         row = st.get("row", {})
         entry = {"cell": c["index"], "name": name, **row, "batch_status": st.get("status"),
                  "batch_wall_s": round(st.get("wall_s", 0) or 0, 1),
                  **batches.cellResultMetrics(batch_dir / f"{name}.json")}
         paths = _analysisPaths(batch_dir, name)
-        try:
-            ast = json.loads(paths["status"].read_text())
-            entry["analysis_status"], entry["analysis_error"] = ast.get("status"), ast.get("error")
-        except (OSError, ValueError):
-            entry["analysis_status"] = "not run"
+        if analysisDone(batch_dir, name):
+            entry["analysis_status"], entry["analysis_error"] = "done", None
+        else:
+            entry["analysis_status"], entry["analysis_error"] = _unfinishedStatus(batch_dir, name)
         analysis = json.loads(paths["json"].read_text()) if paths["json"].exists() and \
             entry["analysis_status"] == "done" else None
         by_id = {e["id"]: e for e in (analysis or {}).get("episodes", [])}
@@ -950,7 +1131,12 @@ def main(argv=None) -> int:
                         "SLURM_ARRAY_TASK_ID); omitted, every cell in order")
     p.add_argument("--count", action="store_true", help="print the number of cells and exit")
     p.add_argument("--summarize", action="store_true", help="only (re)build the final tables")
-    p.add_argument("--overwrite", action="store_true", help="redo cells already analysed")
+    p.add_argument("--overwrite", action="store_true",
+                   help="redo cells already analysed, and their episodes already saved")
+    p.add_argument("--n-shards", type=int, default=1, metavar="N",
+                   help="with --cell: split the cell's episodes over N jobs, this one analysing those of "
+                        "--shard (episodes i, i + N, ...); the job that saves the last marks the cell done")
+    p.add_argument("--shard", type=int, default=0, metavar="I", help="with --n-shards: which share (0-based)")
     p.add_argument("--stride", type=int, default=1,
                    help="analyse every k-th saved step (the plans, the forward simulation and the metrics)")
     p.add_argument("--n-steps-analysed", type=int, default=None, metavar="N",
@@ -969,6 +1155,10 @@ def main(argv=None) -> int:
         p.error("--stride must be >= 1")
     if args.n_steps_analysed is not None and args.n_steps_analysed < 1:
         p.error("--n-steps-analysed must be >= 1")
+    if args.n_shards < 1 or not 0 <= args.shard < args.n_shards:
+        p.error(f"--shard {args.shard} of --n-shards {args.n_shards}: need 0 <= shard < n_shards")
+    if args.n_shards > 1 and args.cell is None:
+        p.error("--n-shards needs --cell")
     if args.optimal_args:
         try:
             parseOptimalArgs(args.optimal_args)
@@ -984,13 +1174,13 @@ def main(argv=None) -> int:
     if not cells:
         p.error(f"{batch_dir} has no cell_*.status.json files; is it an episode-batch results folder?")
     if args.summarize:
-        return 0 if summarize(batch_dir) else 1
+        return 0 if summarize(batch_dir, args.shrinkage) else 1
     kw = dict(stride=args.stride, shrinkage=args.shrinkage, max_episodes=args.max_episodes,
               optimal_args=args.optimal_args, n_steps_analysed=args.n_steps_analysed)
     if args.cell is not None:
         if not 0 <= args.cell < len(cells):
             p.error(f"--cell {args.cell} is out of range: {batch_dir.name} has cells 0-{len(cells) - 1}")
-        return runCell(batch_dir, cells[args.cell], args.overwrite, **kw)
+        return runCell(batch_dir, cells[args.cell], args.overwrite, shard=(args.shard, args.n_shards), **kw)
     # Every cell, each in its own process, so one failure does not stop the rest.
     failed = []
     for i, c in enumerate(cells):
@@ -1008,7 +1198,7 @@ def main(argv=None) -> int:
         rc = subprocess.run(cmd).returncode
         if rc:
             failed.append(c["name"])
-    summarize(batch_dir)
+    summarize(batch_dir, args.shrinkage)
     if failed:
         print(f"\n{len(failed)} cell(s) failed: {', '.join(failed)}")
     return 1 if failed else 0

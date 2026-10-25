@@ -141,7 +141,9 @@ MANAGED_OPTIONS = batches.MANAGED_OPTIONS + ("rollout_model",)
 #: ``--resources`` sizing: eval workers per planner, and memory per process (an M5
 #: planner or worker peaks near 1.8 GB) plus the parent's. An episode waits on one
 #: plan at a time, so a planner needs a worker per plan it can run back to back: ~2
-#: for M1-M4's quick plans, 1 for M5's (1.6-3 s each, against a 3%-busy worker).
+#: for M1-M4's quick plans, 1 for M5's (1.6-3 s each, against a 3%-busy worker). A
+#: cell scoring several models runs as many episodes of each, so it gets the mean of
+#: its models' values: 1.8 per planner for M1-M5.
 WORKERS_PER_PLANNER = 2
 SLOW_MODEL_WORKERS_PER_PLANNER = {"M5": 1}
 MEM_PER_PROCESS_GB = 2.5
@@ -246,21 +248,26 @@ class CellSpec:
         weights = {k: v for k, v in p.items() if k in COST_WEIGHT_KEYS}
         return planner, weights
 
-    def resources(self, max_gpus: int, planners_per_gpu: int) -> dict[str, int]:
+    def workersPerPlanner(self) -> float:
+        """Eval workers a planner keeps busy: the mean over the models, as each runs as many episodes."""
+        return float(np.mean([SLOW_MODEL_WORKERS_PER_PLANNER.get(m, WORKERS_PER_PLANNER) for m in self.models]))
+
+    def resources(self, max_gpus: int, planners_per_gpu: int,
+                  workers_per_planner: float | None = None) -> dict[str, int]:
         """The allocation that runs every episode of the trials in flight at once.
 
         Episodes per BO step are models x ``n_episodes`` x ``trials_in_flight`` (1
-        when unset). GPUs grow with them, ``WORKERS_PER_PLANNER`` workers per
-        planner (fewer when a slow model is among the rollouts), up to
-        ``max_gpus``; one core per process plus the parent's.
+        when unset). GPUs grow with them, ``workers_per_planner`` workers per
+        planner (default ``workersPerPlanner``: 2 for quick models, 1 for slow
+        ones, averaged over the cell's models), up to ``max_gpus``; one core per
+        process plus the parent's.
         """
         in_flight = self.trials_in_flight or 1
         episodes = self.episodes_per_trial * in_flight
-        per_planner = min([WORKERS_PER_PLANNER] + [SLOW_MODEL_WORKERS_PER_PLANNER.get(m, WORKERS_PER_PLANNER)
-                                                    for m in self.models])
-        per_gpu = planners_per_gpu * per_planner
-        gpus = max(1, min(max_gpus, math.ceil(episodes / per_gpu)))
-        workers = min(episodes, gpus * per_gpu)
+        per_gpu = planners_per_gpu * (workers_per_planner or self.workersPerPlanner())
+        # The tolerance keeps a product that should be whole (6.0000001) from rounding up.
+        gpus = max(1, min(max_gpus, math.ceil(episodes / per_gpu - 1e-9)))
+        workers = max(1, min(episodes, math.ceil(gpus * per_gpu - 1e-9)))
         procs = gpus * planners_per_gpu + workers
         mem = 4 * math.ceil((MEM_BASE_GB + MEM_PER_PROCESS_GB * procs) / 4)
         return {"episodes": episodes, "gpus": gpus, "planners_per_gpu": planners_per_gpu,
@@ -946,6 +953,9 @@ def main(argv=None) -> int:
                    help="print each row's allocation, 'cell episodes gpus planners_per_gpu workers cpus "
                         "mem_gb', sized from its episodes per BO step (submit_bayes_opt.sh uses this)")
     p.add_argument("--max-gpus", type=int, default=4, help="with --resources: GPUs per cell at most")
+    p.add_argument("--workers-per-planner", type=float, default=None,
+                   help="with --resources: eval workers per planner process; default 2 for M1-M4 and 1 for M5, "
+                        "averaged over the cell's models")
     p.add_argument("--summarize", action="store_true", help="only (re)build the summaries in --outdir")
     p.add_argument("--debug", action="store_true",
                    help="MPPI's per-plan diagnostics (run_episodes.py --debug) in every episode of every "
@@ -995,10 +1005,12 @@ def main(argv=None) -> int:
     if args.resources:
         if args.max_gpus < 1:
             p.error("--max-gpus must be >= 1")
+        if args.workers_per_planner is not None and args.workers_per_planner <= 0:
+            p.error("--workers-per-planner must be > 0")
         for i, row in enumerate(rows):
             try:
                 r = parseCell(row, csv_path.parent, outdir / batches.cellName(i, row)).resources(
-                    args.max_gpus, args.planners_per_gpu)
+                    args.max_gpus, args.planners_per_gpu, args.workers_per_planner)
             except (ValueError, FileNotFoundError) as e:
                 p.error(f"row {i}: {e}")
             print(i, *r.values())

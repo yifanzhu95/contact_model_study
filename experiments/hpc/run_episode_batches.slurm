@@ -5,10 +5,17 @@
 #SBATCH --array=0-0            # placeholder: submit_episode_batches.sh sets it to the CSV's rows
 #SBATCH --partition=gpu
 #SBATCH --gpus=rtx_5000_ada:1
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=16G
+#SBATCH --cpus-per-task=11
+#SBATCH --mem=32G
 #SBATCH --time=24:00:00
-# One array task = one CSV row (cell) = one GPU. The resources above must cover
+#SBATCH --signal=B:TERM@300    # 5 min before the limit: stop and save the finished episodes
+# One array task = one CSV row (cell) = one GPU. By default the cell's episodes
+# run at once (run_episode_batches.py --pool): PLANNERS_PER_GPU planner
+# processes (2) serving WORKERS eval-sim workers (8), each worker one episode,
+# with a core per process (hence 11 CPUs) and ~2 GB of memory each. With a GPU
+# eval sim (M1-M5) every worker also holds a CUDA context on the GPU. Submit
+# with POOL=0 to run the episodes one after another instead, as run_episodes.py
+# does (2 CPUs and 16G are then enough). The resources above must cover
 # the most expensive row: sbatch options on the command line override them,
 # e.g. `sbatch --time=24:00:00 ...` for rows with long episodes or Pinocchio/Drake
 # eval sims (see test_scripts/profile_run_episodes.py for per-step costs).
@@ -39,5 +46,11 @@ export MUJOCO_GL=egl
 echo "cell ${CELL} of ${CSV} -> ${OUTDIR} on $(hostname)"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
+POOL_ARGS=()
+if [[ "${POOL:-1}" == 1 ]]; then
+    POOL_ARGS=(--pool --planners-per-gpu "${PLANNERS_PER_GPU:-2}" --workers "${WORKERS:-8}")
+fi
 # The out-of-range check is in the Python script, which parses the CSV properly.
-python experiments/run_episode_batches.py "$CSV" --cell "$CELL" --outdir "$OUTDIR"
+# exec: Python is then the batch shell, so --signal=B:TERM reaches it directly.
+exec python experiments/run_episode_batches.py "$CSV" --cell "$CELL" --outdir "$OUTDIR" \
+    ${POOL_ARGS[@]+"${POOL_ARGS[@]}"}

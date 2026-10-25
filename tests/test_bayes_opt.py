@@ -212,6 +212,12 @@ def test_resources_grow_with_the_episodes_per_step(tmp_path):
     m5 = cell(tmp_path, rollout_models="M5", n_episodes="4", trials_in_flight="2", eval_sim="M5",
               opt_weights="w_quat").resources(4, 2)
     assert (m5["episodes"], m5["gpus"], m5["workers"], m5["cpus"]) == (8, 4, 8, 17)  # a planner per episode
+    # M5 among quick models: 1.8 workers per planner (the mean), not M5's 1 for all of them.
+    mix = cell(tmp_path, rollout_models="M1 M2 M3 M4 M5", n_episodes="4", trials_in_flight="2", eval_sim="M5",
+               opt_weights="w_quat").resources(4, 2)
+    assert (mix["episodes"], mix["gpus"], mix["workers"], mix["cpus"], mix["mem_gb"]) == (40, 4, 15, 24, 64)
+    assert cell(tmp_path, rollout_models="M1 M2 M3 M4 M5", n_episodes="4", trials_in_flight="2", eval_sim="M5",
+                opt_weights="w_quat").resources(4, 2, workers_per_planner=2.5)["workers"] == 20
 
 
 def test_constant_liar_proposes_distinct_points(tmp_path):

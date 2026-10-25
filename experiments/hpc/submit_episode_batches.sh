@@ -11,6 +11,8 @@
 #   2. submits run_episode_batches.slurm with --array sized to the CSV's rows,
 #   3. queues summarize_batches.slurm to run once the whole array has finished.
 # Extra sbatch options can go in SBATCH_ARGS, e.g. SBATCH_ARGS="--time=24:00:00".
+# Each cell's episodes run at once on its GPU (PLANNERS_PER_GPU=2 planners, WORKERS=8 workers; see
+# run_episode_batches.slurm); POOL=0 runs them one after another. All three reach the jobs through ALL.
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
