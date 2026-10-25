@@ -41,7 +41,7 @@ STRIDE=4
 # first to its last (every step of a shorter episode), so every episode gets
 # the same number however long it ran. Set, it overrides STRIDE; empty, STRIDE
 # is used.
-N_STEPS_ANALYSED=500
+N_STEPS_ANALYSED=100
 
 set -euo pipefail
 
