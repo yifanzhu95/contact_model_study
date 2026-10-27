@@ -6,7 +6,7 @@
 #SBATCH --partition=gpu
 #SBATCH --nodes=1              # the pool is one process tree: GPUs on a second node sit idle
 #SBATCH --ntasks=1
-#SBATCH --gpus=a5000:4
+#SBATCH --gpus=4                # any type; e.g. --gpus=a5000:4 to pin one
 #SBATCH --cpus-per-task=24
 #SBATCH --mem=64G
 #SBATCH --time=48:00:00

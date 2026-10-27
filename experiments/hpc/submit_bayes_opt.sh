@@ -16,8 +16,8 @@
 #   3. submits run_bayes_opt.slurm once per allocation, as a job array over the rows that share it,
 #      all writing into one results folder,
 #   4. queues summarize_bayes_opt.slurm to run once every array has finished.
-# GPU_TYPE picks the GPU (default a5000). Extra sbatch options go in SBATCH_ARGS and win over the
-# sizing, e.g. SBATCH_ARGS="--time=24:00:00" or SBATCH_ARGS="--gpus=rtx_5000_ada:4".
+# GPU_TYPE picks the GPU (default a5000; GPU_TYPE= takes any type in the partition). Extra sbatch
+# options go in SBATCH_ARGS and win over the sizing, e.g. SBATCH_ARGS="--time=24:00:00".
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
@@ -55,7 +55,7 @@ N=$(python experiments/run_bayes_opt.py "$CSV" --count)
 (( N >= 1 )) || { echo "$CSV has no data rows" >&2; exit 1; }
 
 PLANNERS_PER_GPU="${PLANNERS_PER_GPU:-2}"
-GPU_TYPE="${GPU_TYPE:-a5000}"
+GPU_TYPE="${GPU_TYPE-a5000}"
 # One line per row: cell episodes gpus planners_per_gpu workers cpus mem_gb.
 SIZES=$(python experiments/run_bayes_opt.py "$CSV" --resources --planners-per-gpu "$PLANNERS_PER_GPU" \
             --max-gpus "${MAX_GPUS:-4}" ${WORKERS_PER_PLANNER:+--workers-per-planner "$WORKERS_PER_PLANNER"} \
@@ -81,12 +81,12 @@ for key in "${ORDER[@]}"; do
     # after the first writes into the first one's folder, so the summary finds every cell.
     EXPORT="ALL,CSV=$CSV,PROJ_DIR=$PROJ_DIR,PLANNERS_PER_GPU=$ppg,WORKERS=$workers${OUT:+,OUTDIR=$OUT}"
     # --nodes=1: --gpus is a total for the job, and SLURM may otherwise split it over nodes.
-    JOB=$(sbatch --parsable --array="$ARRAY" --export="$EXPORT" --nodes=1 --ntasks=1 --gpus="$GPU_TYPE:$gpus" \
+    JOB=$(sbatch --parsable --array="$ARRAY" --export="$EXPORT" --nodes=1 --ntasks=1 --gpus="${GPU_TYPE:+$GPU_TYPE:}$gpus" \
           --cpus-per-task="$cpus" --mem="${mem}G" ${SBATCH_ARGS:-} experiments/hpc/run_bayes_opt.slurm)
     JOB=${JOB%%;*}
     JOBS+=("$JOB")
     OUT="${OUT:-$PROJ_DIR/results/bayes_opt_$(basename "${CSV%.*}")_${JOB}}"
-    echo "submitted cells $ARRAY as array job $JOB: $gpus x $GPU_TYPE, $cpus CPUs, ${mem}G"
+    echo "submitted cells $ARRAY as array job $JOB: $gpus x ${GPU_TYPE:-any GPU}, $cpus CPUs, ${mem}G"
 done
 echo "results -> $OUT"
 
