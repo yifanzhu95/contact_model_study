@@ -1,2 +1,2 @@
-w_quat,w_pos_x,w_pos_y,w_pos_z,w_contact,w_joint,w_fallen,w_quat_term,w_pos_term,temperature
-23.0224,0.01,100.0,0.361846,100.0,6.20467,93.6095,145.812,500.0,1.0
+w_quat,w_pos_x,w_pos_y,w_pos_z,w_contact,w_joint,w_fallen,w_quat_term,w_pos_term,temperature_M1,temperature_M2,temperature_M3,temperature_M4
+50,50,1,0.361846,100,0.1,300,100,500,0.001,0.001,0.409574,0.001

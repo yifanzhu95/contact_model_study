@@ -121,9 +121,9 @@ from ContactModelStudy.Tasks.LeapReorient import COST_WEIGHT_KEYS  # noqa: E402
 
 #: The old study's search space: weight -> (low, high).
 DEFAULT_OPT_WEIGHTS = {
-    "w_quat": (1.0, 50.0), "w_pos_x": (1.0, 50.0), "w_pos_y": (1.0, 50.0),
-    "w_pos_z": (1.0, 50.0), "w_contact": (0.1, 100.0), "w_joint": (0.1, 20.0),
-    "w_fallen": (100.0, 300.0), "w_quat_term": (100.0, 300.0), "w_pos_term": (100.0, 300.0),
+    "w_quat": (0.01, 100.0), "w_pos_x": (0.01, 100.0), "w_pos_y": (0.01, 100.0),
+    "w_pos_z": (0.01, 100.0), "w_contact": (0.01, 100.0), "w_joint": (0.01, 100.0),
+    "w_fallen": (10.0, 500.0), "w_quat_term": (10.0, 1000.0), "w_pos_term": (10.0, 1000.0),
 }
 #: A bare weight name searches [default / BOUND_SCALE, default * BOUND_SCALE].
 BOUND_SCALE = 4.0
