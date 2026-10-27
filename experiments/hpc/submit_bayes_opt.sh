@@ -16,7 +16,7 @@
 #   3. submits run_bayes_opt.slurm once per allocation, as a job array over the rows that share it,
 #      all writing into one results folder,
 #   4. queues summarize_bayes_opt.slurm to run once every array has finished.
-# GPU_TYPE picks the GPU (default a5000; GPU_TYPE= takes any type in the partition). Extra sbatch
+# GPU_TYPE pins a GPU type, e.g. GPU_TYPE=a5000 (default: any type in the partition). Extra sbatch
 # options go in SBATCH_ARGS and win over the sizing, e.g. SBATCH_ARGS="--time=24:00:00".
 set -euo pipefail
 
@@ -55,7 +55,7 @@ N=$(python experiments/run_bayes_opt.py "$CSV" --count)
 (( N >= 1 )) || { echo "$CSV has no data rows" >&2; exit 1; }
 
 PLANNERS_PER_GPU="${PLANNERS_PER_GPU:-2}"
-GPU_TYPE="${GPU_TYPE-a5000}"
+GPU_TYPE="${GPU_TYPE:-}"
 # One line per row: cell episodes gpus planners_per_gpu workers cpus mem_gb.
 SIZES=$(python experiments/run_bayes_opt.py "$CSV" --resources --planners-per-gpu "$PLANNERS_PER_GPU" \
             --max-gpus "${MAX_GPUS:-4}" ${WORKERS_PER_PLANNER:+--workers-per-planner "$WORKERS_PER_PLANNER"} \
