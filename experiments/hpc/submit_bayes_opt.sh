@@ -16,7 +16,9 @@
 #   3. submits run_bayes_opt.slurm once per allocation, as a job array over the rows that share it,
 #      all writing into one results folder,
 #   4. queues summarize_bayes_opt.slurm to run once every array has finished.
-# GPU_TYPE pins a GPU type, e.g. GPU_TYPE=a5000 (default: any type in the partition). Extra sbatch
+# GPU_CONSTRAINT lists the node features a job may land on (default "gpu:a5000|gpu:rtx_5000_ada";
+# on the L40S nodes the pool's planners fail to get a CUDA context, likely Exclusive_Process mode);
+# GPU_CONSTRAINT= takes any type. GPU_TYPE pins one type instead, e.g. GPU_TYPE=a5000. Extra sbatch
 # options go in SBATCH_ARGS and win over the sizing, e.g. SBATCH_ARGS="--time=24:00:00".
 set -euo pipefail
 
@@ -56,6 +58,12 @@ N=$(python experiments/run_bayes_opt.py "$CSV" --count)
 
 PLANNERS_PER_GPU="${PLANNERS_PER_GPU:-2}"
 GPU_TYPE="${GPU_TYPE:-}"
+GPU_CONSTRAINT="${GPU_CONSTRAINT-gpu:a5000|gpu:rtx_5000_ada}"
+# --gpus takes one type, so a choice of types goes in --constraint; a pinned type needs none.
+GPU_ARGS=()
+if [[ -z "$GPU_TYPE" && -n "$GPU_CONSTRAINT" ]]; then
+    GPU_ARGS=(--constraint="$GPU_CONSTRAINT")
+fi
 # One line per row: cell episodes gpus planners_per_gpu workers cpus mem_gb.
 SIZES=$(python experiments/run_bayes_opt.py "$CSV" --resources --planners-per-gpu "$PLANNERS_PER_GPU" \
             --max-gpus "${MAX_GPUS:-4}" ${WORKERS_PER_PLANNER:+--workers-per-planner "$WORKERS_PER_PLANNER"} \
@@ -82,11 +90,11 @@ for key in "${ORDER[@]}"; do
     EXPORT="ALL,CSV=$CSV,PROJ_DIR=$PROJ_DIR,PLANNERS_PER_GPU=$ppg,WORKERS=$workers${OUT:+,OUTDIR=$OUT}"
     # --nodes=1: --gpus is a total for the job, and SLURM may otherwise split it over nodes.
     JOB=$(sbatch --parsable --array="$ARRAY" --export="$EXPORT" --nodes=1 --ntasks=1 --gpus="${GPU_TYPE:+$GPU_TYPE:}$gpus" \
-          --cpus-per-task="$cpus" --mem="${mem}G" ${SBATCH_ARGS:-} experiments/hpc/run_bayes_opt.slurm)
+          ${GPU_ARGS[@]+"${GPU_ARGS[@]}"} --cpus-per-task="$cpus" --mem="${mem}G" ${SBATCH_ARGS:-} experiments/hpc/run_bayes_opt.slurm)
     JOB=${JOB%%;*}
     JOBS+=("$JOB")
     OUT="${OUT:-$PROJ_DIR/results/bayes_opt_$(basename "${CSV%.*}")_${JOB}}"
-    echo "submitted cells $ARRAY as array job $JOB: $gpus x ${GPU_TYPE:-any GPU}, $cpus CPUs, ${mem}G"
+    echo "submitted cells $ARRAY as array job $JOB: $gpus x ${GPU_TYPE:-${GPU_CONSTRAINT:-any GPU}}, $cpus CPUs, ${mem}G"
 done
 echo "results -> $OUT"
 

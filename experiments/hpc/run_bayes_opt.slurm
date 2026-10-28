@@ -6,7 +6,8 @@
 #SBATCH --partition=gpu
 #SBATCH --nodes=1              # the pool is one process tree: GPUs on a second node sit idle
 #SBATCH --ntasks=1
-#SBATCH --gpus=4                # any type; e.g. --gpus=a5000:4 to pin one
+#SBATCH --gpus=4
+#SBATCH --constraint=gpu:a5000|gpu:rtx_5000_ada   # not the L40S: planners fail to get a CUDA context there
 #SBATCH --cpus-per-task=24
 #SBATCH --mem=64G
 #SBATCH --time=48:00:00
