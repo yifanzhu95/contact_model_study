@@ -70,7 +70,7 @@ CONTACT_MODELS: dict[str, dict] = {
     "M3": {
         "simulator": "comfree",
         "description": "complementarity-free contact (Jin 2024)",
-        "params": {**_OLD_SOLVER, "stiffness": 0.2, "damping": 0.001},
+        "params": {**_OLD_SOLVER, "stiffness": 0.75, "damping": 0.01},#"params": {**_OLD_SOLVER, "stiffness": 0.2, "damping": 0.001},
     },
     "M4": {
         "simulator": "xpbd",
@@ -83,7 +83,8 @@ CONTACT_MODELS: dict[str, dict] = {
 # M5's solver settings are KaminoConfig's defaults (PADMM with rho0=0.1 and a
 # full warm start, dense dynamics, a 128-contact buffer per world; tuned against
 # objects sticking in a grasp); nothing physical is set here: Kamino reads it
-# from the MJCF.
+# from the MJCF, and combines two geoms' friction by MuJoCo's max rule
+# (KaminoConfig.friction_mix_mode), as M1-M4 do.
 CONTACT_MODELS["M5"] = {
     "simulator": "kamino",
     "description": "Kamino full-NCP PADMM (Newton SolverKamino)",

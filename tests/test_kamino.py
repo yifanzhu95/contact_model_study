@@ -23,6 +23,7 @@ def test_config_validation():
     assert c.padmm_rho0 == 0.1 and c.padmm_warmstart_scale == 1.0
     assert c.contact_stabilization == 0.05 and c.joint_stabilization == 0.1
     assert c.dynamics_solver == "padmm" and c.contact_gap == 0.0
+    assert c.friction_mix_mode == "max"                     # MuJoCo's rule, as in M1-M4
     KaminoConfig(max_contacts_per_world=None)
     KaminoConfig(dynamics_storage="sparse", padmm_penalty_update="balanced")
     for bad in (dict(dynamics_storage="banded"), dict(sparse_linear_solver="LU"), dict(padmm_tolerance=0.0),
@@ -32,7 +33,8 @@ def test_config_validation():
                 dict(dvi_sweeps=1.5), dict(dvi_tolerance=-1.0), dict(contact_stabilization=-0.1),
                 dict(joint_stabilization=2.0), dict(limit_stabilization=float("nan")),
                 dict(contact_penetration_margin=-1e-6),
-                dict(contact_gap=-0.1), dict(max_contacts_per_world=0), dict(max_contacts_per_world=1.5)):
+                dict(contact_gap=-0.1), dict(max_contacts_per_world=0), dict(max_contacts_per_world=1.5),
+                dict(friction_mix_mode="harmonic")):
         with pytest.raises(ValueError):
             KaminoConfig(**bad)
 
@@ -197,6 +199,24 @@ def test_meshes_collide_as_convex_hulls_by_default():
         sim.Step(500)                                       # 0.25 s: the duck settles into the palm
         peaks[convex] = int(sim.Diagnostics()["contacts"].max())
     assert 0 < peaks[True] < peaks[False]
+
+
+@pytest.mark.gpu
+@needs_newton
+@pytest.mark.parametrize("mode, mix", [("max", np.maximum), ("average", lambda a, b: 0.5 * (a + b))])
+def test_contact_friction_mixes_like_mujoco(cube_initial, mode, mix):
+    """Each contact's mu is the mode's mix of its two shapes': the cube (0.5) rests on 0.5 tips and 1.0 links."""
+    from ContactModelStudy.Simulators.Kamino import Kamino
+    q0, v0, u0 = cube_initial
+    sim = Kamino(EVAL_CUBE, KaminoConfig(timestep=0.0005, friction_mix_mode=mode), N=1)
+    sim.SetState(q0, v0)
+    sim.SetControl(u0)
+    sim.Step(200)
+    c = sim.solver._contacts_kamino
+    n = int(c.model_active_contacts.numpy()[0])
+    shape_mu = sim.model.shape_material_mu.numpy()[c.gid_AB.numpy()[:n]]   # (n, 2)
+    assert n > 0 and (shape_mu[:, 0] != shape_mu[:, 1]).any()           # some contact mixes two values
+    np.testing.assert_allclose(c.material.numpy()[:n, 0], mix(shape_mu[:, 0], shape_mu[:, 1]), rtol=1e-6)
 
 
 @pytest.mark.gpu

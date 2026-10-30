@@ -68,11 +68,19 @@ _LINEAR_SOLVERS = ("auto", "CRF", "CR")
 _PENALTY_UPDATES = ("fixed", "balanced")
 _DYNAMICS_SOLVERS = ("padmm", "dvi")
 _INTEGRATORS = ("euler", "moreau")
+_FRICTION_MIXES = ("max", "average", "min", "multiply")
 
 
 @dataclass
 class KaminoConfig(VectorizedSimulatorConfig):
     """Kamino's solver settings; everything physical comes from the MJCF.
+
+    The one physical exception is how a contact's friction is made from its
+    two geoms' (``friction_mix_mode``): MuJoCo, and so M1-M4, takes the larger,
+    where Newton averages. Contacts come from Newton's ``CollisionPipeline``
+    rather than Kamino's own detector, because the detector always averages
+    (its material-pair table, the only way around that, is read with the two
+    material ids unsorted in Newton 1.6).
 
     The defaults are tuned against objects sticking in a grasp (see the README,
     "Why M5 objects stuck"): fixed penalty ``rho0=0.1``, full warm start,
@@ -151,6 +159,12 @@ class KaminoConfig(VectorizedSimulatorConfig):
         convex_meshes: Collide mesh geoms as their convex hulls, as MuJoCo
             does (and so M1-M4). Off keeps Newton's triangle-mesh treatment,
             which generates several times more contact points per mesh pair.
+        friction_mix_mode: How a contact's friction coefficient is made from
+            its two geoms': ``"max"`` (MuJoCo's rule, so M5 matches M1-M4; the
+            default), ``"average"`` (Newton's default, and what M5 used before
+            this setting existed, with Kamino's own detector), ``"min"`` or
+            ``"multiply"``. MuJoCo's explicit ``<pair>`` and geom ``priority``
+            cannot be reproduced; a scene using them warns.
     """
 
     dynamics_storage: str = "dense"
@@ -174,9 +188,13 @@ class KaminoConfig(VectorizedSimulatorConfig):
     contact_gap: float = 0.0
     collision_detection: bool = True
     convex_meshes: bool = True
+    friction_mix_mode: str = "max"
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        if self.friction_mix_mode not in _FRICTION_MIXES:
+            raise ValueError(f"friction_mix_mode must be one of {_FRICTION_MIXES}, "
+                             f"got {self.friction_mix_mode!r}")
         if self.dynamics_storage not in _STORAGES:
             raise ValueError(f"dynamics_storage must be one of {_STORAGES}, got {self.dynamics_storage!r}")
         if self.dynamics_solver not in _DYNAMICS_SOLVERS:
@@ -283,6 +301,11 @@ class Kamino(VectorizedSimulator):
         self._newton = newton
         self.mjm = mujoco.MjModel.from_xml_path(str(self.model_path))
         self.device = wp.get_device(cfg.device)
+        colliding = (self.mjm.geom_contype | self.mjm.geom_conaffinity) != 0
+        if self.mjm.npair or len(np.unique(self.mjm.geom_priority[colliding])) > 1:
+            warnings.warn("this scene sets contact friction with <pair> or geom priority, which Kamino cannot "
+                          f"reproduce; its contacts use the {cfg.friction_mix_mode!r} of the two geoms' friction",
+                          RuntimeWarning, stacklevel=2)
 
         with wp.ScopedDevice(self.device):
             template, self._recorded_sites = self._templateBuilder(newton)
@@ -293,6 +316,17 @@ class Kamino(VectorizedSimulator):
             self.model = builder.finalize()
             self.model.set_gravity(tuple(float(g) for g in cfg.gravity))
             self._buildMaps(template)
+            # Contacts from Newton's pipeline, so friction mixes by friction_mix_mode
+            # (see KaminoConfig). The solver sizes its per-world buffer from
+            # rigid_contact_max, so it is set before the solver is built.
+            self._collision, self._contacts = None, None
+            if cfg.collision_detection:
+                if cfg.max_contacts_per_world is not None:
+                    self.model.rigid_contact_max = self.N * int(cfg.max_contacts_per_world)
+                # deterministic: contacts sorted after the narrow phase, so a step does
+                # not depend on GPU thread order (graph replay then matches eager).
+                self._collision = newton.CollisionPipeline(self.model, broad_phase="explicit", deterministic=True)
+                self._contacts = self._collision.contacts()
             self.linear_solver = self._makeSolver(
                 "CRF" if cfg.sparse_linear_solver == "auto" else cfg.sparse_linear_solver)
             self.state_0, self.state_1 = self.model.state(), self.model.state()
@@ -450,9 +484,8 @@ class Kamino(VectorizedSimulator):
             self.model, dynamics_solver=cfg.dynamics_solver, sparse_jacobian=sparse or dvi,
             sparse_dynamics=sparse, integrator=cfg.integrator)
         sc.use_fk_solver = True
-        sc.use_collision_detector = cfg.collision_detection
-        sc.collision_detector.default_gap = cfg.contact_gap
-        sc.collision_detector.max_contacts_per_world = cfg.max_contacts_per_world
+        sc.use_collision_detector = False           # contacts come from self._collision
+        sc.materials.friction_mix_mode = cfg.friction_mix_mode
         if sparse and not dvi:
             sc.dynamics.linear_solver_type = linear
         sc.constraints.alpha = cfg.joint_stabilization
@@ -553,7 +586,9 @@ class Kamino(VectorizedSimulator):
                           if self._target_per_dof else self.model.joint_coord_world_start],
                   outputs=[self.control.joint_target_q], device=self.device)
         self.state_0.clear_forces()
-        self.solver.step(self.state_0, self.state_1, self.control, None, self.config.timestep)
+        if self._collision is not None:
+            self._collision.collide(self.state_0, self._contacts)
+        self.solver.step(self.state_0, self.state_1, self.control, self._contacts, self.config.timestep)
         self.state_0.assign(self.state_1)
         contacts = self.solver._contacts_kamino
         if contacts is not None:

@@ -135,7 +135,7 @@ Every simulator is a `Simulator`: `SetState(q, q_dot)`, `GetState()`,
 | `VectorizedMujoco` | GPU | As `Mujoco`; pyramidal friction cones only |
 | `ComFree` | GPU | As `VectorizedMujoco`, plus `stiffness` and `damping` |
 | `XPBD` | GPU | As `VectorizedMujoco`, plus `xpbd_substeps`, `xpbd_iterations`, `relaxation`, `vmax_depenetration` |
-| `Kamino` | GPU, Newton | The MJCF, imported by Newton and mapped to MuJoCo's layout by name; `KaminoConfig` holds PADMM and linear-solver settings |
+| `Kamino` | GPU, Newton | The MJCF, imported by Newton and mapped to MuJoCo's layout by name; `KaminoConfig` holds PADMM and linear-solver settings, and how two geoms' friction combine (`friction_mix_mode`, MuJoCo's max by default) |
 
 **Pinocchio and Drake inherit physics from the MJCF.** Damping, armature,
 joint limits, friction and servo gains are all read from the scene. So are the
@@ -285,7 +285,7 @@ parameters, for example
 | M2 | `VectorizedMujoco` | MuJoCo's default soft contact (pyramidal cone), Newton, 25 iterations, 1e-6 |
 | M3 | `ComFree` | Complementarity-free contact (Jin 2024) |
 | M4 | `XPBD` | XPBD relaxation over MJWarp's constraint rows |
-| M5 | `Kamino` | Full NCP solved by PADMM (Newton's `SolverKamino`): ρ₀ = 0.1, full warm start, tolerance 5e-4, up to 100 iterations, contact and joint stabilization 0.05 and 0.1, dense dynamics and a 128-contact buffer per world (tuned against sticking; see [Why M5 objects stuck](#why-m5-objects-stuck)). The accuracy reference, and the slowest model |
+| M5 | `Kamino` | Full NCP solved by PADMM (Newton's `SolverKamino`): ρ₀ = 0.1, full warm start, tolerance 5e-4, up to 100 iterations, contact and joint stabilization 0.05 and 0.1, dense dynamics and a 128-contact buffer per world (tuned against sticking; see [Why M5 objects stuck](#why-m5-objects-stuck)). A contact's friction is the larger of its two geoms', as in MuJoCo and M1–M4 (Newton would average). The accuracy reference, and the slowest model |
 
 Any config field can be overridden for a sweep, for example `stiffness=0.5` on
 M3.
