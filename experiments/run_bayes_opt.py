@@ -641,7 +641,7 @@ def saveTrial(spec: CellSpec, pool_args, cell_dir: Path, trial: _Trial, per_mode
         if weights:
             task.setCostWeights(weights)
         desc = describeRollout(pool_args, task, m, planner_params)
-        eval_cls, eval_cfg = evalSimConfig(pool_args.eval_sim, eval_task.timestep)
+        eval_cls, eval_cfg = evalSimConfig(pool_args.eval_sim, eval_task.timestep, task=eval_task)
         rec = EpisodeRecorder(eval_task, SimStandIn(eval_cls, eval_cfg, nq=eval_task.nq, nv=eval_task.nv,
                                                     nu=eval_task.nu),
                               RemotePlanner(desc, task, None, None, -1, None),

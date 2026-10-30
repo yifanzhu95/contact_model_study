@@ -46,8 +46,8 @@ class ComFreeConfig(VectorizedMujocoConfig):
             the same way. Larger dissipates more contact velocity per step.
     """
 
-    stiffness: float = 0.2
-    damping: float = 0.001
+    stiffness: float = 0.75#These values are overwritten by ContactModelPresets
+    damping: float = 0.01
 
     def __post_init__(self) -> None:
         super().__post_init__()

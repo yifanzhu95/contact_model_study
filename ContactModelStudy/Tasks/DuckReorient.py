@@ -31,6 +31,12 @@ class DuckReorient(LeapReorient):
 
     OBJECT = "duck"
 
+    #: This object's tuning of the contact models, over their presets; see
+    #: ``TaskBase.CONTACT_PARAMS``. Empty: every model runs its preset.
+    CONTACT_PARAMS = {
+        # "M3": {"stiffness": 0.75, "damping": 0.01},
+    }
+
     #: The duck's centre of mass in its body frame: the ``<inertial pos>`` that
     #: every duck scene (eval, rollout and foam variants) declares.
     COM_OFFSET = np.array([-0.0088857, -0.0000003, -0.0152658])

@@ -99,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = p.add_argument_group("episode")
     g.add_argument("--n-episodes", type=int, default=1)
-    g.add_argument("--steps", type=int, default=1000,
+    g.add_argument("--steps", type=int, default=100,#1000,
                    help="control steps per episode")
     g.add_argument("--timestep", type=float, default=0.004,#0.0005,
                    help="eval (fine) physics timestep (s); the rollout model runs "
@@ -124,7 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "the initial grasp, before planning starts (filmed, not "
                         "counted in --steps)")
     g.add_argument("--seed", type=int, default=0)
-    g.add_argument("--goal-difficulty", type=int, default=8, choices=range(10),
+    g.add_argument("--goal-difficulty", type=int, default=4, choices=range(10),
                    metavar="{0..9}",
                    help="goal sampler; 8 (the old default) rolls to show 'O' or "
                         "'B'. See LeapReorient.GOAL_DIFFICULTIES")
@@ -173,7 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--delta", type=float, default=None,
                    help="symmetric per-step clip on the control delta; omitted "
                         "leaves it unclipped (the study's default)")
-    g.add_argument("--warm-start", default="none", choices=["none", "hold", "shift"],
+    g.add_argument("--warm-start", default="shift", choices=["none", "hold", "shift"],
                    help="where each plan starts its mean: none: afresh from the reset "
                         "mean; hold: the last plan's solution as is; shift: the last "
                         "solution moved one control step earlier")
@@ -529,9 +529,9 @@ def main(argv=None) -> int:
     task, eval_task = buildTasks(args)
     # Each simulator at its own task's timestep: the eval sim fine, the rollout
     # model coarse (they are equal when eval_steps_per_rollout_step == 1).
-    sim = makeEvalSim(args.eval_sim, eval_task.getModelPath(), eval_task.timestep)
+    sim = makeEvalSim(args.eval_sim, eval_task.getModelPath(), eval_task.timestep, task=eval_task)
     rollout_sim = GetContactModelSim(args.rollout_model, task.getModelPath(), N=args.n_samples,
-                                     **rolloutSimOverrides(args, task))
+                                     task=task, **rolloutSimOverrides(args, task))
     planner = MPPI(rollout_sim, task, buildPlannerConfig(args))
     recorder = EpisodeRecorder(eval_task, sim, planner, steps=StepSaving.fromArgs(args),
                                cli_args=vars(args), eval_sim=args.eval_sim)

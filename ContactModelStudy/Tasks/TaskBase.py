@@ -85,6 +85,16 @@ class TaskBase(abc.ABC):
     #: parameters sets its own ``TaskBaseConfig`` subclass here.
     CONFIG_CLASS = TaskBaseConfig
 
+    #: Simulator config fields this task wants under each contact model, on top
+    #: of the model's preset, keyed by canonical model name::
+    #:
+    #:     CONTACT_PARAMS = {"M3": {"stiffness": 0.5, "damping": 0.005}}
+    #:
+    #: Merged down the class hierarchy (see ``contactParams``), so a subclass
+    #: lists only what it changes. Applied wherever the model is built for this
+    #: task, rollout or eval; an explicit override at the call site still wins.
+    CONTACT_PARAMS: dict[str, dict] = {}
+
     def __init__(self, config: TaskBaseConfig | None = None):
         """Create a task from its config.
 
@@ -149,6 +159,29 @@ class TaskBase(abc.ABC):
             config: A ``RendererBaseConfig`` or subclass, modified in place.
         """
         return None
+
+    def contactParams(self, model: str) -> dict:
+        """The simulator config fields this task wants under contact model ``model``.
+
+        ``ContactModel.makeConfig`` lays these over the model's preset. The
+        default merges ``CONTACT_PARAMS`` from the most basic class down to
+        this one, so a value set on ``LeapReorient`` reaches every LEAP task
+        and a subclass may replace single fields of it. Override this instead
+        when the tuning depends on the instance (its role, say).
+
+        Args:
+            model: A contact model name; aliases (``"comfree"``) are accepted.
+
+        Returns:
+            A new dict of config fields, empty if the task has no opinion.
+        """
+        from ContactModelStudy.Utils.ContactModelPresets import getContactModel
+
+        name = getContactModel(model).name
+        params: dict = {}
+        for cls in reversed(type(self).__mro__):
+            params.update(cls.__dict__.get("CONTACT_PARAMS", {}).get(name, {}))
+        return params
 
     # -- initial conditions --------------------------------------------------
     @abc.abstractmethod

@@ -29,6 +29,12 @@ class BallReorient(LeapReorient):
 
     OBJECT = "ball"
 
+    #: This object's tuning of the contact models, over their presets; see
+    #: ``TaskBase.CONTACT_PARAMS``. Empty: every model runs its preset.
+    CONTACT_PARAMS = {
+        # "M3": {"stiffness": 0.75, "damping": 0.01},
+    }
+
     def objectParams(self) -> dict:
         """The ball's start, grasp and target, re-chosen for the ball.
 

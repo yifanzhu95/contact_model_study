@@ -29,6 +29,16 @@ def test_names():
         evalSimConfig("m2x", DT)
 
 
+def test_eval_config_carries_the_task_tuning():
+    from ContactModelStudy.Tasks.CubeReorient import CubeReorient
+
+    class Tuned(CubeReorient):
+        CONTACT_PARAMS = {"M3": {"stiffness": 0.3}}
+    name, cfg = evalSimConfig("M3", DT, task=Tuned())
+    assert (name, cfg.stiffness, cfg.timestep) == ("ComFree", 0.3, DT)
+    assert evalSimConfig("mujoco", DT, task=Tuned()) == evalSimConfig("mujoco", DT)
+
+
 @pytest.fixture(scope="module")
 def sims():
     """Each preset's eval sim, built on first use and shared across the tests."""

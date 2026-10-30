@@ -287,8 +287,27 @@ parameters, for example
 | M4 | `XPBD` | XPBD relaxation over MJWarp's constraint rows |
 | M5 | `Kamino` | Full NCP solved by PADMM (Newton's `SolverKamino`): ρ₀ = 0.1, full warm start, tolerance 5e-4, up to 100 iterations, contact and joint stabilization 0.05 and 0.1, dense dynamics and a 128-contact buffer per world (tuned against sticking; see [Why M5 objects stuck](#why-m5-objects-stuck)). A contact's friction is the larger of its two geoms', as in MuJoCo and M1–M4 (Newton would average). The accuracy reference, and the slowest model |
 
-Any config field can be overridden for a sweep, for example `stiffness=0.5` on
-M3.
+Each model is a `ContactModel` in `CONTACT_MODELS`; `getContactModel("M3")`
+returns it, and its `makeConfig` / `makeSim` build the config or simulator. A
+model's config is layered, each layer overriding the one before:
+
+1. the model's preset (the table above);
+2. the task's own tuning for that model, `task.contactParams("M3")`, which by
+   default reads the task class's `CONTACT_PARAMS`, merged down the class
+   hierarchy:
+
+   ```python
+   class CubeReorient(LeapReorient):
+       CONTACT_PARAMS = {"M3": {"stiffness": 0.5, "damping": 0.005}}
+   ```
+
+   This is how a model that works best fitted to each task (ComFree, notably)
+   gets different values per task. Pass the task to have it applied:
+   `GetContactModelSim("M3", xml, N=256, task=task, ...)`. The drivers do, for
+   the rollout model and for a GPU eval model (`makeEvalSim(..., task=eval_task)`),
+   so the recorded `sim_config` is what actually ran;
+3. explicit keywords, which always win, for example `stiffness=0.5` on M3 for a
+   sweep.
 
 ## Running
 
@@ -528,7 +547,8 @@ step. Finished episodes are kept, and the ones in progress are saved as
   1. Add its scenes in `scenes/leap/`, following `env_leap_eval_<obj>.xml` and
      `env_leap_rollout_<obj>_<hand_acc>_<obj_acc>.xml`.
   2. Subclass `LeapReorient`, set `OBJECT`, and return its numbers from
-     `objectParams()`.
+     `objectParams()`. If a contact model needs tuning for it, set
+     `CONTACT_PARAMS`.
   3. Register it in `TASKS` in `run_episodes.py`.
 - **A new task:**
   1. Subclass `TaskBase`, with its own config if it needs parameters (set
@@ -544,7 +564,9 @@ step. Finished episodes are kept, and the ones in progress are saved as
   1. Subclass `VectorizedMujoco` and override its engine hooks, `_putModel`,
      `_makeData`, `_stepPhysics` and `_forwardPhysics`, as ComFree and XPBD
      do.
-  2. Add a preset to `ContactModelPresets.py`.
+  2. Add a `ContactModel` to `CONTACT_MODELS` in `ContactModelPresets.py`
+     (subclass it and override `_resolve` if a field depends on others, as
+     M1's `StiffMujocoModel` does for its time constant).
 
 ## Things to know
 

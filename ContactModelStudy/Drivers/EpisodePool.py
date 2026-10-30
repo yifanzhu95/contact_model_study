@@ -261,7 +261,7 @@ class _PlannerUnit:
         from ContactModelStudy.Utils.ContactModelPresets import GetContactModelSim
         self.task, _ = drv.buildTasks(args)
         self.sim = GetContactModelSim(model, self.task.getModelPath(), N=args.n_samples,
-                                      **drv.rolloutSimOverrides(args, self.task))
+                                      task=self.task, **drv.rolloutSimOverrides(args, self.task))
         self.planner = MPPI(self.sim, self.task, drv.buildPlannerConfig(args))
         self.base_config = self.planner.config
         self.base_weights = dict(self.task.params["cost_weights"])
@@ -358,7 +358,7 @@ def _workerMain(args, worker_id: int, gpu: str | None, descs: dict, jobs, reques
         from ContactModelStudy.Utils.EvalSimulators import makeEvalSim
         task, eval_task = drv.buildTasks(args)
         base_weights = dict(task.params["cost_weights"])
-        sim = makeEvalSim(args.eval_sim, eval_task.getModelPath(), eval_task.timestep)
+        sim = makeEvalSim(args.eval_sim, eval_task.getModelPath(), eval_task.timestep, task=eval_task)
         planner = RemotePlanner(descs[args.rollout_model], task, requests, reply, worker_id, abort)
         recorder = EpisodeRecorder(eval_task, sim, planner, steps=StepSaving.fromArgs(args),
                                    cli_args=vars(args), eval_sim=args.eval_sim)
@@ -406,15 +406,14 @@ def describeRollout(args, task, rollout_model: str | None = None, planner_params
     of the command line's.
     """
     from ContactModelStudy.Drivers import run_episodes as drv
-    from ContactModelStudy.Utils.ContactModelPresets import CONTACT_MODELS, _presetConfig, _resolveName, _simulatorClasses
-    model = rollout_model or args.rollout_model
-    sim_cls, _ = _simulatorClasses(CONTACT_MODELS[_resolveName(model)]["simulator"])
+    from ContactModelStudy.Utils.ContactModelPresets import getContactModel
+    model = getContactModel(rollout_model or args.rollout_model)
     config = drv.buildPlannerConfig(args)
     if planner_params:
         config = replace(config, **planner_params)
     return {"planner_config": config, "planner_class": "MPPI",
-            "sim_class": sim_cls.__name__, "N": args.n_samples,
-            "sim_config": _presetConfig(model, **drv.rolloutSimOverrides(args, task))}
+            "sim_class": model.simulatorClass.__name__, "N": args.n_samples,
+            "sim_config": model.makeConfig(task, **drv.rolloutSimOverrides(args, task))}
 
 
 @contextlib.contextmanager
@@ -677,7 +676,7 @@ def runPool(args, n_workers: int, gpus: list[str | None], planners_per_gpu: int 
           f"on GPU(s) {', '.join(str(g) for g in gpus)}")
 
     # The collected results: every episode a worker finishes lands here.
-    eval_cls, eval_cfg = evalSimConfig(args.eval_sim, eval_task.timestep)
+    eval_cls, eval_cfg = evalSimConfig(args.eval_sim, eval_task.timestep, task=eval_task)
     sim_desc = SimStandIn(eval_cls, eval_cfg, nq=eval_task.nq, nv=eval_task.nv, nu=eval_task.nu)
     planner_desc = RemotePlanner(desc, task, None, None, -1, None)
     recorder = EpisodeRecorder(eval_task, sim_desc, planner_desc, steps=StepSaving.fromArgs(args),

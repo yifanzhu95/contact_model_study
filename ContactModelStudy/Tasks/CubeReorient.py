@@ -33,6 +33,12 @@ class CubeReorient(LeapReorient):
 
     OBJECT = "cube"
 
+    #: This object's tuning of the contact models, over their presets; see
+    #: ``TaskBase.CONTACT_PARAMS``. Empty: every model runs its preset.
+    CONTACT_PARAMS = {
+        # "M3": {"stiffness": 0.75, "damping": 0.01},
+    }
+
     def objectParams(self) -> dict:
         """The cube's entry, carried over from the old task's table.
 

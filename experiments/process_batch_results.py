@@ -795,13 +795,13 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
 
     # The three planners' settings, resolved without building anything on the GPU.
     task, eval_task = drv.buildTasks(args)
-    used_cfg = _presetConfig(args.rollout_model, **drv.rolloutSimOverrides(args, task))
+    used_cfg = _presetConfig(args.rollout_model, task, **drv.rolloutSimOverrides(args, task))
     oargs = optimalArgs(args, used_cfg.control_timestep, used_cfg.horizon_duration, overrides)
     otask, _ = drv.buildTasks(oargs)
-    opt_cfg = _presetConfig(oargs.rollout_model, **drv.rolloutSimOverrides(oargs, otask))
+    opt_cfg = _presetConfig(oargs.rollout_model, otask, **drv.rolloutSimOverrides(oargs, otask))
     zargs = optimalArgs(args, used_cfg.control_timestep, used_cfg.horizon_duration)
     ztask, _ = drv.buildTasks(zargs)
-    zero_cfg = _presetConfig(zargs.rollout_model, **drv.rolloutSimOverrides(zargs, ztask))
+    zero_cfg = _presetConfig(zargs.rollout_model, ztask, **drv.rolloutSimOverrides(zargs, ztask))
     rollout_steps = used_cfg.resolved_substeps
     eval_steps = int(round(rollout_steps * task.timestep / eval_task.timestep))
 
@@ -852,17 +852,17 @@ def _analyseEpisodes(batch_dir: Path, name: str, rep, args, oargs, overrides: di
     # The used planner, as run_episodes.main built it.
     task, eval_task = drv.buildTasks(args)
     used_sim = GetContactModelSim(args.rollout_model, task.getModelPath(), N=args.n_samples,
-                                  **drv.rolloutSimOverrides(args, task))
+                                  task=task, **drv.rolloutSimOverrides(args, task))
     used = (task, MPPI(used_sim, task, drv.buildPlannerConfig(args)))
     # The optimal planner: the same, with the eval model, and any settings of its own.
     otask, _ = drv.buildTasks(oargs)
     opt_sim = GetContactModelSim(oargs.rollout_model, otask.getModelPath(), N=oargs.n_samples,
-                                 **drv.rolloutSimOverrides(oargs, otask))
+                                 task=otask, **drv.rolloutSimOverrides(oargs, otask))
     opt = (otask, MPPI(opt_sim, otask, drv.buildPlannerConfig(oargs)))
     # The zero-gap planner: the used planner's own settings, on the eval model.
     ztask, _ = drv.buildTasks(zargs)
     zero_sim = GetContactModelSim(zargs.rollout_model, ztask.getModelPath(), N=zargs.n_samples,
-                                  **drv.rolloutSimOverrides(zargs, ztask))
+                                  task=ztask, **drv.rolloutSimOverrides(zargs, ztask))
     zero = (ztask, MPPI(zero_sim, ztask, drv.buildPlannerConfig(zargs)))
     _, _, u0 = eval_task.getInitialState()
     reset_mean = u0 if args.control_mode == "absolute" else None
@@ -874,8 +874,9 @@ def _analyseEpisodes(batch_dir: Path, name: str, rep, args, oargs, overrides: di
     rollout_steps = used_sim.config.resolved_substeps
     eval_steps = int(round(rollout_steps * task.timestep / eval_task.timestep))
     overrides_sim = drv.rolloutSimOverrides(args, task)
-    fs_rollout = GetContactModelSim(args.rollout_model, task.getModelPath(), N=n_worlds, **overrides_sim)
-    fs_eval = GetContactModelSim(args.eval_sim, eval_task.getModelPath(), N=n_worlds,
+    fs_rollout = GetContactModelSim(args.rollout_model, task.getModelPath(), N=n_worlds, task=task,
+                                    **overrides_sim)
+    fs_eval = GetContactModelSim(args.eval_sim, eval_task.getModelPath(), N=n_worlds, task=eval_task,
                                  timestep=eval_task.timestep,
                                  **{k: v for k, v in overrides_sim.items() if k in ("nconmax", "njmax")})
     sims = {"rollout": (fs_rollout, rollout_steps), "eval": (fs_eval, eval_steps)}

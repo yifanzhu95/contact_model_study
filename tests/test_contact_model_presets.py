@@ -6,7 +6,10 @@ import numpy as np
 import pytest
 
 from conftest import ROLLOUT_CUBE, matches_within_noise
-from ContactModelStudy.Utils.ContactModelPresets import GetContactModelSim, _presetConfig
+from ContactModelStudy.Drivers.run_episodes import TASKS
+from ContactModelStudy.Tasks.CubeReorient import CubeReorient
+from ContactModelStudy.Utils.ContactModelPresets import (CONTACT_MODELS, GetContactModelSim, _presetConfig,
+                                                         getContactModel)
 
 N, T, DT = 16, 25, 0.004
 
@@ -64,7 +67,7 @@ def test_preset_matches_old_study(name, cube_initial):
 @pytest.mark.gpu
 def test_aliases_and_case():
     assert type(GetContactModelSim("comfree", ROLLOUT_CUBE, N=2, horizon=1)).__name__ == "ComFree"
-    assert _presetConfig("m3").stiffness == 0.2
+    assert _presetConfig("m3").stiffness == CONTACT_MODELS["M3"].params["stiffness"]
 
 
 def test_m1_timeconst_follows_the_timestep():
@@ -92,3 +95,53 @@ def test_unknown_model_name():
 def test_override_that_is_not_a_field_of_that_model():
     with pytest.raises(TypeError, match="stiffness"):
         _presetConfig("M2", stiffness=1.0)
+
+
+# -- per-task tuning -------------------------------------------------------------
+class _TunedCube(CubeReorient):
+    CONTACT_PARAMS = {"M3": {"stiffness": 0.3, "damping": 0.004}, "M1": {"solref_timeconst": 0.05}}
+
+
+class _RetunedCube(_TunedCube):
+    CONTACT_PARAMS = {"M3": {"damping": 0.02}}
+
+
+def test_task_tuning_wins_over_the_preset():
+    c = _presetConfig("M3", _TunedCube())
+    assert (c.stiffness, c.damping) == (0.3, 0.004)
+
+
+def test_override_wins_over_the_task():
+    c = _presetConfig("M3", _TunedCube(), stiffness=0.9)
+    assert (c.stiffness, c.damping) == (0.9, 0.004)
+
+
+def test_a_model_the_task_does_not_list_runs_its_preset():
+    assert _presetConfig("M4", _TunedCube()) == _presetConfig("M4")
+
+
+def test_aliases_find_the_tuning():
+    assert _TunedCube().contactParams("comfree") == {"stiffness": 0.3, "damping": 0.004}
+    assert getContactModel("comfree") is CONTACT_MODELS["M3"]
+
+
+def test_tuning_merges_down_the_class_hierarchy():
+    assert _RetunedCube().contactParams("M3") == {"stiffness": 0.3, "damping": 0.02}
+
+
+def test_task_timeconst_stops_m1_deriving_it():
+    assert _presetConfig("M1", _TunedCube(), timestep=0.004).solref_timeconst == 0.05
+
+
+def test_a_bad_field_in_a_task_table_names_the_task():
+    class Bad(CubeReorient):
+        CONTACT_PARAMS = {"M2": {"stiffness": 1.0}}
+    with pytest.raises(TypeError, match="Bad.contactParams"):
+        _presetConfig("M2", Bad())
+
+
+@pytest.mark.parametrize("task_name", sorted(TASKS))
+def test_every_task_table_builds(task_name):
+    task = TASKS[task_name]()
+    for model in CONTACT_MODELS:
+        _presetConfig(model, task)

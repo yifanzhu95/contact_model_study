@@ -10,7 +10,9 @@ Every choice runs the eval MJCF at the timestep given. Two kinds:
   wrapped in ``SingleWorld`` so it reads like a CPU simulator. Planning with one
   model and judging in another gives the rollout x eval matrix. The preset is
   resolved at the *eval* timestep, so M1's time constant, ``2 * dt``, is twice
-  the eval step here. M5 (Kamino) needs the ``contact_kamino`` env.
+  the eval step here, and with the eval task's own tuning for the model
+  (``TaskBase.CONTACT_PARAMS``), as on the rollout side. M5 (Kamino) needs the
+  ``contact_kamino`` env.
 
 Pinocchio, Drake and the GPU backends are imported only when chosen, so a
 machine with only MuJoCo installed can still use the rest.
@@ -62,7 +64,7 @@ def _check(name: str) -> None:
         raise ValueError(f"unknown eval simulator {name!r}; choose from {evalSimNames()}")
 
 
-def evalSimConfig(name: str, timestep: float):
+def evalSimConfig(name: str, timestep: float, task=None):
     """``(class name, config)`` of the named eval simulator, without building it.
 
     What ``makeEvalSim`` would build, for describing a run in a process that
@@ -70,14 +72,15 @@ def evalSimConfig(name: str, timestep: float):
     """
     _check(name)
     if isGpuEvalSim(name):
-        from ContactModelStudy.Utils.ContactModelPresets import CONTACT_MODELS, _presetConfig, _simulatorClasses
-        sim_cls, _ = _simulatorClasses(CONTACT_MODELS[name]["simulator"])
-        return sim_cls.__name__, _presetConfig(name, timestep=timestep, **EVAL_PRESET_OVERRIDES)
+        from ContactModelStudy.Utils.ContactModelPresets import getContactModel
+        model = getContactModel(name)
+        return model.simulatorClass.__name__, model.makeConfig(task, timestep=timestep,
+                                                               **EVAL_PRESET_OVERRIDES)
     sim_cls, cfg_cls = EVAL_SIMS[name]()
     return sim_cls.__name__, cfg_cls(timestep=timestep)
 
 
-def makeEvalSim(name: str, xml: str, timestep: float) -> Simulator:
+def makeEvalSim(name: str, xml: str, timestep: float, task=None) -> Simulator:
     """Build the named eval simulator on ``xml``.
 
     Args:
@@ -85,6 +88,8 @@ def makeEvalSim(name: str, xml: str, timestep: float) -> Simulator:
             GPU contact model (``"M1"``-``"M5"``).
         xml: Path to the eval MJCF.
         timestep: Physics timestep in seconds.
+        task: The eval task. A GPU contact model gets its tuning for that
+            model (``TaskBase.contactParams``); a CPU simulator ignores it.
 
     Returns:
         A ``Simulator``. A GPU model comes wrapped in ``SingleWorld``.
@@ -96,6 +101,7 @@ def makeEvalSim(name: str, xml: str, timestep: float) -> Simulator:
     if isGpuEvalSim(name):
         from ContactModelStudy.Simulators.SingleWorld import SingleWorld
         from ContactModelStudy.Utils.ContactModelPresets import GetContactModelSim
-        return SingleWorld(GetContactModelSim(name, xml, N=1, timestep=timestep, **EVAL_PRESET_OVERRIDES))
+        return SingleWorld(GetContactModelSim(name, xml, N=1, task=task, timestep=timestep,
+                                              **EVAL_PRESET_OVERRIDES))
     sim_cls, cfg_cls = EVAL_SIMS[name]()
     return sim_cls(xml, cfg_cls(timestep=timestep))

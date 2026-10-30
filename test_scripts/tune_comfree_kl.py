@@ -70,7 +70,7 @@ from ContactModelStudy.Utils.PlannerKLDiv import MIN_VARIANCE, GaussianKL  # noq
 FAILED_KL = 1e9
 #: Seeds of the search: the M3 preset as it stands, the old study's values, and the
 #: ComFreeConfig defaults as edited.
-SEED_POINTS = [(CONTACT_MODELS["M3"]["params"]["stiffness"], CONTACT_MODELS["M3"]["params"]["damping"]),
+SEED_POINTS = [(CONTACT_MODELS["M3"].params["stiffness"], CONTACT_MODELS["M3"].params["damping"]),
                (0.2, 0.001), (100.0, 0.5)]
 
 
@@ -171,7 +171,7 @@ def shrunk(cov, sigma: float, shrinkage: float):
 
 
 def makePlanner(model: str, args, task, **params):
-    sim = GetContactModelSim(model, task.getModelPath(), N=args.n_samples,
+    sim = GetContactModelSim(model, task.getModelPath(), N=args.n_samples, task=task,
                              **drv.rolloutSimOverrides(args, task), **params)
     return MPPI(sim, task, drv.buildPlannerConfig(args))
 
@@ -184,7 +184,7 @@ def closePlanner(planner) -> None:
 def runReference(args, outdir: Path) -> dict:
     """Phase 1: one M5 episode; returns (and saves) the kept states."""
     task, eval_task = drv.buildTasks(args)
-    sim = makeEvalSim(args.eval_sim, eval_task.getModelPath(), eval_task.timestep)
+    sim = makeEvalSim(args.eval_sim, eval_task.getModelPath(), eval_task.timestep, task=eval_task)
     planner = RecordingPlanner(makePlanner("M5", args, task))
     recorder = EpisodeRecorder(eval_task, sim, planner, steps=StepSaving.fromArgs(args),
                                cli_args=vars(args), eval_sim=args.eval_sim)
@@ -301,7 +301,11 @@ def runSearch(args, ref: dict, outdir: Path) -> dict:
                      Real(*args.damping_range, prior="log-uniform", name="damping")],
                     base_estimator="GP", acq_func="gp_hedge",
                     n_initial_points=args.n_initial_points, random_state=args.bo_seed)
+    # The task's own tuning first, as M3 runs for it now, when it differs from the preset.
+    tuned = [planner.sim.config.stiffness, planner.sim.config.damping]
     seeds = [list(p) for p in SEED_POINTS]
+    if tuned not in seeds:
+        seeds.insert(0, tuned)
     print(f"\n{'trial':>5s} {'stiffness':>10s} {'damping':>10s} {'mean KL':>10s} {'median KL':>10s} "
           f"{'run KL':>10s} {'rank rho':>8s} {'failed':>6s}")
     for i in range(args.n_calls):
