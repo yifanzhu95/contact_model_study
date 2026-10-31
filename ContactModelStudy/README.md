@@ -298,7 +298,7 @@ model's config is layered, each layer overriding the one before:
 
    ```python
    class CubeReorient(LeapReorient):
-       CONTACT_PARAMS = {"M3": {"stiffness": 0.5, "damping": 0.005}}
+       CONTACT_PARAMS = {"M3": {"stiffness": 0.75, "damping": 3e-4}}
    ```
 
    This is how a model that works best fitted to each task (ComFree, notably)
@@ -308,6 +308,62 @@ model's config is layered, each layer overriding the one before:
    so the recorded `sim_config` is what actually ran;
 3. explicit keywords, which always win, for example `stiffness=0.5` on M3 for a
    sweep.
+
+### ComFree (M3) per-task tuning
+
+ComFree is the one model tuned per task. The tuning ranked three goals: first,
+M3 stays stable as an eval sim; second, it gives good SR as a rollout model with
+M5 evaluating; third, the three tasks share values. All runs used dt 4 ms,
+64 ms control and a 384 ms horizon. The values are set in each task's
+`CONTACT_PARAMS`, and the drivers apply them to M3 whether it rolls out or
+evaluates. The preset (stiffness 0.75, damping 0.01) still applies when no task
+is passed.
+
+| Task | Stiffness | Damping | Rollout SR, M5 eval (tuned / preset) |
+| --- | --- | --- | --- |
+| Cube | 0.75 | 3e-4 | 0.75 / 0.10 |
+| Duck | 0.3 | 3e-4 | 0.75 / 0.70 |
+| Ball | 0.75 | 2e-3 | 0.35 / 0.55 |
+
+SR was measured on 20 episodes (seed 2), a seed the searches never saw, and is
+good to about ±0.15. The candidates came from small Bayesian optimizations
+(13–14 trials of 10 episodes each). Before that, a screen ran batched M3 worlds
+under hold, shake and planner-like finger motion and compared them against M5.
+
+Takeaways:
+
+- **Damping is what breaks ComFree, not stiffness.**
+  - At damping ≥ 0.03 every task blows up.
+  - The preset's 0.01 is at the edge: it launches the cube out of a held
+    grasp, NaNs the duck, and makes the held ball vibrate at ~80 mm/s.
+  - Stability holds at 3e-4.
+- **The duck is the stability limit.** Under planner-like finger motion it goes
+  NaN in ~20% of worlds at stiffness 0.75, and in none at ≤ 0.3 (with damping
+  ≤ 1e-3).
+  - As the eval sim, the preset NaN'd in 8 of 10 closed-loop episodes and the
+    tuned values in none.
+  - Its rollout SR barely drops at 0.3: 0.80 at stiffness 0.75, 0.75 at 0.3.
+- **The ball and cube need stiffness ≈ 0.75 for SR.** Below about 0.6 the ball
+  drops in M5 (SR 0 at ≤ 0.35). Below about 0.35 the cube sinks and slips out.
+- **The ball and cube want different damping.**
+  - Above ~1e-3 the cube starts getting launched.
+  - The ball never blew up at any damping ≤ 5e-3, and its SR rose with damping:
+    0.15 at 3e-4, 0.35 at 2e-3, 0.40 at 5e-3.
+  - The ball's tuned SR is below the preset's. That SR was given up for
+    stability, the first priority.
+- **So no single set satisfies all three tasks.** The cube and duck share
+  damping; the cube and ball share stiffness. If the cube and ball must be
+  identical, (0.75, 3e-4) is stable for both but drops the ball's SR to 0.15.
+- **A held ball creeps in rotation** at ~10°/s whatever the parameters, because
+  ComFree's friction is velocity-proportional with no static part.
+- **M3 as an eval sim still fails an M1-planned policy** for every setting
+  tried, including the preset.
+  - The failures are drops, not blow-ups: M1's grasps lean on friction M3
+    doesn't provide.
+  - Tuning removes the instability but cannot fix this model mismatch.
+  - With M3 planning for itself, the tuned values beat the preset: SR 0.40
+    against 0.00 on the cube, 0.20 against 0.10 on the duck (with no NaNs), and
+    a tie at 0.20 on the ball.
 
 ## Running
 
