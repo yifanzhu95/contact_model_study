@@ -178,7 +178,7 @@ CONTACT_MODELS: dict[str, ContactModel] = {m.name: m for m in (
     # The old study used stiffness 0.2, damping 0.001. A task tuned to other
     # values sets them in its CONTACT_PARAMS rather than here.
     ContactModel("M3", "comfree", "complementarity-free contact (Jin 2024)",
-                 {**_OLD_SOLVER, "stiffness": 0.75, "damping": 0.01}),
+                 {**_OLD_SOLVER, "stiffness": 0.75, "damping": 3e-4}),#0.01}),
     ContactModel("M4", "xpbd", "XPBD relaxation on MJWarp's constraint rows",
                  {**_OLD_SOLVER, "xpbd_substeps": 1, "xpbd_iterations": 2,
                   "relaxation": 0.1, "vmax_depenetration": 1.0}),

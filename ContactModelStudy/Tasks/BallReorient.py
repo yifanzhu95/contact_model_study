@@ -30,9 +30,19 @@ class BallReorient(LeapReorient):
     OBJECT = "ball"
 
     #: This object's tuning of the contact models, over their presets; see
-    #: ``TaskBase.CONTACT_PARAMS``. Empty: every model runs its preset.
+    #: ``TaskBase.CONTACT_PARAMS``.
+    #:
+    #: M3 (ComFree), tuned 2026-10-31 for eval stability first, then SR as a
+    #: rollout model under M5 eval (dt 4 ms, 64 ms control, 384 ms horizon).
+    #: The ball never blew up under any damping <= 5e-3, and its SR rose with
+    #: damping (seed 2, 20 episodes: 0.15 at 3e-4, 0.35 at 2e-3, 0.40 at
+    #: 5e-3), so it runs more damping than the cube. Not the preset's 0.01
+    #: (SR 0.55): that makes the held ball vibrate at ~80 mm/s. Stiffness
+    #: below ~0.6 drops the ball in M5 (SR 0 at <= 0.35). ComFree's friction
+    #: has no static part, so the held ball creeps in rotation (~10 deg/s)
+    #: whatever these are.
     CONTACT_PARAMS = {
-        # "M3": {"stiffness": 0.75, "damping": 0.01},
+        "M3": {"stiffness": 0.75, "damping": 2e-3},
     }
 
     def objectParams(self) -> dict:

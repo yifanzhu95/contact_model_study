@@ -32,9 +32,18 @@ class DuckReorient(LeapReorient):
     OBJECT = "duck"
 
     #: This object's tuning of the contact models, over their presets; see
-    #: ``TaskBase.CONTACT_PARAMS``. Empty: every model runs its preset.
+    #: ``TaskBase.CONTACT_PARAMS``.
+    #:
+    #: M3 (ComFree), tuned 2026-10-31 for eval stability first, then SR as a
+    #: rollout model under M5 eval (dt 4 ms, 64 ms control, 384 ms horizon).
+    #: The duck is the object ComFree blows up on: under planner-like finger
+    #: motion it goes NaN in ~20% of worlds at stiffness 0.75 and ~90% at the
+    #: preset's damping 0.01, and none at stiffness <= 0.3 with damping <=
+    #: 1e-3. As the eval sim, the preset NaN'd in 8 of 10 closed-loop
+    #: episodes, these values in none. Softer than the cube's, at little SR
+    #: cost: 0.75 here against 0.80 at stiffness 0.75 (seed 2, 20 episodes).
     CONTACT_PARAMS = {
-        # "M3": {"stiffness": 0.75, "damping": 0.01},
+        "M3": {"stiffness": 0.3, "damping": 3e-4},
     }
 
     #: The duck's centre of mass in its body frame: the ``<inertial pos>`` that

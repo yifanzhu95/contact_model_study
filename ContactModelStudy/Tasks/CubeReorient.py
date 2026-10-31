@@ -34,9 +34,17 @@ class CubeReorient(LeapReorient):
     OBJECT = "cube"
 
     #: This object's tuning of the contact models, over their presets; see
-    #: ``TaskBase.CONTACT_PARAMS``. Empty: every model runs its preset.
+    #: ``TaskBase.CONTACT_PARAMS``.
+    #:
+    #: M3 (ComFree), tuned 2026-10-31 for eval stability first, then SR as a
+    #: rollout model under M5 eval (dt 4 ms, 64 ms control, 384 ms horizon).
+    #: The preset's damping (0.01) sits at ComFree's stability edge: the cube
+    #: is launched out of a held grasp, and as a rollout model it scored SR
+    #: 0.10 (seed 2, 20 episodes) against 0.75 here. Damping above ~1e-3
+    #: starts launching the cube under planner-like finger motion; stiffness
+    #: below ~0.35 lets it sink and slip out of the grasp.
     CONTACT_PARAMS = {
-        # "M3": {"stiffness": 0.75, "damping": 0.01},
+        "M3": {"stiffness": 0.75, "damping": 3e-4},
     }
 
     def objectParams(self) -> dict:

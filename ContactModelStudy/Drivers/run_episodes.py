@@ -99,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = p.add_argument_group("episode")
     g.add_argument("--n-episodes", type=int, default=1)
-    g.add_argument("--steps", type=int, default=100,#1000,
+    g.add_argument("--steps", type=int, default=1000,#1000,
                    help="control steps per episode")
     g.add_argument("--timestep", type=float, default=0.004,#0.0005,
                    help="eval (fine) physics timestep (s); the rollout model runs "
