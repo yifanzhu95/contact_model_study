@@ -1,8 +1,9 @@
 """The study's contact models, M1-M5, as ready-made simulators.
 
 Each model is a ``ContactModel`` in ``CONTACT_MODELS``, carrying the numbers
-that define it, copied from the old study's
-``contact_study/contact_models/config.py``. Build one with
+that define it. M1-M3 are copied from the old study's
+``contact_study/contact_models/config.py``; M4 was rebuilt as exact XPBD and
+retuned. Build one with
 ``GetContactModelSim``, passing the task so its own tuning for the model
 (``TaskBase.CONTACT_PARAMS``) is applied::
 
@@ -22,7 +23,9 @@ M1        ``VectorizedMujoco`` (MJWarp)  Stiff limit of MuJoCo's soft contact:
 M2        ``VectorizedMujoco`` (MJWarp)  MuJoCo's default soft contact (the
                                          scene's own solref/solimp).
 M3        ``ComFree``                    Complementarity-free contact (Jin 2024).
-M4        ``XPBD``                       XPBD relaxation on MJWarp's rows.
+M4        ``XPBD``                       Exact XPBD on MJWarp's rows: rigid
+                                         contact, 2 Jacobi sweeps averaged per
+                                         body, relaxation 2.5.
 M5        ``Kamino`` (Newton)            Full NCP, solved by PADMM (Newton's
                                          SolverKamino); the reference model.
                                          Needs Newton 1.6 (the contact_kamino
@@ -179,9 +182,12 @@ CONTACT_MODELS: dict[str, ContactModel] = {m.name: m for m in (
     # values sets them in its CONTACT_PARAMS rather than here.
     ContactModel("M3", "comfree", "complementarity-free contact (Jin 2024)",
                  {**_OLD_SOLVER, "stiffness": 0.75, "damping": 3e-4}),#0.01}),
-    ContactModel("M4", "xpbd", "XPBD relaxation on MJWarp's constraint rows",
+    # Tuned against M5 on all three tasks (README, "XPBD (M4) tuning"), at no
+    # more than 2 sweeps: with per-body averaging, sweeps converge faster with
+    # relaxation up to 3 and go NaN from 4; compliance above 1e-4 lets objects slip.
+    ContactModel("M4", "xpbd", "exact XPBD on MJWarp's constraint rows",
                  {**_OLD_SOLVER, "xpbd_substeps": 1, "xpbd_iterations": 2,
-                  "relaxation": 0.1, "vmax_depenetration": 1.0}),
+                  "relaxation": 2.5, "contact_compliance": 0.0, "joint_compliance": 0.0}),
     # M5's solver settings are KaminoConfig's defaults (PADMM with rho0=0.1 and a
     # full warm start, dense dynamics, a 128-contact buffer per world; tuned
     # against objects sticking in a grasp); nothing physical is set here: Kamino

@@ -134,7 +134,7 @@ Every simulator is a `Simulator`: `SetState(q, q_dot)`, `GetState()`,
 | `Drake` | CPU, SAP contact | The MJCF, parsed by Drake and corrected from `MjcfModelInfo`; `DrakeConfig` holds contact-solver settings |
 | `VectorizedMujoco` | GPU | As `Mujoco`; pyramidal friction cones only |
 | `ComFree` | GPU | As `VectorizedMujoco`, plus `stiffness` and `damping` |
-| `XPBD` | GPU | As `VectorizedMujoco`, plus `xpbd_substeps`, `xpbd_iterations`, `relaxation`, `vmax_depenetration` |
+| `XPBD` | GPU | As `VectorizedMujoco`, plus `xpbd_substeps`, `xpbd_iterations`, `relaxation`, `contact_compliance`, `joint_compliance`; dense models, Euler or implicitfast only |
 | `Kamino` | GPU, Newton | The MJCF, imported by Newton and mapped to MuJoCo's layout by name; `KaminoConfig` holds PADMM and linear-solver settings, and how two geoms' friction combine (`friction_mix_mode`, MuJoCo's max by default) |
 
 **Pinocchio and Drake inherit physics from the MJCF.** Damping, armature,
@@ -162,8 +162,6 @@ one model and judging in another gives a rollout × eval matrix.
   4); more GPUs do.
 - **M1 isn't bit-reproducible on MJWarp.** Its stiff contact under 200 solver
   iterations ends ~1e-3 apart between two identical runs.
-- **M4 lets the duck sag** in the grasp (0.064 m vs 0.090 m on CPU MuJoCo
-  after 2 s). That is the XPBD model's physics.
 
 ### Configs
 
@@ -276,7 +274,7 @@ the simulator it's given.
 ## Contact models (rollout)
 
 `Utils/ContactModelPresets.py` builds each model with the old study's exact
-parameters, for example
+parameters (M1-M3; M4 was rebuilt as exact XPBD), for example
 `GetContactModelSim("M3", xml, N=256, timestep=..., substeps=4, horizon=8)`:
 
 | | Simulator | What defines it |
@@ -284,7 +282,7 @@ parameters, for example
 | M1 | `VectorizedMujoco` | Stiff limit of MuJoCo's soft contact: impedance about 1, solref time constant 2·dt, Newton to 200 iterations and 1e-10 |
 | M2 | `VectorizedMujoco` | MuJoCo's default soft contact (pyramidal cone), Newton, 25 iterations, 1e-6 |
 | M3 | `ComFree` | Complementarity-free contact (Jin 2024) |
-| M4 | `XPBD` | XPBD relaxation over MJWarp's constraint rows |
+| M4 | `XPBD` | Exact XPBD over MJWarp's constraint rows: rigid contact (compliance 0), 2 Jacobi sweeps averaged per body at relaxation 2.5, one substep; see [XPBD (M4) tuning](#xpbd-m4-tuning) |
 | M5 | `Kamino` | Full NCP solved by PADMM (Newton's `SolverKamino`): ρ₀ = 0.1, full warm start, tolerance 5e-4, up to 100 iterations, contact and joint stabilization 0.05 and 0.1, dense dynamics and a 128-contact buffer per world (tuned against sticking; see [Why M5 objects stuck](#why-m5-objects-stuck)). A contact's friction is the larger of its two geoms', as in MuJoCo and M1–M4 (Newton would average). The accuracy reference, and the slowest model |
 
 Each model is a `ContactModel` in `CONTACT_MODELS`; `getContactModel("M3")`
@@ -364,6 +362,60 @@ Takeaways:
   - With M3 planning for itself, the tuned values beat the preset: SR 0.40
     against 0.00 on the cube, 0.20 against 0.10 on the duck (with no NaNs), and
     a tie at 0.20 on the ball.
+
+### XPBD (M4) tuning
+
+M4 is exact XPBD. It solves each row with the exact effective mass
+`J M̂⁻¹ Jᵀ`, where `M̂` is the matrix the integrator advances velocity with
+(`M + dt·diag(damping)` under Euler). Its compliance is XPBD's own
+(`contact_compliance`, `joint_compliance`); MuJoCo's solref/solimp
+regularizer is not used. The sweeps stay parallel (Jacobi). As in Newton's
+XPBD, each contact row's step is averaged over the contact rows on its bodies
+(`relaxation / max(n_a, n_b)`, bodies welded to the world not counted), and
+other rows take `relaxation`. There is no depenetration velocity cap. M4 is
+held to at most 2 sweeps, to stay close to M3's cost.
+
+The settings were picked from batched worlds (64 per run). Those worlds ran
+three motions (hold, sinusoidal shake, planner-like random finger walk) on all
+three tasks, in both the rollout and the eval scene. From M5's state at five
+points in each run, M4 predicted one planning horizon (384 ms), and the error
+is M4's object pose against M5's at the end.
+
+| Setting | Pose error vs M5 (mm / °) | Notes |
+| --- | --- | --- |
+| M2 (reference) | 2.1 / 3.4 | |
+| M3 (preset) | 9.1 / 14.7 | |
+| relaxation 1, 1 sweep | 10.4 / 15.1 | |
+| relaxation 3, 1 sweep | 6.7 / 9.6 | |
+| relaxation 1, 2 sweeps | 7.5 / 10.9 | |
+| relaxation 2, 2 sweeps | 6.0 / 8.2 | |
+| **relaxation 2.5, 2 sweeps** (preset) | **5.7 / 7.8** | max penetration 11 mm |
+| relaxation 3, 2 sweeps | 5.6 / 7.5 | max penetration 14 mm |
+| relaxation 4, 2 sweeps | 5.3 / 7.1 | NaNs in 6 worlds |
+| relaxation ≥ 6 | — | NaNs and launched objects |
+
+Takeaways:
+
+- **Relaxation 3 is the stability edge.** Averaging divides every contact
+  row's step by at least 4 (its own contact's edge rows), so the usable
+  relaxation is higher than without it. At 4 some worlds go NaN, and at 6
+  most do. 2.5 keeps a margin, which matters because the planner's sampled
+  controls are rougher than these motions.
+- **2 sweeps beat 1 at every relaxation**, by about 1 mm.
+- **Averaging costs little accuracy once tuned.** Weighting each row by how
+  strongly it couples to the others (`(A_ee + α̃)/(A_ee + α̃ + Σ|A_ek|)`)
+  reached 5.3 / 7.4 at 2 sweeps, against 5.7 / 7.8 here.
+- **Compliance should be 0 or tiny** (measured with the coupling weights at 8
+  and 16 sweeps, not re-run for averaging).
+  - At 1e-3 the cube slips (about 5 mm off M5).
+  - 1e-4 is a shade better on the cube and duck and worse on the ball.
+  - So the preset is rigid for all tasks.
+- **Cost:** one MPPI plan (256 worlds, 96 steps) takes 39 / 51 / 36 ms on the
+  cube / duck / ball, against 41 / 54 / 29 ms for M3.
+- **The old M4 let the duck sag** in the grasp (0.064 m after 2 s). Now it
+  holds it at 0.088 m, against 0.088 m on M5.
+- The `XPBD` simulator refuses sparse models (nv > 32), and supports only the
+  Euler and implicitfast integrators.
 
 ## Running
 

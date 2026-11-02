@@ -1,4 +1,8 @@
-"""M1-M4 presets: each reproduces the old study's model."""
+"""M1-M4 presets: M1-M3 each reproduce the old study's model.
+
+M4 does not: it was rebuilt as exact XPBD (its own compliance, the exact
+effective mass), so it is checked for its settings only.
+"""
 
 from __future__ import annotations
 
@@ -37,9 +41,8 @@ def _old(name, q0, U):
 
 @pytest.mark.gpu
 @pytest.mark.legacy
-@pytest.mark.parametrize("name", ["M1", "M2", "M3", "M4"])
+@pytest.mark.parametrize("name", ["M1", "M2", "M3"])
 def test_preset_matches_old_study(name, cube_initial):
-    from contact_study.contact_models.config import ContactModelConfig
     q0, _, u0 = cube_initial
     U = (u0 + np.random.default_rng(0).normal(0, 0.3, (T, N, 16))).astype(np.float32)
     m_old, qa = _old(name, q0, U)
@@ -53,10 +56,6 @@ def test_preset_matches_old_study(name, cube_initial):
     if name == "M3":
         assert np.allclose(sim.m.comfree_stiffness.numpy(), m_old.comfree_stiffness.numpy())
         assert np.allclose(sim.m.comfree_damping.numpy(), m_old.comfree_damping.numpy())
-    if name == "M4":
-        p, c = ContactModelConfig.M4().xpbd, sim.config
-        assert (c.xpbd_substeps, c.xpbd_iterations, c.relaxation, c.vmax_depenetration) == \
-            (p.substeps, p.iterations, p.relaxation, p.vmax_depenetration)
     sim.SetState(q0)
     for t in range(T):
         sim.SetControl(U[t])

@@ -2,6 +2,8 @@
 
 MJWarp is not bit-deterministic run to run (atomics), so each comparison with
 the old backend is judged against the old backend's own run-to-run spread.
+XPBD is not compared: it was rebuilt as exact XPBD and no longer reproduces the
+old backend, so its tests check the solve itself.
 """
 
 from __future__ import annotations
@@ -80,7 +82,6 @@ def _old_cfg(kind, **kw):
     ("mujoco", {}, {}),
     ("comfree", {}, {}),
     ("comfree", dict(stiffness=0.5, damping=0.01), dict(stiffness=0.5, damping=0.01)),
-    ("xpbd", {}, {}),
 ])
 def test_matches_old_backend_within_its_own_noise(kind, new_kw, old_kw, cube_initial, controls):
     q0 = cube_initial[0]
@@ -123,7 +124,8 @@ def test_types():
     ("XPBD", "XPBDConfig", dict(xpbd_substeps=0)),
     ("XPBD", "XPBDConfig", dict(xpbd_iterations=0)),
     ("XPBD", "XPBDConfig", dict(relaxation=0)),
-    ("XPBD", "XPBDConfig", dict(vmax_depenetration=0)),
+    ("XPBD", "XPBDConfig", dict(contact_compliance=-1e-4)),
+    ("XPBD", "XPBDConfig", dict(joint_compliance=-1e-4)),
 ])
 def test_config_validation(module, cls, kwargs):
     import importlib
@@ -175,3 +177,74 @@ def test_xpbd_substeps_stay_stable_holding_the_grasp(cube_initial):
         s.Step_GPU(250)
         q = s.GetState()[0]
         assert np.isfinite(q).all() and q[0, 18] > 0.05, f"xpbd_substeps={ns}"
+
+
+def test_xpbd_without_contact_is_mjwarps_euler_step(cube_initial):
+    from ContactModelStudy.Simulators.VectorizedMujoco import VectorizedMujoco, VectorizedMujocoConfig
+    from ContactModelStudy.Simulators.XPBD import XPBD, XPBDConfig
+    q0, _, u0 = cube_initial
+    q = q0.copy()
+    q[18] = 1.0                                   # cube far above the hand: no contacts
+    U = (u0 + np.random.default_rng(2).normal(0, 0.3, (T, N, u0.size))).astype(np.float32)
+    mj = VectorizedMujoco(ROLLOUT_CUBE, VectorizedMujocoConfig(timestep=DT), N=N)
+    xp = XPBD(ROLLOUT_CUBE, XPBDConfig(timestep=DT), N=N)
+    assert xp._int_kind == "euler_damp"           # the hand has joint damping
+    assert np.abs(_run_new(mj, q, U) - _run_new(xp, q, U)).max() < 1e-5
+
+
+def test_xpbd_effective_mass_is_exact(cube_initial):
+    """A_e = J (M + dt·D)⁻¹ Jᵀ, the inverse mass Euler's implicit damping moves with."""
+    from ContactModelStudy.Simulators.XPBD import XPBD, XPBDConfig
+    q0, _, u0 = cube_initial
+    s = XPBD(ROLLOUT_CUBE, XPBDConfig(timestep=DT), N=2)
+    s.SetState(q0)
+    s.SetControl(u0)
+    s.Step_GPU(100)                               # the cube has landed in the palm
+    nv, n = s.mjm.nv, int(s.d.nefc.numpy()[0])
+    assert n > 0
+    J = s.d.efc.J.numpy()[0, :n, :nv]
+    M = s.d.qM.numpy()[0, :nv, :nv]
+    M = np.tril(M) + np.tril(M, -1).T
+    A = np.einsum("ij,ji->i", J, np.linalg.solve(M + DT * np.diag(s.mjm.dof_damping), J.T))
+    assert np.allclose(s._efc_A.numpy()[0, :n], A, rtol=1e-4)
+
+
+def test_xpbd_contact_rows_are_averaged_per_body(cube_initial):
+    """ω_e = relaxation / max(n_a, n_b) on contact rows, counting contact rows on non-static bodies."""
+    from ContactModelStudy.Simulators.XPBD import _CT_CONTACT_PYRAMIDAL, XPBD, XPBDConfig
+    q0, _, u0 = cube_initial
+    r = 0.9
+    s = XPBD(ROLLOUT_CUBE, XPBDConfig(timestep=DT, relaxation=r), N=2)
+    s.SetState(q0)
+    s.SetControl(u0)
+    s.Step_GPU(100)                               # the cube has landed in the palm
+    n = int(s.d.nefc.numpy()[0])
+    typ, eid = s.d.efc.type.numpy()[0, :n], s.d.efc.id.numpy()[0, :n]
+    geom = s.d.contact.geom.numpy()
+    contact = typ == int(_CT_CONTACT_PYRAMIDAL)
+    assert contact.sum() >= 8                     # several contacts, so the averaging bites
+
+    def bodies(e):
+        bs = [int(s.mjm.geom_bodyid[g]) for g in geom[eid[e]]]
+        return [b for b in bs if s.mjm.body_weldid[b] != 0]
+    count = {}
+    for e in np.flatnonzero(contact):
+        for b in bodies(e):
+            count[b] = count.get(b, 0) + 1
+    want = np.full(n, r)
+    for e in np.flatnonzero(contact):
+        want[e] = r / max([1] + [count[b] for b in bodies(e)])
+    assert np.allclose(s._efc_omega.numpy()[0, :n], want)
+
+
+def test_xpbd_refuses_a_sparse_model():
+    import mujoco
+    from ContactModelStudy.Simulators.XPBD import XPBD, XPBDConfig
+
+    class SparseXPBD(XPBD):
+        def _putModel(self):
+            self.mjm.opt.jacobian = mujoco.mjtJacobian.mjJAC_SPARSE
+            return super()._putModel()
+
+    with pytest.raises(NotImplementedError, match="sparse"):
+        SparseXPBD(ROLLOUT_CUBE, XPBDConfig(timestep=DT), N=1)
