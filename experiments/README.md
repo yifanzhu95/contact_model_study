@@ -332,6 +332,7 @@ the reason.
 | Only the final tables | `python experiments/process_batch_results.py <batch dir> --summarize` |
 | One cell, split over 4 jobs | `python experiments/process_batch_results.py <batch dir> --cell 2 --shard 0 --n-shards 4` (and shards 1-3) |
 | Submit to the HPC | `experiments/hpc/submit_process_batch_results.sh <batch dir> [max concurrent]` |
+| Merge a partial rerun into a new batch dir first | `python experiments/combine_episode_batches.py <base dir> <rerun dir> ... --out <new dir>` (later dirs' cells replace earlier ones' with the same label) |
 
 **Options:**
 
