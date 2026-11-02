@@ -140,6 +140,8 @@ def test_metrics():
 def test_cell_and_episode_metrics_come_back_from_the_saved_steps(tmp_path):
     a, b = {"m": np.array([1.0, 2.0])}, {"m": np.array([3.0, np.nan, 6.0])}
     np.savez(tmp_path / "x.npz", m__aa=a["m"], step__aa=np.arange(2), m__bb=b["m"], step__bb=np.arange(3))
+    per_episode = pbr.perEpisodeMetrics(tmp_path / "x.npz")
+    assert set(per_episode) == {"aa", "bb"} and np.array_equal(per_episode["aa"]["m"], a["m"])
     cell, eps = pbr.metricsFromNpz(tmp_path / "x.npz")
     assert cell == pbr.stats("m", [1.0, 2.0, 3.0, np.nan, 6.0])           # pooled over every step
     assert eps == {"aa": pbr.episodeStats(a), "bb": pbr.episodeStats(b)}
@@ -176,6 +178,11 @@ def test_process_a_batch(batch):
     for rec in (a, o):
         assert np.isfinite(rec["metrics"]["kl_used_opt_mean"]) and np.isfinite(rec["metrics"]["fsim_qpos_err_mean"])
         assert np.isfinite(rec["metrics"]["regret_mean"])
+        # Where the time went: every plan took some, and the optimal planner iterated within its cap.
+        m = rec["metrics"]
+        assert all(m[f"plan_s_{p}_mean"] > 0 for p in pbr.PLANNERS) and m["regret_s_mean"] > 0
+        assert 1 <= m["n_iter_opt_mean"] <= rec["optimal_planner"].get("max_iterations", 20)
+        assert 0 <= m["converged_opt_mean"] <= 1
     assert a["optimal_planner"]["rollout_model"] == "M2" and a["optimal_planner"]["scene"] == "env_leap_eval_cube.xml"
     op, zp = a["optimal_planner"], a["zero_gap_planner"]
     assert (op["noise_sigma"], op["temperature"], op["convergence_ratio"]) == (0.38, 0.001, 2.0)
@@ -363,6 +370,11 @@ def test_episode_metrics_from_the_saved_steps():
         d[f"q_next_{key}"], d[f"q_dot_next_{key}"] = q, np.zeros((T, 22))
     m = pbr.episodeMetrics(d, shrinkage=0.5)
     assert np.isnan(m["regret"]).all()                                  # saved before the regret was
+    assert all(np.isnan(m[k]).all() for k in pbr.TIMING_KEYS)           # and before the timing was
+    d.update({k: np.array([1.0, 3.0]) for k in pbr.TIMING_KEYS})
+    m = pbr.episodeMetrics(d, shrinkage=0.5)
+    assert all(np.array_equal(m[k], [1.0, 3.0]) for k in pbr.TIMING_KEYS)
+    assert set(pbr.TIMING_KEYS) <= set(pbr._nanPlans(2, nu))
     d["regret_f_used"], d["regret_f_zero"] = np.array([5.0, 3.0]), np.array([4.0, 3.5])
     m = pbr.episodeMetrics(d, shrinkage=0.5)
     assert np.allclose(m["regret"], [1.0, -0.5])

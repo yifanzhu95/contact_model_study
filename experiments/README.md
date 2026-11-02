@@ -332,6 +332,7 @@ the reason.
 | Only the final tables | `python experiments/process_batch_results.py <batch dir> --summarize` |
 | One cell, split over 4 jobs | `python experiments/process_batch_results.py <batch dir> --cell 2 --shard 0 --n-shards 4` (and shards 1-3) |
 | Submit to the HPC | `experiments/hpc/submit_process_batch_results.sh <batch dir> [max concurrent]` |
+| Would fewer analysed steps per episode do? (no GPU) | `python experiments/check_steps_analysed.py <analysed batch dir> [--every 2 4]` |
 | Merge a partial rerun into a new batch dir first | `python experiments/combine_episode_batches.py <base dir> <rerun dir> ... --out <new dir>` (later dirs' cells replace earlier ones' with the same label) |
 
 **Options:**
@@ -370,15 +371,31 @@ are all saved but which no shard marked done, and lists the rest as `partial`
 from the recorded seed, and checked against the saved goal labels.
 
 **Cost.** The optimal planner runs at the eval timestep, so each recorded step
-costs a few plans: about 1–2 s at 0.5 ms eval and 64 ms control steps.
+costs a few plans: about 1–2 s at 0.5 ms eval and 64 ms control steps. Where
+that time goes is saved with each step and reported like a metric:
+`plan_s_<planner>_mean` (s per plan, for `used`, `opt` and `zero`),
+`n_iter_opt_mean` / `_p90` (the optimal planner's iterations),
+`converged_opt_mean` (how often it converged before its `--max-iterations`
+cap) and `regret_s_mean`. Each episode's log line prints the same.
+
+**How many steps to analyse.** `check_steps_analysed.py` takes an analysed
+batch and recomputes each cell's metrics from every k-th analysed step, on
+the CPU. If at k = 2 the means move by much less than their episode-level
+95% interval and that interval barely widens, halve `N_STEPS_ANALYSED`; its
+docstring explains the columns.
 
 **On the HPC.** `submit_process_batch_results.sh <batch dir> [max concurrent]`
-counts the cells, submits `process_batch_results.slurm` (one GPU per shard,
-30 h), and queues `summarize_batch_results.slurm` `afterany` to build
-`final_results.csv`.
+counts the cells, submits `process_batch_results.slurm` (30 h), and queues
+`summarize_batch_results.slurm` `afterany` to build `final_results.csv`.
 
-- **Shards:** each cell's episodes are split over `N_SHARDS` jobs (5 by
-  default), so the array has cells × `N_SHARDS` tasks.
+- **Shards:** each cell's episodes are split over `N_SHARDS` shards (5 by
+  default).
+- **Shards per GPU:** each array task runs `SHARDS_PER_GPU` shards at once on
+  its one GPU (2 by default; 1 is one GPU per shard), so the array has
+  cells × `N_SHARDS` / `SHARDS_PER_GPU` tasks, each with 4 CPUs and 16 GB per
+  shard. A plan of ~1000 worlds leaves the GPU mostly idle, so two processes
+  share it for little slowdown each. Each shard then logs to
+  `logs/process_batch_results_<job>_<task>_<j>.out`.
 - **The optimal planner** is set in the slurm file's `OPTIMAL_ARGS`. Setting
   `OPTIMAL_ARGS` when submitting replaces it.
 - **Extra flags** go in `ANALYSIS_ARGS`, e.g. `ANALYSIS_ARGS="--stride 4"`.

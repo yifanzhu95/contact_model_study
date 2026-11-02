@@ -91,7 +91,13 @@ Output, in the batch folder
   ``used`` / ``opt`` (NaN where a plan failed), and ``q_next_recorded`` /
   ``q_dot_next_recorded``; and ``noise_sigma_used`` / ``noise_sigma_opt``,
   the task's state ``indices`` and the timesteps; and ``analysis_key`` (the
-  settings it was analysed under), ``replay`` and ``wall_s``;
+  settings it was analysed under), ``replay`` and ``wall_s``; and where the
+  time went (``TIMING_KEYS``): each planner's plan time ``plan_s_<planner>``
+  and iterations ``n_iter_<planner>``, ``converged_opt`` (1 when the optimal
+  planner converged before its cap, 0 when it hit it), the regret rollouts'
+  ``regret_s``, and the episode's forward simulation ``fsim_s``. All but
+  ``fsim_s`` are reported like the metrics, so ``final_results.csv`` has
+  e.g. ``plan_s_opt_mean`` and ``converged_opt_mean`` (the convergence rate);
 * ``analysis/<cell>/_cell.json``: the cell's episodes and how its planners
   were built, from which its record is computed once every episode is saved;
 * ``analysis/<cell>.shard_<i>of<n>.status.json``: a shard's done or failed;
@@ -139,6 +145,7 @@ import subprocess
 import sys
 import time
 import traceback
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -409,14 +416,20 @@ def cellStats(episodes: list[dict[str, np.ndarray]]) -> dict:
     return out
 
 
-def metricsFromNpz(path: Path) -> tuple[dict, dict[str, dict]]:
-    """A cell's metrics, recomputed from its ``analysis.npz``: ``(cell metrics, {episode id: metrics})``."""
+def perEpisodeMetrics(path: Path) -> dict[str, dict[str, np.ndarray]]:
+    """A cell's ``analysis.npz`` read back: ``{episode id: {metric: per-analysed-step values}}``."""
     per_episode: dict[str, dict[str, np.ndarray]] = {}
     with np.load(path) as f:
         for name in f.files:
             key, ep_id = name.rsplit("__", 1)
             if key != "step":
                 per_episode.setdefault(ep_id, {})[key] = f[name]
+    return per_episode
+
+
+def metricsFromNpz(path: Path) -> tuple[dict, dict[str, dict]]:
+    """A cell's metrics, recomputed from its ``analysis.npz``: ``(cell metrics, {episode id: metrics})``."""
+    per_episode = perEpisodeMetrics(path)
     return cellStats(list(per_episode.values())), {i: episodeStats(m) for i, m in per_episode.items()}
 
 
@@ -427,14 +440,30 @@ PLAN_KEYS = tuple(f"{k}_{p}" for p in PLANNERS for k in ("mu", "cov"))
 #: The two free energies on the ground-truth model the regret is the difference of, with their
 #: standard errors: ``F_A(U_B)`` (the deployed plan) and ``F_A(U_A)`` (the zero-gap plan).
 REGRET_KEYS = ("regret_f_used", "regret_f_zero", "regret_f_used_se", "regret_f_zero_se")
+#: Where an analysed step's time went: each planner's plan (s) and iterations, whether the optimal
+#: planner converged before its cap (1/0), and the two regret rollouts (s). Saved and reported like a metric.
+TIMING_KEYS = tuple(f"{k}_{p}" for k in ("plan_s", "n_iter") for p in PLANNERS) + ("converged_opt", "regret_s")
 
 
 def _nanPlans(T: int, nu: int) -> dict[str, np.ndarray]:
     out = {}
     for p in PLANNERS:
         out[f"mu_{p}"], out[f"cov_{p}"] = np.full((T, nu), np.nan), np.full((T, nu, nu), np.nan)
-    out.update({k: np.full(T, np.nan) for k in REGRET_KEYS})
+    out.update({k: np.full(T, np.nan) for k in REGRET_KEYS + TIMING_KEYS})
     return out
+
+
+def _timedPlan(planner, q, q_dot, u) -> tuple[np.ndarray, np.ndarray, float]:
+    """``planGaussian`` and its wall time; accurate, as it ends reading the weights back from the GPU."""
+    t0 = time.perf_counter()
+    mu, cov = planGaussian(planner, q, q_dot, u)
+    return mu, cov, time.perf_counter() - t0
+
+
+def _converged(planner) -> float:
+    """The last plan's ``last_converged`` as 1/0, NaN when it did not iterate to convergence."""
+    c = getattr(planner, "last_converged", None)
+    return float("nan") if c is None else float(c)
 
 
 def evalNoiseSeed(start: dict) -> int:
@@ -519,9 +548,14 @@ class StepPlanners:
         for name, (_, planner), s in (("used", self.used, start), ("opt", self.opt, opt_start),
                                       ("zero", self.zero, start)):
             planner.LoadState({**planner.SaveState(), **s})
-            out[f"mu_{name}"], out[f"cov_{name}"] = planGaussian(planner, q, q_dot, start.get("u_prev"))
+            out[f"mu_{name}"], out[f"cov_{name}"], out[f"plan_s_{name}"] = _timedPlan(
+                planner, q, q_dot, start.get("u_prev"))
+            out[f"n_iter_{name}"] = planner.last_n_iterations
             means[name] = planner.last_mean
+        out["converged_opt"] = _converged(self.opt[1])
+        t0 = time.perf_counter()
         out.update(self._regretTerms(start, q, q_dot, means["used"], means["zero"]))
+        out["regret_s"] = time.perf_counter() - t0
         return out
 
     def _regretTerms(self, start: dict, q, q_dot, U_used, U_zero) -> dict[str, float]:
@@ -640,7 +674,10 @@ def planSequentially(ep, goals, used, opt, zero, args, u0, noise_seed: int) -> d
                 _resetPlanner(planner, reset_mean, noise_seed if t == 0 else None)
         u_prev = u0 if t == 0 else ep.u[t - 1]
         for name, (_, planner) in planners:
-            out[f"mu_{name}"][t], out[f"cov_{name}"][t] = planGaussian(planner, ep.q[t], ep.q_dot[t], u_prev)
+            out[f"mu_{name}"][t], out[f"cov_{name}"][t], out[f"plan_s_{name}"][t] = _timedPlan(
+                planner, ep.q[t], ep.q_dot[t], u_prev)
+            out[f"n_iter_{name}"][t] = planner.last_n_iterations
+        out["converged_opt"][t] = _converged(opt[1])
     return out
 
 
@@ -710,6 +747,8 @@ def episodeMetrics(d, shrinkage: float) -> dict[str, np.ndarray]:
     nan = np.full(len(mu_u), np.nan)
     out["regret"] = np.asarray(d.get("regret_f_used", nan), dtype=float) - \
         np.asarray(d.get("regret_f_zero", nan), dtype=float)
+    # Where the time went; NaN for steps saved before it was recorded.
+    out.update({k: np.asarray(d.get(k, nan), dtype=float) for k in TIMING_KEYS})
     with np.errstate(invalid="ignore"):
         for prefix, a, b in STATE_COMPARISONS:
             errs = stateErrors(d[f"q_next_{a}"], d[f"q_dot_next_{a}"], d[f"q_next_{b}"], d[f"q_dot_next_{b}"],
@@ -905,13 +944,16 @@ def _analyseEpisodes(batch_dir: Path, name: str, rep, args, oargs, overrides: di
             plans = planSequentially(ep, goals, used, opt, zero, args, u0, noise_seed)
             planners.forgetGoal()
         q, v, u = ep.q[rows], ep.q_dot[rows], ep.u[rows]
+        t_fsim = time.perf_counter()
+        next_states = nextStates(q, v, {"used": u, "opt": plans["mu_opt"]}, sims)
+        t_fsim = time.perf_counter() - t_fsim
         data = {
             "id": np.array(ep.id), "episode": ep_index, "n_steps": ep.n_steps,
             "row": rows, "step": ep.step[rows],
             "goal": np.array([goals[g][1] for g in goalIndexAt(goals, ep.step[rows])]),
             "q": q, "q_dot": v, "u_prev": ep.u_prev[rows], "u_used": u, **plans,
             "q_next_recorded": ep.q_next[rows], "q_dot_next_recorded": ep.q_dot_next[rows],
-            **nextStates(q, v, {"used": u, "opt": plans["mu_opt"]}, sims),
+            **next_states, "fsim_s": t_fsim,
             "noise_sigma_used": float(args.noise_sigma), "noise_sigma_opt": float(oargs.noise_sigma),
             "indices": np.asarray(eval_task.indices),
             "control_timestep": used_sim.config.control_timestep,
@@ -920,8 +962,14 @@ def _analyseEpisodes(batch_dir: Path, name: str, rep, args, oargs, overrides: di
         }
         path = steps_dir / f"{ep.id}.npz"
         _saveNpz(path, **data)
+        with np.errstate(invalid="ignore"), warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)       # all-NaN means: a failed step
+            mean = {k: float(np.nanmean(plans[k])) for k in TIMING_KEYS}
         print(f"  episode {ep_index}: {ep.n_steps} steps, {len(rows)} analysed ({mode}) -> "
-              f"{path.relative_to(batch_dir)}  ({time.time() - t0:.0f} s)", flush=True)
+              f"{path.relative_to(batch_dir)}  ({time.time() - t0:.0f} s; per step: plans used "
+              f"{mean['plan_s_used']:.2f} / opt {mean['plan_s_opt']:.2f} / zero {mean['plan_s_zero']:.2f} s, "
+              f"regret {mean['regret_s']:.2f} s, opt {mean['n_iter_opt']:.1f} iterations, converged "
+              f"{mean['converged_opt']:.0%}; forward sim {t_fsim:.1f} s)", flush=True)
     for sim in (used_sim, opt_sim, zero_sim, fs_rollout, fs_eval):
         sim.Close()
 
