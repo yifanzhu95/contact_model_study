@@ -1,8 +1,8 @@
 import mujoco
 import numpy as np
 import warp as wp
-import comfree_warp.mujoco_warp as mjwarp
-import comfree_warp as cfwarp
+import comfree_warp_v1.mujoco_warp as mjwarp
+import comfree_warp_v1 as cfwarp
 
 import time
 import os
@@ -75,12 +75,12 @@ if engine!=0:
         cfwarp.step(m, d)
 
         ##### Default stiffness and damping values for compilation
-        # m= comfree_warp.put_model(mjm)
-        # d= comfree_warp.put_data(mjm, mjd, nworld=nworld, nconmax=nconmax, njmax=njmax)
-        # comfree_warp.step(m, d)
-        # comfree_warp.step(m, d)
+        # m= comfree_warp_v1.put_model(mjm)
+        # d= comfree_warp_v1.put_data(mjm, mjd, nworld=nworld, nconmax=nconmax, njmax=njmax)
+        # comfree_warp_v1.step(m, d)
+        # comfree_warp_v1.step(m, d)
         # with wp.ScopedCapture() as capture:
-        #     comfree_warp.step(m, d)
+        #     comfree_warp_v1.step(m, d)
 
     graph = None
     if wp.get_device().is_cuda:

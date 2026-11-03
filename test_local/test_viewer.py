@@ -2,8 +2,8 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 import warp as wp
-import comfree_warp.mujoco_warp as mjwarp
-import comfree_warp as cfwarp
+import comfree_warp_v1.mujoco_warp as mjwarp
+import comfree_warp_v1 as cfwarp
 
 import time
 

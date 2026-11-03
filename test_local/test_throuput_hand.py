@@ -13,8 +13,8 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 import warp as wp
-import comfree_warp as cfwarp
-from comfree_warp import mujoco_warp as mjwarp
+import comfree_warp_v1 as cfwarp
+from comfree_warp_v1 import mujoco_warp as mjwarp
 
 wp.set_device("cuda:0")
 
@@ -29,7 +29,7 @@ def run_hand_test(
     contact_damping=0.001,
     qvel_noise_std=1e-3,
 ):
-    # engine: 1 = mjwarp, 2 = comfree_warp
+    # engine: 1 = mjwarp, 2 = comfree_warp_v1
     engine_name = "MJWARP" if engine == 1 else "COMFREE_WARP"
     print(f"Loading model: {model_path}")
     mjm = mujoco.MjSpec.from_file(model_path).compile()
@@ -117,8 +117,8 @@ if __name__ == "__main__":
     
     # nworlds = [256, 512, 1024, 2048, 4096]
     nworlds = [256]
-    engines = [1, 2]  # 1 = mjwarp, 2 = comfree_warp
-    engine_names = {1: "mjwarp", 2: "comfree_warp"}
+    engines = [1, 2]  # 1 = mjwarp, 2 = comfree_warp_v1
+    engine_names = {1: "mjwarp", 2: "comfree_warp_v1"}
     
     results = {}
     

@@ -139,8 +139,8 @@ def _import_warp_backends() -> tuple[object, object, object]:
 
     try:
         import warp as wp_mod
-        import comfree_warp as cfwarp_mod
-        from comfree_warp import mujoco_warp as mjwarp_mod
+        import comfree_warp_v1 as cfwarp_mod
+        from comfree_warp_v1 import mujoco_warp as mjwarp_mod
     except Exception as exc:  # pragma: no cover - depends on local runtime
         WARP_IMPORT_ERROR = exc
         raise RuntimeError(f"warp backend imports failed: {exc}") from exc
@@ -343,8 +343,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--nworld", type=int, default=1, help="Number of worlds for warp backends.")
     parser.add_argument("--nconmax", type=int, default=256, help="Contacts per world for warp backends.")
     parser.add_argument("--njmax", type=int, default=1024, help="Constraints per world for warp backends.")
-    parser.add_argument("--contact-stiffness", type=float, default=0.2, help="comfree_warp contact stiffness.")
-    parser.add_argument("--contact-damping", type=float, default=0.001, help="comfree_warp contact damping.")
+    parser.add_argument("--contact-stiffness", type=float, default=0.2, help="comfree_warp_v1 contact stiffness.")
+    parser.add_argument("--contact-damping", type=float, default=0.001, help="comfree_warp_v1 contact damping.")
     return parser.parse_args()
 
 

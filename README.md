@@ -96,7 +96,7 @@ This benchmark also supports multiple backends through `--engine` with `mujoco`,
 ### Python API
 
 ```python
-import comfree_warp as cfwarp
+import comfree_warp_v1 as cfwarp
 
 # Create your simulation environment
 # See documentation for detailed examples
@@ -109,8 +109,8 @@ For comprehensive examples and tutorials, visit the [documentation](https://iris
 This repository contains materials under multiple licenses:
 
 - Repository-wide licensing notice: `LICENSE`
-- `comfree_warp/comfree_core/`: noncommercial academic research license in `comfree_warp/comfree_core/LICENSE`
-- Vendored `comfree_warp/mujoco_warp/` upstream code: Apache License 2.0; see `LICENSES/Apache-2.0.txt`
+- `comfree_warp_v1/comfree_core/`: noncommercial academic research license in `comfree_warp_v1/comfree_core/LICENSE`
+- Vendored `comfree_warp_v1/mujoco_warp/` upstream code: Apache License 2.0; see `LICENSES/Apache-2.0.txt`
 
 
 ## Citation
