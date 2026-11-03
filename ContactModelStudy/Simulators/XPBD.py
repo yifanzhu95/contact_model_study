@@ -81,18 +81,17 @@ from ContactModelStudy.Simulators.VectorizedMujoco import (
 # that come from MJWarp's types. The whole module needs MJWarp, and
 # VectorizedMujoco already imports it.
 _mujoco_warp()
-from comfree_warp.mujoco_warp._src import collision_driver  # noqa: E402
-from comfree_warp.mujoco_warp._src import constraint as _mjw_constraint  # noqa: E402
-from comfree_warp.mujoco_warp._src import derivative  # noqa: E402
-from comfree_warp.mujoco_warp._src import sensor  # noqa: E402
-from comfree_warp.mujoco_warp._src import smooth  # noqa: E402
-from comfree_warp.mujoco_warp._src.forward import (  # noqa: E402
+from mujoco_warp._src import derivative  # noqa: E402
+from mujoco_warp._src import sensor  # noqa: E402
+from mujoco_warp._src import smooth  # noqa: E402
+from mujoco_warp._src.forward import (  # noqa: E402
     _advance,
     fwd_acceleration,
     fwd_actuation,
+    fwd_position,
     fwd_velocity,
 )
-from comfree_warp.mujoco_warp._src.types import (  # noqa: E402
+from mujoco_warp._src.types import (  # noqa: E402
     ConstraintType,
     DisableBit,
     EnableBit,
@@ -167,15 +166,55 @@ def _sum2(
 
 
 @wp.kernel
-def _add_damping_dense(
+def _add_damping_csr(
     opt_timestep: wp.array(dtype=float),
     dof_damping: wp.array2d(dtype=float),
-    qM_int: wp.array3d(dtype=float),  # in/out
+    M_rownnz: wp.array(dtype=int),
+    M_rowadr: wp.array(dtype=int),
+    M_int: wp.array2d(dtype=float),  # in/out, CSR like d.M
 ):
-    """qM_int += dt · diag(damping), Euler's implicit damping."""
+    """M_int += dt · diag(damping), Euler's implicit damping.
+
+    Each CSR row of M ends with its diagonal entry.
+    """
     w, i = wp.tid()
     dt = opt_timestep[w % opt_timestep.shape[0]]
-    qM_int[w, i, i] += dt * dof_damping[w % dof_damping.shape[0], i]
+    M_int[w, M_rowadr[i] + M_rownnz[i] - 1] += dt * dof_damping[w % dof_damping.shape[0], i]
+
+
+@wp.kernel
+def _dense_cholesky_csr(
+    nv: int,
+    M_rownnz: wp.array(dtype=int),
+    M_rowadr: wp.array(dtype=int),
+    M_colind: wp.array(dtype=int),
+    M_csr: wp.array2d(dtype=float),
+    L: wp.array3d(dtype=float),  # [out] lower triangle; the upper stays zero
+):
+    """Densify a CSR mass matrix and factor it in place as M = L Lᵀ.
+
+    MJWarp's own factor is packed per block, which a per-row kernel cannot
+    walk, so XPBD keeps this dense copy for ``_efc_inv_mass_dense``. The CSR
+    rows hold each dof's ancestor chain, which is the lower triangle.
+    """
+    w = wp.tid()
+    for i in range(nv):
+        for j in range(i + 1):
+            L[w, i, j] = 0.0
+        adr = M_rowadr[i]
+        for k in range(M_rownnz[i]):
+            L[w, i, M_colind[adr + k]] = M_csr[w, adr + k]
+    for j in range(nv):
+        s = L[w, j, j]
+        for k in range(j):
+            s -= L[w, j, k] * L[w, j, k]
+        d = wp.sqrt(s)
+        L[w, j, j] = d
+        for i in range(j + 1, nv):
+            t = L[w, i, j]
+            for k in range(j):
+                t -= L[w, i, k] * L[w, j, k]
+            L[w, i, j] = t / d
 
 
 @wp.func
@@ -441,16 +480,16 @@ class XPBD(VectorizedMujoco):
             N: Number of parallel worlds.
 
         Raises:
-            NotImplementedError: If MJWarp stores the model sparse (``nv > 32``
-                or ``jacobian="sparse"``), or its integrator is not Euler or
-                implicitfast.
+            NotImplementedError: If MJWarp stores the constraint Jacobian
+                sparse (``nv > 32`` or ``jacobian="sparse"``), or the
+                integrator is not Euler or implicitfast.
         """
         super().__init__(xml, sim_config if sim_config is not None else XPBDConfig(), N)
         m, d = self.m, self.d
         if m.is_sparse:
             raise NotImplementedError(
-                f"the XPBD backend reads efc.J and the mass factor as dense, but MJWarp "
-                f"stores this model sparse (nv={self.mjm.nv}, jacobian={self.mjm.opt.jacobian})"
+                f"the XPBD backend reads efc.J as dense, but MJWarp stores it sparse for "
+                f"this model (nv={self.mjm.nv}, jacobian={self.mjm.opt.jacobian})"
             )
         if m.opt.integrator not in (IntegratorType.EULER, IntegratorType.IMPLICITFAST):
             raise NotImplementedError(
@@ -480,8 +519,12 @@ class XPBD(VectorizedMujoco):
             int(m.opt.timestep.shape[0]), dtype=float, device=device
         )
 
-        # The integrator's velocity-update matrix M̂. It is M itself, and its
-        # factor d.qLD, unless the integrator adds velocity derivatives.
+        # Dense Cholesky factor of M̂, for the per-row J M̂⁻¹ Jᵀ.
+        self._L_dense = wp.zeros((self.N, nv, nv), dtype=float, device=device)
+
+        # The integrator's velocity-update matrix M̂, CSR like d.M. It is M
+        # itself, and its factor d.qLD, unless the integrator adds velocity
+        # derivatives.
         if m.opt.integrator == IntegratorType.EULER:
             self._int_kind = ("euler_damp" if self.mjm.dof_damping.any()
                               and not (m.opt.disableflags & (DisableBit.EULERDAMP | DisableBit.DAMPER))
@@ -492,10 +535,9 @@ class XPBD(VectorizedMujoco):
                               != (DisableBit.ACTUATION | DisableBit.SPRING | DisableBit.DAMPER)
                               else "mass")
         if self._int_kind == "mass":
-            self._qM_int = self._qLD_int = self._qLDiagInv_int = None
+            self._M_int = self._qLD_int = self._qLDiagInv_int = None
         else:
-            # Zeroed once: the dense factor only writes the per-tree blocks.
-            self._qM_int = wp.zeros(d.qM.shape, dtype=float, device=device)
+            self._M_int = wp.zeros(d.M.shape, dtype=float, device=device)
             self._qLD_int = wp.zeros(d.qLD.shape, dtype=float, device=device)
             self._qLDiagInv_int = wp.zeros(d.qLDiagInv.shape, dtype=float, device=device)
 
@@ -558,27 +600,15 @@ class XPBD(VectorizedMujoco):
 
     # -- pipeline ------------------------------------------------------------
     def _positionPhase(self) -> None:
-        """Kinematics through constraint rows, in ComFree's forward order.
+        """Kinematics, collision and constraint rows: MJWarp's position stage.
 
-        Collision has to come after ``factor_m`` and before ``make_constraint``,
-        which reads the contacts. It runs every substep. The old backend tried
-        detecting collisions once per step and reusing them across substeps
-        (Macklin §4.2), but that call returned zero contacts on this MJWarp
-        build.
+        Collision runs every substep. The old backend tried detecting
+        collisions once per step and reusing them across substeps (Macklin
+        §4.2), but that call returned zero contacts on the MJWarp build of the
+        time. M is factored later, by ``fwd_acceleration``, as in MJWarp's
+        own forward.
         """
-        m, d = self.m, self.d
-        smooth.kinematics(m, d)
-        smooth.com_pos(m, d)
-        smooth.camlight(m, d)
-        smooth.flex(m, d)
-        smooth.tendon(m, d)
-        smooth.crb(m, d)
-        smooth.tendon_armature(m, d)
-        smooth.factor_m(m, d)
-        if not (m.opt.disableflags & DisableBit.CONSTRAINT):
-            collision_driver.collision(m, d)
-        _mjw_constraint.make_constraint(m, d)
-        smooth.transmission(m, d)
+        fwd_position(self.m, self.d, factorize=False)
 
     def _actuationAndSolve(self) -> None:
         """Compute actuation and smooth acceleration, then run the XPBD solve."""
@@ -604,20 +634,30 @@ class XPBD(VectorizedMujoco):
         _advance(m, d, self._qacc_int)
 
     def _factorIntegrationMatrix(self) -> tuple:
-        """Factor M̂ for this substep and return ``(L, D⁻¹)`` for ``solve_LD``."""
+        """Factor M̂ for this substep and return ``(L, D⁻¹)`` for ``solve_LD``.
+
+        Also refreshes ``_L_dense``, the dense factor of the same M̂.
+        """
         m, d = self.m, self.d
         if self._int_kind == "mass":
-            return d.qLD, d.qLDiagInv
-        if self._int_kind == "euler_damp":
-            wp.copy(self._qM_int, d.qM)
-            wp.launch(_add_damping_dense, dim=(self.N, m.nv),
-                      inputs=[m.opt.timestep, m.dof_damping], outputs=[self._qM_int])
+            M, L, Dinv = d.M, d.qLD, d.qLDiagInv
         else:
-            derivative.deriv_smooth_vel(m, d, self._qM_int)
-        # factor_solve_i also solves; the solve here is the one _solve needs next.
-        smooth.factor_solve_i(m, d, self._qM_int, self._qLD_int, self._qLDiagInv_int,
-                              self._qacc_int, d.qfrc_smooth)
-        return self._qLD_int, self._qLDiagInv_int
+            if self._int_kind == "euler_damp":
+                wp.copy(self._M_int, d.M)
+                wp.launch(_add_damping_csr, dim=(self.N, m.nv),
+                          inputs=[m.opt.timestep, m.dof_damping, m.M_rownnz, m.M_rowadr],
+                          outputs=[self._M_int])
+            else:
+                # MJWarp's implicitfast also leaves free bodies' rows at M and
+                # solves them separately; this M̂ does not.
+                derivative.deriv_smooth_vel(m, d, self._M_int)
+            M, L, Dinv = self._M_int, self._qLD_int, self._qLDiagInv_int
+            # factor_solve_i also solves; the solve here is the one _solve needs next.
+            smooth.factor_solve_i(m, d, M, L, Dinv, self._qacc_int, d.qfrc_smooth)
+        wp.launch(_dense_cholesky_csr, dim=self.N,
+                  inputs=[m.nv, m.M_rownnz, m.M_rowadr, m.M_colind, M],
+                  outputs=[self._L_dense])
+        return L, Dinv
 
     def _solve(self) -> None:
         """The XPBD constraint solve, replacing MJWarp's solver.
@@ -649,7 +689,7 @@ class XPBD(VectorizedMujoco):
 
         if njmax_pad > 0:
             wp.launch(_efc_inv_mass_dense, dim=(nw, njmax_pad),
-                      inputs=[nv, d.efc.J, d.nefc, L, self._efc_z],
+                      inputs=[nv, d.efc.J, d.nefc, self._L_dense, self._efc_z],
                       outputs=[self._efc_A])
             self._body_rows.zero_()
             wp.launch(_count_contact_rows_per_body, dim=(nw, njmax_pad),
@@ -708,6 +748,7 @@ class XPBD(VectorizedMujoco):
         self._efc_omega = None
         self._body_rows = None
         self._timestep_orig = None
-        self._qM_int = None
+        self._L_dense = None
+        self._M_int = None
         self._qLD_int = None
         self._qLDiagInv_int = None

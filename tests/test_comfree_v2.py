@@ -1,8 +1,8 @@
 """M6, ComFree-Sim (comfree_warp 0.3).
 
 The config and preset tests run anywhere. The simulator tests need
-comfree_warp >= 0.3, which only the contact_comfree2 env has, and skip
-elsewhere.
+comfree_warp >= 0.3, which is private and installed by hand (README.md), and
+skip without it.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def _has_comfree_v2() -> bool:
     return tuple(int(p) for p in version.split(".")[:2]) >= (0, 3)
 
 
-needs_v2 = pytest.mark.skipif(not _has_comfree_v2(), reason="needs comfree_warp >= 0.3 (contact_comfree2 env)")
+needs_v2 = pytest.mark.skipif(not _has_comfree_v2(), reason="needs comfree_warp >= 0.3 (installed by hand, README.md)")
 
 
 @pytest.mark.parametrize("kwargs", [dict(alpha=0.0), dict(alpha=1.5), dict(gamma=0.5),

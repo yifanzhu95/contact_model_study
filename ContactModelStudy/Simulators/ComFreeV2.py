@@ -6,11 +6,9 @@ passes, each a Newton step of MuJoCo's soft-constraint problem at fixed row
 states (ComFree-C). A world stops early once its active rows settle, and its
 acceleration is then MuJoCo's exact solution. L = 0 is the closed form alone.
 
-comfree_warp 0.3 vendors MuJoCo Warp 3.14 and needs MuJoCo 3.14, while M3's
-comfree_warp 0.1 needs MuJoCo 3.6, and both install as ``comfree_warp``. So the
-two cannot share an env: M6 runs in ``contact_comfree2`` (see
-``ContactModelStudy/README.md``), where every MJWarp model (M1, M2, M4) runs
-on the 3.14 copy too, and M3 does not run at all.
+comfree_warp 0.3 vendors MuJoCo Warp 3.14 and needs MuJoCo 3.14, which the
+study's one env, ``contact_comfree2``, is built around. M3's comfree_warp 0.1
+installs there renamed, as ``comfree_warp_v1``, since this one took the name.
 
 Only pyramidal friction cones, as for MJWarp.
 """
@@ -127,12 +125,12 @@ def _comfree_warp():
         version = metadata.version("comfree_warp")
     except (ImportError, metadata.PackageNotFoundError) as exc:
         raise ImportError(
-            "ComFreeV2 (M6) needs comfree_warp >= 0.3 from asu-iris/comfree-warp-simbenchmark; "
-            "use the contact_comfree2 env (ContactModelStudy/README.md)."
+            "ComFreeV2 (M6) needs comfree_warp >= 0.3 from asu-iris/comfree-warp-simbenchmark "
+            "(README.md, Building contact_comfree2)."
         ) from exc
     if tuple(int(p) for p in version.split(".")[:2]) < _MIN_VERSION:
         raise ImportError(
-            f"ComFreeV2 (M6) needs comfree_warp >= 0.3, found {version} (M3's ComFree); "
-            f"use the contact_comfree2 env (ContactModelStudy/README.md)."
+            f"ComFreeV2 (M6) needs comfree_warp >= 0.3, found {version}, M3's ComFree "
+            f"under its old name; M3 now installs as comfree_warp_v1 (README.md)."
         )
     return cfw

@@ -24,12 +24,12 @@ def _comfree_version() -> tuple:
         return ()
 
 
-# M5 (Kamino) builds only where Newton is installed; M6 only on comfree_warp >= 0.3 (contact_comfree2).
+# M5 (Kamino) builds only where Newton is installed; M6 only on comfree_warp >= 0.3.
 _SKIPS = {
     "M5": pytest.mark.skipif(importlib.util.find_spec("newton") is None,
-                             reason="M5 needs Newton (contact_kamino env)"),
+                             reason="M5 needs Newton (the kamino extra)"),
     "M6": pytest.mark.skipif(_comfree_version() < (0, 3),
-                             reason="M6 needs comfree_warp >= 0.3 (contact_comfree2 env)"),
+                             reason="M6 needs comfree_warp >= 0.3 (installed by hand, README.md)"),
 }
 MODELS = [pytest.param(m, marks=_SKIPS[m]) if m in _SKIPS else m for m in EVAL_PRESETS]
 

@@ -20,9 +20,9 @@ ContactModelStudy/
 │   ├── Mujoco.py               CPU MuJoCo
 │   ├── Pinocchio.py            Pinocchio + ADMM contact solver (CPU)
 │   ├── Drake.py                Drake MultibodyPlant (CPU)
-│   ├── VectorizedMujoco.py     MuJoCo Warp (MJWarp), N worlds
-│   ├── ComFree.py              complementarity-free contact on MJWarp (M3)
-│   ├── ComFreeV2.py            ComFree-Sim: closed form plus L Newton passes (M6, contact_comfree2 env)
+│   ├── VectorizedMujoco.py     MuJoCo Warp (MJWarp 3.14), N worlds
+│   ├── ComFree.py              complementarity-free contact, comfree_warp_v1 (M3)
+│   ├── ComFreeV2.py            ComFree-Sim: closed form plus L Newton passes (M6)
 │   ├── XPBD.py                 XPBD contact on MJWarp
 │   ├── Kamino.py               Newton's SolverKamino: full-NCP contact by PADMM (M5)
 │   └── SingleWorld.py          a one-world GPU simulator as a plain Simulator (GPU eval sims)
@@ -285,7 +285,7 @@ parameters (M1-M3; M4 was rebuilt as exact XPBD), for example
 | M2 | `VectorizedMujoco` | MuJoCo's default soft contact (pyramidal cone), Newton, 25 iterations, 1e-6 |
 | M3 | `ComFree` | Complementarity-free contact (Jin 2024) |
 | M4 | `XPBD` | Exact XPBD over MJWarp's constraint rows: rigid contact (compliance 0), 2 Jacobi sweeps averaged per body at relaxation 2.5, one substep; see [XPBD (M4) tuning](#xpbd-m4-tuning) |
-| M6 | `ComFreeV2` | ComFree-Sim (`comfree_warp` 0.3): M3's closed form decides which rows start active, then up to L = 2 Newton passes of MuJoCo's soft-constraint problem; α 0.002, γ 10, the package defaults. Runs only in the `contact_comfree2` env; see [ComFree-Sim (M6)](#comfree-sim-m6) |
+| M6 | `ComFreeV2` | ComFree-Sim (`comfree_warp` 0.3): M3's closed form decides which rows start active, then up to L = 2 Newton passes of MuJoCo's soft-constraint problem; α 0.002, γ 10, the package defaults; see [ComFree-Sim (M6)](#comfree-sim-m6) |
 | M5 | `Kamino` | Full NCP solved by PADMM (Newton's `SolverKamino`): ρ₀ = 0.1, full warm start, tolerance 5e-4, up to 100 iterations, contact and joint stabilization 0.05 and 0.1, dense dynamics and a 128-contact buffer per world (tuned against sticking; see [Why M5 objects stuck](#why-m5-objects-stuck)). A contact's friction is the larger of its two geoms', as in MuJoCo and M1–M4 (Newton would average). The accuracy reference, and the slowest model |
 
 Each model is a `ContactModel` in `CONTACT_MODELS`; `getContactModel("M3")`
@@ -375,10 +375,11 @@ a full Newton step of MuJoCo's own soft-constraint problem at those row states
 and reclassify the rows; a world stops once its rows stop changing, and its
 acceleration is then MuJoCo's exact solution. So at large L, M6 is M2.
 
-- **It needs its own env.** `comfree_warp` 0.3 needs MuJoCo 3.14 and installs
-  under the same name as M3's 0.1, so it runs in `contact_comfree2` (top-level
-  `README.md`), where M3 and M4 do not run. M5 is bit-identical there, so M6
-  judged by M5 compares directly with M1–M4 results from `contact_kamino`.
+- **It set the env.** `comfree_warp` 0.3 needs MuJoCo 3.14 and took the
+  `comfree_warp` name, so the study moved to one MuJoCo 3.14 env,
+  `contact_comfree2`, with M3's ComFree renamed to `comfree_warp_v1` (top-level
+  `README.md`). M5 is bit-identical to `contact_kamino`'s; M1–M4 shift
+  slightly, so they were re-run there.
 - **The planner seeds every world alike.** The passes start from the warm
   start, the last step's acceleration. After a reseed that belongs to another
   state, so `ComFreeV2.SetState` and `BroadcastState` clear it (and
@@ -496,16 +497,16 @@ Takeaways:
   cube / duck / ball, against 41 / 54 / 29 ms for M3.
 - **The old M4 let the duck sag** in the grasp (0.064 m after 2 s). Now it
   holds it at 0.088 m, against 0.088 m on M5.
-- The `XPBD` simulator refuses sparse models (nv > 32), and supports only the
-  Euler and implicitfast integrators.
+- The `XPBD` simulator refuses models whose constraint Jacobian MJWarp stores
+  sparse (nv > 32), and supports only the Euler and implicitfast integrators.
 
 ## Running
 
-Use the `contact_kamino` or `contact_modeling` conda environment; the top-level
-`README.md` (Installation and system setup) has what each runs and how to build
-it. A CUDA GPU is needed for the rollouts. For offscreen video on a headless
+Use the `contact_comfree2` conda environment, which runs every model; the
+top-level `README.md` (Installation and system setup) has how to build it. A
+CUDA GPU is needed for the rollouts. For offscreen video on a headless
 machine, set `MUJOCO_GL=egl`; the driver sets this itself when there's no
-display. **M5 (Kamino) needs `contact_kamino`.**
+display.
 
 **What M5 costs**, measured on an idle RTX 4090 under CUDA-graph replay (which
 the planner and the eval sim use), with the earlier settings (`rho0=0.1`, a 0.9
@@ -657,7 +658,7 @@ Useful driver options:
 | Option | Effect |
 | --- | --- |
 | `--task` | Which object: `cube_reorient`, `duck_reorient`, `ball_reorient` |
-| `--rollout-model` | M1–M6 (M6 in the `contact_comfree2` env only) |
+| `--rollout-model` | M1–M6 |
 | `--eval-sim` | `mujoco`, `pinocchio`, `drake`, or a GPU contact model `M1`–`M6` |
 | `--hand-acc` / `--obj-acc` | Rollout scene fidelity; for the duck, `obj_acc` can also be a `foam*` variant |
 | `--cost-weight NAME=VALUE` | Override one cost weight; repeatable |

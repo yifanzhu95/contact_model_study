@@ -79,7 +79,7 @@ families. Other drivers retain the general scene-selection behavior above.
 |-----|--------------------------------------------------------------------|
 | M1  | Wanted an Anitescu model, for now just use MuJoCo but with hard contact |
 | M2  | MuJoCo default soft contact                                        |
-| M3  | Jin 2024 complementarity-free model (`comfree_warp`)               |
+| M3  | Jin 2024 complementarity-free model (`comfree_warp_v1`)            |
 | M4  | XPBD-style penalty model (`contact_models/xpbd_backend.py`)        |
 
 ### Old M5..M10 mapping
@@ -146,7 +146,7 @@ contact_study/
 ### What the machine needs
 
 - **Linux with an NVIDIA GPU and its driver.**
-  - The rollouts (M1–M5) all run on the GPU through Warp. Warp ships its own
+  - The rollouts (M1–M6) all run on the GPU through Warp. Warp ships its own
     CUDA runtime, so only the driver is needed, not the CUDA toolkit.
   - Used on an RTX 4090 (driver 580, CUDA 13.0) and on the HPC's RTX 5000 Ada.
   - Without a GPU, only the CPU parts run, and the tests skip the rest.
@@ -161,99 +161,98 @@ contact_study/
 
 ### Which environment
 
-| Env | Python | Warp | Runs | Notes |
+On this branch every model, M1–M6, runs in one env, `contact_comfree2`:
+
+| Env | Python | Warp | MuJoCo | Runs |
 | --- | --- | --- | --- | --- |
-| `contact_kamino` | 3.12 | 1.17 | M1–M5, CPU MuJoCo, Pinocchio, Drake | Everything. Recommended for a new setup. |
-| `contact_modeling` | 3.10 | 1.13 | M1–M4, CPU MuJoCo, Pinocchio, Drake | The original env. |
-| `contact_comfree2` | 3.12 | 1.17 | M1, M2, M5, M6, CPU MuJoCo 3.14, Pinocchio, Drake | Testing only: ComFree-Sim (M6) on MuJoCo 3.14. No M3 or M4. |
+| `contact_comfree2` | 3.12 | 1.17 | 3.14 | M1–M6, CPU MuJoCo, Pinocchio, Drake |
 
-M5 (Kamino, from Newton 1.6) is the reason for the split: Newton's Kamino code
-does not import on Python 3.10, and Newton needs Warp ≥ 1.17. Both envs pass
-the full test suite.
+- **Each model's package:** M1, M2 and M4 run on the standalone `mujoco-warp`
+  3.14, M3 on `comfree_warp_v1` (M3's ComFree 0.1, renamed), M5 on Newton 1.6,
+  and M6 on `comfree_warp` 0.3 (ComFree-Sim).
+- **Why MuJoCo 3.14:** M6 needs it. Python 3.12 and Warp 1.17 are for M5:
+  Newton's Kamino code does not import on Python 3.10, and Newton needs
+  Warp ≥ 1.17.
+- **main's envs don't run this branch.** `contact_kamino` and
+  `contact_modeling` (MuJoCo 3.6) have neither `mujoco_warp` nor
+  `comfree_warp_v1`. `results/bo_check` came from `contact_kamino`;
+  `results/bo_check_one_env` is the same runs in `contact_comfree2`.
 
-### Building `contact_kamino` (recommended)
+### Building `contact_comfree2`
 
 From the repo root:
 
 ```bash
-conda create -n contact_kamino -c conda-forge python=3.12 pinocchio=4.0.0 coal=3.0.2 numpy=2.2 ffmpeg
-conda activate contact_kamino
-pip install drake==1.51.1 mediapy pytest
-pip install -e ".[kamino]"     # MuJoCo 3.6, Warp 1.17, Newton 1.6, comfree_warp (pinned), skopt, ...
-```
-
-### Building `contact_modeling`
-
-```bash
-conda create -n contact_modeling -c conda-forge python=3.10 pinocchio=4.0.0 coal=3.0.2 numpy=2.2 ffmpeg
-conda activate contact_modeling
-pip install warp-lang==1.13.0 drake==1.51.1 mediapy pytest
-pip install -e .               # MuJoCo 3.6, comfree_warp (pinned), skopt, ...
-```
-
-- Install `warp-lang==1.13.0` first, as above. `pyproject.toml` allows Warp
-  1.12–1.17, so pip keeps the version already there.
-- Pinocchio and Drake are needed only for those eval simulators. Without
-  them, the tests that use them skip.
-
-### Building `contact_comfree2` (M6, testing)
-
-M6 is ComFree-Sim, `comfree_warp` 0.3 from the private
-`asu-iris/comfree-warp-simbenchmark` (tested at `0a8b385`). It vendors MJWarp
-3.14 and needs MuJoCo 3.14, where M3's `comfree_warp` 0.1 needs 3.6, and both
-install as `comfree_warp`, so M6 gets its own env, cloned from `contact_kamino`:
-
-```bash
-conda create -n contact_comfree2 --clone contact_kamino
+conda create -n contact_comfree2 -c conda-forge python=3.12 pinocchio=4.0.0 coal=3.0.2 numpy=2.2 ffmpeg
 conda activate contact_comfree2
-pip uninstall -y comfree_warp                 # M3's 0.1
-pip install mujoco==3.14.0 absl-py "etils[epath]"
+pip install drake==1.51.1 mediapy pytest
+pip install -e ".[kamino]"     # MuJoCo 3.14, MJWarp 3.14, Warp 1.17, Newton 1.6, comfree_warp_v1 (pinned), skopt, ...
 gh repo clone asu-iris/comfree-warp-simbenchmark /path/to/comfree-warp-simbenchmark
-pip install --no-deps /path/to/comfree-warp-simbenchmark   # comfree_warp 0.3.0
+pip install --no-deps /path/to/comfree-warp-simbenchmark   # comfree_warp 0.3.0, for M6
 ```
 
 - **Warp stays at 1.17.** ComFree-Sim pins 1.15, but Newton (M5) needs 1.17,
   and ComFree-Sim runs on 1.17 unchanged. `--no-deps` keeps pip from
-  downgrading it.
+  downgrading it, and `pip check` reports the mismatch.
+- **The env on the lab's 4090 was upgraded in place** from a clone of
+  `contact_kamino`, not built this way: `pip uninstall comfree_warp`, then
+  `pip install mujoco==3.14.0 absl-py "etils[epath]"`,
+  `pip install --no-deps mujoco-warp==3.14.0`, and the two ComFree packages.
+- Pinocchio and Drake are needed only for those eval simulators. Without
+  them, the tests that use them skip.
+
+### What MuJoCo 3.14 changes
+
 - **M5 is unchanged.** Kamino's trajectories on all three eval scenes under
-  hold, shake and random-walk controls are bit-identical to `contact_kamino`'s,
-  so M6 runs judged by M5 here compare directly with M1–M4 runs from there.
-- **M1 and M2 run on the vendored MJWarp 3.14 here, not 3.6.** M3 refuses to
-  start (it needs `comfree_warp` 0.1), and M4 (XPBD) does not run on MJWarp
-  3.14 (it reads `d.qM`, which 3.14 renamed). `tests/test_vectorized_backends.py`
-  fails on both, as expected.
+  hold, shake and random-walk controls are bit-identical to `contact_kamino`'s.
+- **M1–M4 are not.** MuJoCo 3.14 compiles the mesh scenes slightly
+  differently: geom orientations move by up to 0.25°, sizes by about 0.04 mm,
+  and the duck's hull is rebuilt. M1, M2 and M4 also move to MJWarp 3.14's
+  collision and solver.
+  - Over 200 steps of random hand motion, the cube and the duck end
+    0.1–4 mm (mean) from where `contact_kamino` puts them, against
+    run-to-run noise of 0.06–0.26 mm.
+  - The ball compiles identically, and M3 and M4 are bit-identical on it.
+  - So compare M1–M4 results only within one env.
+- **M4 (XPBD) was ported to MJWarp 3.14.** 3.14 stores M as CSR and factors
+  it per block, packed, so XPBD densifies M̂ and factors it itself for the
+  per-row effective mass. It still uses MJWarp's factor for the per-world
+  solves.
 
-### The `comfree_warp` dependency
+### The ComFree dependencies
 
-`pyproject.toml` pins MuJoCo 3.6.0 (comfree needs exactly that) and Warp
-1.12–1.17.
+- **`comfree_warp_v1` (M3)** is installed from this repository's
+  `comfree-warp-v1` branch. That is upstream `asu-iris/comfree_warp@ba8b996`
+  with:
+  - a fix to its vendored MJWarp `sensor.py`, without which Warp ≥ 1.16 does
+    not compile it (the `comfree-warp1.17` branch, which main pins);
+  - the package renamed to `comfree_warp_v1`;
+  - `EnableBit.MULTICCD` falling back to 0, since MuJoCo 3.14 dropped
+    `mjENBL_MULTICCD`.
+- **`comfree_warp` 0.3 (M6)** is the private
+  `asu-iris/comfree-warp-simbenchmark`, tested at `0a8b385`.
 
-`comfree_warp` is installed from this repository's `comfree-warp1.17` branch.
-That is upstream `asu-iris/comfree_warp@ba8b996` plus one fix to its vendored
-MJWarp `sensor.py`, without which Warp ≥ 1.16 does not compile it.
+The `comfree-warp*` branches stand apart from the study code: they share only
+the early comfree history. **Never merge them into the study branches.**
 
-That branch stands apart from the study code: it shares only the early comfree
-history. **Never merge it into the study branches.**
-
-To edit comfree, check that branch out somewhere else and install it over the
-pinned one:
+To edit M3's comfree, check that branch out somewhere else and install it over
+the pinned one:
 
 ```bash
-git clone -b comfree-warp1.17 https://github.com/yifanzhu95/contact_model_study.git /path/to/comfree_warp
-pip install -e /path/to/comfree_warp --no-deps
+git clone -b comfree-warp-v1 https://github.com/yifanzhu95/contact_model_study.git /path/to/comfree_warp_v1
+pip install -e /path/to/comfree_warp_v1 --no-deps
 ```
 
 ### Checking the install
 
 ```bash
-python -c "import mujoco, warp, comfree_warp; print(mujoco.__version__, warp.__version__)"   # 3.6.0, then 1.17.0 or 1.13.0
+python -c "import mujoco, mujoco_warp, warp, comfree_warp_v1, comfree_warp; print(mujoco.__version__, mujoco_warp.__version__, warp.__version__, comfree_warp.__version__)"   # 3.14.0 3.14.0 1.17.0 0.3.0
 python -c "import warp; warp.init()"         # lists the CUDA devices Warp can see
 python -m pytest tests -m "not slow"         # a few minutes; the full suite is longer
 ```
 
-- On an RTX 4090, the full suite takes about 4 minutes in `contact_modeling`
-  and about 32 minutes in `contact_kamino`, where the M5 tests on the eval
-  scene are slow.
+- On an RTX 4090, `python -m pytest tests` took about 4.5 minutes in
+  `contact_comfree2`, with the Warp kernels already compiled.
 - The first run of each GPU model also spends a while compiling Warp kernels.
   They are cached afterwards.
 
@@ -262,9 +261,9 @@ python -m pytest tests -m "not slow"         # a few minutes; the full suite is 
 - Build the env once on the login node, the same way, after
   `module load miniconda`.
 - The submit scripts in `experiments/hpc/` and their `.slurm` jobs activate
-  `contact_kamino`, so every model, M5 included, runs on the cluster.
-- To use another env, set `CONDA_ENV` when submitting, for example
-  `CONDA_ENV=contact_modeling bash experiments/hpc/submit_episode_batches.sh ...`.
+  `contact_kamino`, main's env. For this branch, build `contact_comfree2` on
+  the cluster and set `CONDA_ENV` when submitting:
+  `CONDA_ENV=contact_comfree2 bash experiments/hpc/submit_episode_batches.sh ...`.
   The submit script exports it, so the jobs activate the same env.
 - See `experiments/README.md` for the submission workflow.
 

@@ -28,11 +28,11 @@ M4        ``XPBD``                       Exact XPBD on MJWarp's rows: rigid
                                          body, relaxation 2.5.
 M5        ``Kamino`` (Newton)            Full NCP, solved by PADMM (Newton's
                                          SolverKamino); the reference model.
-                                         Needs Newton 1.6 (the contact_kamino
-                                         env), and is the slowest model.
+                                         Needs Newton 1.6 (the kamino extra),
+                                         and is the slowest model.
 M6        ``ComFreeV2``                  ComFree-Sim: M3's closed form plus up
-                                         to L Newton passes (comfree_warp 0.3;
-                                         the contact_comfree2 env only).
+                                         to L Newton passes (comfree_warp 0.3,
+                                         installed by hand).
 ========  =============================  =====================================
 
 All four use pyramidal friction cones, the only kind MJWarp has, so the

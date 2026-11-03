@@ -203,7 +203,11 @@ def test_xpbd_effective_mass_is_exact(cube_initial):
     nv, n = s.mjm.nv, int(s.d.nefc.numpy()[0])
     assert n > 0
     J = s.d.efc.J.numpy()[0, :n, :nv]
-    M = s.d.qM.numpy()[0, :nv, :nv]
+    # MJWarp holds M as CSR rows of each dof's ancestors, the lower triangle.
+    M = np.zeros((nv, nv))
+    adr, nnz, col = s.m.M_rowadr.numpy(), s.m.M_rownnz.numpy(), s.m.M_colind.numpy()
+    for i in range(nv):
+        M[i, col[adr[i]:adr[i] + nnz[i]]] = s.d.M.numpy()[0, adr[i]:adr[i] + nnz[i]]
     M = np.tril(M) + np.tril(M, -1).T
     A = np.einsum("ij,ji->i", J, np.linalg.solve(M + DT * np.diag(s.mjm.dof_damping), J.T))
     assert np.allclose(s._efc_A.numpy()[0, :n], A, rtol=1e-4)

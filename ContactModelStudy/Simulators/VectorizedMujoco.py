@@ -379,15 +379,14 @@ class VectorizedMujoco(VectorizedSimulator):
 def _mujoco_warp():
     """Import MJWarp, with a message that names the package if it is missing.
 
-    Imported lazily and through comfree_warp's vendored copy, which is what the
-    study installs — there is no standalone ``mujoco_warp`` distribution pinned
-    in ``pyproject.toml``.
+    Imported lazily, and from the standalone ``mujoco_warp`` package, not
+    either ComFree's vendored copy.
     """
     try:
-        import comfree_warp.mujoco_warp as mjw
+        import mujoco_warp as mjw
     except ImportError as exc:
         raise ImportError(
-            "VectorizedMujoco needs MJWarp, provided by the comfree_warp package "
-            "(see pyproject.toml). Install it, or use the CPU Mujoco simulator."
+            "VectorizedMujoco needs MJWarp, the mujoco-warp package (see pyproject.toml). "
+            "Install it, or use the CPU Mujoco simulator."
         ) from exc
     return mjw

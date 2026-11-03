@@ -11,8 +11,8 @@ Every choice runs the eval MJCF at the timestep given. Two kinds:
   model and judging in another gives the rollout x eval matrix. The preset is
   resolved at the *eval* timestep, so M1's time constant, ``2 * dt``, is twice
   the eval step here, and with the eval task's own tuning for the model
-  (``TaskBase.CONTACT_PARAMS``), as on the rollout side. M5 (Kamino) needs the
-  ``contact_kamino`` env.
+  (``TaskBase.CONTACT_PARAMS``), as on the rollout side. M5 (Kamino) needs Newton
+  (the ``kamino`` extra) and M6 the private ``comfree_warp`` 0.3.
 
 Pinocchio, Drake and the GPU backends are imported only when chosen, so a
 machine with only MuJoCo installed can still use the rest.
