@@ -194,15 +194,16 @@ def _readJson(path: Path) -> dict | None:
 
 
 def _writeJson(path: Path, obj) -> None:
-    """Write ``obj`` through a temporary file, so a job killed mid-write leaves the old file whole."""
-    tmp = path.with_name(path.name + ".tmp")
+    """Write ``obj`` through a temporary file, so a job killed mid-write leaves the old file whole. The
+    temporary name holds the process id, so shards writing the same file at once don't take each other's."""
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(obj, indent=2))
     os.replace(tmp, path)
 
 
 def _saveNpz(path: Path, **arrays) -> None:
     """``np.savez`` through a temporary file, so a job killed mid-write leaves no partial episode."""
-    tmp = path.with_name(path.name + ".tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     with open(tmp, "wb") as f:
         np.savez(f, **arrays)
     os.replace(tmp, path)
