@@ -118,7 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--eval-sim", default="mujoco", choices=evalSimNames(),
                    help="simulator the episode is scored in, on the eval MJCF: a CPU "
                         "simulator (mujoco, pinocchio, drake) or a GPU contact model "
-                        "(M1-M5, as for --rollout-model, with one world)")
+                        "(M1-M6, as for --rollout-model, with one world)")
     g.add_argument("--settle", type=float, default=1.0,
                    help="seconds to let the hand and object come to rest, holding "
                         "the initial grasp, before planning starts (filmed, not "
@@ -141,7 +141,8 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--rollout-model", default="M2",
                    choices=sorted(CONTACT_MODELS) + sorted(ALIASES), metavar="MODEL",
                    help="contact model the planner rolls out with: M1 (stiff MJWarp), "
-                        "M2 (MJWarp soft, default), M3 (ComFree), M4 (XPBD), M5 (Kamino; contact_kamino env)")
+                        "M2 (MJWarp soft, default), M3 (ComFree), M4 (XPBD), M5 (Kamino; contact_kamino env), "
+                        "M6 (ComFree-Sim; contact_comfree2 env)")
     g.add_argument("--n-samples", type=int, default=256,#256,
                    help="N: rollout worlds, one per sampled control sequence")
     g.add_argument("--horizon", type=int, default=None,

@@ -106,4 +106,12 @@ def _comfree_warp():
         raise ImportError(
             "ComFree needs the comfree_warp package (see pyproject.toml)."
         ) from exc
+    # comfree_warp 0.3 (ComFree-Sim, M6) installs under the same name but takes
+    # other parameters; its env, contact_comfree2, cannot run M3.
+    version = getattr(cfw, "__version__", "0.1")
+    if version[:1].isdigit() and tuple(int(p) for p in version.split(".")[:2]) >= (0, 3):
+        raise ImportError(
+            f"ComFree (M3) needs comfree_warp 0.1 (pyproject.toml); this env has "
+            f"{cfw.__version__}, ComFree-Sim, which runs as M6."
+        )
     return cfw

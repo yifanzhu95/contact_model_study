@@ -30,6 +30,9 @@ M5        ``Kamino`` (Newton)            Full NCP, solved by PADMM (Newton's
                                          SolverKamino); the reference model.
                                          Needs Newton 1.6 (the contact_kamino
                                          env), and is the slowest model.
+M6        ``ComFreeV2``                  ComFree-Sim: M3's closed form plus up
+                                         to L Newton passes (comfree_warp 0.3;
+                                         the contact_comfree2 env only).
 ========  =============================  =====================================
 
 All four use pyramidal friction cones, the only kind MJWarp has, so the
@@ -69,6 +72,9 @@ def _simulatorClasses(kind: str):
     if kind == "comfree":
         from ContactModelStudy.Simulators.ComFree import ComFree, ComFreeConfig
         return ComFree, ComFreeConfig
+    if kind == "comfree2":
+        from ContactModelStudy.Simulators.ComFreeV2 import ComFreeV2, ComFreeV2Config
+        return ComFreeV2, ComFreeV2Config
     if kind == "kamino":
         from ContactModelStudy.Simulators.Kamino import Kamino, KaminoConfig
         return Kamino, KaminoConfig
@@ -90,9 +96,9 @@ class ContactModel:
        ``horizon``, ...) and any sweep over a model parameter.
 
     Attributes:
-        name: The model's canonical name, ``"M1"``-``"M5"``.
+        name: The model's canonical name, ``"M1"``-``"M6"``.
         simulator: Which simulator runs it: ``"mujoco"``, ``"comfree"``,
-            ``"xpbd"`` or ``"kamino"``.
+            ``"xpbd"``, ``"kamino"`` or ``"comfree2"``.
         description: One line, for printing.
         params: The config fields that make this model what it is.
     """
@@ -194,10 +200,17 @@ CONTACT_MODELS: dict[str, ContactModel] = {m.name: m for m in (
     # reads it from the MJCF, and combines two geoms' friction by MuJoCo's max
     # rule (KaminoConfig.friction_mix_mode), as M1-M4 do.
     ContactModel("M5", "kamino", "Kamino full-NCP PADMM (Newton SolverKamino)"),
+    # ComFree-Sim (comfree_warp 0.3): comfree-0 plus up to L Newton passes. Needs
+    # the contact_comfree2 env (MuJoCo 3.14), where M3 cannot run. alpha, gamma
+    # and L are comfree_warp's defaults until tuned; a task's own values go in
+    # its CONTACT_PARAMS.
+    ContactModel("M6", "comfree2", "ComFree-Sim: closed form plus L passes (comfree_warp 0.3)",
+                 {**_OLD_SOLVER, "alpha": 0.002, "gamma": 10.0, "refinement": 2}),
 )}
 
 #: Other accepted names: the old study's backend names.
-ALIASES = {"mujoco_hard": "M1", "mujoco_soft": "M2", "comfree": "M3", "xpbd": "M4", "kamino": "M5"}
+ALIASES = {"mujoco_hard": "M1", "mujoco_soft": "M2", "comfree": "M3", "xpbd": "M4", "kamino": "M5",
+           "comfree2": "M6"}
 
 
 def _resolveName(name: str) -> str:
@@ -227,9 +240,9 @@ def GetContactModelSim(name: str, xml: str, N: int = 1, task=None, **overrides) 
     """Build a rollout simulator running the named contact model.
 
     Args:
-        name: ``"M1"``-``"M5"`` (case-insensitive), or an old backend name:
+        name: ``"M1"``-``"M6"`` (case-insensitive), or an old backend name:
             ``"mujoco_hard"``, ``"mujoco_soft"``, ``"comfree"``, ``"xpbd"``,
-            ``"kamino"``.
+            ``"kamino"``, ``"comfree2"``.
         xml: Path to the rollout MJCF.
         N: Number of parallel worlds.
         task: The task the simulator runs, whose tuning for this model
@@ -242,7 +255,7 @@ def GetContactModelSim(name: str, xml: str, N: int = 1, task=None, **overrides) 
             An explicit value always wins.
 
     Returns:
-        A ``VectorizedMujoco``, ``ComFree``, ``XPBD`` or ``Kamino``, whichever
+        A ``VectorizedMujoco``, ``ComFree``, ``XPBD``, ``Kamino`` or ``ComFreeV2``, whichever
         runs the model.
 
     Raises:

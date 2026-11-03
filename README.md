@@ -165,6 +165,7 @@ contact_study/
 | --- | --- | --- | --- | --- |
 | `contact_kamino` | 3.12 | 1.17 | M1–M5, CPU MuJoCo, Pinocchio, Drake | Everything. Recommended for a new setup. |
 | `contact_modeling` | 3.10 | 1.13 | M1–M4, CPU MuJoCo, Pinocchio, Drake | The original env. |
+| `contact_comfree2` | 3.12 | 1.17 | M1, M2, M5, M6, CPU MuJoCo 3.14, Pinocchio, Drake | Testing only: ComFree-Sim (M6) on MuJoCo 3.14. No M3 or M4. |
 
 M5 (Kamino, from Newton 1.6) is the reason for the split: Newton's Kamino code
 does not import on Python 3.10, and Newton needs Warp ≥ 1.17. Both envs pass
@@ -194,6 +195,33 @@ pip install -e .               # MuJoCo 3.6, comfree_warp (pinned), skopt, ...
   1.12–1.17, so pip keeps the version already there.
 - Pinocchio and Drake are needed only for those eval simulators. Without
   them, the tests that use them skip.
+
+### Building `contact_comfree2` (M6, testing)
+
+M6 is ComFree-Sim, `comfree_warp` 0.3 from the private
+`asu-iris/comfree-warp-simbenchmark` (tested at `0a8b385`). It vendors MJWarp
+3.14 and needs MuJoCo 3.14, where M3's `comfree_warp` 0.1 needs 3.6, and both
+install as `comfree_warp`, so M6 gets its own env, cloned from `contact_kamino`:
+
+```bash
+conda create -n contact_comfree2 --clone contact_kamino
+conda activate contact_comfree2
+pip uninstall -y comfree_warp                 # M3's 0.1
+pip install mujoco==3.14.0 absl-py "etils[epath]"
+gh repo clone asu-iris/comfree-warp-simbenchmark /path/to/comfree-warp-simbenchmark
+pip install --no-deps /path/to/comfree-warp-simbenchmark   # comfree_warp 0.3.0
+```
+
+- **Warp stays at 1.17.** ComFree-Sim pins 1.15, but Newton (M5) needs 1.17,
+  and ComFree-Sim runs on 1.17 unchanged. `--no-deps` keeps pip from
+  downgrading it.
+- **M5 is unchanged.** Kamino's trajectories on all three eval scenes under
+  hold, shake and random-walk controls are bit-identical to `contact_kamino`'s,
+  so M6 runs judged by M5 here compare directly with M1–M4 runs from there.
+- **M1 and M2 run on the vendored MJWarp 3.14 here, not 3.6.** M3 refuses to
+  start (it needs `comfree_warp` 0.1), and M4 (XPBD) does not run on MJWarp
+  3.14 (it reads `d.qM`, which 3.14 renamed). `tests/test_vectorized_backends.py`
+  fails on both, as expected.
 
 ### The `comfree_warp` dependency
 
