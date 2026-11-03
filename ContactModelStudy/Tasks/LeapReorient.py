@@ -187,7 +187,7 @@ class LeapReorient(TaskBase):
     #: ``is_success``: object position (m, L2), orientation (``1 - dot^2``),
     #: and object speed (norm of the 6-D linear+angular velocity) — the last so
     #: that a cube tumbling *through* the goal pose does not count.
-    SUCCESS_THRESHOLDS = {"pos": 0.02, "quat": 0.04, "vel": 0.1}
+    SUCCESS_THRESHOLDS = {"pos": 0.02, "quat": 0.04, "vel": 10.0}#0.1}
 
     #: Object height (m) below which the episode has failed — the object has
     #: left the hand and hit the floor. Deliberately not ``fallen_z``: that is

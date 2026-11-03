@@ -42,7 +42,8 @@ class BallReorient(LeapReorient):
     #: has no static part, so the held ball creeps in rotation (~10 deg/s)
     #: whatever these are.
     CONTACT_PARAMS = {
-        "M3": {"stiffness": 0.75, "damping": 2e-3},
+        "M3": {"stiffness": 1.0, "damping": 2e-3},
+        #"M3": {"stiffness": 0.75, "damping": 2e-3},
     }
 
     def objectParams(self) -> dict:
