@@ -7,7 +7,7 @@
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=30:00:00
+#SBATCH --time=04:00:00          # one shard of a 30-episode cell: ~1.1 h expected; see below
 # One array task = one shard of one cell of an episode-batch results folder =
 # one GPU. With N_SHARDS shards per cell, task t analyses the episodes
 # t % N_SHARDS, t % N_SHARDS + N_SHARDS, ... of cell t / N_SHARDS, and the
@@ -19,8 +19,14 @@
 # forward-simulation errors from those files. The optimal planner runs at the
 # eval timestep, so a step costs many normal plans: about 22 s per analysed step
 # on an RTX 5000 Ada with M5 as the eval model (Nov 2026 batch), 84% of it the
-# optimal planner. A cell with many long episodes can trade resolution for time
-# with STRIDE or N_STEPS_ANALYSED below.
+# optimal planner, and an estimated ~13 s with the Kamino settings below. A
+# cell with many long episodes can trade resolution for time with STRIDE or
+# N_STEPS_ANALYSED below.
+# The time limit fits the defaults: 30 episodes per cell over N_SHARDS=5 is 6
+# episodes x 50 steps x ~13 s = ~65 min per task, and 4 h leaves room for
+# startup and an estimate scaled from a desktop GPU. Fewer shards, more
+# episodes, STRIDE instead of N_STEPS_ANALYSED, or Kamino's own settings take
+# longer: raise it with SBATCH_ARGS="--time=HH:MM:SS" when submitting.
 # Each episode is saved as soon as it is analysed, and a cell already analysed
 # is skipped, so resubmitting resumes episode by episode, even after a task hit
 # the time limit. To rerun a done cell with another STRIDE, N_STEPS_ANALYSED,

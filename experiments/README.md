@@ -406,8 +406,11 @@ explains the columns.
 
 **On the HPC.** `submit_process_batch_results.sh <batch dir> [max concurrent]`
 counts the cells, submits `process_batch_results.slurm` (one GPU per shard,
-30 h), and queues `summarize_batch_results.slurm` `afterany` to build
-`final_results.csv`.
+4 h), and queues `summarize_batch_results.slurm` `afterany` to build
+`final_results.csv`. The 4 h fits a shard of 6 episodes × 50 steps (~65 min
+expected); with fewer shards or more episodes per cell, raise it with
+`SBATCH_ARGS="--time=HH:MM:SS"`. A task cut off by the limit resumes from its
+next episode when resubmitted.
 
 - **Shards:** each cell's episodes are split over `N_SHARDS` jobs (5 by
   default), so the array has cells × `N_SHARDS` tasks. Two shards on one GPU

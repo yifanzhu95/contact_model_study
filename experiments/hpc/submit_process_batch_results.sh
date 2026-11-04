@@ -17,7 +17,8 @@
 #   2. submits process_batch_results.slurm with --array sized to them times N_SHARDS,
 #   3. queues summarize_batch_results.slurm to build final_results.csv once the array has finished.
 # Cells already analysed, and episodes already saved, are skipped, so resubmitting resumes. Extra sbatch
-# options can go in SBATCH_ARGS, e.g. SBATCH_ARGS="--time=24:00:00".
+# options can go in SBATCH_ARGS, e.g. SBATCH_ARGS="--time=08:00:00" with N_SHARDS=1 (the slurm file's
+# 4 h fits 6 episodes of 50 steps per task).
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
