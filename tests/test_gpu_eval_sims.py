@@ -1,8 +1,9 @@
-"""The GPU contact models (M1-M5) as eval simulators: SingleWorld and EvalSimulators."""
+"""The GPU contact models (M1-M6) as eval simulators: SingleWorld and EvalSimulators."""
 
 from __future__ import annotations
 
 import importlib.util
+from importlib import metadata
 
 import numpy as np
 import pytest
@@ -12,15 +13,29 @@ from ContactModelStudy.Utils.EvalSimulators import (EVAL_PRESETS, evalSimConfig,
                                                     isGpuEvalSim, makeEvalSim)
 
 DT = 0.002
-CLASSES = {"M1": "VectorizedMujoco", "M2": "VectorizedMujoco", "M3": "ComFree", "M4": "XPBD", "M5": "Kamino"}
-# M5 (Kamino) builds only where Newton is installed (the contact_kamino env).
-MODELS = [pytest.param(m, marks=pytest.mark.skipif(importlib.util.find_spec("newton") is None,
-                                                   reason="M5 needs Newton (contact_kamino env)"))
-          if m == "M5" else m for m in EVAL_PRESETS]
+CLASSES = {"M1": "VectorizedMujoco", "M2": "VectorizedMujoco", "M3": "ComFree", "M4": "XPBD", "M5": "Kamino",
+           "M6": "ComFreeV2"}
+
+
+def _comfree_version() -> tuple:
+    try:
+        return tuple(int(p) for p in metadata.version("comfree_warp").split(".")[:2])
+    except metadata.PackageNotFoundError:
+        return ()
+
+
+# M5 (Kamino) builds only where Newton is installed; M6 only on comfree_warp >= 0.3.
+_SKIPS = {
+    "M5": pytest.mark.skipif(importlib.util.find_spec("newton") is None,
+                             reason="M5 needs Newton (the kamino extra)"),
+    "M6": pytest.mark.skipif(_comfree_version() < (0, 3),
+                             reason="M6 needs comfree_warp >= 0.3 (installed by hand, README.md)"),
+}
+MODELS = [pytest.param(m, marks=_SKIPS[m]) if m in _SKIPS else m for m in EVAL_PRESETS]
 
 
 def test_names():
-    assert evalSimNames() == ["drake", "mujoco", "pinocchio", "M1", "M2", "M3", "M4", "M5"]
+    assert evalSimNames() == ["drake", "mujoco", "pinocchio", "M1", "M2", "M3", "M4", "M5", "M6"]
     assert all(isGpuEvalSim(m) for m in EVAL_PRESETS)
     assert not any(isGpuEvalSim(n) for n in ("mujoco", "pinocchio", "drake"))
     with pytest.raises(ValueError, match="unknown eval simulator"):

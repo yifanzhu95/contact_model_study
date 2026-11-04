@@ -3,7 +3,7 @@
 ComFree replaces MuJoCo's constraint solver with a closed-form,
 complementarity-free contact force: no iterative QP, so one step costs the same
 however many contacts are active. It runs on MJWarp's model and data layout —
-``comfree_warp`` is MJWarp with its constraint solve swapped out — so this
+``comfree_warp_v1`` is MJWarp with its constraint solve swapped out — so this
 simulator is ``VectorizedMujoco`` with the model upload and the step replaced.
 Controls, state, control sequences and CUDA-graph capture are all inherited.
 
@@ -74,7 +74,7 @@ class ComFree(VectorizedMujoco):
             N: Number of parallel worlds.
 
         Raises:
-            ImportError: If comfree_warp is not installed.
+            ImportError: If comfree_warp_v1 is not installed.
         """
         self._cfw = _comfree_warp()
         super().__init__(xml, sim_config if sim_config is not None else ComFreeConfig(), N)
@@ -99,11 +99,15 @@ class ComFree(VectorizedMujoco):
 
 
 def _comfree_warp():
-    """Import comfree_warp, with a message that names the package if it is missing."""
+    """Import comfree_warp_v1, with a message that names the package if it is missing.
+
+    This is comfree_warp 0.1 renamed, so it installs beside ComFree-Sim (M6),
+    which took over the ``comfree_warp`` name.
+    """
     try:
-        import comfree_warp as cfw
+        import comfree_warp_v1 as cfw
     except ImportError as exc:
         raise ImportError(
-            "ComFree needs the comfree_warp package (see pyproject.toml)."
+            "ComFree needs the comfree_warp_v1 package (see pyproject.toml)."
         ) from exc
     return cfw

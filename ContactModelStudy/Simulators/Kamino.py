@@ -241,7 +241,7 @@ def _newton():
     except ImportError as exc:
         raise ImportError(
             "The Kamino simulator (M5) needs Newton 1.6 with Warp 1.17 on Python >= 3.11: "
-            "use the `contact_kamino` conda env (see ContactModelStudy/README.md)."
+            "use the `contact_comfree2` conda env (see README.md)."
         ) from exc
     return newton
 

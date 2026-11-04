@@ -342,6 +342,9 @@ the reason.
 - `--max-episodes` limits the episodes analysed per cell.
 - `--shrinkage` is the KL's covariance shrinkage (1e-3).
 - `--overwrite` redoes cells already analysed.
+- `--kamino-max-contacts`, `--kamino-padmm-iterations`: with an M5 eval
+  model, the optimal and zero-gap planners' contact buffer and PADMM cap (96
+  and 100; Kamino's own are 128 and 200).
 - `--shard i --n-shards n` (with `--cell`) analyses only the episodes i, i + n,
   ... of the cell; the job that saves its last episode computes its metrics.
 
@@ -370,9 +373,24 @@ are all saved but which no shard marked done, and lists the rest as `partial`
 `goal_steps`). Older ones are rebuilt by replaying the eval task's goal stream
 from the recorded seed, and checked against the saved goal labels.
 
-**Cost.** The optimal planner runs at the eval timestep, so each recorded step
-costs a few plans: about 1–2 s at 0.5 ms eval and 64 ms control steps. Where
-that time goes is saved with each step and reported like a metric:
+**Cost.** The optimal planner runs at the eval timestep, so each analysed step
+costs many plans: about 22 s on an RTX 5000 Ada with M5 as the eval model
+(Nov 2026), 84% of it the optimal planner. Three things cut that:
+
+- **Kamino settings.** With an M5 eval model, the optimal and zero-gap
+  planners run with a smaller contact buffer and PADMM cap,
+  `--kamino-max-contacts` (96) and `--kamino-padmm-iterations` (100); Kamino's
+  own are 128 and 200. The cap cuts ~37% of a step. The used planner and the
+  forward simulation keep the cell's own settings. An episode analysed under
+  other settings is redone. Watch the logs for Kamino's "contact capacity
+  exceeded": a world over the buffer drops contacts (64 overflowed on a cube
+  cell; 96 did not).
+- **One regret rollout.** The regret's two free energies are scored in one
+  rollout of twice the zero-gap planner's worlds rather than two, about a
+  third faster for the same values.
+- **50 analysed steps per episode** (`N_STEPS_ANALYSED`), below.
+
+Where the time goes is saved with each step and reported like a metric:
 `plan_s_<planner>_mean` (s per plan, for `used`, `opt` and `zero`),
 `n_iter_opt_mean` / `_p90` (the optimal planner's iterations),
 `converged_opt_mean` (how often it converged before its `--max-iterations`
@@ -380,22 +398,24 @@ cap) and `regret_s_mean`. Each episode's log line prints the same.
 
 **How many steps to analyse.** `check_steps_analysed.py` takes an analysed
 batch and recomputes each cell's metrics from every k-th analysed step, on
-the CPU. If at k = 2 the means move by much less than their episode-level
-95% interval and that interval barely widens, halve `N_STEPS_ANALYSED`; its
-docstring explains the columns.
+the CPU. It reports how much each cell's episode-level 95% interval widens,
+and whether the means moved further than dropping steps at random would move
+them (about 1 cell in 20 does by chance). The Nov 2026 batch passed at k = 2
+with intervals 3.5–9% wider, so `N_STEPS_ANALYSED` is 50; its docstring
+explains the columns.
 
 **On the HPC.** `submit_process_batch_results.sh <batch dir> [max concurrent]`
-counts the cells, submits `process_batch_results.slurm` (30 h), and queues
-`summarize_batch_results.slurm` `afterany` to build `final_results.csv`.
+counts the cells, submits `process_batch_results.slurm` (one GPU per shard,
+30 h), and queues `summarize_batch_results.slurm` `afterany` to build
+`final_results.csv`.
 
-- **Shards:** each cell's episodes are split over `N_SHARDS` shards (5 by
-  default).
-- **Shards per GPU:** each array task runs `SHARDS_PER_GPU` shards at once on
-  its one GPU (2 by default; 1 is one GPU per shard), so the array has
-  cells × `N_SHARDS` / `SHARDS_PER_GPU` tasks, each with 4 CPUs and 16 GB per
-  shard. A plan of ~1000 worlds leaves the GPU mostly idle, so two processes
-  share it for little slowdown each. Each shard then logs to
-  `logs/process_batch_results_<job>_<task>_<j>.out`.
+- **Shards:** each cell's episodes are split over `N_SHARDS` jobs (5 by
+  default), so the array has cells × `N_SHARDS` tasks. Two shards on one GPU
+  were tried and gained nothing: without CUDA MPS the two processes take
+  turns, and each ran at half speed.
+- **Steps per episode:** `N_STEPS_ANALYSED` in the slurm file, 50.
+- **Kamino settings:** `KAMINO_MAX_CONTACTS` and `KAMINO_PADMM_ITERATIONS` in
+  the slurm file (96 and 100).
 - **The optimal planner** is set in the slurm file's `OPTIMAL_ARGS`. Setting
   `OPTIMAL_ARGS` when submitting replaces it.
 - **Extra flags** go in `ANALYSIS_ARGS`, e.g. `ANALYSIS_ARGS="--stride 4"`.

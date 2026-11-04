@@ -51,15 +51,37 @@ def test_the_baseline_has_no_shift_and_a_constant_metric_keeps_its_mean(tmp_path
     assert by[("smooth", 1)]["lag1"] > 0.9 and abs(by[("noisy", 1)]["lag1"]) < 0.4
 
 
+def test_the_shift_is_judged_against_random_subsets(tmp_path):
+    """Every 2nd step of a metric that alternates step to step is a biased sample, and the null catches it;
+    independent noise stays within what random subsets give."""
+    d = fake_analysed_batch(tmp_path, n_episodes=8, n_steps=40)
+    with np.load(d / "analysis" / "cell_0000_a.analysis.npz") as f:
+        arrays = dict(f)
+    rng = np.random.default_rng(1)
+    for e in range(8):
+        arrays[f"zigzag__ep{e}"] = e + np.where(np.arange(40) % 2 == 0, 1.0, -1.0) + 0.1 * rng.normal(size=40)
+    np.savez(d / "analysis" / "cell_0000_a.analysis.npz", **arrays)
+    rows = chk.checkBatch(d, metrics=["zigzag", "noisy"], ks=[2], n_draws=100)
+    by = {(r["metric"], r["k"]): r for r in rows}
+    assert np.isnan(by[("noisy", 1)]["null_p95"])                       # nothing to judge at k = 1
+    z, n = by[("zigzag", 2)], by[("noisy", 2)]
+    assert abs(z["shift"]) > z["null_p95"] and z["null_frac_ge"] == 0
+    assert 0 < n["null_p95"] < 1 and abs(n["shift"]) < n["null_p95"]
+
+
 def test_main_writes_the_table(tmp_path, capsys):
     d = fake_analysed_batch(tmp_path)
     assert chk.main([str(d), "--every", "2", "--metrics", "smooth"]) == 0
     with open(d / "steps_analysed_check.csv") as f:
         rows = list(csv.DictReader(f))
     assert [(r["metric"], r["k"]) for r in rows] == [("smooth", "1"), ("smooth", "2")]
-    assert "max |shift|" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "max |shift|" in out and "past null p95" in out
+    assert {"null_p95", "null_frac_ge"} <= set(rows[0])
     with pytest.raises(SystemExit):
         chk.main([str(d), "--every", "1"])
+    with pytest.raises(SystemExit):
+        chk.main([str(d), "--null-draws", "-1"])
 
 
 def test_lag1():

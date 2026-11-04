@@ -1,6 +1,6 @@
 """Simulators/Kamino.py (M5): config, MuJoCo layout, conventions, planning, eval.
 
-Needs Newton 1.6 (the ``contact_kamino`` env); everything but the config test
+Needs Newton 1.6 (the ``kamino`` extra); everything but the config test
 skips without it, so that one runs in ``contact_modeling`` too.
 """
 
@@ -41,7 +41,7 @@ def test_config_validation():
 
 # Everything below needs Newton and a GPU.
 needs_newton = pytest.mark.skipif(importlib.util.find_spec("newton") is None,
-                                  reason="needs Newton (contact_kamino env)")
+                                  reason="needs Newton (the kamino extra)")
 
 
 def _sim(N=1, **kw):

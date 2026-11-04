@@ -5,7 +5,7 @@ control. A planner (MPPI) chooses actions by rolling out many sampled futures
 in a fast GPU simulator, the *rollout model*. Those actions are then applied
 in a separate, more accurate simulator standing in for reality, the *eval
 simulator*. The study measures how well a task is performed as the rollout
-model's contact physics (M1–M5) and geometry fidelity change.
+model's contact physics (M1–M6) and geometry fidelity change.
 
 The main task is in-hand reorientation with a 16-DOF LEAP hand: turn a cube,
 duck or ball to a goal orientation.
@@ -20,8 +20,9 @@ ContactModelStudy/
 │   ├── Mujoco.py               CPU MuJoCo
 │   ├── Pinocchio.py            Pinocchio + ADMM contact solver (CPU)
 │   ├── Drake.py                Drake MultibodyPlant (CPU)
-│   ├── VectorizedMujoco.py     MuJoCo Warp (MJWarp), N worlds
-│   ├── ComFree.py              complementarity-free contact on MJWarp
+│   ├── VectorizedMujoco.py     MuJoCo Warp (MJWarp 3.14), N worlds
+│   ├── ComFree.py              complementarity-free contact, comfree_warp_v1 (M3)
+│   ├── ComFreeV2.py            ComFree-Sim: closed form plus L Newton passes (M6)
 │   ├── XPBD.py                 XPBD contact on MJWarp
 │   ├── Kamino.py               Newton's SolverKamino: full-NCP contact by PADMM (M5)
 │   └── SingleWorld.py          a one-world GPU simulator as a plain Simulator (GPU eval sims)
@@ -41,7 +42,7 @@ ContactModelStudy/
 │   ├── run_episodes_pooled.py     many at once, across the GPUs and CPU cores of a machine
 │   └── EpisodePool.py             the engine behind the parallel drivers and the BO search
 └── Utils/
-    ├── ContactModelPresets.py  M1–M5 as ready-made rollout simulators
+    ├── ContactModelPresets.py  M1–M6 as ready-made rollout simulators
     ├── EvalSimulators.py       eval simulator by name (mujoco/pinocchio/drake, or M1-M4 on the GPU)
     ├── EpisodeRecorder.py      record, save, summarize and replay episodes
     ├── MjcfModelInfo.py        MJCF parameters as MuJoCo resolves them
@@ -134,6 +135,7 @@ Every simulator is a `Simulator`: `SetState(q, q_dot)`, `GetState()`,
 | `Drake` | CPU, SAP contact | The MJCF, parsed by Drake and corrected from `MjcfModelInfo`; `DrakeConfig` holds contact-solver settings |
 | `VectorizedMujoco` | GPU | As `Mujoco`; pyramidal friction cones only |
 | `ComFree` | GPU | As `VectorizedMujoco`, plus `stiffness` and `damping` |
+| `ComFreeV2` | GPU | As `VectorizedMujoco` (solref and solimp are used), plus `alpha`, `gamma` and `refinement` (L) |
 | `XPBD` | GPU | As `VectorizedMujoco`, plus `xpbd_substeps`, `xpbd_iterations`, `relaxation`, `contact_compliance`, `joint_compliance`; dense models, Euler or implicitfast only |
 | `Kamino` | GPU, Newton | The MJCF, imported by Newton and mapped to MuJoCo's layout by name; `KaminoConfig` holds PADMM and linear-solver settings, and how two geoms' friction combine (`friction_mix_mode`, MuJoCo's max by default) |
 
@@ -283,6 +285,7 @@ parameters (M1-M3; M4 was rebuilt as exact XPBD), for example
 | M2 | `VectorizedMujoco` | MuJoCo's default soft contact (pyramidal cone), Newton, 25 iterations, 1e-6 |
 | M3 | `ComFree` | Complementarity-free contact (Jin 2024) |
 | M4 | `XPBD` | Exact XPBD over MJWarp's constraint rows: rigid contact (compliance 0), 2 Jacobi sweeps averaged per body at relaxation 2.5, one substep; see [XPBD (M4) tuning](#xpbd-m4-tuning) |
+| M6 | `ComFreeV2` | ComFree-Sim (`comfree_warp` 0.3): M3's closed form decides which rows start active, then up to L = 2 Newton passes of MuJoCo's soft-constraint problem; α 0.002, γ 10, the package defaults; see [ComFree-Sim (M6)](#comfree-sim-m6) |
 | M5 | `Kamino` | Full NCP solved by PADMM (Newton's `SolverKamino`): ρ₀ = 0.1, full warm start, tolerance 5e-4, up to 100 iterations, contact and joint stabilization 0.05 and 0.1, dense dynamics and a 128-contact buffer per world (tuned against sticking; see [Why M5 objects stuck](#why-m5-objects-stuck)). A contact's friction is the larger of its two geoms', as in MuJoCo and M1–M4 (Newton would average). The accuracy reference, and the slowest model |
 
 Each model is a `ContactModel` in `CONTACT_MODELS`; `getContactModel("M3")`
@@ -363,6 +366,86 @@ Takeaways:
     against 0.00 on the cube, 0.20 against 0.10 on the duck (with no NaNs), and
     a tie at 0.20 on the ball.
 
+### ComFree-Sim (M6)
+
+M6 is the newer ComFree, from `asu-iris/comfree-warp-simbenchmark`
+(`comfree_warp` 0.3, at `0a8b385`). comfree-0, M3's closed-form force, now
+only decides which constraint rows start active. Then up to L passes each take
+a full Newton step of MuJoCo's own soft-constraint problem at those row states
+and reclassify the rows; a world stops once its rows stop changing, and its
+acceleration is then MuJoCo's exact solution. So at large L, M6 is M2.
+
+- **It set the env.** `comfree_warp` 0.3 needs MuJoCo 3.14 and took the
+  `comfree_warp` name, so the study moved to one MuJoCo 3.14 env,
+  `contact_comfree2`, with M3's ComFree renamed to `comfree_warp_v1` (top-level
+  `README.md`). M5 is bit-identical to `contact_kamino`'s; M1–M4 shift
+  slightly, so they were re-run there.
+- **The planner seeds every world alike.** The passes start from the warm
+  start, the last step's acceleration. After a reseed that belongs to another
+  state, so `ComFreeV2.SetState` and `BroadcastState` clear it (and
+  `comfree_warp`'s warm-start-check backoff) inside the captured graph.
+
+**Tuning.** α, γ and L were screened like M4: from M5's eval-scene states
+under hold, shake and random-walk controls (5 starts each), M6 on the rollout
+scene predicted one horizon (384 ms), and the error is its object pose against
+M5's at the end. Mean over the 15 starts, mm / °:
+
+| | Cube | Duck | Ball |
+| --- | --- | --- | --- |
+| M2 (reference, MJWarp 3.14) | 2.6 / 4.6 | 2.3 / 4.2 | 3.4 / 6.3 |
+| M6, L = 0 (closed form only), best of 35 (α, γ) | 10.7 / 13.9 | 8.1 / 10.6 | 7.6 / 7.2 |
+| M6, L = 1, α 0.002, γ 10 | 2.8 / 4.6 | 3.2 / 8.0 | 2.6 / 4.1 |
+| **M6, L = 2, α 0.002, γ 10** (preset) | **2.4 / 4.3** | **2.2 / 3.7** | **3.3 / 5.9** |
+| M6, L = 4, α 0.002, γ 10 | 2.6 / 4.6 | 2.3 / 4.2 | 3.4 / 6.2 |
+
+Then, closed loop (M5 eval, 10 episodes, seed 2, which the final runs do not
+use; otherwise the final runs' settings):
+
+| Candidate | Cube | Duck | Ball |
+| --- | --- | --- | --- |
+| **L 2, γ 10** (preset) | **9/10** | **10/10** | **10/10** |
+| L 2, γ 4 | 8/10 | 9/10 | |
+| L 2, γ 20 | | | 10/10 |
+| L 1, γ 4 | 8/10 | | |
+| L 1, γ 2 | 7/10 | | |
+
+Takeaways:
+
+- **The passes are what matter.** With none (L = 0), M6 is a closed-form model
+  like M3 and is 3–4× further from M5 than M2 is, and some (α, γ) go NaN. One
+  pass brings it to M2's level, and by L = 4 it is M2.
+- **α hardly matters once there is a pass.** It only sets the first guess at
+  the active rows, which a pass corrects. Over α 3e-4–0.1 the error moved by
+  less than 0.05 mm in most (γ, L), and at most 0.45 mm (cube, L 2, γ 2). γ
+  moves it by up to 1 mm, and no γ is best on all three tasks.
+- **No (α, γ, L) was unstable at L ≥ 1**: no NaNs in 525 worlds per task and
+  L, under any of the three motions.
+- **So the package defaults are kept, for every task.** They were best or tied
+  in success rate on all three, and the differences are within the ±0.15 that
+  10 episodes resolve. Unlike M3, M6 needs no per-task `CONTACT_PARAMS`.
+- **L = 1 costs about as much as L = 2.** Four 10-episode runs sharing the GPU
+  planned in 196–216 ms whatever L was.
+
+**Result** (M5 eval, 30 episodes, seed 1, temperature 0.1, the settings and
+goals of the `results/bo_check` runs of M1–M4; `experiments/plot_sr_by_task_model.py`
+draws them together):
+
+| Rollout | Cube | Duck | Ball | Plan, cube / duck / ball (ms) |
+| --- | --- | --- | --- | --- |
+| M1 | 29/30 | 28/30 | 30/30 | |
+| M2 | 27/30 | 27/30 | 30/30 | 62 / 80 / 46 (MJWarp 3.14) |
+| M3 | 25/30 | 22/30 | 22/30 | 39 / 55 / 30 |
+| M4 | 21/30 | 26/30 | 29/30 | |
+| **M6** | **29/30** | **24/30** | **28/30** | **49 / 69 / 36** |
+
+M6 is level with M1 and M2 on the cube and the ball, and above M3 on all
+three; on the duck its 24/30 is below M1 and M2, but its 95% interval
+(0.63–0.90) overlaps every other model's.
+Its six duck episodes all ended in drops (failures), none in timeouts. It
+plans about 20% faster than M2 and 25% slower than M3. The plan times are one
+model alone on an RTX 4090 (60 control steps on CPU MuJoCo), M3's in
+`contact_kamino`.
+
 ### XPBD (M4) tuning
 
 M4 is exact XPBD. It solves each row with the exact effective mass
@@ -414,16 +497,16 @@ Takeaways:
   cube / duck / ball, against 41 / 54 / 29 ms for M3.
 - **The old M4 let the duck sag** in the grasp (0.064 m after 2 s). Now it
   holds it at 0.088 m, against 0.088 m on M5.
-- The `XPBD` simulator refuses sparse models (nv > 32), and supports only the
-  Euler and implicitfast integrators.
+- The `XPBD` simulator refuses models whose constraint Jacobian MJWarp stores
+  sparse (nv > 32), and supports only the Euler and implicitfast integrators.
 
 ## Running
 
-Use the `contact_kamino` or `contact_modeling` conda environment; the top-level
-`README.md` (Installation and system setup) has what each runs and how to build
-it. A CUDA GPU is needed for the rollouts. For offscreen video on a headless
+Use the `contact_comfree2` conda environment, which runs every model; the
+top-level `README.md` (Installation and system setup) has how to build it. A
+CUDA GPU is needed for the rollouts. For offscreen video on a headless
 machine, set `MUJOCO_GL=egl`; the driver sets this itself when there's no
-display. **M5 (Kamino) needs `contact_kamino`.**
+display.
 
 **What M5 costs**, measured on an idle RTX 4090 under CUDA-graph replay (which
 the planner and the eval sim use), with the earlier settings (`rho0=0.1`, a 0.9
@@ -575,8 +658,8 @@ Useful driver options:
 | Option | Effect |
 | --- | --- |
 | `--task` | Which object: `cube_reorient`, `duck_reorient`, `ball_reorient` |
-| `--rollout-model` | M1–M5 |
-| `--eval-sim` | `mujoco`, `pinocchio`, `drake`, or a GPU contact model `M1`–`M5` |
+| `--rollout-model` | M1–M6 |
+| `--eval-sim` | `mujoco`, `pinocchio`, `drake`, or a GPU contact model `M1`–`M6` |
 | `--hand-acc` / `--obj-acc` | Rollout scene fidelity; for the duck, `obj_acc` can also be a `foam*` variant |
 | `--cost-weight NAME=VALUE` | Override one cost weight; repeatable |
 | `--stop-on-success` / `--no-stop-on-success` | Multi-goal episodes |

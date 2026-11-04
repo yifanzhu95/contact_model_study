@@ -21,7 +21,10 @@ the eval simulator. It works in two passes:
    settings of its own: ``DEFAULT_OPTIMAL_ARGS`` (iterate to a convergence
    ratio of 2, noise 0.38, temperature 0.001), with ``--optimal-args`` on top,
    flag by flag (``OPTIMAL_FLAGS``: sample count, horizon, noise, temperature,
-   convergence, cost weights, ...), the same for every cell.
+   convergence, cost weights, ...), the same for every cell. With a Kamino
+   (M5) eval model, the optimal and zero-gap planners also run Kamino with a
+   smaller contact buffer and PADMM cap (``DEFAULT_KAMINO``,
+   ``--kamino-max-contacts``, ``--kamino-padmm-iterations``).
    Each analysed step is planned on its own (``StepPlanners``): every planner
    loads what the used planner started that step's plan from (its mean, noise
    draw, temperature and previous control, saved with the steps) and plans
@@ -41,6 +44,9 @@ the eval simulator. It works in two passes:
    their own (``evalNoiseSeed``), not the noise the plans drew, so ``U_A`` is
    not scored on the noise it was fitted to. Positive when the model gap cost
    the plan; noise in the estimates can make it negative at a single step.
+   The two are scored in one rollout of twice the zero-gap planner's worlds
+   (``PairedFreeEnergy``), which gives what two ``FreeEnergyOf`` calls give
+   in about two thirds of the time.
 
    From each analysed state, the action the episode took and the optimal
    planner's mean action are each stepped one control step on the rollout
@@ -120,13 +126,13 @@ recomputes them from the saved ``analysis.npz``, so older analyses gain them
 without a rerun.
 
 A cell whose analysis is done is skipped when run again (``--overwrite`` redoes
-it, which is needed to rerun with another ``--stride``, ``--n-steps-analysed``
-or ``--optimal-args``).
+it, which is needed to rerun with another ``--stride``, ``--n-steps-analysed``,
+``--optimal-args`` or Kamino settings).
 
 **Resuming and sharding.** Each episode's steps are saved as soon as it is
 analysed, so a cell cut off by the wall clock resumes from its next episode.
-An episode saved under other ``--optimal-args``, other analysed rows, or from
-an earlier run of the batch cell is redone. ``--cell c --shard i --n-shards
+An episode saved under other ``--optimal-args`` or Kamino settings, other
+analysed rows, or from an earlier run of the batch cell is redone. ``--cell c --shard i --n-shards
 n`` analyses only the episodes ``i, i + n, ...`` of cell ``c``, so ``n`` jobs
 split it; the one that saves the last episode computes the cell's metrics.
 ``--summarize`` does that for any cell whose episodes are all saved but which
@@ -238,6 +244,25 @@ OPTIMAL_FLAGS = ("n_samples", "horizon", "time_horizon", "n_iterations", "noise_
 #: The optimal planner's own settings unless ``--optimal-args`` gives others, flag by flag:
 #: iterate to convergence, with wide noise and a near-greedy temperature.
 DEFAULT_OPTIMAL_ARGS = "--convergence-ratio 2 --noise-sigma 0.38 --temperature 0.001"
+
+
+#: Kamino (M5) solver settings for the optimal and zero-gap planners when the eval model is Kamino: their
+#: rollouts, and the regret's, are nearly all of the analysis's cost. At the optimal planner's wide noise,
+#: 44% of world-steps run PADMM to its cap and a batch waits for its slowest world, so a cap of 100
+#: (KaminoConfig: 200) cuts those three stages by ~37%, at the price of less-converged contact forces in the
+#: worlds that hit it. The contact buffer is 96 (KaminoConfig: 128), which costs about the same as 128: 64
+#: took off ~10% more, but on an M4-vs-M5 cube cell (Nov 2026) some worlds overflowed it (Kamino's "contact
+#: capacity exceeded" warning, ~1 analysed step in 2), and an overflowing world drops contacts; 96 did not
+#: overflow there. The used planner and the forward
+#: simulation keep the cell's own settings, so the replay and the comparison with the recorded episode are
+#: unchanged. ``--kamino-max-contacts`` / ``--kamino-padmm-iterations`` change these; 128 and 200 are Kamino's.
+DEFAULT_KAMINO = {"max_contacts_per_world": 96, "padmm_max_iterations": 100}
+
+
+def kaminoOverrides(model: str, kamino: dict | None) -> dict:
+    """``kamino``'s settings when ``model`` runs on Kamino, else none (the settings are Kamino's alone)."""
+    from ContactModelStudy.Utils.ContactModelPresets import getContactModel
+    return dict(kamino or {}) if getContactModel(model).simulator == "kamino" else {}
 
 
 def optimalOverrides(optimal_args: str | None) -> tuple[dict, str]:
@@ -442,7 +467,7 @@ PLAN_KEYS = tuple(f"{k}_{p}" for p in PLANNERS for k in ("mu", "cov"))
 #: standard errors: ``F_A(U_B)`` (the deployed plan) and ``F_A(U_A)`` (the zero-gap plan).
 REGRET_KEYS = ("regret_f_used", "regret_f_zero", "regret_f_used_se", "regret_f_zero_se")
 #: Where an analysed step's time went: each planner's plan (s) and iterations, whether the optimal
-#: planner converged before its cap (1/0), and the two regret rollouts (s). Saved and reported like a metric.
+#: planner converged before its cap (1/0), and the regret's rollout (s). Saved and reported like a metric.
 TIMING_KEYS = tuple(f"{k}_{p}" for k in ("plan_s", "n_iter") for p in PLANNERS) + ("converged_opt", "regret_s")
 
 
@@ -487,6 +512,82 @@ def planGaussian(planner, q: np.ndarray, q_dot: np.ndarray, u) -> tuple[np.ndarr
         return np.full(planner.nu, np.nan), np.full((planner.nu, planner.nu), np.nan)
 
 
+def mppiFreeEnergy(costs: np.ndarray, lam: float) -> tuple[float, float]:
+    """``(F, se)`` of one block of folded rollout costs at temperature ``lam``, as ``MPPI`` computes it
+    after an update (``_weightUpdate`` then ``_freeEnergy``), in float32 as on the device; NaN, NaN when
+    every cost is NaN. A NaN cost weighs zero."""
+    J = np.asarray(costs, dtype=np.float32)
+    n = len(J)
+    finite = ~np.isnan(J)
+    if not finite.any():
+        return float("nan"), float("nan")
+    beta = J[finite].min()
+    with np.errstate(invalid="ignore"):
+        w = np.where(finite, np.exp(-(J - beta) / np.float32(lam)), np.float32(0)).astype(np.float32)
+    total = w.sum(dtype=np.float32)
+    w = (w / (total + np.float32(1e-8))).astype(np.float64)
+    f = float(beta) - lam * float(np.log((float(total) + 1e-8) / n))
+    return f, lam * float(np.sqrt(max(float(w @ w) - 1.0 / n, 0.0)))
+
+
+class PairedFreeEnergy:
+    """``FreeEnergyOf`` of several means in one rollout, on a planner with that many times the worlds.
+
+    The regret scores the used and the zero-gap means, ``F_A(U_B)`` and
+    ``F_A(U_A)``, each on the zero-gap planner's model and noise. Two calls of
+    its ``FreeEnergyOf`` take two rollouts of N worlds, one after the other;
+    this does both at once on a planner of k * N worlds with the zero-gap
+    planner's model and settings (``pair``). Block j of N worlds samples around
+    mean j, every block on the noise ``FreeEnergyOf`` would draw (the zero-gap
+    planner draws it), and each block's free energy is MPPI's over its own N
+    worlds (``mppiFreeEnergy``). Worlds do not interact, so each block is that
+    mean's ``FreeEnergyOf``, up to float rounding. ``zero`` and ``pair`` are
+    ``(task, planner)`` pairs.
+    """
+
+    def __init__(self, zero, pair):
+        pz, pp = zero[1], pair[1]
+        if pp.N % pz.N or (pp.horizon, pp.nu) != (pz.horizon, pz.nu):
+            raise ValueError(f"the paired planner is {pp.N} worlds of {pp.horizon} x {pp.nu}; it needs a "
+                             f"multiple of the zero-gap planner's {pz.N} worlds of {pz.horizon} x {pz.nu}")
+        if pp.config != pz.config:
+            raise ValueError("the paired planner needs the zero-gap planner's settings")
+        self.zero, self.pair, self.k = zero, pair, pp.N // pz.N
+        import warp as wp
+        self._V = wp.zeros_like(pp.V_wp)                # the samples, assembled block by block
+
+    def __call__(self, state: dict, q, q_dot, means: list[np.ndarray], u=None) -> list[tuple[float, float]]:
+        """``[(F, se)]`` of each of ``means`` (at most ``k``), each as ``LoadState(state)`` then
+        ``FreeEnergyOf(q, q_dot, mean, u)`` on the zero-gap planner would give it."""
+        import warp as wp
+        z, p = self.zero[1], self.pair[1]
+        if not 1 <= len(means) <= self.k:
+            raise ValueError(f"{len(means)} means for {self.k} blocks of worlds")
+        n, size = z.N, z.N * z.horizon * z.nu
+        # The block FreeEnergyOf draws, into every block of the pair's noise; a spare block repeats the last mean.
+        z.LoadState({**z.SaveState(), **state})
+        z._sampleNoise()
+        p.LoadState({**p.SaveState(), **state})
+        p._setCommandBase(np.asarray(q, dtype=float).ravel(), u)
+        for j in range(self.k):
+            wp.copy(p.eps_wp, z.eps_wp, dest_offset=j * size, count=size)
+        # Each block's samples around its own mean: the planner's own sampling, one mean at a time.
+        padded = list(means) + [means[-1]] * (self.k - len(means))
+        for j, U in enumerate(padded):
+            p.U_wp.assign(np.asarray(U, dtype=np.float32))
+            p._buildSamples()
+            wp.copy(self._V, p.V_wp, dest_offset=j * size, src_offset=j * size, count=size)
+        wp.copy(p.V_wp, self._V)
+        p._buildCommands()
+        p._rollout(np.asarray(q, dtype=float).ravel(), np.asarray(q_dot, dtype=float).ravel())
+        cfg = p.config
+        running = 1.0 / p.horizon if getattr(cfg, "mean_cost_over_horizon", False) and p.horizon > 0 else 1.0
+        total = 1.0 / n if getattr(cfg, "normalize_cost_by_samples", False) else 1.0   # each block's own N
+        p._foldCosts(running, total)
+        costs = p.costs_wp.numpy()
+        return [mppiFreeEnergy(costs[j * n:(j + 1) * n], p.lam) for j in range(len(means))]
+
+
 class StepPlanners:
     """The used, optimal and zero-gap planners, each analysed step planned on its own.
 
@@ -506,22 +607,31 @@ class StepPlanners:
     planned, each one's final mean is scored on the zero-gap planner's model
     (``FreeEnergyOf``), on one shared noise block of its own
     (``evalNoiseSeed``): ``F_A(U_B)`` and ``F_A(U_A)``, whose difference is the
-    used planner's regret.
+    used planner's regret. Given ``regret`` (a ``PairedFreeEnergy`` on the
+    zero-gap planner), both are scored in one rollout instead of two.
 
     ``used``, ``opt`` and ``zero`` are ``(task, planner)`` pairs.
     """
 
-    def __init__(self, used, opt, zero, reset_mean: np.ndarray | None, opt_temperature: float | None = None):
+    def __init__(self, used, opt, zero, reset_mean: np.ndarray | None, opt_temperature: float | None = None,
+                 regret: PairedFreeEnergy | None = None):
         pu, po, pz = used[1], opt[1], zero[1]
         self._same_shape = (pu.horizon, pu.nu) == (po.horizon, po.nu)
         if (pz.horizon, pz.nu) != (pu.horizon, pu.nu):
             raise ValueError(f"the used planner's mean is {pu.horizon} x {pu.nu}, the zero-gap one's "
                              f"{pz.horizon} x {pz.nu}: the regret scores the used plan on the zero-gap "
                              f"planner, so both need the same control step and horizon")
+        if regret is not None and regret.zero is not zero:
+            raise ValueError("the paired regret scorer must be built on this zero-gap planner")
         self.used, self.opt, self.zero, self.opt_temperature = used, opt, zero, opt_temperature
+        self.regret = regret
         self._goal = None
-        for _, planner in (used, opt, zero):
+        for _, planner in self._pairs():
             planner.Reset(reset_mean)       # the seed a warm_start="none" plan starts from
+
+    def _pairs(self) -> list:
+        """Every ``(task, planner)`` here, the paired regret scorer's included."""
+        return [self.used, self.opt, self.zero] + ([self.regret.pair] if self.regret is not None else [])
 
     def forgetGoal(self) -> None:
         """Set the goal again on the next step: the tasks' goals were changed elsewhere."""
@@ -529,7 +639,7 @@ class StepPlanners:
 
     def _setGoal(self, goal: np.ndarray) -> None:
         if self._goal is None or not np.array_equal(self._goal, goal):
-            for task, _ in (self.used, self.opt, self.zero):
+            for task, _ in self._pairs():
                 task.setGoal(goal)
             self._goal = np.array(goal, copy=True)
 
@@ -566,6 +676,10 @@ class StepPlanners:
             return out
         planner = self.zero[1]
         eval_start = {**start, "noise_seed": evalNoiseSeed(start), "resample_count": 0}
+        if self.regret is not None:                         # both in one rollout
+            (out["regret_f_used"], out["regret_f_used_se"]), (out["regret_f_zero"], out["regret_f_zero_se"]) = \
+                self.regret(eval_start, q, q_dot, [U_used, U_zero], u=start.get("u_prev"))
+            return out
         for name, U in (("used", U_used), ("zero", U_zero)):
             planner.LoadState({**planner.SaveState(), **eval_start})
             out[f"regret_f_{name}"], out[f"regret_f_{name}_se"] = planner.FreeEnergyOf(
@@ -781,9 +895,13 @@ def _plannerRecord(pargs: argparse.Namespace, task, sim_config) -> dict:
             "cost_weights": pargs.cost_weights}
 
 
-def _analysisKey(effective_args: str) -> str:
-    """What a saved episode was analysed under: it is reused only when this matches."""
-    return json.dumps({"optimal_args": effective_args})
+def _analysisKey(effective_args: str, kamino: dict | None = None) -> str:
+    """What a saved episode was analysed under: it is reused only when this matches. ``kamino`` is the
+    Kamino settings the optimal and zero-gap planners ran with (``kaminoOverrides``), if any."""
+    key = {"optimal_args": effective_args}
+    if kamino:
+        key["kamino"] = dict(sorted(kamino.items()))
+    return json.dumps(key)
 
 
 def _savedEpisode(path: Path, key: str, rows: np.ndarray, q: np.ndarray) -> bool:
@@ -802,7 +920,7 @@ def _savedEpisode(path: Path, key: str, rows: np.ndarray, q: np.ndarray) -> bool
 def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float = 1e-3,
                 max_episodes: int | None = None, optimal_args: str | None = None,
                 n_steps_analysed: int | None = None, shard: tuple[int, int] = (0, 1),
-                overwrite: bool = False) -> dict | None:
+                overwrite: bool = False, kamino: dict | None = DEFAULT_KAMINO) -> dict | None:
     """One cell: every episode's analysed steps saved, then the metrics computed from them.
 
     Each episode's steps are saved as soon as it is analysed, and an episode
@@ -811,7 +929,9 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
     ``shard = (i, n)`` analyses only the episodes ``i, i + n, i + 2n, ...``, so
     n jobs can split a cell. Once every episode is saved, whichever shard saved
     it, the metrics are computed (``finalizeCell``): returns the cell's analysis
-    record then, ``None`` while episodes are missing.
+    record then, ``None`` while episodes are missing. ``kamino`` is the solver
+    settings of the optimal and zero-gap planners when the eval model is Kamino
+    (``DEFAULT_KAMINO``; ``None`` keeps Kamino's own).
     """
     from ContactModelStudy.Drivers import run_episodes as drv
     from ContactModelStudy.Utils.ContactModelPresets import _presetConfig
@@ -829,7 +949,6 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
     args = argsFromCliArgs(cli_args)
     checkCell(rep, args)
     overrides, effective_args = optimalOverrides(optimal_args)
-    key = _analysisKey(effective_args)
     episodes = list(rep)[:max_episodes] if max_episodes else list(rep)
     all_rows = [analysedRows(ep.n_saved, stride, n_steps_analysed) for ep in episodes]
 
@@ -837,11 +956,13 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
     task, eval_task = drv.buildTasks(args)
     used_cfg = _presetConfig(args.rollout_model, task, **drv.rolloutSimOverrides(args, task))
     oargs = optimalArgs(args, used_cfg.control_timestep, used_cfg.horizon_duration, overrides)
+    eval_kamino = kaminoOverrides(oargs.rollout_model, kamino)    # the optimal and zero-gap planners' model
     otask, _ = drv.buildTasks(oargs)
-    opt_cfg = _presetConfig(oargs.rollout_model, otask, **drv.rolloutSimOverrides(oargs, otask))
+    opt_cfg = _presetConfig(oargs.rollout_model, otask, **drv.rolloutSimOverrides(oargs, otask), **eval_kamino)
     zargs = optimalArgs(args, used_cfg.control_timestep, used_cfg.horizon_duration)
     ztask, _ = drv.buildTasks(zargs)
-    zero_cfg = _presetConfig(zargs.rollout_model, ztask, **drv.rolloutSimOverrides(zargs, ztask))
+    zero_cfg = _presetConfig(zargs.rollout_model, ztask, **drv.rolloutSimOverrides(zargs, ztask), **eval_kamino)
+    key = _analysisKey(effective_args, eval_kamino)
     rollout_steps = used_cfg.resolved_substeps
     eval_steps = int(round(rollout_steps * task.timestep / eval_task.timestep))
 
@@ -856,7 +977,7 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
         "plan_on_eval": bool(getattr(args, "plan_on_eval", False)),
         "stride": None if n_steps_analysed is not None else stride, "n_steps_analysed": n_steps_analysed,
         "save_stride": int(rep.step_saving.get("stride", 1)), "warm_start": args.warm_start,
-        "optimal_args": effective_args,
+        "optimal_args": effective_args, "kamino": eval_kamino or None,
         "optimal_planner": _plannerRecord(oargs, otask, opt_cfg),
         "zero_gap_planner": _plannerRecord(zargs, ztask, zero_cfg),
         "forward_sim": {"rollout_steps": rollout_steps, "eval_steps": eval_steps,
@@ -874,14 +995,16 @@ def processCell(batch_dir: Path, cell: dict, stride: int = 1, shrinkage: float =
     if todo:
         _analyseEpisodes(batch_dir, name, rep, args, oargs, overrides, zargs,
                          [(k, episodes[k], all_rows[k]) for k in todo], key, effective_args, stride,
-                         n_steps_analysed)
+                         n_steps_analysed, eval_kamino)
     return finalizeCell(batch_dir, name, shrinkage)
 
 
 def _analyseEpisodes(batch_dir: Path, name: str, rep, args, oargs, overrides: dict, zargs, todo: list,
-                     key: str, effective_args: str, stride: int, n_steps_analysed: int | None) -> None:
+                     key: str, effective_args: str, stride: int, n_steps_analysed: int | None,
+                     eval_kamino: dict | None = None) -> None:
     """Plan and step the analysed rows of each ``(position in the cell, episode, rows)`` of ``todo``,
-    saving each episode as ``analysis/<cell>/<id>.npz``."""
+    saving each episode as ``analysis/<cell>/<id>.npz``. ``eval_kamino`` goes on the optimal and
+    zero-gap planners' simulators (``kaminoOverrides``)."""
     from ContactModelStudy.Drivers import run_episodes as drv
     from ContactModelStudy.Drivers.EpisodePool import episodeSeeds
     from ContactModelStudy.SamplingBasedPlanners.MPPI import MPPI
@@ -897,17 +1020,23 @@ def _analyseEpisodes(batch_dir: Path, name: str, rep, args, oargs, overrides: di
     # The optimal planner: the same, with the eval model, and any settings of its own.
     otask, _ = drv.buildTasks(oargs)
     opt_sim = GetContactModelSim(oargs.rollout_model, otask.getModelPath(), N=oargs.n_samples,
-                                 task=otask, **drv.rolloutSimOverrides(oargs, otask))
+                                 task=otask, **drv.rolloutSimOverrides(oargs, otask), **(eval_kamino or {}))
     opt = (otask, MPPI(opt_sim, otask, drv.buildPlannerConfig(oargs)))
     # The zero-gap planner: the used planner's own settings, on the eval model.
     ztask, _ = drv.buildTasks(zargs)
     zero_sim = GetContactModelSim(zargs.rollout_model, ztask.getModelPath(), N=zargs.n_samples,
-                                  task=ztask, **drv.rolloutSimOverrides(zargs, ztask))
+                                  task=ztask, **drv.rolloutSimOverrides(zargs, ztask), **(eval_kamino or {}))
     zero = (ztask, MPPI(zero_sim, ztask, drv.buildPlannerConfig(zargs)))
+    # The regret's two free energies in one rollout: the zero-gap planner with twice the worlds.
+    ptask, _ = drv.buildTasks(zargs)
+    pair_sim = GetContactModelSim(zargs.rollout_model, ptask.getModelPath(), N=2 * zargs.n_samples,
+                                  task=ptask, **drv.rolloutSimOverrides(zargs, ptask), **(eval_kamino or {}))
+    regret = PairedFreeEnergy(zero, (ptask, MPPI(pair_sim, ptask, drv.buildPlannerConfig(zargs))))
     _, _, u0 = eval_task.getInitialState()
     reset_mean = u0 if args.control_mode == "absolute" else None
     planners = StepPlanners(used, opt, zero, reset_mean,
-                            opt_temperature=oargs.temperature if "temperature" in overrides else None)
+                            opt_temperature=oargs.temperature if "temperature" in overrides else None,
+                            regret=regret)
 
     # The forward-simulation pair: one world per analysed step.
     n_worlds = max(1, max(len(rows) for _, _, rows in todo))
@@ -971,7 +1100,7 @@ def _analyseEpisodes(batch_dir: Path, name: str, rep, args, oargs, overrides: di
               f"{mean['plan_s_used']:.2f} / opt {mean['plan_s_opt']:.2f} / zero {mean['plan_s_zero']:.2f} s, "
               f"regret {mean['regret_s']:.2f} s, opt {mean['n_iter_opt']:.1f} iterations, converged "
               f"{mean['converged_opt']:.0%}; forward sim {t_fsim:.1f} s)", flush=True)
-    for sim in (used_sim, opt_sim, zero_sim, fs_rollout, fs_eval):
+    for sim in (used_sim, opt_sim, zero_sim, pair_sim, fs_rollout, fs_eval):
         sim.Close()
 
 
@@ -1200,7 +1329,15 @@ def main(argv=None) -> int:
                         f"and of the defaults ({DEFAULT_OPTIMAL_ARGS}), flag by flag, "
                         "e.g. --optimal-args=\"--n-samples 1024 --temperature 0.1\" (with '=': the value "
                         "starts with --). It may set " + ", ".join("--" + f.replace("_", "-") for f in OPTIMAL_FLAGS))
+    p.add_argument("--kamino-max-contacts", type=int, default=DEFAULT_KAMINO["max_contacts_per_world"],
+                   metavar="N", help="with a Kamino (M5) eval model: the optimal and zero-gap planners' contact "
+                                     "buffer per world (default %(default)s; Kamino's own is 128)")
+    p.add_argument("--kamino-padmm-iterations", type=int, default=DEFAULT_KAMINO["padmm_max_iterations"],
+                   metavar="N", help="with a Kamino (M5) eval model: the optimal and zero-gap planners' PADMM "
+                                     "iteration cap (default %(default)s; Kamino's own is 200)")
     args = p.parse_args(argv)
+    if args.kamino_max_contacts < 1 or args.kamino_padmm_iterations < 1:
+        p.error("--kamino-max-contacts and --kamino-padmm-iterations must be >= 1")
     if args.stride < 1:
         p.error("--stride must be >= 1")
     if args.n_steps_analysed is not None and args.n_steps_analysed < 1:
@@ -1226,7 +1363,9 @@ def main(argv=None) -> int:
     if args.summarize:
         return 0 if summarize(batch_dir, args.shrinkage) else 1
     kw = dict(stride=args.stride, shrinkage=args.shrinkage, max_episodes=args.max_episodes,
-              optimal_args=args.optimal_args, n_steps_analysed=args.n_steps_analysed)
+              optimal_args=args.optimal_args, n_steps_analysed=args.n_steps_analysed,
+              kamino={"max_contacts_per_world": args.kamino_max_contacts,
+                      "padmm_max_iterations": args.kamino_padmm_iterations})
     if args.cell is not None:
         if not 0 <= args.cell < len(cells):
             p.error(f"--cell {args.cell} is out of range: {batch_dir.name} has cells 0-{len(cells) - 1}")
@@ -1235,7 +1374,8 @@ def main(argv=None) -> int:
     failed = []
     for i, c in enumerate(cells):
         cmd = [sys.executable, __file__, str(batch_dir), "--cell", str(i), "--stride", str(args.stride),
-               "--shrinkage", str(args.shrinkage)]
+               "--shrinkage", str(args.shrinkage), "--kamino-max-contacts", str(args.kamino_max_contacts),
+               "--kamino-padmm-iterations", str(args.kamino_padmm_iterations)]
         if args.max_episodes:
             cmd += ["--max-episodes", str(args.max_episodes)]
         if args.n_steps_analysed is not None:
