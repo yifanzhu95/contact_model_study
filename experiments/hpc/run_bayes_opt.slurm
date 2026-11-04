@@ -41,8 +41,8 @@ OUTDIR="${OUTDIR:-$PROJ_DIR/results/bayes_opt_$(basename "${CSV%.*}")_${SLURM_AR
 
 module load miniconda
 eval "$(conda shell.bash hook)"
-# The submit script exports CONDA_ENV; contact_kamino (M1-M5) otherwise.
-conda activate "${CONDA_ENV:-contact_kamino}"
+# The submit script exports CONDA_ENV; contact_comfree2 (M1-M6) otherwise.
+conda activate "${CONDA_ENV:-contact_comfree2}"
 export MUJOCO_GL=egl
 
 echo "cell ${CELL} of ${CSV} -> ${OUTDIR} on $(hostname), ${SLURM_CPUS_PER_TASK:-?} CPUs"

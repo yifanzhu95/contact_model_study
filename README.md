@@ -261,9 +261,9 @@ python -m pytest tests -m "not slow"         # a few minutes; the full suite is 
 - Build the env once on the login node, the same way, after
   `module load miniconda`.
 - The submit scripts in `experiments/hpc/` and their `.slurm` jobs activate
-  `contact_kamino`, main's env. For this branch, build `contact_comfree2` on
-  the cluster and set `CONDA_ENV` when submitting:
-  `CONDA_ENV=contact_comfree2 bash experiments/hpc/submit_episode_batches.sh ...`.
+  `contact_comfree2` by default. Set `CONDA_ENV` when submitting to use
+  another env, for example main's `contact_kamino`:
+  `CONDA_ENV=contact_kamino bash experiments/hpc/submit_episode_batches.sh ...`.
   The submit script exports it, so the jobs activate the same env.
 - See `experiments/README.md` for the submission workflow.
 

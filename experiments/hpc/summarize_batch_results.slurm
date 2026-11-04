@@ -19,7 +19,7 @@ BATCH_DIR="${BATCH_DIR:?set BATCH_DIR to the batch results folder}"
 
 module load miniconda
 eval "$(conda shell.bash hook)"
-# The submit script exports CONDA_ENV; contact_kamino (M1-M5) otherwise.
-conda activate "${CONDA_ENV:-contact_kamino}"
+# The submit script exports CONDA_ENV; contact_comfree2 (M1-M6) otherwise.
+conda activate "${CONDA_ENV:-contact_comfree2}"
 
 python experiments/process_batch_results.py "$BATCH_DIR" --summarize

@@ -83,8 +83,8 @@ SHARD=$((TASK % N_SHARDS))
 
 module load miniconda
 eval "$(conda shell.bash hook)"
-# The submit script exports CONDA_ENV; contact_kamino (M1-M5) otherwise.
-conda activate "${CONDA_ENV:-contact_kamino}"
+# The submit script exports CONDA_ENV; contact_comfree2 (M1-M6) otherwise.
+conda activate "${CONDA_ENV:-contact_comfree2}"
 export MUJOCO_GL=egl
 
 echo "cell ${CELL}, shard ${SHARD}/${N_SHARDS}, of ${BATCH_DIR} on $(hostname)"

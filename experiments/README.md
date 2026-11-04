@@ -27,7 +27,7 @@ driver's default.
   `temperature`, `control_mode`, `settle`, `seed`, `goal_difficulty`,
   `nconmax`, `njmax`. `run_episodes.py --help` lists them all.
   `eval_sim` takes a CPU simulator (`mujoco`, `pinocchio`, `drake`) or a GPU
-  contact model (`M1`–`M5`; M5, Kamino, needs the `contact_kamino` env).
+  contact model (`M1`–`M6`, all in the `contact_comfree2` env).
   `plan_on_eval` (true/false) makes the planner roll out on the eval scene.
 - **On/off options.** These take `true` or `false`: `stop_on_success`,
   `uncertainty`, `save_steps`, `graph`, `debug`, ...
@@ -84,7 +84,7 @@ the batch another `seed` than the BO to keep the tuning episodes out of it.
 
 | File | Role |
 | --- | --- |
-| `submit_episode_batches.sh` | **What you run**, from the repo root, on the login node. It loads `miniconda` and activates the `contact_kamino` env (`CONDA_ENV=` picks another, and the jobs inherit it) so it can run Python there, then validates the CSV, submits the array sized to its rows (an optional second argument caps how many cells run at once), and queues the summary. Extra `sbatch` options go in `SBATCH_ARGS`, for example `SBATCH_ARGS="--time=24:00:00"`. |
+| `submit_episode_batches.sh` | **What you run**, from the repo root, on the login node. It loads `miniconda` and activates the `contact_comfree2` env (`CONDA_ENV=` picks another, and the jobs inherit it) so it can run Python there, then validates the CSV, submits the array sized to its rows (an optional second argument caps how many cells run at once), and queues the summary. Extra `sbatch` options go in `SBATCH_ARGS`, for example `SBATCH_ARGS="--time=24:00:00"`. |
 | `run_episode_batches.slurm` | The job array: task *i* runs `--cell i` on its own GPU node, its episodes at once (`--pool` with `PLANNERS_PER_GPU=2` planners and `WORKERS=8` workers, on 11 CPUs and 32 GB; `POOL=0` runs them one after another). Five minutes before the time limit it signals the cell to stop and save. Every task writes into one folder. |
 | `summarize_batches.slurm` | Builds `summary.csv` after the array. It is queued with `afterany`, so it also runs when some cells fail. |
 
