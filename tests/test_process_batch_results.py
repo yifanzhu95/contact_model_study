@@ -137,6 +137,36 @@ def test_metrics():
     assert pbr.stats("z", [np.nan])["z_mean"] is None
 
 
+def test_kamino_settings_go_only_on_a_kamino_eval_model_and_into_the_key():
+    assert pbr.kaminoOverrides("M5", pbr.DEFAULT_KAMINO) == pbr.DEFAULT_KAMINO
+    assert pbr.kaminoOverrides("kamino", {"padmm_max_iterations": 7}) == {"padmm_max_iterations": 7}
+    assert pbr.kaminoOverrides("M2", pbr.DEFAULT_KAMINO) == {} and pbr.kaminoOverrides("M5", None) == {}
+    # Without Kamino settings the key is what it always was, so analyses of other eval models stay valid.
+    assert pbr._analysisKey("--x 1") == json.dumps({"optimal_args": "--x 1"}) == pbr._analysisKey("--x 1", {})
+    keyed = json.loads(pbr._analysisKey("--x 1", pbr.DEFAULT_KAMINO))
+    assert keyed["kamino"] == pbr.DEFAULT_KAMINO
+    assert pbr._analysisKey("--x 1", {"padmm_max_iterations": 200}) != pbr._analysisKey("--x 1", pbr.DEFAULT_KAMINO)
+
+
+def test_kamino_flags_are_checked(tmp_path):
+    fake_batch(tmp_path, 1)
+    for flag in ("--kamino-max-contacts", "--kamino-padmm-iterations"):
+        with pytest.raises(SystemExit):
+            pbr.main([str(tmp_path), "--count", flag, "0"])
+
+
+def test_the_free_energy_of_a_block_of_costs_is_mppis():
+    J, lam = np.array([1.0, 2.0, np.nan, 4.0]), 0.5
+    w = np.exp(-(J[[0, 1, 3]] - 1.0) / lam)
+    f, se = pbr.mppiFreeEnergy(J, lam)
+    assert f == pytest.approx(1.0 - lam * np.log((w.sum() + 1e-8) / 4), rel=1e-6)    # NaN weighs zero, counts in N
+    wn = w / w.sum()
+    assert se == pytest.approx(lam * np.sqrt(wn @ wn - 1 / 4), rel=1e-5)
+    # Equal costs: the soft minimum is the cost, and the error ~0 (float32 weights, as on the device, leave ~1e-4).
+    assert pbr.mppiFreeEnergy(np.full(3, 5.0), 1.0) == pytest.approx((5.0, 0.0), abs=1e-3)
+    assert all(np.isnan(pbr.mppiFreeEnergy(np.full(3, np.nan), 1.0)))
+
+
 def test_cell_and_episode_metrics_come_back_from_the_saved_steps(tmp_path):
     a, b = {"m": np.array([1.0, 2.0])}, {"m": np.array([3.0, np.nan, 6.0])}
     np.savez(tmp_path / "x.npz", m__aa=a["m"], step__aa=np.arange(2), m__bb=b["m"], step__bb=np.arange(3))
@@ -229,6 +259,57 @@ def test_process_a_batch(batch):
     mtime = (batch / "analysis" / "cell_0000_mismatch.analysis.json").stat().st_mtime
     assert pbr.main([str(batch), "--cell", "0"]) == 0
     assert (batch / "analysis" / "cell_0000_mismatch.analysis.json").stat().st_mtime == mtime
+
+
+@pytest.mark.gpu
+@pytest.mark.slow
+def test_paired_regret_scores_each_mean_as_free_energy_of_does(batch):
+    """One rollout of 2N worlds gives each mean's FreeEnergyOf on N worlds, noise and all."""
+    from ContactModelStudy.Drivers import run_episodes as drv
+    from ContactModelStudy.Drivers.EpisodePool import episodeSeeds
+    from ContactModelStudy.SamplingBasedPlanners.MPPI import MPPI
+    from ContactModelStudy.Utils.ContactModelPresets import GetContactModelSim, _presetConfig
+    from ContactModelStudy.Utils.EpisodeRecorder import EpisodeReplayer
+    rep = EpisodeReplayer(batch / "cell_0000_mismatch.json")
+    args = pbr.argsFromCliArgs(rep.configs["metadata"]["cli_args"])
+    task, eval_task = drv.buildTasks(args)
+    cfg = _presetConfig(args.rollout_model, task, **drv.rolloutSimOverrides(args, task))
+    zargs = pbr.optimalArgs(args, cfg.control_timestep, cfg.horizon_duration)
+
+    def build(n):
+        t, _ = drv.buildTasks(zargs)
+        sim = GetContactModelSim(zargs.rollout_model, t.getModelPath(), N=n, task=t,
+                                 **drv.rolloutSimOverrides(zargs, t))
+        return t, MPPI(sim, t, drv.buildPlannerConfig(zargs))
+
+    zero, pair = build(zargs.n_samples), build(2 * zargs.n_samples)
+    try:
+        ep = rep[0]
+        _, _, u0 = eval_task.getInitialState()
+        start = pbr.planStart(ep, 0, args, u0, episodeSeeds(args.seed, 0)[1])
+        for t, _ in (zero, pair):
+            t.setGoal(pbr.episodeGoals(rep, args)[0][0][1])
+        zero[1].LoadState({**zero[1].SaveState(), **start})
+        pbr.planGaussian(zero[1], ep.q[0], ep.q_dot[0], start["u_prev"])
+        means = [zero[1].last_mean, zero[1].last_mean + 0.05]
+        state = {**start, "noise_seed": 1234, "resample_count": 0}
+        expected = []
+        for U in means:
+            zero[1].LoadState({**zero[1].SaveState(), **state})
+            expected.append(zero[1].FreeEnergyOf(ep.q[0], ep.q_dot[0], U, u=start["u_prev"]))
+        scorer = pbr.PairedFreeEnergy(zero, pair)
+        got = scorer(state, ep.q[0], ep.q_dot[0], means, u=start["u_prev"])
+        assert expected[0][0] != pytest.approx(expected[1][0])          # the two means do score differently
+        for (f, se), (f_ref, se_ref) in zip(got, expected):
+            assert f == pytest.approx(f_ref, rel=1e-4) and se == pytest.approx(se_ref, rel=1e-3, abs=1e-6)
+        # One mean alone: the spare block repeats it.
+        assert scorer(state, ep.q[0], ep.q_dot[0], means[1:], u=start["u_prev"])[0][0] == \
+            pytest.approx(expected[1][0], rel=1e-4)
+        with pytest.raises(ValueError, match="multiple"):
+            pbr.PairedFreeEnergy(pair, zero)
+    finally:
+        for _, p in (zero, pair):
+            p.sim.Close()
 
 
 @pytest.mark.gpu
