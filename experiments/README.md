@@ -424,6 +424,69 @@ next episode when resubmitted.
 - **Extra flags** go in `ANALYSIS_ARGS`, e.g. `ANALYSIS_ARGS="--stride 4"`.
 - **Resubmitting** skips the cells already done and the episodes already saved.
 
+# Sweeping contact parameters: how regret moves with the rollout model
+
+`contact_param_sweep.py` takes the same results folder and, for each cell,
+asks how its planner's regret changes as its rollout model's contact
+parameters move away from the values the episodes ran with. At each analysed
+step it:
+
+1. plans once with the **zero-gap planner**, exactly as in
+   `process_batch_results.py`, and keeps its mean `U_A`;
+2. plans again with **the cell's own planner**, its rollout model rebuilt at
+   every point θ of a full grid over the model's parameters, and keeps each
+   mean `U_B(θ)`;
+3. scores `F_A(U_B(θ)) - F_A(U_A)` on the eval model, each step on its own
+   evaluation noise.
+
+Every plan starts from the recorded start of the step, so all of them draw the
+same noise. The nominal point (the cell's own parameters) is always in the
+grid, and its regret is the cell's `process_batch_results` regret.
+
+| Model | Parameters | Default values (× nominal unless listed) | Points |
+|---|---|---|---|
+| M1 | `solref_timeconst`, `solref_dampratio` | ×{1, 1.5, 2, 4, 8}; ×{0.25, 0.5, 1, 2, 4} | 25 |
+| M2 | `solref_timeconst`, `solref_dampratio` | ×{0.4, 0.6, 1, 2, 4}; ×{0.25, 0.5, 1, 2, 4} | 25 |
+| M3 | `stiffness`, `damping` | ×{0.25, 0.5, 1, 2, 4} each | 25 |
+| M4 | `xpbd_iterations`, `relaxation` | {1, 2, 3, 4, 6}; {1, 1.5, 2, 2.5, 3, 3.5} | 30 |
+| M6 | `alpha`, `gamma`, `refinement` | ×{0.25, 0.5, 1, 2, 4} each; {0, 1, 2, 3, 4} | 125 |
+
+- **Nominal values** are the preset with the task's tuning. M1's time constant
+  is its resolved 2·dt. M2's solref comes from the rollout scene.
+- **M5 cells** are skipped, since M5 is the ground truth.
+- **Dropped points:** a point the model's config refuses, or one with a time
+  constant below 2·dt, is dropped and listed in the cell's json.
+
+| Task | Command |
+|---|---|
+| One cell, chosen episodes | `python experiments/contact_param_sweep.py <batch dir> --cell 2 --episodes 0-4,9` |
+| Other values | `--values stiffness=0.5,1` (absolute), `--multipliers M1:solref_dampratio=0.5,2` (× nominal) |
+| Every cell, then the table | `python experiments/contact_param_sweep.py <batch dir>` |
+| Only the table | `python experiments/contact_param_sweep.py <batch dir> --summarize` |
+| Submit to the HPC | `experiments/hpc/submit_contact_param_sweep.sh <batch dir> [max concurrent]` |
+
+**Per cell.** A run (and an HPC array task) sweeps one whole cell:
+- It writes `sweep/<cell>.sweep.npz`, with every analysed step's regret,
+  free energies, means and timings per grid point.
+- It writes `sweep/<cell>.sweep.json`, with the settings and each grid point's
+  regret mean, 95% interval, median and p90.
+- `--summarize` gathers every cell into `sweep_results.csv`, one row per
+  (cell, grid point).
+- While a cell runs, `sweep/<cell>.partial.npz` is saved after the zero-gap
+  plans, each grid point and each score block. A cell cut off by the wall
+  clock resumes from there.
+
+**On the HPC.** `submit_contact_param_sweep.sh` submits one task per cell and
+then the summary.
+- The slurm header sets the steps per episode (`N_STEPS_ANALYSED`, 20), the
+  score block (4) and the Kamino settings.
+- `EPISODES="0-4"` picks the episodes of every cell. Other flags go in
+  `SWEEP_ARGS`.
+- An M6 cell costs about 6× an M3 cell: ~115 s against ~20 s a step on an
+  RTX 4090, with M5 as the eval model. Time one cell by hand first
+  (`--episodes 0 --n-steps-analysed 2`) and set
+  `SBATCH_ARGS="--time=HH:MM:SS"`.
+
 # The final batch CSV from the searches
 
 `make_final_batch_csv.py` turns a BO cell folder into the batch CSV for the

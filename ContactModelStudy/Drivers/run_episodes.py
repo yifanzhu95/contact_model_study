@@ -165,7 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="subtract the sample mean from each noise draw, so uniform "
                         "weights leave the planned mean in place")
     g.add_argument("--noise-sigma", type=float, default=0.05)#0.05)#0.1)#40.0)#0.01)
-    g.add_argument("--temperature", type=float, default=1e-5,#1.0,#40.0,#0.001,
+    g.add_argument("--temperature", type=float, default=1e-1,#1.0,#40.0,#0.001,
                    help="MPPI lambda; smaller is greedier")
     g.add_argument("--control-mode", default="pos_relative",
                    choices=["pos_relative", "ctrl_relative", "absolute"],
