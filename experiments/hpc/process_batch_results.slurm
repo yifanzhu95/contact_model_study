@@ -46,7 +46,7 @@
 # and --njmax; empty, each cell's own planner is used on the eval model. Set
 # OPTIMAL_ARGS when submitting to replace this (make_final_batch_csv.py prints
 # the line for a tuned optimal planner).
-OPTIMAL_ARGS="${OPTIMAL_ARGS-"--n-samples 1024 --convergence-ratio 2 --max-iterations 20 --noise-sigma 0.38 --temperature 0.001 --no-adaptive-temp"}"
+OPTIMAL_ARGS="${OPTIMAL_ARGS-"--n-samples 1024 --convergence-ratio 2 --max-iterations 20 --noise-sigma 0.05 --temperature 0.02 --no-adaptive-temp"}"
 # Analyse every STRIDE-th saved step of each episode (plans and forward
 # simulation). Warm-started results that did not save each plan's starting
 # mean must be replayed through every step: they fail with STRIDE > 1.
