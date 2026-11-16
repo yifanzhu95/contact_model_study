@@ -313,7 +313,8 @@ class EpisodeRecorder:
         """Whether an episode has started and not yet finished."""
         return self._active is not None
 
-    def recordStateAndAction(self, q, q_dot, U, sigma_U=None, planning_time=None) -> None:
+    def recordStateAndAction(self, q, q_dot, U, sigma_U=None, planning_time=None,
+                             plan: dict | None = None) -> None:
         """Append one control step to the current episode, starting one if needed.
 
         Args:
@@ -322,6 +323,11 @@ class EpisodeRecorder:
             sigma_U: The planner's uncertainty in ``U``, ``(nu,)``, if it
                 reported one. Stored as NaN otherwise.
             planning_time: Seconds the plan took. Stored as NaN if not given.
+            plan: The plan the action came from, as ``last_plan_start``,
+                ``last_action_seq`` and ``last_min_cost`` keys, read in place
+                of the planner's own attributes. For a driver whose action
+                comes from an older plan than the planner's latest (see
+                ``Drivers/run_episodes_async.py``); ``None`` reads the planner.
 
         Every step counts toward ``n_steps`` and the planning-time summary; the
         steps ``self.steps`` keeps are also stored whole. A kept step also
@@ -341,7 +347,10 @@ class EpisodeRecorder:
         if ep.n_steps == 0:
             ep.start_errors = self._goalErrors(q, q_dot)
         ep.closeLastStep(q, q_dot)
-        start = getattr(self.planner, "last_plan_start", None) or {}
+        if plan is None:
+            plan = {k: getattr(self.planner, k, None)
+                    for k in ("last_plan_start", "last_action_seq", "last_min_cost")}
+        start = plan.get("last_plan_start") or {}
         if ep.noise_seed is None and start.get("noise_seed") is not None:
             ep.noise_seed = int(start["noise_seed"])
         pt = np.nan if planning_time is None else float(planning_time)
@@ -356,7 +365,7 @@ class EpisodeRecorder:
                 "q": q, "q_dot": q_dot, "u": u,
                 "sigma_u": nan if sigma_U is None else np.asarray(sigma_U, dtype=np.float64).ravel(),
                 "planning_time": pt,
-                "planner_cost": float(getattr(self.planner, "last_min_cost", np.nan)),
+                "planner_cost": float(np.nan if plan.get("last_min_cost") is None else plan["last_min_cost"]),
                 "q_next": np.full(q.shape, np.nan), "q_dot_next": np.full(q_dot.shape, np.nan),
                 "u_prev": nan if u_prev is None else np.asarray(u_prev, dtype=np.float64).ravel(),
                 "noise_index": float(start.get("resample_count", np.nan)),
@@ -364,7 +373,7 @@ class EpisodeRecorder:
             }
             if self.steps.plans:
                 rec["mean_start"] = self._sequence(start.get("U"), u.size)
-                rec["action_seq"] = self._sequence(getattr(self.planner, "last_action_seq", None), u.size)
+                rec["action_seq"] = self._sequence(plan.get("last_action_seq"), u.size)
             ep.steps.append(rec)
         ep.n_steps += 1
 

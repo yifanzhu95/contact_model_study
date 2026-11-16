@@ -519,3 +519,151 @@ python experiments/make_final_batch_csv.py results/bayes_opt_bo_123/cell_0000_cu
   planner uses each row's own.
 
 The CSV is checked against the driver before the script exits.
+
+# Planning horizon × control period in closed loop, sync and async
+
+`horizon_closed_loop.py` asks how a model's closed-loop cost changes with its
+planning horizon, at a given control period, on an M5 world.
+
+From each start state, a planner with each horizon in `--horizons` controls
+its own M5 copy for a window of W control steps, replanning every step. The
+start states come from one of two places:
+
+- **`--seeds N` (the period sweep).** N trajectories from the task's initial
+  pose, settled as an episode is. Seed i sets the goal and the planner noise,
+  as `EpisodePool.episodeSeeds(--seed, i)` does for episode i of
+  `run_episodes.py`, and every planner starts from its own initial mean. The
+  seeds are the same for every model, period and horizon. `--goal-face F`
+  gives every seed one goal instead, the start turned to show face F on top
+  (`LeapReorient.goalShowing`; "S" is the cube flipped upside down), so the
+  seeds differ only in planner noise.
+- **A driver (the default).** A driver planner runs short episodes on M5, and
+  every `--every` steps its state becomes a start state. Each is repeated K
+  times (`--repeats`) with different noise seeds, all from the same state,
+  control and warm-start mean.
+
+The output holds the running cost after every step and the terminal cost at
+the end, and the step at which each trajectory failed or reached the goal. Per
+horizon, `cost_stats` in the .json gives each cost's mean over the start
+states with its standard error and 95% t-interval.
+
+There are two closed loops:
+
+- **Sync (the default).** The eval sim waits for every `Plan()`, as
+  `run_episodes.py` does. Planning time is free.
+- **`--async`.** The loop of `run_episodes_async.py` (tape executor). Planning
+  time passes as sim time, so a planner slower than its control period plays
+  later rows of older plans. Latency is measured, so run one job at a time on
+  an otherwise idle GPU.
+
+The period sweep is one `horizon_closed_loop.py` *run* per model and control
+period: sync runs M1–M6, async M1–M4 and M6, each at every 8 ms from 16 to
+128 ms (substeps 4–32; 15 periods). Every run holds the same settings in
+seconds, rounded to whole control steps:
+
+- **The trajectories.** 10 seeds (`--seeds 10`; `SEEDS=` for fewer), each a
+  ~1 s window from the initial pose toward one goal, the "S" face up (the cube
+  flipped upside down, `--goal-face S`): round(1 s / dt) steps (0.96–1.04 s).
+  One goal for every seed keeps the spread down to planner noise, where
+  different goals, some nearer than others, swamped it. The window is long
+  enough for the planners' costs to separate and short enough that none should
+  reach the goal; the plot reports any run in which a trajectory did.
+- **The horizons.** Log-spaced and the same lengths in seconds at every
+  period: one step and round(T / dt) steps for T = 1.28 s divided by 2^¼ again
+  and again, down to 12 ms. That is every step up to 8 and then ~19% apart
+  (1–8, 10, 12, 14, 17, 20 at 64 ms; 10–21 per period, 199 per model), evenly
+  spread on the heatmap's log axis and dense under and just past the
+  real-time front, which sits at 4–10 steps for M1–M4 and M6 at every period.
+- **The score.** Each trajectory's cost, with the planner's cost averaged over
+  its horizon (`--mean-cost-over-horizon`); the plots show the mean over the 10
+  seeds with ±1 standard error. The seeds are the same at every horizon and
+  period, so differences between points are paired and better resolved than
+  the error bars on each point suggest.
+
+Each run is one job, written to `chunks/<name>_c00of01.*`, except that a run
+with more than 40 horizons (16 for M5) is split into *chunks*
+(`period_sweep_jobs.py`), interleaved so they cost about the same and all
+running the same seeds: M5 at 16–32 ms, two chunks each. The **merge** (`horizon_cl_results.py merge`) joins a run's chunks
+into `<name>.{json,npz}`, the files the plots read.
+
+On the HPC (`hpc/`), each model is one array task on its own GPU, running all
+of its runs one after another. The sweep is sync unless `--async` is given.
+The submit script also queues the merge and plots, and for sync the solo
+plan-time benchmark:
+
+```bash
+experiments/hpc/submit_period_sweep.sh                # sync: M1-M6 on six GPUs, bench_plan_time, merge + plots
+experiments/hpc/submit_period_sweep.sh 3              # at most 3 models at once
+MODELS="M1 M3" PERIODS="16 64" experiments/hpc/submit_period_sweep.sh
+MODELS=M2 SEEDS=3 experiments/hpc/submit_period_sweep.sh   # a quick look: runs named _goalS_seeds3
+SBATCH_ARGS="--exclusive" experiments/hpc/submit_period_sweep.sh --async   # async: M1-M4, M6
+```
+
+Scaled from the M2 preview (3 seeds, Nov 2026, RTX 4090), the sync sweep with 10
+seeds is ~16 GPU-hours: ~1.3–2.2 h per model for M1–M4 and M6 and ~7 h for M5,
+which plans several times slower and so sets the wall-clock time. Async adds ~5
+(about 1 h per model) and the plan-time benchmark ~1. Every horizon step to
+1.28 s would be ~64 in all, every step to 1 s ~40.
+
+On a workstation, one job after another:
+
+```bash
+experiments/run_period_sweep.sh
+python experiments/bench_plan_time.py --out results/horizon_kl_sweep/plan_time_solo.json
+python experiments/plot_period_sweep.py results/horizon_kl_sweep/cl_period_onM5_T0.1_meancost
+
+experiments/run_period_sweep.sh --async
+python experiments/plot_period_sweep.py --async results/horizon_kl_sweep/acl_period_onM5_T0.1_meancost
+```
+
+- **The runner.** `run_period_sweep.sh [--async]` runs every chunk, one at a
+  time, then the merge, sync unless `--async` comes first; `STAGE=chunks|merge`
+  runs one. Each HPC array task is `MODELS=<its model> STAGE=chunks`. It writes under `$OUTDIR`
+  (default `results/horizon_kl_sweep`) and skips anything already written, so
+  a stopped sweep resumes. `MODELS=`, `PERIODS=` and `SEEDS=` narrow the jobs, and
+  `PYTHON=` picks the interpreter.
+- **Latency is measured where the sweep runs.** Async plan times, and the
+  solo times behind the sync real-time cutoff, belong to the GPU they were
+  measured on. Run every job of a sweep on one GPU type
+  (`hpc/period_sweep.slurm` asks for an RTX 5000 Ada), with
+  `SBATCH_ARGS="--exclusive"` if other jobs share the nodes.
+- **Earlier runs.** The driver-start runs from before the seeds
+  (`..._S8K6`, and at 64 ms `cl_<M>_..._W20_all`, `cl_M5_..._W20_every2_S8K6`)
+  are plotted only where there is no `_goalS_seeds10` run of that model and period.
+- **The plots.** `plot_period_sweep.py` writes `_running`, `_whole` and
+  `_terminal` PNGs: one panel per model and one line per control period, each
+  the mean cost over the seeds with a ±1 standard error band (over the start
+  states, of the mean over repeats, for a driver run). A segment is dotted, with
+  hollow markers, where the mean plan time exceeds the control period. For
+  sync this is the solo time from `bench_plan_time.py` (M5's from its own
+  runs). For `--async` it is the time measured in the run itself.
+- **Heatmaps (`--heatmap`).** The same data as `_heat_{running,whole,terminal}`
+  PNGs: one heatmap per model, control frequency across and horizon up (log
+  scale), the mean cost as colour and printed in each cell tall enough for it
+  (with ± its standard error where there is room). A
+  red dotted staircase marks the Pareto frontier, taken as the real-time
+  (async: keeps-up) limit: in each column, the cells below it have a mean plan
+  time within the control period (the longest such run from one step up).
+- **All frontiers on one plot (`--frontiers`).** `_frontiers.png`: each
+  model's real-time (async: keeps-up) frontier as a staircase in its own hue,
+  at the longest real-time horizon of each period. A segment's intensity is
+  the whole-trajectory cost at that horizon, stronger for lower cost, on one scale
+  across models.
+- **Brownian noise (`--brownian-sigma`).** By default `--noise-sigma` is the
+  noise per control step at every period. With `--brownian-sigma` it scales as
+  a Brownian increment: `σ · √(dt / 64 ms)` (reference set by
+  `--sigma-ref-dt`). The noise variance per second of plan is then the same at
+  every period: σ = 0.025, 0.035, 0.05, 0.071 at 16, 32, 64, 128 ms. Run it
+  under a tag, so it doesn't skip on or overwrite the base runs, and plot with
+  the same tag:
+
+  ```bash
+  TAG=_bsig SWEEP_ARGS="--brownian-sigma" experiments/hpc/submit_period_sweep.sh --async
+  # or locally:
+  TAG=_bsig experiments/run_period_sweep.sh --async --brownian-sigma
+  python experiments/plot_period_sweep.py --async --tag _bsig results/horizon_kl_sweep/acl_period_bsig_onM5_T0.1_meancost
+  ```
+- **Other settings.** Flags after the mode (`SWEEP_ARGS` on the HPC) go to
+  every job. Any
+  `horizon_closed_loop.py` flag it doesn't know goes to the driver's parser,
+  e.g. `--executor zoh` or `--plan-latency-ms 50` under `--async`.

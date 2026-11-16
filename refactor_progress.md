@@ -64,7 +64,7 @@ every existing script still runs while the port is in progress.
 | Module | Status | Ported from | Notes |
 | --- | --- | --- | --- |
 | `Drivers/run_episodes.py` | DONE | `contact_study/drivers/run_eval_episode.py` | Closed-loop MPC episodes + video + JSON |
-| `Drivers/run_episodes_parallel.py` | DEFER | `contact_study/drivers/run_async_eval_episode.py` | "Ignore for now" |
+| `Drivers/run_episodes_async.py` | DONE | `contact_study/drivers/run_async_eval_episode.py` | Plan latency spent as sim time; `tape` (default) / `zoh` / `time` executors; `tests/test_run_episodes_async.py` |
 | `Utils/MjcfModelInfo.py` | DONE | new (replaces the scattered MJCF readers) | MJCF parameters resolved by MuJoCo, shared by Pinocchio and Drake |
 | `Utils/EvalSimulators.py` | DONE | `Drivers/run_episodes.py` (moved out) | `makeEvalSim(name, xml, timestep)` + `EVAL_SIMS`; builds the MuJoCo / Pinocchio / Drake eval simulator by name |
 | `Utils/Quaternions.py` | DONE | `Tasks/LeapReorient.py` header (moved out) | `matToQuat`, `axisAngleQuat`, `quatMul` (wxyz) |

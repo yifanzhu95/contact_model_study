@@ -38,6 +38,7 @@ ContactModelStudy/
 │   └── MujocoVideoRenderer.py  draws any simulator's state with MuJoCo
 ├── Drivers/
 │   ├── run_episodes.py            closed-loop episodes, one at a time
+│   ├── run_episodes_async.py      the same, but planning takes sim time: slow plans are played out row by row
 │   ├── run_episodes_interwoven.py two episodes at once: one plans on the GPU while the other steps on the CPU
 │   ├── run_episodes_pooled.py     many at once, across the GPUs and CPU cores of a machine
 │   └── EpisodePool.py             the engine behind the parallel drivers and the BO search
@@ -636,6 +637,10 @@ fails on either half of the old settings.
 python ContactModelStudy/Drivers/run_episodes.py --task cube_reorient --n-episodes 5
 python ContactModelStudy/Drivers/run_episodes.py --rollout-model M3 --eval-sim pinocchio --no-video
 python ContactModelStudy/Drivers/run_episodes.py --hand-acc low --ctrl-time-step 0.032 --time-horizon 0.256
+
+# planning latency charged against the dynamics (same options, plus --executor, --plan-latency-ms, ...)
+python ContactModelStudy/Drivers/run_episodes_async.py --rollout-model M5
+python ContactModelStudy/Drivers/run_episodes_async.py --plan-latency-ms 150 --executor zoh
 
 # the same episodes, run concurrently (same options, plus the pool's size)
 python ContactModelStudy/Drivers/run_episodes_interwoven.py --n-episodes 10

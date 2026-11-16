@@ -266,51 +266,8 @@ def run_episode(args, task, eval_task, sim, planner, renderer, recorder) -> str:
         A multi-goal episode that reached goals and then ran out of steps ends
         in ``"timeout"``; its summary still reports it as a success.
     """
-    eval_task.setSimToInitialState(sim)
-    _, _, u0 = eval_task.getInitialState()
-    # Under absolute control the mean IS the command, so a zero mean would open
-    # the hand and drop the object on the first plan; seed it with the task's
-    # initial grasp. Under both relative modes the mean is a delta, and zero
-    # correctly means "hold" — the pose, or the command.
-    reset_mean = u0 if args.control_mode == "absolute" else None
-    _newGoal(task, eval_task, renderer, recorder)
-    planner.Reset(reset_mean)
-    if renderer is not None:
-        renderer.Reset()
-
-    # One control step advances the eval simulator this many of its own (fine)
-    # steps: the planner's (resolved) substeps rollout steps, each task.timestep long.
-    # From the two timesteps rather than eval_steps_per_rollout_step, so it is
-    # also right for a planner on the eval scene (rollout step = eval step).
-    eval_steps = int(round(planner.substeps * task.timestep / eval_task.timestep))
-    # Frames are due every `steps_per_frame` eval steps — on the simulation
-    # clock, not the control clock. A control step can be longer than a frame
-    # (64 ms vs 33 ms at 30 fps), so capturing once per control step would drop
-    # frames and play back fast; _advance steps the eval sim in pieces that end
-    # exactly on each frame deadline instead.
-    steps_per_frame = renderer.getStepsPerFrame() if renderer is not None else 0
-    eval_clock = [0]            # eval steps taken this episode
-
-    def _advance(n: int) -> None:
-        """Advance the eval sim n steps, capturing every frame that falls due."""
-        if renderer is None:
-            sim.Step(n)
-            return
-        while n > 0:
-            chunk = min(n, steps_per_frame - eval_clock[0] % steps_per_frame)
-            sim.Step(chunk)
-            eval_clock[0] += chunk
-            n -= chunk
-            if eval_clock[0] % steps_per_frame == 0:
-                renderer.RenderState(sim.GetState()[0])
-
-    if renderer is not None:
-        renderer.RenderState(sim.GetState()[0])
-    # Settle: the object drops into the palm and the hand closes on it under
-    # the initial grasp command, which setSimToInitialState applied and which
-    # is held here. Filmed like the rest, so the video opens with it; nothing is
-    # planned or recorded until it is over, and it does not count as a step.
-    _advance(int(round(args.settle / eval_task.timestep)))
+    reset_mean, clock = startEpisode(args, task, eval_task, sim, planner, renderer, recorder)
+    eval_steps = controlEvalSteps(task, eval_task, planner)
 
     end_reason = "timeout"
     for _ in range(args.steps):
@@ -338,17 +295,95 @@ def run_episode(args, task, eval_task, sim, planner, renderer, recorder) -> str:
         recorder.recordStateAndAction(q, q_dot, u, sigma, planning_time=dt)
 
         sim.SetControl(u)
-        _advance(eval_steps)
+        clock.advance(eval_steps)
 
-    # End on the final state, unless that state was itself a frame deadline and
-    # is already the last frame — a duplicate would stretch playback by a frame.
-    if renderer is not None and eval_clock[0] % steps_per_frame != 0:
-        renderer.RenderState(sim.GetState()[0])
+    clock.finish()
     return end_reason
 
 
-def _printEpisode(episode: int, s: dict, args) -> None:
-    """One episode's result, from the recorder's summary of it."""
+class EvalClock:
+    """Steps the eval simulator, filming every frame that falls due on the way.
+
+    Frames are due every ``steps_per_frame`` eval steps — on the simulation
+    clock, not the control clock. A control step can be longer than a frame
+    (64 ms vs 33 ms at 30 fps), so capturing once per control step would drop
+    frames and play back fast; ``advance`` steps the eval sim in pieces that
+    end exactly on each frame deadline instead.
+    """
+
+    def __init__(self, sim, renderer):
+        self.sim = sim
+        self.renderer = renderer
+        self.steps_per_frame = renderer.getStepsPerFrame() if renderer is not None else 0
+        #: Eval steps taken this episode.
+        self.t = 0
+
+    def advance(self, n: int) -> None:
+        """Advance the eval sim n steps, capturing every frame that falls due."""
+        if self.renderer is None:
+            self.sim.Step(n)
+            self.t += n
+            return
+        while n > 0:
+            chunk = min(n, self.steps_per_frame - self.t % self.steps_per_frame)
+            self.sim.Step(chunk)
+            self.t += chunk
+            n -= chunk
+            if self.t % self.steps_per_frame == 0:
+                self.renderer.RenderState(self.sim.GetState()[0])
+
+    def finish(self) -> None:
+        """Film the final state, unless it was itself a frame deadline and is
+        already the last frame — a duplicate would stretch playback by a frame."""
+        if self.renderer is not None and self.t % self.steps_per_frame != 0:
+            self.renderer.RenderState(self.sim.GetState()[0])
+
+
+def controlEvalSteps(task, eval_task, planner) -> int:
+    """Eval-simulator (fine) steps in one control step.
+
+    The planner's (resolved) substeps rollout steps, each ``task.timestep``
+    long. From the two timesteps rather than eval_steps_per_rollout_step, so it
+    is also right for a planner on the eval scene (rollout step = eval step).
+    """
+    return int(round(planner.substeps * task.timestep / eval_task.timestep))
+
+
+def startEpisode(args, task, eval_task, sim, planner, renderer, recorder):
+    """Reset everything for a new episode and settle it; ``(reset_mean, EvalClock)``.
+
+    ``reset_mean`` is what ``planner.Reset`` is seeded with, again at every new
+    goal. The clock has already run the settle.
+    """
+    eval_task.setSimToInitialState(sim)
+    _, _, u0 = eval_task.getInitialState()
+    # Under absolute control the mean IS the command, so a zero mean would open
+    # the hand and drop the object on the first plan; seed it with the task's
+    # initial grasp. Under both relative modes the mean is a delta, and zero
+    # correctly means "hold" — the pose, or the command.
+    reset_mean = u0 if args.control_mode == "absolute" else None
+    _newGoal(task, eval_task, renderer, recorder)
+    planner.Reset(reset_mean)
+    if renderer is not None:
+        renderer.Reset()
+
+    clock = EvalClock(sim, renderer)
+    if renderer is not None:
+        renderer.RenderState(sim.GetState()[0])
+    # Settle: the object drops into the palm and the hand closes on it under
+    # the initial grasp command, which setSimToInitialState applied and which
+    # is held here. Filmed like the rest, so the video opens with it; nothing is
+    # planned or recorded until it is over, and it does not count as a step.
+    clock.advance(int(round(args.settle / eval_task.timestep)))
+    return reset_mean, clock
+
+
+def _printEpisode(episode: int, s: dict, args, first_plan_compiles: bool = True) -> None:
+    """One episode's result, from the recorder's summary of it.
+
+    ``first_plan_compiles``: the run's first plan paid for compilation and graph
+    capture (false when a warm-up already did).
+    """
     outcome = ("SUCCESS" if s["success"] else "FAILED" if s["failed"]
                else s["finish_reason"])
     where = (f" at step {s['steps_to_success']}" if s["success"]
@@ -363,7 +398,7 @@ def _printEpisode(episode: int, s: dict, args) -> None:
     if s.get("plan_s_mean"):
         # Only the run's very first plan compiles kernels and captures the
         # graph; later episodes reuse both.
-        note = " (compile + graph capture)" if episode == 0 else ""
+        note = " (compile + graph capture)" if episode == 0 and first_plan_compiles else ""
         mean_ms, max_ms, first_ms = (1e3 * s[k] for k in ("plan_s_mean", "plan_s_max", "plan_s_first"))
         print(f"  plan {mean_ms:.1f} ms mean, {max_ms:.1f} ms max "
               f"({1e3 / mean_ms:.0f} Hz), first {first_ms:.0f} ms{note}")
@@ -464,8 +499,15 @@ def buildPlannerConfig(args) -> MPPI_Config:
     )
 
 
-def runRecordedEpisode(episode: int, args, task, eval_task, sim, planner, recorder) -> dict:
-    """One episode, with its video if asked for, finished in ``recorder``; returns its summary."""
+def runRecordedEpisode(episode: int, args, task, eval_task, sim, planner, recorder,
+                       episode_fn=None) -> dict:
+    """One episode, with its video if asked for, finished in ``recorder``; returns its summary.
+
+    ``episode_fn`` runs the episode itself, with ``run_episode``'s signature
+    and return value; it defaults to ``run_episode``. It may return
+    ``(end_reason, extra)``, ``extra`` a dict of its own summary entries.
+    """
+    episode_fn = episode_fn or run_episode
     renderer = None
     video_path = None
     if args.video:
@@ -483,7 +525,10 @@ def runRecordedEpisode(episode: int, args, task, eval_task, sim, planner, record
         renderer = MujocoVideoRenderer(eval_task, cfg)
     extra = {"episode": episode, "settle_s": args.settle}
     try:
-        end_reason = run_episode(args, task, eval_task, sim, planner, renderer, recorder)
+        end_reason = episode_fn(args, task, eval_task, sim, planner, renderer, recorder)
+        if isinstance(end_reason, tuple):
+            end_reason, more = end_reason
+            extra.update(more)
         if renderer is not None:
             extra["video"] = str(renderer.Save(video_path))
     finally:

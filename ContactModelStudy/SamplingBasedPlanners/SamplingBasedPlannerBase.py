@@ -287,6 +287,10 @@ class SamplingBasedPlannerBase(abc.ABC):
         self.last_free_energy: float | None = None
         self.last_free_energy_drop: float | None = None
         self.last_free_energy_drop_se: float | None = None
+        #: Control steps the ``"shift"`` warm start moves the mean by. One
+        #: suits a planner run once per control step; an asynchronous driver,
+        #: whose solves span several, sets it to how many the last one took.
+        self.shift_steps: int = 1
 
         self._setupArrays()
 
@@ -716,7 +720,7 @@ class SamplingBasedPlannerBase(abc.ABC):
         if self.config.warm_start == "shift":
             wp.launch(
                 _shift_kernel, dim=(self.horizon, self.nu),
-                inputs=[self.U_wp, self.horizon, 1],
+                inputs=[self.U_wp, self.horizon, int(self.shift_steps)],
                 outputs=[self.U_shift_wp],
             )
             self.U_wp, self.U_shift_wp = self.U_shift_wp, self.U_wp

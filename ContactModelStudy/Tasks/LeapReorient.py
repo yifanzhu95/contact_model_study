@@ -450,6 +450,26 @@ class LeapReorient(TaskBase):
             r = self._turnTo(self._pick(others), up, twist=True)
         return quatMul(g, r)
 
+    def goalShowing(self, face: str) -> np.ndarray:
+        """The starting orientation turned, with no twist, to show ``face`` on top (wxyz).
+
+        A fixed goal, for comparisons that must all chase the same one: from
+        the cube's start (R up), "S" is the 180-degree flip of level 5. For a
+        letter on two faces, the first in ``_AXIS_LETTERS``. Raises
+        ``ValueError`` for a letter on no face.
+        """
+        axes = [a for a, letter in _AXIS_LETTERS.items() if letter == face]
+        if not axes:
+            raise ValueError(f"no face shows {face!r}; the faces are {sorted(set(_AXIS_LETTERS.values()))}")
+        axis, sign = axes[0]
+        v = np.zeros(3)
+        v[axis] = float(sign)
+        g = self._start_quat
+        up = self._upVector(g)
+        if float(np.dot(v, up)) > 0.5:
+            return g.copy()
+        return quatMul(g, self._turnTo(v, up, twist=False))
+
     def setGoal(self, goal: np.ndarray) -> None:
         """Adopt ``goal``, a wxyz target orientation; see ``TaskBase.setGoal``.
 
