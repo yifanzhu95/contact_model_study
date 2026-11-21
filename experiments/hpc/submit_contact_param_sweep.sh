@@ -13,7 +13,8 @@
 # Run from the repo root. It:
 #   1. counts the folder's cells (its cell_*.status.json files),
 #   2. submits contact_param_sweep.slurm with --array sized to them,
-#   3. queues summarize_contact_param_sweep.slurm to build sweep_results.csv once the array has finished.
+#   3. queues summarize_contact_param_sweep.slurm to build sweep_results.csv and the plots
+#      (sweep/plots) once the array has finished.
 # Cells already done are skipped and a cell cut off resumes from its checkpoint, so resubmitting resumes.
 set -euo pipefail
 
@@ -58,4 +59,4 @@ echo "submitted $N cells of $BATCH_DIR as array job $JOB (--array=$ARRAY)"
 
 sbatch --parsable --dependency=afterany:"$JOB" --export="ALL,BATCH_DIR=$BATCH_DIR,PROJ_DIR=$PROJ_DIR" \
     experiments/hpc/summarize_contact_param_sweep.slurm >/dev/null \
-    && echo "summary job queued after $JOB -> $BATCH_DIR/sweep_results.csv"
+    && echo "summary job queued after $JOB -> $BATCH_DIR/sweep_results.csv, $BATCH_DIR/sweep/plots/"

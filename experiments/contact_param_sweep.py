@@ -40,6 +40,14 @@ M4     relaxation, contact_compliance,      {0.1, 0.25, 0.5, ..., 3.5} (steps of
                                             fixed at 2
 M6     alpha, gamma, refinement             x {0.1, 0.15, 0.2, ..., 1, ..., 7, 10} each;
                                             refinement fixed at 2
+M1     solref_timeconst, solref_dampratio   timeconst x {1, 1.5, 2, 4, 8} (nominal 2 dt is
+                                            its floor); dampratio x {0.25, 0.5, 1, 2, 4}
+M2     solref_timeconst, solref_dampratio   timeconst x {0.4, 0.6, 1, 2, 4} (0.4 x 0.02 s
+                                            is 2 dt at 4 ms); dampratio x {0.25, 0.5, 1, 2, 4}
+M3     stiffness, damping                   x {0.25, 0.5, 1, 2, 4} each
+M4     xpbd_iterations, relaxation          {1, 2, 3, 4, 6}; {1, 1.5, 2, 2.5, 3, 3.5}
+M6     alpha, gamma                         x {0.25, 0.5, 1, 2, 4} each (refinement held at
+                                            the preset's 2 passes)
 =====  ===================================  ===========================================
 
 A multiplier is on the parameter's nominal value: the preset, with the task's
@@ -138,6 +146,16 @@ SWEEP_PARAMS: dict[str, dict[str, tuple[str, tuple]]] = {
     "M6": {"alpha": ("mult", (0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0, 1.4, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0)),
            "gamma": ("mult", (0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0, 1.4, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0)),
            "refinement": ("abs", (2,))},
+    "M1": {"solref_timeconst": ("mult", (1.0, 1.5, 2.0, 4.0, 8.0)),
+           "solref_dampratio": ("mult", (0.25, 0.5, 1.0, 2.0, 4.0))},
+    "M2": {"solref_timeconst": ("mult", (0.4, 0.6, 1.0, 2.0, 4.0)),
+           "solref_dampratio": ("mult", (0.25, 0.5, 1.0, 2.0, 4.0))},
+    "M3": {"stiffness": ("mult", (0.25, 0.5, 1.0, 2.0, 4.0)),
+           "damping": ("mult", (0.25, 0.5, 1.0, 2.0, 4.0))},
+    "M4": {"xpbd_iterations": ("abs", (1, 2, 3, 4, 6)),
+           "relaxation": ("abs", (1.0, 1.5, 2.0, 2.5, 3.0, 3.5))},
+    "M6": {"alpha": ("mult", (0.25, 0.5, 1.0, 2.0, 4.0)),
+           "gamma": ("mult", (0.25, 0.5, 1.0, 2.0, 4.0))},     # refinement: the preset's
 }
 
 #: The parameters that take whole numbers.

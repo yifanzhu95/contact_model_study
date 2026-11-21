@@ -477,7 +477,8 @@ grid, and its regret is the cell's `process_batch_results` regret.
   clock resumes from there.
 
 **On the HPC.** `submit_contact_param_sweep.sh` submits one task per cell and
-then the summary.
+then the summary job, which writes `sweep_results.csv` and every swept cell's
+plots (`sweep/plots/`).
 - The slurm header sets the steps per episode (`N_STEPS_ANALYSED`, 20), the
   score block (4) and the Kamino settings.
 - `EPISODES="0-4"` picks the episodes of every cell. Other flags go in
