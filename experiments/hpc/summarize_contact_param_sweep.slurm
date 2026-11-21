@@ -4,13 +4,16 @@
 #SBATCH --error=logs/contact_param_sweep_summary_%j.err
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=4G
-#SBATCH --time=00:15:00
+#SBATCH --time=00:30:00
 # Builds sweep_results.csv / .json in BATCH_DIR: one row per grid point of
-# every swept cell, one per cell not done (with its status). Queued by
+# every swept cell, one per cell not done (with its status). Then plots every
+# swept cell (plot_contact_param_sweep.py): its regret heatmap and ranking, in
+# BATCH_DIR/sweep/plots. Queued by
 # submit_contact_param_sweep.sh to run after the whole array (afterany, so it
 # also runs when some cells failed or ran out of time). By hand:
 #   BATCH_DIR=/abs/results/episode_batches_x_123 sbatch experiments/hpc/summarize_contact_param_sweep.slurm
 # or directly: python experiments/contact_param_sweep.py <BATCH_DIR> --summarize
+#               python experiments/plot_contact_param_sweep.py <BATCH_DIR>
 
 set -euo pipefail
 PROJ_DIR="${PROJ_DIR:-/home/kg878/project_pi_amd78/kg878/Projects/contact_model_study}"
@@ -23,3 +26,4 @@ eval "$(conda shell.bash hook)"
 conda activate "${CONDA_ENV:-contact_comfree2}"
 
 python experiments/contact_param_sweep.py "$BATCH_DIR" --summarize
+python experiments/plot_contact_param_sweep.py "$BATCH_DIR"

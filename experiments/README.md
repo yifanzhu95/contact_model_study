@@ -449,7 +449,7 @@ grid, and its regret is the cell's `process_batch_results` regret.
 | M2 | `solref_timeconst`, `solref_dampratio` | ×{0.4, 0.6, 1, 2, 4}; ×{0.25, 0.5, 1, 2, 4} | 25 |
 | M3 | `stiffness`, `damping` | ×{0.25, 0.5, 1, 2, 4} each | 25 |
 | M4 | `xpbd_iterations`, `relaxation` | {1, 2, 3, 4, 6}; {1, 1.5, 2, 2.5, 3, 3.5} | 30 |
-| M6 | `alpha`, `gamma`, `refinement` | ×{0.25, 0.5, 1, 2, 4} each; {0, 1, 2, 3, 4} | 125 |
+| M6 | `alpha`, `gamma` (refinement held at the preset's 2) | ×{0.25, 0.5, 1, 2, 4} each | 25 |
 
 - **Nominal values** are the preset with the task's tuning. M1's time constant
   is its resolved 2·dt. M2's solref comes from the rollout scene.
@@ -477,14 +477,15 @@ grid, and its regret is the cell's `process_batch_results` regret.
   clock resumes from there.
 
 **On the HPC.** `submit_contact_param_sweep.sh` submits one task per cell and
-then the summary.
+then the summary job, which writes `sweep_results.csv` and every swept cell's
+plots (`sweep/plots/`).
 - The slurm header sets the steps per episode (`N_STEPS_ANALYSED`, 20), the
   score block (4) and the Kamino settings.
 - `EPISODES="0-4"` picks the episodes of every cell. Other flags go in
   `SWEEP_ARGS`.
-- An M6 cell costs about 6× an M3 cell: ~115 s against ~20 s a step on an
-  RTX 4090, with M5 as the eval model. Time one cell by hand first
-  (`--episodes 0 --n-steps-analysed 2`) and set
+- An M6 cell costs a little more than an M3 cell: ~25 s against ~20 s a step
+  on an RTX 4090, with M5 as the eval model (~4 h for 30 episodes × 20 steps).
+  Time one cell by hand first (`--episodes 0 --n-steps-analysed 2`) and set
   `SBATCH_ARGS="--time=HH:MM:SS"`.
 
 # The final batch CSV from the searches
