@@ -3,8 +3,9 @@
 
 One figure per swept cell, read from ``sweep/<cell>.sweep.json``: the mean
 regret over the analysed steps at each grid point, the first swept parameter
-across and the second up. A model with a third parameter (M6's refinement) gets
-one panel per value of it, all on one colour scale. Regret is a signed
+across and the second up. A model with a third parameter (M4's iterations, M6's
+refinement; held at one value by default) gets one panel per value of it, all on
+one colour scale. Regret is a signed
 difference of free energies (``F_A(U_B(θ)) - F_A(U_A)``), so the scale diverges
 from zero: red where planning with θ cost more than the zero-gap plan, blue
 where it scored better (sampling noise can do that at a step), gray near zero.

@@ -31,7 +31,7 @@ def rollout(model: str):
 
 
 # -- the grid ------------------------------------------------------------------------------
-@pytest.mark.parametrize("model, size", [("M1", 25), ("M2", 25), ("M3", 25), ("M4", 30), ("M6", 125)])
+@pytest.mark.parametrize("model, size", [("M1", 225), ("M2", 225), ("M3", 225), ("M4", 225), ("M6", 225)])
 def test_each_model_sweeps_a_full_grid_around_its_nominal(model, size):
     task, ov = rollout(model)
     nominal = cps.nominalParams(model, task, ov)
@@ -41,13 +41,20 @@ def test_each_model_sweeps_a_full_grid_around_its_nominal(model, size):
     assert grid[cps.nominalIndex(grid, nominal)] == pytest.approx(nominal)
 
 
+@pytest.mark.parametrize("model, fixed", [("M4", "xpbd_iterations"), ("M6", "refinement")])
+def test_xpbd_iterations_and_m6_refinement_are_held_at_two(model, fixed):
+    task, ov = rollout(model)
+    grid, _ = cps.buildGrid(model, cps.nominalParams(model, task, ov), task, ov)
+    assert {theta[fixed] for theta in grid} == {2}
+
+
 def test_the_nominal_is_the_cells_own_model():
     task, ov = rollout("M1")
     assert cps.nominalParams("M1", task, ov)["solref_timeconst"] == pytest.approx(2 * task.timestep)
     task, ov = rollout("M3")
     assert cps.nominalParams("mujoco_soft", task, ov) == cps.sceneSolref(task.getModelPath())
     assert cps.nominalParams("M3", task, ov) == task.contactParams("M3")       # the task's tuning
-    assert cps.nominalParams("M4", task, ov) == {"xpbd_iterations": 2, "relaxation": 2.5}
+    assert cps.nominalParams("M4", task, ov) == {"relaxation": 2.5, "contact_compliance": 0.0, "xpbd_iterations": 2}
 
 
 def test_values_and_multipliers_replace_the_defaults():
@@ -59,7 +66,7 @@ def test_values_and_multipliers_replace_the_defaults():
     assert per["stiffness"] == [0.5, nominal["stiffness"], 1.0]            # the nominal is always in
     assert per["damping"] == pytest.approx([nominal["damping"], 2 * nominal["damping"]])
     # Whole numbers stay whole, and repeats are dropped.
-    assert cps.paramValues("M4", {"xpbd_iterations": 2, "relaxation": 2.5},
+    assert cps.paramValues("M4", {"xpbd_iterations": 2, "relaxation": 2.5, "contact_compliance": 0.0},
                            cps.parseValueSpecs(["xpbd_iterations=1.2,2,3"], "--values"))["xpbd_iterations"] == [1, 2, 3]
     for bad in ("stiffness", "stiffness=", "nope=1", "M3:alpha=1", "stiffness=a,b"):
         with pytest.raises(ValueError):

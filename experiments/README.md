@@ -445,11 +445,11 @@ grid, and its regret is the cell's `process_batch_results` regret.
 
 | Model | Parameters | Default values (× nominal unless listed) | Points |
 |---|---|---|---|
-| M1 | `solref_timeconst`, `solref_dampratio` | ×{1, 1.5, 2, 4, 8}; ×{0.25, 0.5, 1, 2, 4} | 25 |
-| M2 | `solref_timeconst`, `solref_dampratio` | ×{0.4, 0.6, 1, 2, 4}; ×{0.25, 0.5, 1, 2, 4} | 25 |
-| M3 | `stiffness`, `damping` | ×{0.25, 0.5, 1, 2, 4} each | 25 |
-| M4 | `xpbd_iterations`, `relaxation` | {1, 2, 3, 4, 6}; {1, 1.5, 2, 2.5, 3, 3.5} | 30 |
-| M6 | `alpha`, `gamma`, `refinement` | ×{0.25, 0.5, 1, 2, 4} each; {0, 1, 2, 3, 4} | 125 |
+| M1 | `solref_timeconst`, `solref_dampratio` | ×{1, 1.2, 1.4, 1.7, 2, 2.4, 2.8, 3.4, 4, 4.8, 5.7, 6.7, 8, 11, 16}; ×{0.125, 0.17, 0.22, 0.3, 0.4, 0.54, 0.73, 1, 1.35, 1.8, 2.4, 3.3, 4.4, 6, 8} | 225 |
+| M2 | `solref_timeconst`, `solref_dampratio` | ×{0.4, 0.5, 0.6, 0.7, 0.8, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 8}; dampratio as M1 | 225 |
+| M3 | `stiffness`, `damping` | ×{0.125, 0.17, ..., 6, 8} each, as M1's dampratio | 225 |
+| M4 | `relaxation`, `contact_compliance`, `xpbd_iterations` | {0.1, 0.25, 0.5, ..., 3.5} in steps of 0.25; {0, 1e-8, 3e-8, 1e-7, 3e-7, 1e-6, 2e-6, 5e-6, 1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3} m/N; iterations fixed at 2 | 225 |
+| M6 | `alpha`, `gamma`, `refinement` | ×{0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.7, 1, 1.4, 2, 3, 4, 5, 7, 10} each; refinement fixed at 2 | 225 |
 
 - **Nominal values** are the preset with the task's tuning. M1's time constant
   is its resolved 2·dt. M2's solref comes from the rollout scene.
@@ -482,8 +482,10 @@ then the summary.
   score block (4) and the Kamino settings.
 - `EPISODES="0-4"` picks the episodes of every cell. Other flags go in
   `SWEEP_ARGS`.
-- An M6 cell costs about 6× an M3 cell: ~115 s against ~20 s a step on an
-  RTX 4090, with M5 as the eval model. Time one cell by hand first
+- The score blocks dominate the cost: ~1.9 s each per step with M5 as the eval
+  model (the Nov 2026 run on the cluster's GPUs). At 225 grid points (75
+  blocks) a cell of 30 episodes × 20 steps takes ~27-30 h, so the slurm
+  header asks for 48 h. Time one cell by hand first
   (`--episodes 0 --n-steps-analysed 2`) and set
   `SBATCH_ARGS="--time=HH:MM:SS"`.
 

@@ -7,21 +7,21 @@
 #SBATCH --gpus=rtx_5000_ada:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=24:00:00          # an M3 cell of 30 x 20 steps: ~3.5 h expected; M6: ~19 h; see below
+#SBATCH --time=48:00:00          # a cell of 30 x 20 steps at 225 grid points: ~27-30 h expected; see below
 # One array task = one cell of an episode-batch results folder = one GPU. At
 # every analysed step of the episodes chosen, it plans once with the zero-gap
 # planner (the cell's planner on the eval model), plans again with the cell's
 # planner at every point of a grid over its rollout model's contact
 # parameters, and scores every plan's free energy on the eval model; see
-# contact_param_sweep.py. The grid sets the cost: 25 points for M1-M3, 30 for
-# M4 and 125 for M6, each a plan per step plus a share of an eval-model
-# rollout (SCORE_BLOCK - 1 points per rollout). On an RTX 4090 with M5 as the
-# eval model (Nov 2026, 256 samples, 64 ms control, 352 ms horizon), a step
-# took ~1.2 s for the zero-gap plan, 0.34 s (M3) / 0.53 s (M6) per grid
-# point's plan and ~1.2 s per score block: ~20 s a step for M3 (9 blocks) and
-# ~115 s for M6 (42 blocks). So 30 episodes x 20 steps is ~3.5 h for an M3
-# cell and ~19 h for an M6 one; fewer EPISODES or N_STEPS_ANALYSED, or a
-# larger SCORE_BLOCK, bring M6 down. Time a cell on the cluster's GPU first
+# contact_param_sweep.py. The grid sets the cost: 225 points (15 x 15) for
+# every model, each a plan per step plus a share of an eval-model rollout
+# (SCORE_BLOCK - 1 points per rollout). On this partition with M5 as the eval
+# model (the Nov 2026 25/125-point sweep, 256 samples), a step took ~0.65 s
+# for the zero-gap plan, 0.03-0.12 s per grid point's plan and ~1.9 s per
+# score block, which dominate: at 225 points (75 blocks) ~160-175 s a step.
+# So 30 episodes x 20 steps is ~27-30 h a cell; fewer EPISODES or
+# N_STEPS_ANALYSED, or a larger SCORE_BLOCK, bring it down. Time a cell on
+# the cluster's GPU first
 # (--episodes 0 --n-steps-analysed 2 prints per-unit times) and set --time
 # with SBATCH_ARGS when submitting. The cell's checkpoint is saved after each
 # grid point and each score block, so a task cut off by the time limit resumes

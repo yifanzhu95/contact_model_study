@@ -27,15 +27,19 @@ regret, up to the eval model's run-to-run noise.
 The grid is the full product of each parameter's values (``SWEEP_PARAMS``):
 
 =====  ===================================  ===========================================
-Model  Parameters                           Default values
+Model  Parameters                           Default values (15 x 15 = 225 points each)
 =====  ===================================  ===========================================
-M1     solref_timeconst, solref_dampratio   timeconst x {1, 1.5, 2, 4, 8} (nominal 2 dt is
-                                            its floor); dampratio x {0.25, 0.5, 1, 2, 4}
-M2     solref_timeconst, solref_dampratio   timeconst x {0.4, 0.6, 1, 2, 4} (0.4 x 0.02 s
-                                            is 2 dt at 4 ms); dampratio x {0.25, 0.5, 1, 2, 4}
-M3     stiffness, damping                   x {0.25, 0.5, 1, 2, 4} each
-M4     xpbd_iterations, relaxation          {1, 2, 3, 4, 6}; {1, 1.5, 2, 2.5, 3, 3.5}
-M6     alpha, gamma, refinement             x {0.25, 0.5, 1, 2, 4}; x the same; {0, ..., 4}
+M1     solref_timeconst, solref_dampratio   timeconst x {1, 1.2, 1.4, ..., 8, 11, 16}
+                                            (nominal 2 dt is its floor); dampratio x
+                                            {0.125, 0.17, ..., 1, ..., 6, 8} (log-spaced)
+M2     solref_timeconst, solref_dampratio   timeconst x {0.4, 0.5, ..., 1, ..., 6, 8} (0.4 x
+                                            0.02 s is 2 dt at 4 ms); dampratio as M1
+M3     stiffness, damping                   x {0.125, 0.17, ..., 1, ..., 6, 8} each
+M4     relaxation, contact_compliance,      {0.1, 0.25, 0.5, ..., 3.5} (steps of 0.25); {0,
+       xpbd_iterations                      1e-8, 3e-8, ..., 5e-4, 1e-3} m/N; iterations
+                                            fixed at 2
+M6     alpha, gamma, refinement             x {0.1, 0.15, 0.2, ..., 1, ..., 7, 10} each;
+                                            refinement fixed at 2
 =====  ===================================  ===========================================
 
 A multiplier is on the parameter's nominal value: the preset, with the task's
@@ -112,19 +116,28 @@ GROUND_TRUTH = "M5"
 #: Each model's swept parameters, in grid order: ``(kind, values)``, ``kind`` ``"mult"`` (values multiply
 #: the nominal) or ``"abs"`` (values as given). M1's time constant is at its 2 * dt floor already, so it
 #: only goes up, and M2's (the scene's 0.02 s) goes down to 0.4x, the floor at a 4 ms rollout step; XPBD
-#: goes NaN from a relaxation of 4 (``ContactModelPresets``, M4).
+#: goes NaN from a relaxation of 4 (``ContactModelPresets``, M4), and its nominal compliance is 0 (rigid),
+#: so it is swept in absolute values; M6's gamma must be >= 1, its nominal x 0.1. XPBD's iterations and
+#: M6's refinement are held at 2 (a single value, the last parameter, so plots facet on it).
+#: 15 values a parameter, 15 x 15 = 225 points a model, roughly evenly spaced in log.
+_MULTS = (0.125, 0.17, 0.22, 0.3, 0.4, 0.54, 0.73, 1.0, 1.35, 1.8, 2.4, 3.3, 4.4, 6.0, 8.0)
 SWEEP_PARAMS: dict[str, dict[str, tuple[str, tuple]]] = {
-    "M1": {"solref_timeconst": ("mult", (1.0, 1.5, 2.0, 4.0, 8.0)),
-           "solref_dampratio": ("mult", (0.25, 0.5, 1.0, 2.0, 4.0))},
-    "M2": {"solref_timeconst": ("mult", (0.4, 0.6, 1.0, 2.0, 4.0)),
-           "solref_dampratio": ("mult", (0.25, 0.5, 1.0, 2.0, 4.0))},
-    "M3": {"stiffness": ("mult", (0.25, 0.5, 1.0, 2.0, 4.0)),
-           "damping": ("mult", (0.25, 0.5, 1.0, 2.0, 4.0))},
-    "M4": {"xpbd_iterations": ("abs", (1, 2, 3, 4, 6)),
-           "relaxation": ("abs", (1.0, 1.5, 2.0, 2.5, 3.0, 3.5))},
-    "M6": {"alpha": ("mult", (0.25, 0.5, 1.0, 2.0, 4.0)),
-           "gamma": ("mult", (0.25, 0.5, 1.0, 2.0, 4.0)),
-           "refinement": ("abs", (0, 1, 2, 3, 4))},
+    "M1": {"solref_timeconst": ("mult", (1.0, 1.2, 1.4, 1.7, 2.0, 2.4, 2.8, 3.4, 4.0, 4.8, 5.7, 6.7, 8.0,
+                                         11.0, 16.0)),
+           "solref_dampratio": ("mult", _MULTS)},
+    "M2": {"solref_timeconst": ("mult", (0.4, 0.5, 0.6, 0.7, 0.8, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0,
+                                         6.0, 8.0)),
+           "solref_dampratio": ("mult", _MULTS)},
+    "M3": {"stiffness": ("mult", _MULTS),
+           "damping": ("mult", _MULTS)},
+    "M4": {"relaxation": ("abs", (0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25,
+                                  3.5)),
+           "contact_compliance": ("abs", (0.0, 1e-8, 3e-8, 1e-7, 3e-7, 1e-6, 2e-6, 5e-6, 1e-5, 2e-5, 5e-5, 1e-4,
+                                          2e-4, 5e-4, 1e-3)),
+           "xpbd_iterations": ("abs", (2,))},
+    "M6": {"alpha": ("mult", (0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0, 1.4, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0)),
+           "gamma": ("mult", (0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0, 1.4, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0)),
+           "refinement": ("abs", (2,))},
 }
 
 #: The parameters that take whole numbers.
