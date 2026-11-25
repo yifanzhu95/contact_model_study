@@ -1,0 +1,24 @@
+{
+  "validated_on_phoenix_date": "2026-11-24",
+  "deployment_contract_tests_passed": 7,
+  "recovery_tests_passed": 8,
+  "relocated_source_archive": {
+    "file_manifest": "passed",
+    "launcher_dry_run": "passed",
+    "original_home_paths_in_commands": false,
+    "P011_load": "passed",
+    "camera_config_load": "passed",
+    "calibrated_and_measured_limit_xml_load": "passed",
+    "portable_recovery_cli": "passed",
+    "original_runtime_cache_present": false,
+    "gpu_selection": "disabled only in temporary test profile"
+  },
+  "camera_mapping_equivalence": "Direct Method5 transform matches source publication plus consumer adapter at 1e-14 absolute tolerance over 20 deterministic points.",
+  "external_source_API": "Clean pinned source checkout; required module SHA256 recorded in external_assets.json.",
+  "external_vision_images": "Source image IDs inspected; binaries are not committed.",
+  "not_performed": [
+    "Fresh environment installation on destination",
+    "Live hardware/camera operation",
+    "GPU execution on destination"
+  ]
+}

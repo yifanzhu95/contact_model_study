@@ -1,0 +1,107 @@
+{
+  "reviewed_for_this_hand": true,
+  "robot_qref": [
+    0.765751,
+    -0.568012,
+    0.916951,
+    0.573897,
+    -0.0191225,
+    -0.0837503,
+    0.709056,
+    1.01884,
+    0.830768,
+    0.610365,
+    0.929305,
+    0.610097,
+    1.09912,
+    1.44581,
+    1.33179,
+    0.192794
+  ],
+  "episode_preparation": {
+    "speed_rad_s": 0.5,
+    "tolerance_rad": 0.06,
+    "joint_tolerance_rad": {
+      "if_mcp": 0.08
+    },
+    "settle_time_s": 0.3,
+    "settle_velocity_rad_s": 0.08,
+    "timeout_s": 0,
+    "interrupt_timeout_s": 30,
+    "command_hz": 50
+  },
+  "port": "/dev/ttyUSB0",
+  "baudrate": 3000000,
+  "usb_latency_timer_ms": 1,
+  "usb_latency_restore_ms": 16,
+  "gravity_mujoco": [
+    0.0,
+    0.0,
+    -9.81
+  ],
+  "palm_quat_wxyz": [
+    0.0,
+    0.9659258262890683,
+    0.0,
+    -0.25881904510252074
+  ],
+  "manual_viewer_limits": {
+    "max_command_speed": 0.5,
+    "max_velocity": 3.0,
+    "max_tracking_error": 0.35
+  },
+  "delta_reference": "measured_position",
+  "hold_on_non_motor_failure": true,
+  "ctrl_range": {
+    "lower": 0.2,
+    "upper": 0.2
+  },
+  "joint_limits": {
+    "model": "scenes/leap/hardware/calibrated_hand_measured_limits.xml",
+    "cost_weight": 100.0
+  },
+  "max_current_raw": 550,
+  "max_temperature": 50,
+  "expected_registers": {
+    "model_number": 1240,
+    "mode": 5,
+    "p": [
+      450,
+      600,
+      600,
+      600,
+      450,
+      600,
+      600,
+      600,
+      450,
+      600,
+      600,
+      600,
+      600,
+      600,
+      600,
+      600
+    ],
+    "i": 0,
+    "d": [
+      150,
+      200,
+      200,
+      200,
+      150,
+      200,
+      200,
+      200,
+      150,
+      200,
+      200,
+      200,
+      200,
+      200,
+      200,
+      200
+    ],
+    "goal_current": 550
+  }
+}

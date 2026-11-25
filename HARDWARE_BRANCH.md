@@ -8,7 +8,9 @@ This branch captures the LEAP hardware runner and LCM bridge, persistent object
 tracking and video-recording integration, calibration tools, joint-reference
 and joint-limit capture, recovery/shutdown utilities, hardware models and
 configurations, RL evaluation tools, and their tests. See `README.md` for setup
-and experiment commands.
+and experiment commands. For another machine, start with the portable baseline
+profile, environment/external-asset records and setup guide in
+[`deployment/leap_cube/README.md`](deployment/leap_cube/README.md).
 
 Source and configuration files are versioned, including small saved calibration
 fits used by the current calibration selector and the mesh/texture assets used

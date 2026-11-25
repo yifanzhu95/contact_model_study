@@ -78,6 +78,25 @@ def test_missing_empty_hand_ack_never_opens_usb(monkeypatch):
     assert exc.value.code==2
 
 
+def test_portable_api_and_xml_override_avoid_cached_model(monkeypatch):
+    hand=FakeHand(np.zeros(16));seen={}
+    monkeypatch.setattr(recovery,'release_port',lambda port:[])
+    def create(api,config):seen['api']=api;return hand
+    monkeypatch.setattr(recovery,'CalibrationHand',create)
+    monkeypatch.setattr(recovery,'model',lambda:pytest.fail('Portable override loaded the source-machine MJB'))
+    def record_recovery(hand,m,config,run,record,**kwargs):
+        seen['joints']=m.nu;hand.client.is_connected=True;record['zero_settled']=True
+    monkeypatch.setattr(recovery,'recover',record_recovery)
+    with tempfile.TemporaryDirectory(dir=local('cache')) as folder:
+        run=Path(folder)
+        monkeypatch.setattr(recovery,'local',lambda value:run/'session' if str(value).startswith('results/') else run/'lock')
+        xml=recovery.ROOT.parent/'scenes/leap/hardware/calibrated_hand.xml'
+        assert recovery.main(['--empty-hand-confirmed','--hardware-api','third_party/LEAP_Hand_Hardware',
+                              '--model',str(xml)])==0
+        assert seen['api']==Path('third_party/LEAP_Hand_Hardware') and seen['joints']==16
+        assert hand.events==['verified_off']
+
+
 def test_feedback_failure_still_disables_torque_and_returns_failure(monkeypatch):
     hand=FakeHand(np.zeros(16))
     def broken():raise OSError('USB feedback timeout')

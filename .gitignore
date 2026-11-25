@@ -270,3 +270,5 @@ iris-foundationpose-plusplus/meshes/spamTin_adjusted/spamTin_texture.png
 iris-foundationpose-plusplus/meshes/tomatoSoupTin_adjusted/tomatoSoupTin_texture.png
 iris-foundationpose-plusplus/meshes/cube_70_mm_adjusted/cube_70_mm_texture.png
 rl/**/runtime/
+third_party/LEAP_Hand_Hardware/
+deployment/leap_cube/*.local.json

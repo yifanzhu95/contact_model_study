@@ -122,6 +122,10 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--empty-hand-confirmed',action='store_true',help='confirm the object is removed and hands are clear')
     parser.add_argument('--hardware-config',type=Path,default=ROOT.parent/'configs/leap_hardware.json')
+    parser.add_argument('--hardware-api',type=Path,default=API,
+                        help='LEAP_Hand_Hardware checkout; override the source-machine default')
+    parser.add_argument('--model',type=Path,
+                        help='optional standalone hand XML; avoids requiring a local calibration MJB cache')
     parser.add_argument('--port',help='optional USB serial port override')
     parser.add_argument('--speed',type=float,default=.3,help='maximum commanded joint speed in rad/s (default .3, maximum .5)')
     parser.add_argument('--torque-off-only',action='store_true',help='skip the zero move and only disable/verify torque')
@@ -140,6 +144,8 @@ def main(argv=None):
         lock.close();parser.error(str(exc))
     run=local('results/hand_recovery_'+identifier());run.mkdir()
     record=dict(created_at=utc(),status='starting',hardware_config=config,gains_modified=False,
+        hardware_api=str(args.hardware_api.expanduser().resolve()),
+        model_override=None if args.model is None else str(args.model.expanduser().resolve()),
         max_command_speed_rad_s=args.speed,max_command_acceleration_rad_s2=.35,
         empty_hand_confirmed=True,zero_settled=False,torque_disabled_verified=False,usb_owner_termination=terminated)
     write_json(run/'session.json',record);print(f'Recovery log: {run}',flush=True)
@@ -148,8 +154,10 @@ def main(argv=None):
     for sig in (signal.SIGINT,signal.SIGTERM):previous[sig]=signal.signal(sig,interrupt)
     code=0
     try:
-        hand=CalibrationHand(API,config)
-        recover(hand,None if args.torque_off_only else model(),config,run,record,speed=args.speed,off_only=args.torque_off_only)
+        hand=CalibrationHand(args.hardware_api,config)
+        selected_model=(None if args.torque_off_only else model() if args.model is None
+                        else mujoco.MjModel.from_xml_path(str(args.model.expanduser().resolve())))
+        recover(hand,selected_model,config,run,record,speed=args.speed,off_only=args.torque_off_only)
     except BaseException as exc:
         record.update(status='interrupted' if isinstance(exc,KeyboardInterrupt) else 'failed',error=f'{type(exc).__name__}: {exc}')
         print(f'Recovery stopped: {exc}. Attempting torque-off cleanup.',flush=True);code=1

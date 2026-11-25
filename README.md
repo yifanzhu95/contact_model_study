@@ -98,6 +98,14 @@ benchmark scripts:
 
 ## Calibrated LEAP hardware runner
 
+For deployment on another machine, use the versioned
+[portable M2 Trial 358 deployment profile](deployment/leap_cube/README.md).
+It includes explicit baseline arguments, motor settings, model/reference hashes,
+a standalone camera calibration snapshot, host version records and external
+vision/API setup instructions. USB/camera identity and physical calibration must
+be configured for the destination rig; recordings and network weights stay out
+of Git.
+
 For a manual USB joint test, run `python run_leap_joint_viewer.py`. The MuJoCo
 window displays measured hardware positions without stepping simulation.
 It starts with torque disabled; joints outside the calibrated model limits

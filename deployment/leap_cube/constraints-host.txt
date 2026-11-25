@@ -1,0 +1,8 @@
+# Install with: pip install -c deployment/leap_cube/constraints-host.txt -e '.[hardware]'
+# Core source-host pins. host_versions.json records the wider observed environment.
+mujoco==3.14.0
+mujoco-warp==3.14.0
+warp-lang==1.17.0
+numpy==2.2.5
+scipy==1.16.3
+scikit-optimize==0.10.2

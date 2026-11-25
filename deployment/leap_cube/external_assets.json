@@ -1,0 +1,42 @@
+{
+  "leap_hardware_api": {
+    "repository": "https://github.com/asu-iris/LEAP_Hand_Hardware.git",
+    "commit": "4f0ae3a7f951fe8c89e18caae0d8d772718545cd",
+    "checkout": "third_party/LEAP_Hand_Hardware",
+    "sha256": {
+      "python/leap_hand_utils/dynamixel_client.py": "efda2512962829f7ff47f4109fec49182cb7b448ad1f8daf1547094357342cd3",
+      "python/leap_hand_utils/mj_leap_utils.py": "9437d4ad91b3f2022bb06c28cf01c04c61feac3aafac15e3614ebfcdc0dafca6"
+    }
+  },
+  "vision_images": [
+    {
+      "tag": "irislab_fppp:online_tracking_snapshot",
+      "image_id": "sha256:a96c6591666504b3d2ea231280e0c12a17255b196135947c5d9ee438dd18c1e8"
+    },
+    {
+      "tag": "irislab_fppp:leap_hardware",
+      "image_id": "sha256:a683622dfce5b9e4201ee07a0e2510df21e36d91b6311c447d5866ad4e2fa431"
+    }
+  ],
+  "vision_image_distribution": "Locally prepared images with no registry digest; transfer with docker save/load or build a prepared compatible base using iris-foundationpose-plusplus/Install.md. Image binaries and network checkpoints are deliberately not committed.",
+  "source_baseline_run": "results/bo_validation/hardware/cube_reorient/hand-high_obj-high/M2/trial358_shift512_h0256_paced_measured_limits/leap_experiment_20261123_124445_598769",
+  "source_commit": "056548d",
+  "cube": {
+    "size_m": 0.07,
+    "mass_kg": 0.07
+  },
+  "reference_pose": "P011",
+  "reference_calibration": "Method 5 fit_001; baked into camera.reference.json as direct camera-to-world, zero correction",
+  "horizons_steps": {
+    "M1": {
+      "high": 3,
+      "med": 3,
+      "low": 3
+    },
+    "M2": {
+      "high": 4,
+      "med": 5,
+      "low": 5
+    }
+  }
+}
