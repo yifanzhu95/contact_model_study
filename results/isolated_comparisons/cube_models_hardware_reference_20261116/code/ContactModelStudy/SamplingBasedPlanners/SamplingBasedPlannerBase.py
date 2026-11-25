@@ -1,0 +1,991 @@
+"""Shared engine for sampling-based predictive control.
+
+Every planner here runs the same loop::
+
+    x0   <- measured state
+    for i = 1..N:  U^(i) ~ pi_theta(U);  J^(i) <- J(U^(i), x0)
+    theta <- update(U^(1:N), J^(1:N))
+    u     <- action(theta)
+
+The N candidate trajectories are rolled out in parallel as the N worlds of a
+``VectorizedSimulator``. A concrete planner supplies only two hooks —
+``_buildSamples`` (draw ``V`` from ``theta``) and ``_updateParams`` (fold the
+costs back into ``theta``) — so comparing planners holds the rollout, the cost
+and the control parameterization fixed.
+
+The big structural change from the old ``contact_study.planners.base``: the
+planner no longer owns the physics. It used to call ``api.put_model`` and
+``api.make_data`` itself and hold ``self.m``/``self.d``; now it is handed a
+simulator and a task and drives them through their public interfaces. Swapping
+the contact model under a planner is a matter of constructing a different
+simulator.
+
+Everything stays on the device between plans. The sampled controls are uploaded
+device-to-device, the costs are evaluated by the task's GPU kernel against the
+simulator's own arrays, and only a handful of scalars and the ``(H, nu)`` mean
+ever cross to the host.
+"""
+
+from __future__ import annotations
+
+import abc
+import warnings
+from dataclasses import dataclass, replace
+
+import numpy as np
+import warp as wp
+
+from ContactModelStudy.Simulators.VectorizedSimulator import VectorizedSimulator
+
+_CONTROL_MODES = ("absolute", "ctrl_relative", "pos_relative")
+_WARM_STARTS = ("none", "hold", "shift")
+
+
+@dataclass
+class SamplingBasedPlannerConfig:
+    """Configuration shared by every sampling-based planner.
+
+    Deliberately small. ``N``, ``H``, ``nu``, ``substeps`` and the device are
+    *not* here — they are read off the simulator the planner is given, because
+    duplicating them invites a config and a simulator that disagree about the
+    shape of the same buffer.
+
+    Attributes:
+        noise_sigma: Standard deviation of the Gaussian perturbations.
+        n_iterations: Optimizer iterations per ``Plan`` call. Ignored when
+            ``convergence_ratio`` is set.
+        convergence_ratio: Iterate until the free energy stops improving,
+            instead of a fixed ``n_iterations``. Every update estimates the
+            free energy of the distribution it sampled, with a standard error
+            (see ``_freeEnergy``). From the second update on, the loop stops
+            once the drop from the previous estimate is within
+            ``convergence_ratio`` standard errors of their difference,
+            ``F_k-1 - F_k <= convergence_ratio * sqrt(se_k-1^2 + se_k^2)``:
+            the improvement can no longer be told apart from sampling noise.
+            The standard error treats the two estimates as independent, which
+            they are under ``resample_noise``; on a shared noise block their
+            errors are correlated, the drop is less noisy than that, and the
+            test stops on the early side. Around 1–2 is a reasonable start.
+            ``None`` (default) runs ``n_iterations``.
+        max_iterations: Cap on the iterations when ``convergence_ratio`` is
+            set; at least 2, since the test compares consecutive updates.
+        resample_noise: Redraw the noise block before every iteration. Off, one
+            block is drawn per ``Plan`` and every iteration re-centers it on the
+            new mean. Either way the first iteration's draw is the same, and
+            the plan's noise index (``resample_count``) advances once per plan.
+        center_noise: Subtract the mean over the ``N`` samples from every
+            ``(h, u)`` entry of each noise draw, so the block sums to zero. The
+            update ``U += sum_n w_n eps_n`` then moves the mean only where the
+            costs tell samples apart: uniform weights leave it exactly where it
+            was, instead of shifting it by the draw's sample mean. Shrinks each
+            sample's variance by ``(N - 1) / N``.
+        warm_start: Where each ``Plan`` call starts its mean sequence:
+
+            * ``"none"`` — afresh, from the mean the last ``Reset`` seeded
+              (zero, a "hold still" mean, unless a seed command was given
+              there). No plan carries over to the next.
+            * ``"hold"`` — from the last plan's solution as it is, row for row;
+              row 0 is the action just applied.
+            * ``"shift"`` — from the last plan's solution moved one control step
+              earlier (row h takes row h + 1, the last row is zeroed), so it
+              lines up with the step now being planned.
+        control_mode: How a planned value ``U_t`` becomes the command at
+            rollout control step ``t``:
+
+            * ``"absolute"`` — ``ctrl_t = U_t``. Planning happens directly in
+              the actuators' command space.
+            * ``"ctrl_relative"`` — ``ctrl_t = ctrl_{t-1} + U_t``, starting from
+              the control currently applied. The deltas accumulate over the
+              horizon (the old planner's legacy ``ctrl += delta`` mode).
+            * ``"pos_relative"`` (default) — ``ctrl_t = q_t + U_t``, where
+              ``q_t`` is each world's robot joint position *at that step*,
+              re-read every control step: a bounded servo relative to wherever
+              the world has got to (the old planner's default,
+              ``_assign_ctrl_relative_kernel``).
+        delta_range: ``(low, high)`` clip applied to every sampled value before
+            it becomes a command. Either side may be ``None`` to leave it
+            unbounded. Off by default: under ``"pos_relative"`` the value *is*
+            the position-servo error, so clipping it caps how hard the hand can
+            grip. Under ``"absolute"`` it bounds the command itself; under
+            ``"ctrl_relative"``, the per-step change in it.
+        action_rate_weight: Nonnegative weight on squared changes in requested
+            absolute actuator targets. Includes the first target relative to
+            ``Plan(u=...)`` and every subsequent horizon target, including the
+            last. Uses targets before actuator filtering, without dividing by
+            the timestep. Zero preserves the original objective and launches.
+        seed: Seed for the noise. ``None`` draws one from fresh entropy.
+        use_graph: Capture the rollout into a CUDA graph. This is most of the
+            planner's speed — a rollout is thousands of small kernel launches,
+            and replaying one recorded graph removes nearly all of that
+            overhead. Falls back to eager launches, with a warning, if the
+            capture cannot be made.
+        debug: Print per-plan diagnostics.
+        return_uncertainty: Make ``Plan`` return ``(action, uncertainty)``
+            instead of just the action. ``uncertainty`` is ``(nu,)``: how
+            spread out the samples' first actions were, per actuator, under the
+            weights the planner used to form the action. What exactly that is
+            depends on the planner; see its ``_actionUncertainty``.
+        plan_on_eval_scene: Predict with the task's *eval* scene, at the eval
+            timestep: the same model the eval simulator runs, instead of the
+            rollout scene. The planner is handed its task and simulator, so
+            this flag does not build anything; it says which they are, and the
+            planner checks that its task's role agrees (an eval-role task with
+            the flag, a rollout-role one without), so a recorded config always
+            describes what was rolled out. The drivers read it to build the
+            planner's task (``run_episodes.py --plan-on-eval``).
+    """
+
+    noise_sigma: float = 0.01
+    n_iterations: int = 1
+    convergence_ratio: float | None = None
+    max_iterations: int = 10
+    resample_noise: bool = True
+    center_noise: bool = True
+    warm_start: str = "none"
+    control_mode: str = "pos_relative"
+    delta_range: tuple[float | None, float | None] = (None, None)
+    action_rate_weight: float = 0.0
+    seed: int | None = None
+    use_graph: bool = True
+    debug: bool = False
+    return_uncertainty: bool = False
+    plan_on_eval_scene: bool = False
+
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.action_rate_weight) or self.action_rate_weight < 0.0:
+            raise ValueError("action_rate_weight must be finite and nonnegative")
+        if self.noise_sigma <= 0.0:
+            raise ValueError(f"noise_sigma must be positive, got {self.noise_sigma}")
+        if self.n_iterations < 1:
+            raise ValueError(f"n_iterations must be >= 1, got {self.n_iterations}")
+        if self.convergence_ratio is not None and self.convergence_ratio <= 0.0:
+            raise ValueError(f"convergence_ratio must be positive or None, got {self.convergence_ratio}")
+        if self.max_iterations < 1:
+            raise ValueError(f"max_iterations must be >= 1, got {self.max_iterations}")
+        if self.convergence_ratio is not None and self.max_iterations < 2:
+            raise ValueError("convergence_ratio compares consecutive updates, so max_iterations "
+                             f"must be >= 2, got {self.max_iterations}")
+        if self.control_mode not in _CONTROL_MODES:
+            raise ValueError(
+                f"control_mode must be one of {_CONTROL_MODES}, got {self.control_mode!r}"
+            )
+        if self.warm_start not in _WARM_STARTS:
+            raise ValueError(
+                f"warm_start must be one of {_WARM_STARTS}, got {self.warm_start!r}"
+            )
+        low, high = self.delta_range
+        if low is not None and high is not None and low > high:
+            raise ValueError(f"delta_range low > high: {self.delta_range}")
+
+
+class SamplingBasedPlannerBase(abc.ABC):
+    """Base class for all sampling-based planners.
+
+    Subclasses implement ``_buildSamples`` and ``_updateParams``.
+
+    Attributes:
+        U_wp: ``(H, nu)`` mean control sequence — the distribution parameter
+            ``theta`` that ``Plan`` optimizes.
+        V_wp: ``(N, H, nu)`` sampled sequences drawn from it.
+        A_wp: ``(N, H, nu)`` commands for ``"ctrl_relative"``, precomputed
+            from ``V`` and handed to the simulator as a sequence.
+        costs_wp: ``(N,)`` running-cost sums.
+        terminal_costs_wp: ``(N,)`` terminal costs, kept separate so the running
+            sum can be horizon-normalized without also scaling a single-step
+            terminal cost.
+    """
+
+    name = "SamplingBasedPlanner"
+    #: Config fields ``UpdateConfig`` may change on a built planner: the ones
+    #: read afresh on every plan, so no buffer or captured graph depends on them.
+    RUNTIME_FIELDS: tuple[str, ...] = ("noise_sigma", "convergence_ratio", "max_iterations",
+                                       "resample_noise", "center_noise")
+
+    def __init__(
+        self,
+        simulator: VectorizedSimulator,
+        task,
+        config: SamplingBasedPlannerConfig | None = None,
+    ):
+        """Bind a planner to a simulator and a task.
+
+        Args:
+            simulator: The rollout engine. Its world count is the sample count
+                and its horizon is the planning horizon — the planner never
+                allocates worlds of its own.
+            task: Supplies ``calcCosts``, and (for ``"pos_relative"`` control)
+                the robot-joint start address via its ``indices`` vector.
+            config: Planner parameters. Defaults to
+                ``SamplingBasedPlannerConfig()``.
+
+        Raises:
+            ValueError: If the simulator's horizon is 1 under ``"shift"``,
+                which would shift the whole sequence off the end every plan.
+        """
+        self.sim = simulator
+        self.task = task
+        self.config = config if config is not None else SamplingBasedPlannerConfig()
+
+        # Shape comes from the simulator, never from the config.
+        self.N = simulator.N
+        self.horizon = simulator.horizon
+        self.nu = simulator.nu
+        self.nq = simulator.nq
+        self.nv = simulator.nv
+        self.substeps = simulator.config.resolved_substeps
+        self.device = simulator.config.device
+
+        if self.config.warm_start == "shift" and self.horizon < 2:
+            raise ValueError(
+                f"warm_start='shift' needs a horizon of at least 2, got {self.horizon}"
+            )
+
+        # Where the robot's joints start in qpos, for the pos_relative mode.
+        # Slot 2 of the task's index vector, the same convention the old planner
+        # used; 0 (robot joints lead qpos) when the task does not publish one.
+        self.robot_qpos_adr = 0
+        idx = getattr(task, "indices", None)
+        if idx is not None and len(idx) > 2:
+            self.robot_qpos_adr = int(idx[2])
+
+        self._rng = np.random.default_rng(self.config.seed)
+        self._noise_seed = int(self._rng.integers(0, 2**31 - 1))
+        self._resample_count = 0
+        # The command the last Reset seeded the mean with; None means zero.
+        self._reset_mean: np.ndarray | None = None
+
+        if (self.config.return_uncertainty
+                and type(self)._actionUncertainty is SamplingBasedPlannerBase._actionUncertainty):
+            raise NotImplementedError(
+                f"{type(self).__name__} cannot report an action uncertainty; "
+                f"set return_uncertainty=False"
+            )
+
+        role = getattr(task, "role", None)
+        if role is not None:
+            from ContactModelStudy.Tasks.TaskBase import TaskRole
+            on_eval = TaskRole(role) is TaskRole.EVAL
+            if on_eval != bool(self.config.plan_on_eval_scene):
+                raise ValueError(
+                    f"plan_on_eval_scene={self.config.plan_on_eval_scene} but the task's role is "
+                    f"{TaskRole(role).value!r}: plan on the eval scene with an eval-role task and "
+                    f"plan_on_eval_scene=True, or on the rollout scene with a rollout-role task")
+
+        # Diagnostics a driver or an evaluation pass can read after a plan.
+        self.last_action_seq: np.ndarray | None = None
+        #: ``(H, nu)`` mean the last successful plan ended at, before the
+        #: warm-start shift: the plan itself, in the planner's own
+        #: parameterization (``last_action_seq`` is the commands it implies).
+        self.last_mean: np.ndarray | None = None
+        self.last_plan_ok: bool = False
+        #: The ``SaveState`` this plan started from: its mean, the control it
+        #: accumulates from, its noise draw and (MPPI) temperature.
+        #: ``LoadState`` it and ``Plan(q, q_dot, u=start["u_prev"])`` repeats the plan.
+        self.last_plan_start: dict | None = None
+        #: ``(nu,)`` uncertainty of the last action, when ``return_uncertainty``
+        #: is set; NaN after a failed plan.
+        self.last_action_uncertainty: np.ndarray | None = None
+        #: Updates the last plan made, and — with ``convergence_ratio`` set —
+        #: whether its free energy stopped improving (``None`` without one);
+        #: the free energy of its final update, and that update's drop from
+        #: the one before with the drop's standard error (``None`` until a
+        #: second update).
+        self.last_n_iterations: int = 0
+        self.last_converged: bool | None = None
+        self.last_free_energy: float | None = None
+        self.last_free_energy_drop: float | None = None
+        self.last_free_energy_drop_se: float | None = None
+
+        self._setupArrays()
+
+    # -- setup ---------------------------------------------------------------
+    def _setupArrays(self) -> None:
+        """Allocate every device buffer once, at construction."""
+        N, H, nu = self.N, self.horizon, self.nu
+        dev = self.device
+
+        self.U_wp = wp.zeros((H, nu), dtype=wp.float32, device=dev)
+        self.U_shift_wp = wp.zeros((H, nu), dtype=wp.float32, device=dev)
+        self.V_wp = wp.zeros((N, H, nu), dtype=wp.float32, device=dev)
+        self.A_wp = wp.zeros((N, H, nu), dtype=wp.float32, device=dev)
+        self.eps_wp = wp.zeros((N, H, nu), dtype=wp.float32, device=dev)
+
+        self.costs_wp = wp.zeros(N, dtype=wp.float32, device=dev)
+        self.terminal_costs_wp = wp.zeros(N, dtype=wp.float32, device=dev)
+        self._step_cost_wp = wp.zeros(N, dtype=wp.float32, device=dev)
+
+        # Per-actuator clip bounds. A None side becomes +/-inf so the clamp is a
+        # no-op there; when both are None the kernel skips clamping entirely.
+        low, high = self.config.delta_range
+        rng = np.empty((nu, 2), dtype=np.float32)
+        rng[:, 0] = -np.inf if low is None else low
+        rng[:, 1] = np.inf if high is None else high
+        self._clip_wp = wp.array(rng, dtype=wp.float32, device=dev)
+        self._has_clip = not (low is None and high is None)
+
+        # Control applied when planning starts: ctrl_relative accumulates from
+        # it, and the optional action-rate cost anchors its first target to it.
+        self._u_prev_wp = wp.zeros(nu, dtype=wp.float32, device=dev)
+        # pos_relative: one control step's commands, computed on the device from
+        # the rollout's current positions and handed to the simulator.
+        self._ctrl_step_wp = wp.zeros((N, nu), dtype=wp.float32, device=dev)
+        self._rate_previous_wp = (wp.zeros((N, nu), dtype=wp.float32, device=dev)
+                                  if self.config.action_rate_weight > 0 else None)
+        # Host copies of the two command bases, for forming the returned action.
+        self._u_prev: np.ndarray | None = None
+        self._q_robot = np.zeros(nu)
+
+        # The rollout's start state, staged on the device. The host-to-device
+        # copy into these happens once per plan, outside the graph; the graph
+        # itself broadcasts from them.
+        self._q0_wp = wp.zeros(self.nq, dtype=wp.float32, device=dev)
+        self._v0_wp = wp.zeros(self.nv, dtype=wp.float32, device=dev)
+        self._rollout_graph = None
+        self._graph_failed = False
+
+    # -- planner-specific hooks ---------------------------------------------
+    @abc.abstractmethod
+    def _buildSamples(self) -> None:
+        """Fill ``V_wp`` with ``N`` sequences drawn from the current ``theta``.
+
+        Reads ``U_wp`` and ``eps_wp``; must apply ``delta_range`` clipping, so
+        that whatever the update does with ``V`` inherits the bound.
+        """
+        ...
+
+    @abc.abstractmethod
+    def _updateParams(self) -> bool:
+        """Fold ``costs_wp``/``terminal_costs_wp`` into ``theta``.
+
+        Returns:
+            ``False`` when the update could not be made — every rollout cost was
+            NaN, say — which makes ``Plan`` return a zero action rather than one
+            derived from a poisoned distribution.
+        """
+        ...
+
+    def _resetParams(self) -> None:
+        """Restore any adaptive state. No-op unless a subclass has some."""
+        return None
+
+    def _actionUncertainty(self) -> np.ndarray:
+        """``(nu,)`` uncertainty of the action the last update produced.
+
+        Called after the final ``_updateParams`` and before the warm-start
+        shift, so ``U_wp`` row 0 is the action about to be returned. A planner
+        that can report ``return_uncertainty`` overrides this; the base class
+        refuses the flag at construction otherwise.
+        """
+        raise NotImplementedError
+
+    def _freeEnergy(self) -> tuple[float, float]:
+        """``(F, se)``: free energy of the distribution the last update sampled.
+
+        The objective ``convergence_ratio`` watches: lower is better, and the
+        loop stops once it stops dropping by more than its noise. Called after
+        every ``_updateParams`` when it is set; a planner that supports
+        convergence-terminated planning overrides this.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no free energy; "
+                                  f"set convergence_ratio=None")
+
+    # -- the loop ------------------------------------------------------------
+    def Plan(
+        self, q: np.ndarray, q_dot: np.ndarray, u: np.ndarray | None = None
+    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+        """Optimize from the measured state and return the next action.
+
+        Args:
+            q: Measured positions, ``(nq,)``.
+            q_dot: Measured velocities, ``(nv,)``.
+            u: The control currently applied, ``(nu,)``. ``"ctrl_relative"``
+                starts its deltas from it; the action-rate cost uses it as the
+                first target's reference in every control mode. ``None``
+                falls back to the action this planner returned last, which is
+                right as long as that is what was applied; pass it whenever it
+                may not be, such as at the start of an episode. With no previous
+                action, the rate cost starts from measured joints; however,
+                ``ctrl_relative`` always requires a known applied command.
+
+        Returns:
+            ``(nu,)`` actuator command — what to hand
+            ``Simulator.SetControl``. Already resolved for the control mode, so
+            a driver never has to know which parameterization the planner used:
+            ``U_0``, ``u + U_0`` or ``q_robot + U_0``.
+
+            With ``config.return_uncertainty`` set, a tuple ``(action,
+            uncertainty)`` instead, both ``(nu,)``. The uncertainty is in the
+            same units as the action, and is NaN when the plan failed.
+
+        Raises:
+            ValueError: On a bad shape, or under ``"ctrl_relative"`` when the
+                current control is unknown — no ``u`` and no previous action.
+        """
+        q = np.asarray(q, dtype=float).ravel()
+        q_dot = np.asarray(q_dot, dtype=float).ravel()
+        if q.shape != (self.nq,):
+            raise ValueError(f"q must have shape ({self.nq},), got {q.shape}")
+        if q_dot.shape != (self.nv,):
+            raise ValueError(f"q_dot must have shape ({self.nv},), got {q_dot.shape}")
+
+        self._setCommandBase(q, u)
+        if self.config.warm_start == "none":
+            self._seedMean()
+        self.last_plan_start = {**self.SaveState(), "last_action_seq": None, "last_plan_ok": False}
+        self._sampleNoise()
+        self.last_plan_ok = False
+        self.last_mean = None
+
+        ratio = self.config.convergence_ratio
+        cap = self.config.n_iterations if ratio is None else self.config.max_iterations
+        self.last_n_iterations = 0
+        self.last_converged = None if ratio is None else False
+        self.last_free_energy = None
+        self.last_free_energy_drop = None
+        self.last_free_energy_drop_se = None
+        prev_f = prev_se = None
+
+        for i in range(cap):
+            if i > 0 and self.config.resample_noise:
+                self._sampleNoise(iteration=i)
+            self._buildSamples()
+            self._buildCommands()
+            self._rollout(q, q_dot)
+            if not self._updateParams():
+                # The update may have written NaN into theta; clear it so the
+                # next call starts clean, and publish a zero tape — a driver
+                # replaying the previous one would be acting on a failed solve.
+                self.U_wp.zero_()
+                self.last_action_seq = np.zeros((self.horizon, self.nu), dtype=np.float32)
+                return self._result(np.zeros(self.nu, dtype=np.float32),
+                                    np.full(self.nu, np.nan, dtype=np.float32))
+            self.last_n_iterations = i + 1
+            if ratio is None:
+                continue
+            f, se = self._freeEnergy()
+            self.last_free_energy = f
+            if prev_f is None:
+                if self.config.debug:
+                    print(f"  [{self.name}] iter {i + 1}/{cap}  F {f:.6g} (se {se:.2e})")
+                prev_f, prev_se = f, se
+                continue
+            drop, drop_se = prev_f - f, float(np.hypot(prev_se, se))
+            self.last_free_energy_drop, self.last_free_energy_drop_se = drop, drop_se
+            if self.config.debug:
+                print(f"  [{self.name}] iter {i + 1}/{cap}  F {f:.6g} (se {se:.2e})  "
+                      f"drop {drop:.3e}  drop/se {drop / drop_se if drop_se > 0 else float('inf'):.2f}")
+            if drop <= ratio * drop_se:
+                self.last_converged = True
+                break
+            prev_f, prev_se = f, se
+
+        if self.config.debug and ratio is not None:
+            status = "converged" if self.last_converged else "reached cap"
+            print(f"  [{self.name}] {status} in {self.last_n_iterations}/{cap} iterations "
+                  f"(F={self.last_free_energy:.6g}, drop={self.last_free_energy_drop:.3e}, "
+                  f"se={self.last_free_energy_drop_se:.3e}, ratio={ratio:g})")
+
+        self.last_plan_ok = True
+        # Before _extractAction, whose warm-start shift moves U_wp's row 0.
+        unc = self._actionUncertainty() if self.config.return_uncertainty else None
+        return self._result(self._extractAction(), unc)
+
+    def FreeEnergyOf(self, q: np.ndarray, q_dot: np.ndarray, U: np.ndarray,
+                     u: np.ndarray | None = None) -> tuple[float, float]:
+        """``(F, se)``: free energy of ``N(U, noise_sigma^2 I)`` from ``(q, q_dot)``.
+
+        Scores a given ``(H, nu)`` mean under this planner's model, cost and
+        temperature: one noise draw around ``U``, rolled out and weighted as an
+        update would, then ``_freeEnergy``. ``U`` is in this planner's own
+        parameterization (``last_mean``), ``u`` as for ``Plan``. NaN when every
+        rollout failed.
+
+        It leaves the planner as a one-iteration plan from ``U`` would: the
+        mean updated and the noise stream advanced. ``LoadState`` around it to
+        keep the planner's own state, or to choose the noise it draws.
+        """
+        U = np.asarray(U, dtype=np.float32)
+        if U.shape != (self.horizon, self.nu):
+            raise ValueError(f"U must have shape ({self.horizon}, {self.nu}), got {U.shape}")
+        q = np.asarray(q, dtype=float).ravel()
+        q_dot = np.asarray(q_dot, dtype=float).ravel()
+        self._setCommandBase(q, u)
+        self.U_wp.assign(U)
+        self._sampleNoise()
+        self._buildSamples()
+        self._buildCommands()
+        self._rollout(q, q_dot)
+        if not self._updateParams():
+            return float("nan"), float("nan")
+        return self._freeEnergy()
+
+    def _result(self, action: np.ndarray, uncertainty: np.ndarray | None):
+        """``action``, or ``(action, uncertainty)`` when the config asks for it."""
+        if not self.config.return_uncertainty:
+            return action
+        self.last_action_uncertainty = uncertainty
+        return action, uncertainty
+
+    def _setCommandBase(self, q: np.ndarray, u: np.ndarray | None) -> None:
+        """Record what this plan's commands are relative to.
+
+        ``pos_relative`` needs the measured joint positions — only for the
+        returned action and tape; the rollout re-reads each world's own. And
+        ``ctrl_relative`` needs the control currently applied, uploaded for the
+        rollout's accumulation. The action-rate cost uses that same applied
+        target as its first reference, independently of the control mode.
+        """
+        a = self.robot_qpos_adr
+        self._q_robot = q[a:a + self.nu].copy()
+        if self.config.control_mode != "ctrl_relative" and self.config.action_rate_weight == 0:
+            return
+        if u is not None:
+            u = np.asarray(u, dtype=float).ravel()
+            if u.shape != (self.nu,):
+                raise ValueError(f"u must have shape ({self.nu},), got {u.shape}")
+            self._u_prev = u.copy()
+        if self._u_prev is None:
+            if self.config.control_mode == "ctrl_relative":
+                raise ValueError(
+                    "ctrl_relative needs the control currently applied: pass u= to "
+                    "Plan (there is no previous action to fall back on)."
+                )
+            self._u_prev = self._q_robot.copy()
+        if self.config.action_rate_weight > 0 and not np.isfinite(self._u_prev).all():
+            raise ValueError("action-rate reference must be finite")
+        self._u_prev_wp.assign(self._u_prev.astype(np.float32))
+
+    def _sampleNoise(self, iteration: int = 0) -> None:
+        """Redraw the whole ``(N, H, nu)`` perturbation block on the device.
+
+        Iteration 0 starts a plan: the seed advances, so no two plans in this
+        planner's lifetime replay the same block, and a fixed ``config.seed``
+        reproduces the whole episode. A later iteration (``resample_noise``)
+        keeps the plan's seed and reads a disjoint stretch of its stream, so
+        the plan's noise index still identifies every draw it made.
+        """
+        if iteration == 0:
+            self._plan_noise_seed = self._noise_seed + self._resample_count
+            self._resample_count += 1
+        size = self.N * self.horizon * self.nu
+        if (iteration + 1) * size >= 2**31:
+            raise ValueError(f"iteration {iteration} overruns the noise stream for "
+                             f"{size} elements per draw; lower max_iterations")
+        wp.launch(
+            _sample_noise_kernel,
+            dim=(self.N, self.horizon, self.nu),
+            inputs=[self._plan_noise_seed, iteration * size, self.config.noise_sigma],
+            outputs=[self.eps_wp],
+        )
+        if self.config.center_noise:
+            wp.launch(_center_noise_kernel, dim=(self.horizon, self.nu),
+                      inputs=[self.N], outputs=[self.eps_wp])
+
+    def _buildCommands(self) -> None:
+        """Turn sampled values into commands, where that can be done up front.
+
+        ``absolute`` needs nothing — the samples *are* the commands.
+        ``ctrl_relative`` accumulates them onto the current control:
+        ``A_t = u + sum_{k<=t} V_k``. ``pos_relative`` cannot be precomputed —
+        each step's command depends on where the rollout has got to — so it is
+        formed inside the rollout, step by step.
+        """
+        if self.config.control_mode == "ctrl_relative":
+            wp.launch(
+                _cumsum_commands_kernel,
+                dim=(self.N, self.nu),
+                inputs=[self.V_wp, self._u_prev_wp, self.horizon],
+                outputs=[self.A_wp],
+            )
+
+    def _armControls(self) -> None:
+        """Hand the simulator this rollout's commands, as the mode requires.
+
+        Precomputable modes go in as a sequence the simulator steps through.
+        ``pos_relative`` clears any sequence instead, since the rollout body
+        sets each step's command itself.
+        """
+        mode = self.config.control_mode
+        if mode == "absolute":
+            self.sim.SetControlSequence(self.V_wp)
+        elif mode == "ctrl_relative":
+            self.sim.SetControlSequence(self.A_wp)
+        else:
+            self.sim.ClearControlSequence()
+
+    def _rollout(self, q: np.ndarray, q_dot: np.ndarray) -> None:
+        """Roll all ``N`` sampled sequences out in parallel and score them.
+
+        Stages the start state on the device, then replays the captured rollout
+        graph — or runs it eagerly when capture is off or unavailable.
+        """
+        self._q0_wp.assign(q.astype(np.float32))
+        self._v0_wp.assign(q_dot.astype(np.float32))
+        self._armControls()
+
+        if not self.config.use_graph or self._graph_failed:
+            self._rolloutBody()
+            return
+        if self._rollout_graph is None:
+            self._captureRollout()
+        wp.capture_launch(self._rollout_graph)
+
+    def _rolloutBody(self) -> None:
+        """The rollout itself: reset, unroll, accumulate. Kernel launches only.
+
+        Nothing here may touch the host — no ``.assign`` from numpy, no
+        ``.numpy()``, no synchronize — because this is the body that gets
+        recorded into a CUDA graph.
+
+        The state cost of the final control step goes to ``terminal_costs_wp``
+        instead of the running sum, not in addition to it, matching the old
+        ``_launch_accumulate_costs(terminal=...)``, where the terminal cost
+        *replaces* that step's running state cost. Optional action-rate costs
+        accumulate for every command, including the final one.
+        """
+        self.sim.BroadcastState(self._q0_wp, self._v0_wp)
+        self.costs_wp.zero_()
+        self.terminal_costs_wp.zero_()
+        state = self.sim.DeviceState()
+        pos_relative = self.config.control_mode == "pos_relative"
+
+        for t in range(self.horizon):
+            if pos_relative:
+                # ctrl_t = q_t + V_t, from each world's joint positions as they
+                # stand at the start of this control step.
+                wp.launch(
+                    _pos_relative_kernel, dim=(self.N, self.nu),
+                    inputs=[self.V_wp, t, state.qpos, self.robot_qpos_adr],
+                    outputs=[self._ctrl_step_wp],
+                )
+                self.sim.SetControl(self._ctrl_step_wp)
+            if self.config.action_rate_weight > 0:
+                # Score raw requested targets, not DeviceState.ctrl: some
+                # calibrated backends expose a filtered target in that field.
+                sequence = self.A_wp if self.config.control_mode == "ctrl_relative" else self.V_wp
+                wp.launch(
+                    _action_rate_cost_kernel, dim=self.N,
+                    inputs=[sequence, self._ctrl_step_wp, self._u_prev_wp, t,
+                            int(pos_relative), self.config.action_rate_weight],
+                    outputs=[self._rate_previous_wp, self.costs_wp],
+                )
+            self.sim.Step_GPU(self.substeps)
+            terminal = t == self.horizon - 1
+            # The task reads the simulator's device state itself; `out` keeps
+            # the call allocation-free, which is what lets it be captured.
+            self.task.calcCosts(self.sim, terminal=terminal, out=self._step_cost_wp)
+            wp.launch(
+                _accumulate_kernel, dim=self.N,
+                inputs=[self._step_cost_wp],
+                outputs=[self.terminal_costs_wp if terminal else self.costs_wp],
+            )
+
+    def _captureRollout(self) -> None:
+        """Record one rollout into a CUDA graph, after a warm-up pass.
+
+        The warm-up matters: the first call compiles kernels and lets MJWarp
+        make whatever internal allocations it needs, neither of which belongs in
+        a recording. The control sequence is re-set afterwards so the capture
+        starts from cursor 0 and bakes in control indices 0..H-1 — which is what
+        an unrolled rollout wants, and why the captured graph stays correct when
+        replayed against new contents of the same buffers.
+
+        A capture failure is not fatal: it disables graphs for this planner and
+        warns, rather than taking the run down.
+        """
+        self._rolloutBody()
+        wp.synchronize()
+        self._armControls()
+        try:
+            with wp.ScopedCapture() as capture:
+                self._rolloutBody()
+            self._rollout_graph = capture.graph
+        except Exception as exc:  # noqa: BLE001 - any capture failure degrades the same way
+            self._graph_failed = True
+            warnings.warn(
+                f"CUDA graph capture failed ({exc}); falling back to eager "
+                f"launches. Rollouts will be slower but identical.",
+                RuntimeWarning, stacklevel=2,
+            )
+            self._rolloutBody()
+
+    def _foldCosts(self, running_scale: float = 1.0, total_scale: float = 1.0) -> None:
+        """Add the terminal cost into the running sum and rescale, in place."""
+        wp.launch(
+            _combine_costs_kernel, dim=self.N,
+            inputs=[self.costs_wp, self.terminal_costs_wp, running_scale, total_scale],
+        )
+
+    def _extractAction(self) -> np.ndarray:
+        """Read row 0 of the mean, apply the warm-start shift, return the action.
+
+        The whole ``(H, nu)`` mean comes across — a few hundred bytes, one
+        transfer either way — and is published as ``last_action_seq`` *before*
+        the shift, so a driver that plays a tape out over a latency window gets
+        a sequence aligned with the state it was planned from.
+        """
+        seq = self.U_wp.numpy().astype(float)
+        self.last_mean = seq.astype(np.float32)
+        mode = self.config.control_mode
+        if mode == "absolute":
+            tape = seq
+        elif mode == "ctrl_relative":
+            tape = self._u_prev + np.cumsum(seq, axis=0)
+        else:
+            # Row 0 is exact — the rollout's first step reads the measured q.
+            # Later rows assume the robot holds q; the rollouts re-read it.
+            tape = self._q_robot + seq
+        self.last_action_seq = tape.astype(np.float32)
+        action = self.last_action_seq[0].copy()
+        # The next ctrl_relative plan starts from this command, unless told
+        # otherwise with Plan(u=...).
+        self._u_prev = action.astype(float)
+
+        if self.config.warm_start == "shift":
+            wp.launch(
+                _shift_kernel, dim=(self.horizon, self.nu),
+                inputs=[self.U_wp, self.horizon, 1],
+                outputs=[self.U_shift_wp],
+            )
+            self.U_wp, self.U_shift_wp = self.U_shift_wp, self.U_wp
+        return action
+
+    # -- episode boundaries --------------------------------------------------
+    def Reset(self, mean: np.ndarray | None = None) -> None:
+        """Reset the distribution. Call at the start of an episode or new goal.
+
+        Args:
+            mean: ``(nu,)`` command to seed every row of the mean sequence with.
+                ``None`` zeroes it.
+
+        Zero is the right seed under both relative modes — the sequence is a
+        delta, so a zero mean means "hold the pose" (``pos_relative``) or "hold
+        the command" (``ctrl_relative``). Under ``"absolute"`` it is not: a zero
+        mean commands every joint to zero, and on a grasping hand that opens it
+        and drops the object on the first plan. Seed it with the task's initial
+        control there.
+
+        Under ``warm_start="none"``, every ``Plan`` starts again from this seed.
+        """
+        if mean is None:
+            self._reset_mean = None
+        else:
+            m = np.asarray(mean, dtype=np.float32).ravel()
+            if m.shape != (self.nu,):
+                raise ValueError(f"mean must have shape ({self.nu},), got {m.shape}")
+            self._reset_mean = m.copy()
+        self._seedMean()
+        self.last_action_seq = None
+        self.last_mean = None
+        self.last_plan_ok = False
+        self._resetParams()
+
+    def _seedMean(self) -> None:
+        """Write the ``Reset`` seed into every row of the mean, in place."""
+        if self._reset_mean is None:
+            self.U_wp.zero_()
+        else:
+            self.U_wp.assign(np.tile(self._reset_mean, (self.horizon, 1)))
+
+    def FirstActionDistribution(self) -> tuple[np.ndarray, np.ndarray]:
+        """``(mu, cov)``: the last plan's first action, as a Gaussian in command space.
+
+        ``mu`` is the action ``Plan`` returned, ``(nu,)``; ``cov`` is the
+        ``(nu, nu)`` spread of the samples' first actions under the weights the
+        planner formed that action with. A planner that can describe its action
+        distribution overrides this; ``Utils/PlannerKLDiv.py`` compares two of
+        them. Raises ``RuntimeError`` before the first plan or after a failed one.
+        """
+        raise NotImplementedError(f"{type(self).__name__} cannot describe its action distribution")
+
+    def UpdateConfig(self, **changes) -> None:
+        """Change config fields in ``RUNTIME_FIELDS`` without rebuilding the planner.
+
+        The config is replaced, not edited, so its own validation runs on the
+        new values. Anything else (the sample count, the control mode, graph
+        use, ...) shaped the planner's buffers or its captured rollout, and
+        needs a new planner.
+
+        Raises:
+            ValueError: On a field outside ``RUNTIME_FIELDS``, or an invalid value.
+        """
+        fixed = set(changes) - set(self.RUNTIME_FIELDS)
+        if fixed:
+            raise ValueError(f"{type(self).__name__} cannot change {sorted(fixed)} after it is "
+                             f"built; only {list(self.RUNTIME_FIELDS)}")
+        self.config = replace(self.config, **changes)
+
+    # -- per-episode state -----------------------------------------------------
+    def SaveState(self) -> dict:
+        """Everything that carries over from one ``Plan`` to the next, as plain data.
+
+        That is: the mean sequence and the ``Reset`` seed it restarts from, the
+        control a ``ctrl_relative`` plan starts from, the last plan's outputs,
+        and the noise stream's seed and position.
+        ``LoadState`` puts it back. Together they let one planner serve several
+        episodes in turn: save one episode's state, load another's, plan, and
+        swap back. The noise stream travels with it, so an episode's samples do
+        not depend on which other episodes shared the planner. A subclass with
+        adaptive state of its own extends both methods.
+        """
+        return {
+            "U": self.U_wp.numpy().copy(),
+            "reset_mean": None if self._reset_mean is None else self._reset_mean.copy(),
+            "u_prev": None if self._u_prev is None else self._u_prev.copy(),
+            "last_action_seq": None if self.last_action_seq is None else self.last_action_seq.copy(),
+            "last_plan_ok": self.last_plan_ok,
+            "noise_seed": self._noise_seed,
+            "resample_count": self._resample_count,
+        }
+
+    def LoadState(self, state: dict) -> None:
+        """Restore a state from ``SaveState``, in place.
+
+        The mean is written into the existing device buffer rather than
+        replacing it, so a captured rollout graph stays valid.
+        """
+        U = np.asarray(state["U"], dtype=np.float32)
+        if U.shape != (self.horizon, self.nu):
+            raise ValueError(f"state mean has shape {U.shape}, planner needs {(self.horizon, self.nu)}")
+        self.U_wp.assign(U)
+        m = state.get("reset_mean")
+        self._reset_mean = None if m is None else np.asarray(m, dtype=np.float32).copy()
+        self._u_prev = None if state["u_prev"] is None else np.asarray(state["u_prev"], dtype=float).copy()
+        self.last_action_seq = state["last_action_seq"]
+        self.last_plan_ok = bool(state["last_plan_ok"])
+        self._noise_seed = int(state["noise_seed"])
+        self._resample_count = int(state["resample_count"])
+
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__name__}(N={self.N}, H={self.horizon}, nu={self.nu}, "
+            f"substeps={self.substeps}, mode={self.config.control_mode!r})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Kernels shared by every sampling-based planner
+# ---------------------------------------------------------------------------
+
+@wp.kernel
+def _sample_noise_kernel(seed: int, offset: int, sigma: float, eps: wp.array3d(dtype=float)):
+    """Redraw the perturbation block in place.
+
+    Each element gets its own RNG stream keyed by (seed, offset + flat index),
+    so a draw is reproducible for a given seed and decorrelated across seeds;
+    ``offset`` separates a plan's per-iteration draws.
+    """
+    n, h, u = wp.tid()
+    tid = (n * eps.shape[1] + h) * eps.shape[2] + u
+    state = wp.rand_init(seed, offset + tid)
+    eps[n, h, u] = sigma * wp.randn(state)
+
+
+@wp.kernel
+def _center_noise_kernel(N: int, eps: wp.array3d(dtype=float)):
+    """eps[n,h,u] -= mean_n eps[n,h,u], so every (h, u) column sums to zero.
+
+    One thread per (h, u) with the sum over N inside, as in the weighted mean.
+    """
+    h, u = wp.tid()
+    total = float(0.0)
+    for n in range(N):
+        total = total + eps[n, h, u]
+    mean = total / float(N)
+    for n in range(N):
+        eps[n, h, u] = eps[n, h, u] - mean
+
+
+@wp.kernel
+def _cumsum_commands_kernel(
+    V: wp.array3d(dtype=float),       # (N, H, nu)  per-step deltas
+    u_prev: wp.array(dtype=float),    # (nu,)       control applied at plan time
+    H: int,
+    out: wp.array3d(dtype=float),     # (N, H, nu)  [out]
+):
+    """ctrl_relative commands: out[t] = u_prev + sum_{k<=t} V[k].
+
+    One thread per (world, actuator), running the sum along the horizon in
+    order — the same additions, in the same order, as applying ctrl += V[t]
+    one step at a time.
+    """
+    n, u = wp.tid()
+    acc = u_prev[u]
+    for t in range(H):
+        acc = acc + V[n, t, u]
+        out[n, t, u] = acc
+
+
+@wp.kernel
+def _pos_relative_kernel(
+    V: wp.array3d(dtype=float),       # (N, H, nu)
+    t: int,
+    qpos: wp.array2d(dtype=float),    # (N, nq)  each world's current positions
+    robot_adr: int,                   # robot-joint start index in qpos
+    out: wp.array2d(dtype=float),     # (N, nu)  [out]
+):
+    """pos_relative command for step t: out = q_t + V[t], per world."""
+    n, u = wp.tid()
+    out[n, u] = qpos[n, robot_adr + u] + V[n, t, u]
+
+
+@wp.kernel
+def _action_rate_cost_kernel(
+    sequence: wp.array3d(dtype=float),
+    step_target: wp.array2d(dtype=float),
+    applied_target: wp.array(dtype=float),
+    t: int,
+    pos_relative: int,
+    weight: float,
+    previous: wp.array2d(dtype=float),
+    costs: wp.array(dtype=float),
+):
+    """Sum_j weight*(target_t-target_(t-1))^2 for each sampled world."""
+    n = wp.tid()
+    value = float(0.0)
+    for j in range(previous.shape[1]):
+        target = sequence[n, t, j]
+        if pos_relative != 0:
+            target = step_target[n, j]
+        before = applied_target[j]
+        if t > 0:
+            before = previous[n, j]
+        change = target - before
+        value = value + change * change
+        previous[n, j] = target
+    costs[n] = costs[n] + weight * value
+
+
+@wp.kernel
+def _accumulate_kernel(src: wp.array(dtype=float), dst: wp.array(dtype=float)):
+    """dst += src, one element per sample."""
+    n = wp.tid()
+    dst[n] = dst[n] + src[n]
+
+
+@wp.kernel
+def _combine_costs_kernel(
+    running: wp.array(dtype=float),    # (N,)  [in/out] becomes the total
+    terminal: wp.array(dtype=float),   # (N,)
+    running_scale: float,
+    total_scale: float,
+):
+    """Fold the terminal cost into the running sum and rescale, in place."""
+    n = wp.tid()
+    running[n] = (running[n] + terminal[n]) * running_scale * total_scale
+
+
+@wp.kernel
+def _shift_kernel(
+    src: wp.array2d(dtype=float),   # (H, nu)
+    H: int,
+    shift: int,
+    dst: wp.array2d(dtype=float),   # (H, nu)  [out]
+):
+    """Warm start: dst[h] = src[h + shift], zeroing the rows that fall off."""
+    h, u = wp.tid()
+    s = h + shift
+    if s < H:
+        dst[h, u] = src[s, u]
+    else:
+        dst[h, u] = float(0.0)

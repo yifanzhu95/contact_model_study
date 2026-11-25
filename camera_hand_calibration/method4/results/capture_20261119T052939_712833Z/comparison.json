@@ -1,0 +1,200 @@
+{
+  "samples": 60,
+  "capture_span_s": 3.288747549057007,
+  "maximum_abs_joint_skew_ms": 9.387731552124023,
+  "torque_disabled_verified": true,
+  "rows": [
+    {
+      "name": "Method 1, raw",
+      "position_rms_mm": 25.43912935092324,
+      "mean_error_world_xyz_mm": [
+        -21.66326143546941,
+        4.993382588175543,
+        -12.35742618255527
+      ],
+      "position_scatter_world_xyz_mm": [
+        0.30127365784606974,
+        0.14264739501005091,
+        0.31849723090717175
+      ],
+      "resting_face_normal_rms_deg": 1.960628663144246,
+      "cube_axes_alignment_rms_deg": 5.653673489389803,
+      "heldout_rigid_palm_reprojection_rms_px": 4.630325244903994
+    },
+    {
+      "name": "Method 1, -15 mm",
+      "position_rms_mm": 14.575968914859809,
+      "mean_error_world_xyz_mm": [
+        -13.347390317620231,
+        5.83814371519949,
+        0.09780027823585724
+      ],
+      "position_scatter_world_xyz_mm": [
+        0.30127365784606347,
+        0.14264739501005133,
+        0.31849723090716686
+      ],
+      "resting_face_normal_rms_deg": 1.960628663144246,
+      "cube_axes_alignment_rms_deg": 5.653673489389803,
+      "heldout_rigid_palm_reprojection_rms_px": 4.630325244903994
+    },
+    {
+      "name": "Method 2, raw",
+      "position_rms_mm": 6.779714101479193,
+      "mean_error_world_xyz_mm": [
+        -6.30050934641115,
+        0.1041122130836294,
+        2.4585994668424216
+      ],
+      "position_scatter_world_xyz_mm": [
+        0.29721041100308065,
+        0.13982934516026485,
+        0.32352481842057584
+      ],
+      "resting_face_normal_rms_deg": 1.5096551056080105,
+      "cube_axes_alignment_rms_deg": 2.489083089901836,
+      "heldout_rigid_palm_reprojection_rms_px": 1.3832853459263366
+    },
+    {
+      "name": "Method 3, raw",
+      "position_rms_mm": 8.886832707336886,
+      "mean_error_world_xyz_mm": [
+        -7.760017493820641,
+        1.1631275749146104,
+        4.14638441608506
+      ],
+      "position_scatter_world_xyz_mm": [
+        0.30174555753654686,
+        0.14050238018902417,
+        0.3190035767492477
+      ],
+      "resting_face_normal_rms_deg": 1.6137092303002534,
+      "cube_axes_alignment_rms_deg": 2.9178013082155414,
+      "heldout_rigid_palm_reprojection_rms_px": 1.5516646990602738
+    },
+    {
+      "name": "Method 4, raw",
+      "position_rms_mm": 0.4610364218916285,
+      "mean_error_world_xyz_mm": [
+        2.451742512713887e-14,
+        1.503427012513233e-15,
+        -4.625929269271485e-15
+      ],
+      "position_scatter_world_xyz_mm": [
+        0.30174555753654697,
+        0.14050238018902383,
+        0.31900357674924773
+      ],
+      "resting_face_normal_rms_deg": 1.6137092303002534,
+      "cube_axes_alignment_rms_deg": 2.9178013082155414,
+      "heldout_rigid_palm_reprojection_rms_px": 8.67839473874956
+    }
+  ],
+  "translation_fit": {
+    "total_samples": 60,
+    "inlier_samples": 60,
+    "inliers": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "translation_change_world_m": [
+      0.007760017493820641,
+      -0.0011631275749146104,
+      -0.00414638441608506
+    ],
+    "translation_change_camera_m": [
+      -0.0010308589626716962,
+      0.00876937579984903,
+      -0.0008936547800934124
+    ],
+    "before_reference_rms_mm": 8.886832707336886,
+    "after_reference_rms_mm": 0.4610364218916287,
+    "residual_scatter_mm": [
+      0.30174555753654697,
+      0.14050238018902414,
+      0.31900357674924773
+    ],
+    "rotation_changed": false,
+    "object_only_correction_used": false,
+    "limitation": "Single-pose anchor residual is a training residual, not independent accuracy. Placement, contact geometry and tracker bias can be absorbed into translation."
+  },
+  "rotation_verification": {
+    "resting_face_normal_rms_deg": 1.6137092303002534,
+    "resting_face_normal_max_deg": 2.4016363601097046,
+    "cube_axes_alignment_rms_deg": 2.9178013082155414,
+    "rotation_updated": false,
+    "face_identity_verified": false,
+    "reference_plane": "measured finger links",
+    "note": "Axes are checked modulo 24 cube symmetries; printed face identity is not inferred. Mesh axes are assumed to represent physical cube faces."
+  },
+  "support_plane_tilt_deg": 0.11719850671725753,
+  "placement_is_training_reference": true,
+  "independent_accuracy_established": false,
+  "palm_image_motion_check": {
+    "matched_features": 17,
+    "median_displacement_px": [
+      -0.047149658203125,
+      -0.3167266845703125
+    ],
+    "paper_tag_masked": true
+  },
+  "production_camera_unchanged": true
+}

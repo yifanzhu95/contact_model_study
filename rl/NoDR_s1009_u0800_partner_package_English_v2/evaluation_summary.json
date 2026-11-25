@@ -1,0 +1,92 @@
+{
+  "policy": "noDR seed1009 final800",
+  "evaluations": {
+    "M2": {
+      "all": {
+        "n": 128,
+        "pose_arrival": 128,
+        "strict_arrival": 128,
+        "final_pose": 128,
+        "final_strict": 128,
+        "last150_strict": 128,
+        "drops": 0,
+        "drop_without_prior_arrival": 0,
+        "mean_capped_pose_step": 20.7421875,
+        "median_pose_seconds_among_arrivals": 1.344
+      },
+      "by_sign": {
+        "-1": {
+          "n": 64,
+          "pose_arrival": 64,
+          "strict_arrival": 64,
+          "final_pose": 64,
+          "final_strict": 64,
+          "last150_strict": 64,
+          "drops": 0,
+          "drop_without_prior_arrival": 0,
+          "mean_capped_pose_step": 21.0,
+          "median_pose_seconds_among_arrivals": 1.344
+        },
+        "1": {
+          "n": 64,
+          "pose_arrival": 64,
+          "strict_arrival": 64,
+          "final_pose": 64,
+          "final_strict": 64,
+          "last150_strict": 64,
+          "drops": 0,
+          "drop_without_prior_arrival": 0,
+          "mean_capped_pose_step": 20.484375,
+          "median_pose_seconds_among_arrivals": 1.28
+        }
+      },
+      "model": "M2",
+      "split": "validation",
+      "scene_role": "rollout"
+    },
+    "M5": {
+      "all": {
+        "n": 128,
+        "pose_arrival": 52,
+        "strict_arrival": 49,
+        "final_pose": 44,
+        "final_strict": 41,
+        "last150_strict": 0,
+        "drops": 6,
+        "drop_without_prior_arrival": 6,
+        "mean_capped_pose_step": 314.6640625,
+        "median_pose_seconds_among_arrivals": 1.8559999999999999
+      },
+      "by_sign": {
+        "-1": {
+          "n": 64,
+          "pose_arrival": 52,
+          "strict_arrival": 49,
+          "final_pose": 44,
+          "final_strict": 41,
+          "last150_strict": 0,
+          "drops": 3,
+          "drop_without_prior_arrival": 3,
+          "mean_capped_pose_step": 128.328125,
+          "median_pose_seconds_among_arrivals": 1.8559999999999999
+        },
+        "1": {
+          "n": 64,
+          "pose_arrival": 0,
+          "strict_arrival": 0,
+          "final_pose": 0,
+          "final_strict": 0,
+          "last150_strict": 0,
+          "drops": 3,
+          "drop_without_prior_arrival": 3,
+          "mean_capped_pose_step": 501.0,
+          "median_pose_seconds_among_arrivals": null
+        }
+      },
+      "model": "M5",
+      "split": "validation",
+      "scene_role": "eval"
+    }
+  },
+  "interpretation": "M2/M5 are simulator results, not hardware validation. M5 continuous holding0/128; known transfer limitation retained."
+}

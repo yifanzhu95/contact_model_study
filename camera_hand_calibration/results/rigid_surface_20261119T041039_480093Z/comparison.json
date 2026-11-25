@@ -1,0 +1,985 @@
+{
+  "created_utc": "2026-11-19T04:10:42.896587+00:00",
+  "results": {
+    "surface": {
+      "T_world_from_camera": [
+        [
+          -0.03289760354343896,
+          0.46704453453832717,
+          -0.8836216104413566,
+          0.6282728286549037
+        ],
+        [
+          0.9982995167971215,
+          -0.027213449674898842,
+          -0.05155097399105187,
+          0.048321914524364004
+        ],
+        [
+          -0.04812299288004712,
+          -0.8838149302397361,
+          -0.4653550758738942,
+          0.2609468167109401
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "fit": {
+        "cost": 5.92960460424971,
+        "success": true,
+        "optimality": 0.00317831965202231,
+        "points": {
+          "if": [
+            0.006733695645134726,
+            -0.008608187632315762,
+            -0.0001
+          ],
+          "rf": [
+            0.007403190874973661,
+            -0.01182849297513953,
+            -0.0001
+          ]
+        },
+        "depth_bias_m": 0.0,
+        "jacobian_singular_values": [
+          4753.299150375414,
+          4473.413714298445,
+          2748.1167455773552,
+          1834.353725283655,
+          1337.40516419872,
+          504.7486657155458,
+          158.59170495822153,
+          96.46733873385939,
+          31.78843302180145,
+          14.755353783534417
+        ]
+      },
+      "validation": {
+        "metrics": {
+          "train": {
+            "pixel": {
+              "n": 8,
+              "mean": 0.48336705940680513,
+              "median": 0.296871819355695,
+              "rms": 0.5975646876269273,
+              "mae": 0.48336705940680513,
+              "p95": 1.0765588651212743,
+              "p95_abs": 1.0765588651212743,
+              "max": 1.2829925573212564
+            },
+            "depth_mm": {
+              "n": 8,
+              "mean": 0.03075319331269366,
+              "median": 0.28996126432850877,
+              "rms": 2.340025984983558,
+              "mae": 1.8284511140957416,
+              "p95": 2.850632797179164,
+              "p95_abs": 3.846206047859035,
+              "max": 3.072521316573207
+            }
+          },
+          "validation": {
+            "pixel": {
+              "n": 3,
+              "mean": 0.8593345709752532,
+              "median": 0.46030762769136735,
+              "rms": 1.1436202187850637,
+              "mae": 0.8593345709752532,
+              "p95": 1.7704258255829726,
+              "p95_abs": 1.7704258255829726,
+              "max": 1.9159945142375956
+            },
+            "depth_mm": {
+              "n": 3,
+              "mean": -1.8019149424640668,
+              "median": -1.0818415523887737,
+              "rms": 2.320563775936027,
+              "mae": 1.8019149424640668,
+              "p95": -0.5430395366821994,
+              "p95_abs": 3.564841721298639,
+              "max": -0.4831726460481356
+            }
+          }
+        },
+        "rows": [
+          {
+            "finger": "if",
+            "pose": "if_neutral",
+            "split": "train",
+            "neutral_anchor": true,
+            "pixel_error_px": 2.842170943040401e-14,
+            "depth_error_mm": -0.021985744690700137,
+            "predicted_pixel": [
+              301.0,
+              211.50000000000003
+            ],
+            "observed_pixel": [
+              301.0,
+              211.5
+            ]
+          },
+          {
+            "finger": "if",
+            "pose": "if_flex_low",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.2317854178253239,
+            "depth_error_mm": 0.17820269867074856,
+            "predicted_pixel": [
+              300.06662786025396,
+              204.6417714297079
+            ],
+            "observed_pixel": [
+              300.25,
+              204.5
+            ]
+          },
+          {
+            "finger": "if",
+            "pose": "if_flex_high",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.6931820081784514,
+            "depth_error_mm": 0.1364975650451905,
+            "predicted_pixel": [
+              299.04657699791557,
+              193.3987575247287
+            ],
+            "observed_pixel": [
+              299.6585365853659,
+              193.0731707317073
+            ]
+          },
+          {
+            "finger": "if",
+            "pose": "if_abduct_out",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.6393292968431366,
+            "depth_error_mm": 0.401719829986269,
+            "predicted_pixel": [
+              297.177742650876,
+              204.47568335050812
+            ],
+            "observed_pixel": [
+              297.74,
+              204.78
+            ]
+          },
+          {
+            "finger": "if",
+            "pose": "if_return",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.21773416277018504,
+            "depth_error_mm": -4.262805518551405,
+            "predicted_pixel": [
+              300.80741018458474,
+              210.31706523946414
+            ],
+            "observed_pixel": [
+              301.01851851851853,
+              210.37037037037038
+            ]
+          },
+          {
+            "finger": "mf",
+            "pose": "mf_neutral",
+            "split": "validation",
+            "neutral_anchor": true,
+            "pixel_error_px": 1.797546735911271e-13,
+            "depth_error_mm": -2.4157013740953026,
+            "predicted_pixel": [
+              347.15789473684214,
+              209.85964912280684
+            ],
+            "observed_pixel": [
+              347.1578947368421,
+              209.859649122807
+            ]
+          },
+          {
+            "finger": "mf",
+            "pose": "mf_flex_low",
+            "split": "validation",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.20170157099679664,
+            "depth_error_mm": -0.4831726460481356,
+            "predicted_pixel": [
+              347.01760171563086,
+              204.14820709427283
+            ],
+            "observed_pixel": [
+              347.15686274509807,
+              204.2941176470588
+            ]
+          },
+          {
+            "finger": "mf",
+            "pose": "mf_flex_high",
+            "split": "validation",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.46030762769136735,
+            "depth_error_mm": -3.840730628955291,
+            "predicted_pixel": [
+              346.7219354009721,
+              193.08911746419523
+            ],
+            "observed_pixel": [
+              347.1578947368421,
+              193.23684210526315
+            ]
+          },
+          {
+            "finger": "mf",
+            "pose": "mf_return",
+            "split": "validation",
+            "neutral_anchor": false,
+            "pixel_error_px": 1.9159945142375956,
+            "depth_error_mm": -1.0818415523887737,
+            "predicted_pixel": [
+              347.13398504650263,
+              208.94865198630757
+            ],
+            "observed_pixel": [
+              345.2844827586207,
+              208.44827586206895
+            ]
+          },
+          {
+            "finger": "rf",
+            "pose": "rf_neutral",
+            "split": "train",
+            "neutral_anchor": true,
+            "pixel_error_px": 8.526512829121202e-14,
+            "depth_error_mm": -2.181460166517102,
+            "predicted_pixel": [
+              390.39344262295083,
+              208.8360655737704
+            ],
+            "observed_pixel": [
+              390.39344262295083,
+              208.8360655737705
+            ]
+          },
+          {
+            "finger": "rf",
+            "pose": "rf_flex_low",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.31451271701976236,
+            "depth_error_mm": 1.2093217010538115,
+            "predicted_pixel": [
+              390.86193060051147,
+              202.83963625029082
+            ],
+            "observed_pixel": [
+              391.16,
+              202.94
+            ]
+          },
+          {
+            "finger": "rf",
+            "pose": "rf_flex_high",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.20816939360469808,
+            "depth_error_mm": -2.927986164580787,
+            "predicted_pixel": [
+              391.3139136598025,
+              188.81046467752645
+            ],
+            "observed_pixel": [
+              391.4,
+              189.0
+            ]
+          },
+          {
+            "finger": "rf",
+            "pose": "rf_abduct_in",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.27923092169162766,
+            "depth_error_mm": 2.4385541183045145,
+            "predicted_pixel": [
+              392.0964764057911,
+              198.97819573746085
+            ],
+            "observed_pixel": [
+              392.375,
+              198.95833333333334
+            ]
+          },
+          {
+            "finger": "rf",
+            "pose": "rf_return",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 1.2829925573212564,
+            "depth_error_mm": 3.072521316573207,
+            "predicted_pixel": [
+              390.46391707922515,
+              207.71321679255186
+            ],
+            "observed_pixel": [
+              389.18095238095236,
+              207.7047619047619
+            ]
+          }
+        ]
+      },
+      "difference_from_current": {
+        "rotation_deg": 28.49545272308879,
+        "camera_origin_mm": 322.3183044735135
+      }
+    },
+    "surface_bias": {
+      "T_world_from_camera": [
+        [
+          -0.03377700951224148,
+          0.47857270467271507,
+          -0.8773980168490538,
+          0.6027187760802575
+        ],
+        [
+          0.9982448335481191,
+          -0.026575232517222935,
+          -0.052924562455858776,
+          0.048125742413888624
+        ],
+        [
+          -0.04864530730603422,
+          -0.8776456707344361,
+          -0.4768350980351632,
+          0.2590894531797613
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "fit": {
+        "cost": 5.79340514739432,
+        "success": true,
+        "optimality": 0.004413478704947238,
+        "points": {
+          "if": [
+            0.005973535473111456,
+            -0.009300296615641288,
+            -0.0001
+          ],
+          "rf": [
+            0.00652199435105663,
+            -0.009080005688709668,
+            -0.0001
+          ]
+        },
+        "depth_bias_m": -0.023498397081960807,
+        "jacobian_singular_values": [
+          4934.358167352386,
+          4657.037458357539,
+          2854.0469663492936,
+          1989.3433804625092,
+          1695.6134365022597,
+          579.7303998843048,
+          170.38072082164132,
+          93.87988517182384,
+          32.289379499818175,
+          18.78577863977832,
+          12.183981053514547
+        ]
+      },
+      "validation": {
+        "metrics": {
+          "train": {
+            "pixel": {
+              "n": 8,
+              "mean": 0.5020033281264665,
+              "median": 0.341593094646121,
+              "rms": 0.6037528851165432,
+              "mae": 0.5020033281264665,
+              "p95": 1.090081643460677,
+              "p95_abs": 1.090081643460677,
+              "max": 1.288270821415458
+            },
+            "depth_mm": {
+              "n": 8,
+              "mean": 0.0029172752117923584,
+              "median": 0.21103394087837804,
+              "rms": 2.2997934809023106,
+              "mae": 1.7738094620227562,
+              "p95": 2.7794223554164303,
+              "p95_abs": 3.890077060472892,
+              "max": 3.1946939438132516
+            }
+          },
+          "validation": {
+            "pixel": {
+              "n": 3,
+              "mean": 0.8736077049196441,
+              "median": 0.5071439273270312,
+              "rms": 1.150228350501413,
+              "mae": 0.8736077049196441,
+              "p95": 1.7755719645575645,
+              "p95_abs": 1.7755719645575645,
+              "max": 1.916508413138735
+            },
+            "depth_mm": {
+              "n": 3,
+              "mean": -1.7249434793971918,
+              "median": -1.0192243162977197,
+              "rms": 2.264625183202663,
+              "mae": 1.7249434793971918,
+              "p95": -0.4509408816531412,
+              "p95_abs": 3.4929494913108723,
+              "max": -0.38779827780374354
+            }
+          }
+        },
+        "rows": [
+          {
+            "finger": "if",
+            "pose": "if_neutral",
+            "split": "train",
+            "neutral_anchor": true,
+            "pixel_error_px": 2.842170943040401e-14,
+            "depth_error_mm": -0.03895700736674876,
+            "predicted_pixel": [
+              301.0,
+              211.50000000000003
+            ],
+            "observed_pixel": [
+              301.0,
+              211.5
+            ]
+          },
+          {
+            "finger": "if",
+            "pose": "if_flex_low",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.2653104879248435,
+            "depth_error_mm": 0.20754572497808446,
+            "predicted_pixel": [
+              300.0314724096241,
+              204.65045048104747
+            ],
+            "observed_pixel": [
+              300.25,
+              204.5
+            ]
+          },
+          {
+            "finger": "if",
+            "pose": "if_flex_high",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.7220160272589422,
+            "depth_error_mm": 0.12732215628588964,
+            "predicted_pixel": [
+              298.97013487448,
+              193.29090963054753
+            ],
+            "observed_pixel": [
+              299.6585365853659,
+              193.0731707317073
+            ]
+          },
+          {
+            "finger": "if",
+            "pose": "if_abduct_out",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.5387903334691292,
+            "depth_error_mm": 0.21452215677867162,
+            "predicted_pixel": [
+              297.21162773444485,
+              204.67455915197667
+            ],
+            "observed_pixel": [
+              297.74,
+              204.78
+            ]
+          },
+          {
+            "finger": "if",
+            "pose": "if_return",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.22256011028586448,
+            "depth_error_mm": -4.264514123289622,
+            "predicted_pixel": [
+              300.8003383107669,
+              210.32643405696209
+            ],
+            "observed_pixel": [
+              301.01851851851853,
+              210.37037037037038
+            ]
+          },
+          {
+            "finger": "mf",
+            "pose": "mf_neutral",
+            "split": "validation",
+            "neutral_anchor": true,
+            "pixel_error_px": 0.0,
+            "depth_error_mm": -2.365430126020276,
+            "predicted_pixel": [
+              347.1578947368421,
+              209.859649122807
+            ],
+            "observed_pixel": [
+              347.1578947368421,
+              209.859649122807
+            ]
+          },
+          {
+            "finger": "mf",
+            "pose": "mf_flex_low",
+            "split": "validation",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.19717077429316607,
+            "depth_error_mm": -0.38779827780374354,
+            "predicted_pixel": [
+              347.0089564340961,
+              204.16373345552796
+            ],
+            "observed_pixel": [
+              347.15686274509807,
+              204.2941176470588
+            ]
+          },
+          {
+            "finger": "mf",
+            "pose": "mf_flex_high",
+            "split": "validation",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.5071439273270312,
+            "depth_error_mm": -3.767807844090112,
+            "predicted_pixel": [
+              346.7036448007657,
+              193.0113383168265
+            ],
+            "observed_pixel": [
+              347.1578947368421,
+              193.23684210526315
+            ]
+          },
+          {
+            "finger": "mf",
+            "pose": "mf_return",
+            "split": "validation",
+            "neutral_anchor": false,
+            "pixel_error_px": 1.916508413138735,
+            "depth_error_mm": -1.0192243162977197,
+            "predicted_pixel": [
+              347.13247351771827,
+              208.95614853501124
+            ],
+            "observed_pixel": [
+              345.2844827586207,
+              208.44827586206895
+            ]
+          },
+          {
+            "finger": "rf",
+            "pose": "rf_neutral",
+            "split": "train",
+            "neutral_anchor": true,
+            "pixel_error_px": 0.0,
+            "depth_error_mm": -2.0917531391984845,
+            "predicted_pixel": [
+              390.39344262295083,
+              208.8360655737705
+            ],
+            "observed_pixel": [
+              390.39344262295083,
+              208.8360655737705
+            ]
+          },
+          {
+            "finger": "rf",
+            "pose": "rf_flex_low",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.29659482739572046,
+            "depth_error_mm": 1.3546192758313904,
+            "predicted_pixel": [
+              390.873823440802,
+              202.8620803708717
+            ],
+            "observed_pixel": [
+              391.16,
+              202.94
+            ]
+          },
+          {
+            "finger": "rf",
+            "pose": "rf_flex_high",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.2958926553652526,
+            "depth_error_mm": -2.8190546239542336,
+            "predicted_pixel": [
+              391.35020927283483,
+              188.7083266433363
+            ],
+            "observed_pixel": [
+              391.4,
+              189.0
+            ]
+          },
+          {
+            "finger": "rf",
+            "pose": "rf_abduct_in",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 0.3865913618965215,
+            "depth_error_mm": 2.008203691250907,
+            "predicted_pixel": [
+              392.09990434405375,
+              199.22994935121983
+            ],
+            "observed_pixel": [
+              392.375,
+              198.95833333333334
+            ]
+          },
+          {
+            "finger": "rf",
+            "pose": "rf_return",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 1.288270821415458,
+            "depth_error_mm": 3.1946939438132516,
+            "predicted_pixel": [
+              390.46919739924726,
+              207.71291556337798
+            ],
+            "observed_pixel": [
+              389.18095238095236,
+              207.7047619047619
+            ]
+          }
+        ]
+      },
+      "difference_from_current": {
+        "rotation_deg": 27.746140171613686,
+        "camera_origin_mm": 308.5870792024072
+      }
+    },
+    "current": {
+      "T_world_from_camera": [
+        [
+          -0.053325542737646295,
+          0.8305459369514124,
+          -0.5543914078566113,
+          0.4275556239117867
+        ],
+        [
+          0.9980614638070043,
+          0.02648894046274657,
+          -0.05631740846826334,
+          0.05352875202028851
+        ],
+        [
+          -0.03208895378717712,
+          -0.5563198564195432,
+          -0.8303484307194078,
+          0.5130868213950068
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "validation": {
+        "metrics": {
+          "train": {
+            "pixel": {
+              "n": 8,
+              "mean": 7.090804403346333,
+              "median": 6.6092432765294244,
+              "rms": 8.36199034152373,
+              "mae": 7.090804403346333,
+              "p95": 14.059016170618076,
+              "p95_abs": 14.059016170618076,
+              "max": 14.783111949462366
+            },
+            "depth_mm": {
+              "n": 8,
+              "mean": 0.8310566258789565,
+              "median": 0.9197515420578672,
+              "rms": 3.028176740020395,
+              "mae": 2.704263164393539,
+              "p95": 4.539749662466796,
+              "p95_abs": 4.539749662466796,
+              "max": 4.994883614532153
+            }
+          },
+          "validation": {
+            "pixel": {
+              "n": 3,
+              "mean": 6.507783344018158,
+              "median": 4.9723472364732935,
+              "rms": 7.727018775104802,
+              "mae": 6.507783344018158,
+              "p95": 11.478559819914361,
+              "p95_abs": 11.478559819914361,
+              "max": 12.201472329185592
+            },
+            "depth_mm": {
+              "n": 3,
+              "mean": -0.6636791281429133,
+              "median": 0.4885040190319989,
+              "rms": 2.274182261720735,
+              "mae": 1.8095833832628323,
+              "p95": 1.1561675291862916,
+              "p95_abs": 3.461939626762544,
+              "max": 1.2303523636478797
+            }
+          }
+        },
+        "rows": [
+          {
+            "finger": "if",
+            "pose": "if_neutral",
+            "split": "train",
+            "neutral_anchor": true,
+            "pixel_error_px": 8.526512829121202e-14,
+            "depth_error_mm": 0.851517500698451,
+            "predicted_pixel": [
+              301.0,
+              211.49999999999991
+            ],
+            "observed_pixel": [
+              301.0,
+              211.5
+            ]
+          },
+          {
+            "finger": "if",
+            "pose": "if_flex_low",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 5.98942820425493,
+            "depth_error_mm": 0.5950310617489629,
+            "predicted_pixel": [
+              300.1609479506377,
+              210.48876614557864
+            ],
+            "observed_pixel": [
+              300.25,
+              204.5
+            ]
+          },
+          {
+            "finger": "if",
+            "pose": "if_flex_high",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 12.714266867050108,
+            "depth_error_mm": -2.0349564621979788,
+            "predicted_pixel": [
+              299.2734853830232,
+              205.78160562897702
+            ],
+            "observed_pixel": [
+              299.6585365853659,
+              193.0731707317073
+            ]
+          },
+          {
+            "finger": "if",
+            "pose": "if_abduct_out",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 7.468899561058854,
+            "depth_error_mm": 1.2444720223667716,
+            "predicted_pixel": [
+              299.03966861398146,
+              212.1349522192205
+            ],
+            "observed_pixel": [
+              297.74,
+              204.78
+            ]
+          },
+          {
+            "finger": "if",
+            "pose": "if_return",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 1.1589524715564998,
+            "depth_error_mm": -3.350735360364898,
+            "predicted_pixel": [
+              300.82473497362156,
+              211.51300713201167
+            ],
+            "observed_pixel": [
+              301.01851851851853,
+              210.37037037037038
+            ]
+          },
+          {
+            "finger": "mf",
+            "pose": "mf_neutral",
+            "split": "validation",
+            "neutral_anchor": true,
+            "pixel_error_px": 2.842170943040401e-14,
+            "depth_error_mm": -0.9855614294880244,
+            "predicted_pixel": [
+              347.1578947368421,
+              209.85964912280699
+            ],
+            "observed_pixel": [
+              347.1578947368421,
+              209.859649122807
+            ]
+          },
+          {
+            "finger": "mf",
+            "pose": "mf_flex_low",
+            "split": "validation",
+            "neutral_anchor": false,
+            "pixel_error_px": 4.9723472364732935,
+            "depth_error_mm": 1.2303523636478797,
+            "predicted_pixel": [
+              347.107807720181,
+              209.2662228998259
+            ],
+            "observed_pixel": [
+              347.15686274509807,
+              204.2941176470588
+            ]
+          },
+          {
+            "finger": "mf",
+            "pose": "mf_flex_high",
+            "split": "validation",
+            "neutral_anchor": false,
+            "pixel_error_px": 12.201472329185592,
+            "depth_error_mm": -3.7098937671086185,
+            "predicted_pixel": [
+              347.1189497573224,
+              205.4382522814867
+            ],
+            "observed_pixel": [
+              347.1578947368421,
+              193.23684210526315
+            ]
+          },
+          {
+            "finger": "mf",
+            "pose": "mf_return",
+            "split": "validation",
+            "neutral_anchor": false,
+            "pixel_error_px": 2.349530466395587,
+            "depth_error_mm": 0.4885040190319989,
+            "predicted_pixel": [
+              347.145721328204,
+              209.88218115866863
+            ],
+            "observed_pixel": [
+              345.2844827586207,
+              208.44827586206895
+            ]
+          },
+          {
+            "finger": "rf",
+            "pose": "rf_neutral",
+            "split": "train",
+            "neutral_anchor": true,
+            "pixel_error_px": 6.355287432313019e-14,
+            "depth_error_mm": -0.5974196606071125,
+            "predicted_pixel": [
+              390.3934426229508,
+              208.83606557377053
+            ],
+            "observed_pixel": [
+              390.39344262295083,
+              208.8360655737705
+            ]
+          },
+          {
+            "finger": "rf",
+            "pose": "rf_flex_low",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 5.518604291191722,
+            "depth_error_mm": 3.6123915680966734,
+            "predicted_pixel": [
+              390.90748041223816,
+              208.45282388441316
+            ],
+            "observed_pixel": [
+              391.16,
+              202.94
+            ]
+          },
+          {
+            "finger": "rf",
+            "pose": "rf_flex_high",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 14.783111949462366,
+            "depth_error_mm": -2.1071343314954527,
+            "predicted_pixel": [
+              391.86312825681597,
+              203.77585568175581
+            ],
+            "observed_pixel": [
+              391.4,
+              189.0
+            ]
+          },
+          {
+            "finger": "rf",
+            "pose": "rf_abduct_in",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 7.229058348803918,
+            "depth_error_mm": 3.6945008943454205,
+            "predicted_pixel": [
+              389.89074198110796,
+              205.74712900752934
+            ],
+            "observed_pixel": [
+              392.375,
+              198.95833333333334
+            ]
+          },
+          {
+            "finger": "rf",
+            "pose": "rf_return",
+            "split": "train",
+            "neutral_anchor": false,
+            "pixel_error_px": 1.8641135333922616,
+            "depth_error_mm": 4.994883614532153,
+            "predicted_pixel": [
+              390.5311812607635,
+              208.98998610212988
+            ],
+            "observed_pixel": [
+              389.18095238095236,
+              207.7047619047619
+            ]
+          }
+        ]
+      },
+      "difference_from_current": {
+        "rotation_deg": 0.0,
+        "camera_origin_mm": 0.0
+      }
+    }
+  },
+  "status": "Exploratory; inspect held-out geometry before acceptance"
+}

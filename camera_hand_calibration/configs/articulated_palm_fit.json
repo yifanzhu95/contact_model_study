@@ -1,0 +1,331 @@
+{
+  "schema_version": 1,
+  "session": "datasets/articulated_20261119T033633_480690Z",
+  "method": "Natural rigid-palm housing corners plus aligned depth; no previous extrinsics in initialization or fitting",
+  "annotation_method": "Fresh visual annotation on median park capture; outer front-face corners verified against complete CAD vertex set; lower-right body coordinates corrected by -4.752 mm from previous preliminary stationary fit.",
+  "pixel_sigma": 1.5,
+  "depth_sigma_m": 0.002,
+  "depth_grid_stride_px": 4,
+  "max_depth_temporal_std_m": 0.002,
+  "bootstrap_repetitions": 0,
+  "seed": 24,
+  "landmarks": [
+    {
+      "id": "if_upper_left",
+      "body_xyz_m": [
+        -0.018,
+        0.022087,
+        -0.0282
+      ],
+      "pixel": [
+        284.5,
+        164.0
+      ],
+      "split": "train"
+    },
+    {
+      "id": "if_upper_right",
+      "body_xyz_m": [
+        -0.018,
+        -0.004247,
+        -0.0282
+      ],
+      "pixel": [
+        308.5,
+        163.5
+      ],
+      "split": "train"
+    },
+    {
+      "id": "if_lower_left",
+      "body_xyz_m": [
+        0.002,
+        0.020107,
+        -0.0282
+      ],
+      "pixel": [
+        286.8,
+        180.5
+      ],
+      "split": "train"
+    },
+    {
+      "id": "if_lower_right",
+      "body_xyz_m": [
+        0.002,
+        -0.0022670000000000004,
+        -0.0282
+      ],
+      "pixel": [
+        305.6,
+        180.5
+      ],
+      "split": "train"
+    },
+    {
+      "id": "mf_upper_left",
+      "body_xyz_m": [
+        -0.018,
+        -0.022909,
+        -0.0282
+      ],
+      "pixel": [
+        328.5,
+        163.8
+      ],
+      "split": "validation"
+    },
+    {
+      "id": "mf_upper_right",
+      "body_xyz_m": [
+        -0.018,
+        -0.049243,
+        -0.0282
+      ],
+      "pixel": [
+        352.8,
+        163.0
+      ],
+      "split": "validation"
+    },
+    {
+      "id": "mf_lower_left",
+      "body_xyz_m": [
+        0.002,
+        -0.024889,
+        -0.0282
+      ],
+      "pixel": [
+        330.5,
+        180.5
+      ],
+      "split": "validation"
+    },
+    {
+      "id": "mf_lower_right",
+      "body_xyz_m": [
+        0.002,
+        -0.047262,
+        -0.0282
+      ],
+      "pixel": [
+        349.4,
+        180.0
+      ],
+      "split": "validation"
+    },
+    {
+      "id": "rf_upper_left",
+      "body_xyz_m": [
+        -0.018,
+        -0.067904,
+        -0.0282
+      ],
+      "pixel": [
+        372.0,
+        162.0
+      ],
+      "split": "train"
+    },
+    {
+      "id": "rf_upper_right",
+      "body_xyz_m": [
+        -0.018,
+        -0.094238,
+        -0.0282
+      ],
+      "pixel": [
+        395.5,
+        161.5
+      ],
+      "split": "train"
+    },
+    {
+      "id": "rf_lower_left",
+      "body_xyz_m": [
+        0.002,
+        -0.069884,
+        -0.0282
+      ],
+      "pixel": [
+        374.4,
+        179.3
+      ],
+      "split": "train"
+    },
+    {
+      "id": "rf_lower_right",
+      "body_xyz_m": [
+        0.002,
+        -0.092258,
+        -0.0282
+      ],
+      "pixel": [
+        392.5,
+        178.8
+      ],
+      "split": "train"
+    }
+  ],
+  "depth_regions": [
+    {
+      "id": "if_front",
+      "polygon_px": [
+        [
+          289,
+          167
+        ],
+        [
+          302,
+          167
+        ],
+        [
+          302,
+          177
+        ],
+        [
+          289,
+          177
+        ]
+      ],
+      "normal_body": [
+        0,
+        0,
+        -1
+      ],
+      "plane_offset_m": 0.0282,
+      "split": "train"
+    },
+    {
+      "id": "rf_front",
+      "polygon_px": [
+        [
+          378,
+          165
+        ],
+        [
+          390,
+          165
+        ],
+        [
+          390,
+          175
+        ],
+        [
+          378,
+          175
+        ]
+      ],
+      "normal_body": [
+        0,
+        0,
+        -1
+      ],
+      "plane_offset_m": 0.0282,
+      "split": "train"
+    },
+    {
+      "id": "mf_front",
+      "polygon_px": [
+        [
+          334,
+          167
+        ],
+        [
+          347,
+          167
+        ],
+        [
+          347,
+          177
+        ],
+        [
+          334,
+          177
+        ]
+      ],
+      "normal_body": [
+        0,
+        0,
+        -1
+      ],
+      "plane_offset_m": 0.0282,
+      "split": "validation"
+    },
+    {
+      "id": "palm_flat_left",
+      "polygon_px": [
+        [
+          285,
+          130
+        ],
+        [
+          303,
+          128
+        ],
+        [
+          303,
+          138
+        ],
+        [
+          285,
+          138
+        ]
+      ],
+      "normal_body": [
+        0,
+        0,
+        -1
+      ],
+      "plane_offset_m": 0.0347,
+      "split": "train"
+    },
+    {
+      "id": "palm_flat_right",
+      "polygon_px": [
+        [
+          308,
+          129
+        ],
+        [
+          317,
+          129
+        ],
+        [
+          317,
+          138
+        ],
+        [
+          308,
+          138
+        ]
+      ],
+      "normal_body": [
+        0,
+        0,
+        -1
+      ],
+      "plane_offset_m": 0.0347,
+      "split": "validation"
+    }
+  ],
+  "exclusions": [
+    "Fiducial pattern and paper corners",
+    "All articulated finger geometry",
+    "Cube as a world anchor",
+    "Current camera extrinsics during fitting",
+    "Paper and surrounding margin explicitly masked in RGB and depth before processing"
+  ],
+  "limitations": [
+    "Manual corner correspondence uncertainty and CAD-to-real mismatch",
+    "Single fixed hand/camera pose, near-planar landmarks",
+    "Held-out spatial features and adjacent frames, not independent poses",
+    "Factory intrinsics and depth scale held fixed"
+  ],
+  "exclude_rectangle_xyxy": [
+    320,
+    75,
+    391,
+    151
+  ]
+}

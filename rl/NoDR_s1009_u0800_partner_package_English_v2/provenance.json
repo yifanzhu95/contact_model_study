@@ -1,0 +1,111 @@
+{
+  "policy": "noDR seed1009 scheduled final800",
+  "actor_sha256": "c7e34e236c91f32e6d27473a732837da97a643584d3a393b59ed04a24fb2b86a",
+  "actor_byte_identical_to_original": true,
+  "checkpoint_sha256": "e6954bf1b5be951717ad4c5fe30709af3b0051d97c400f179c80052096e2e700",
+  "copied_actor_normalizer_tensors_exact": true,
+  "source_checksums": [
+    {
+      "name": "result.json",
+      "sha256": "8d00c0ffea3978cf91a598bb8343cbd3fb7744a30c91638124b9b12d10973617",
+      "bytes": 5671
+    },
+    {
+      "name": "manifest.json",
+      "sha256": "6c412c926872adae20e34bedd3996dc4a3fd7a822ffa640508181877c5f47f93",
+      "bytes": 6220
+    },
+    {
+      "name": "actor.pt",
+      "sha256": "c7e34e236c91f32e6d27473a732837da97a643584d3a393b59ed04a24fb2b86a",
+      "bytes": 1762870
+    },
+    {
+      "name": "checkpoint_complete_800.pt",
+      "sha256": "e6954bf1b5be951717ad4c5fe30709af3b0051d97c400f179c80052096e2e700",
+      "bytes": 10460025
+    },
+    {
+      "name": "runtime_lock_v2.json",
+      "sha256": "8a308b088e8f263d403bebab590eb0421caa8eb8c47fe5a57bf6f7a97889fc47",
+      "bytes": 113337
+    },
+    {
+      "name": "env_leap_rollout_cube_high_high.xml",
+      "sha256": "49f2c66e4f19fec8aa1296e72e1be356a44264fe5dda04dc322b37138eec3255",
+      "bytes": 4695
+    },
+    {
+      "name": "Encoding.py",
+      "sha256": "e6259d7ef316097d81fa6876aad6ff1d87438ff296e69fd2a2377d5434d4e496",
+      "bytes": 6317
+    },
+    {
+      "name": "result.json",
+      "sha256": "99faa7817d74dfa9f7390ea46eb65080387281dbe754781f9db11d6844caf416",
+      "bytes": 5265
+    },
+    {
+      "name": "trace.npz",
+      "sha256": "0a3d45eb48e74b6c18f023b9ed1370e915a51f6b4042e4489d8460294a2514d7",
+      "bytes": 16470173
+    },
+    {
+      "name": "result.json",
+      "sha256": "a14e2fe245421731496af01d24b5bb6b1474ca337f909b491b82f7236d311bf6",
+      "bytes": 5284
+    },
+    {
+      "name": "trace.npz",
+      "sha256": "36fb56a91c1d4e91dab72d9e65e87529f683c088250e1cb03310b14c99cd6b9b",
+      "bytes": 19146266
+    },
+    {
+      "name": "initial_state.npz",
+      "sha256": "e9847342fc07b5f3e08d54f83c9b13064432ff25d4e89422667c87c69787201a",
+      "bytes": 344067
+    },
+    {
+      "name": "action_interface_v2.py",
+      "sha256": "2587a93911c31339bb07c5ec9cd2cfea9a1dd8bb1d61375cf92aba0bbd576d22",
+      "bytes": 5621
+    },
+    {
+      "name": "evaluate_v2.py",
+      "sha256": "e45bd9248290b6ead4c47aa6c33d98bf28987778c0d12eaafe52009e2a4b9d9b",
+      "bytes": 9135
+    },
+    {
+      "name": "train_maturity_v1.py",
+      "sha256": "a626129374f6b64bd71d39531e7dc7825d3ab1d76f7d8142e0a8508241407c3a",
+      "bytes": 10597
+    },
+    {
+      "name": "m2_interface.py",
+      "sha256": "0ffc3183aa394692f5761e720eaa5fa9b8981cb33cee2d029e22070bed98072c",
+      "bytes": 4973
+    },
+    {
+      "name": "TrainEnv.py",
+      "sha256": "5ce796461180d79cbbe6e892f1d8cb8761b447b349c0f53c957f5be709003395",
+      "bytes": 11118
+    },
+    {
+      "name": "CubeReorient.py",
+      "sha256": "6ff58fae58e0428880f5ee8a3bd3a7d78d586c1bf1e7776c6b94abaa9d578048",
+      "bytes": 4632
+    },
+    {
+      "name": "LeapReorient.py",
+      "sha256": "1c0defdaf5f3575f2c6277594fdcb4fb694c0dbfae2b131bc2787be1836d26c9",
+      "bytes": 44395
+    },
+    {
+      "name": "export_QA.json",
+      "sha256": "480cd0ebea779c6c6cff930ee4570c1a468324147f6e8b1521abfb180a0b109c",
+      "bytes": 665
+    }
+  ],
+  "archived_reference_cases": 112,
+  "scope": "research inference handoff only; no hardware performance validation"
+}

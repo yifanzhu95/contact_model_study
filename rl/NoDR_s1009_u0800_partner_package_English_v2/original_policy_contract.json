@@ -1,0 +1,94 @@
+{
+  "format": "arrival_hold_action_v2",
+  "profile": "tanh",
+  "action": {
+    "transform": "tanh",
+    "delta": 0.064,
+    "lead": null
+  },
+  "recipe": "strict_occupancy_fixed500_v1",
+  "seed": 1009,
+  "updates": 800,
+  "num_envs": 8192,
+  "qualification": false,
+  "observation": "native73_current_actor_critic",
+  "goal": "fixed local X +/-90",
+  "model": "M2",
+  "scene_role": "rollout",
+  "geometry": "high_high",
+  "initials": "originalM5/fullbankqvu",
+  "reward": "7terms*0.064;success5*originaljointgateeachcontrol;nooncebonus",
+  "terminal": "originaldropor500;successnonterminal;goalnotresampled",
+  "runner_config": {
+    "num_steps_per_env": 32,
+    "obs_groups": {
+      "actor": [
+        "policy"
+      ],
+      "critic": [
+        "policy"
+      ]
+    },
+    "save_interval": 100,
+    "logger": "tensorboard",
+    "check_for_nan": true,
+    "torch_compile_mode": null,
+    "actor": {
+      "class_name": "MLPModel",
+      "hidden_dims": [
+        512,
+        512,
+        256
+      ],
+      "activation": "elu",
+      "obs_normalization": true,
+      "distribution_cfg": {
+        "class_name": "GaussianDistribution",
+        "init_std": 0.7,
+        "std_type": "scalar",
+        "std_range": [
+          0.05,
+          1.0
+        ],
+        "learn_std": true
+      }
+    },
+    "critic": {
+      "class_name": "MLPModel",
+      "hidden_dims": [
+        512,
+        512,
+        256
+      ],
+      "activation": "elu",
+      "obs_normalization": true,
+      "distribution_cfg": null
+    },
+    "algorithm": {
+      "class_name": "PPO",
+      "num_learning_epochs": 5,
+      "num_mini_batches": 8,
+      "clip_param": 0.2,
+      "gamma": 0.99,
+      "lam": 0.95,
+      "value_loss_coef": 1,
+      "entropy_coef": 0.003,
+      "learning_rate": 0.001,
+      "max_grad_norm": 1,
+      "optimizer": "adam",
+      "use_clipped_value_loss": true,
+      "schedule": "adaptive",
+      "desired_kl": 0.01,
+      "normalize_advantage_per_mini_batch": false,
+      "use_mixed_precision": false,
+      "rnd_cfg": null,
+      "symmetry_cfg": null
+    },
+    "multi_gpu": null
+  },
+  "model_rng_seeded_after_geometry_construction": true,
+  "parent_checkpoint": "/home/weihao/Documents/ChatGPT/contact modle/reports/rl_maturity_11h_2026-11-12_v1/stage_01_s1009_dose_and_action_screen_v1/fresh_high_tanh_s1009_u188/checkpoint_complete_188.pt",
+  "parent_checkpoint_sha256": "9bb95ab77fb2a60ca94886fc895743f2f479d6d5f129f3cbc1eae6b292642a40",
+  "prefix_updates": 188,
+  "total_planned_updates": 800
+}

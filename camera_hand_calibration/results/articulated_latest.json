@@ -1,0 +1,5 @@
+{
+  "directory": "results/rigid_surface_20261119T042209_623823Z",
+  "method": "joint fixed-palm and measured rigid-housing RGB-D fit",
+  "status": "No candidate passes every cross-check; the joint fit is a provisional review candidate, not a production calibration."
+}

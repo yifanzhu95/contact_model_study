@@ -1,0 +1,98 @@
+{
+  "status": "prepared_not_started",
+  "prepared_at_utc": "2026-11-17T02:12:31.418233+00:00",
+  "object": "cube",
+  "mode": "hardware",
+  "n_episodes": 12,
+  "weights": {
+    "w_quat": 26.342,
+    "w_pos_x": 53.616,
+    "w_pos_y": 100.0,
+    "w_pos_z": 0.0503,
+    "w_velo": 0.0,
+    "w_contact": 100.0,
+    "w_joint": 0.0538,
+    "w_joint_velo": 0.0,
+    "w_fallen": 11.841,
+    "w_quat_term": 148.42,
+    "w_pos_term": 1000.0,
+    "w_fallen_term": 0.0
+  },
+  "joint_reference_id": "P011",
+  "joint_reference": [
+    0.15646600723266602,
+    -0.9096508026123047,
+    1.1412818431854248,
+    0.3206019401550293,
+    0.31172097356695877,
+    -0.0981748104095459,
+    1.178177745718705,
+    0.11076939733404863,
+    0.2807183265686035,
+    1.0308349132537842,
+    1.179630994796753,
+    0.2546408176422119,
+    0.5629708766937256,
+    1.5477864742279053,
+    1.6183497905731201,
+    0.4448542594909668
+  ],
+  "initial_preparation_pose_id": "P001",
+  "clipping": {
+    "lower": 0.2,
+    "upper": 0.2,
+    "reference": "measured_position"
+  },
+  "friction": {
+    "cube": [
+      0.3,
+      0.005,
+      0.0001
+    ],
+    "fingertip": [
+      0.5,
+      0.005,
+      0.0001
+    ],
+    "palm": [
+      0.4,
+      0.005,
+      0.0001
+    ],
+    "finger": [
+      0.4,
+      0.005,
+      0.0001
+    ]
+  },
+  "mass_kg": 0.07,
+  "hand": "calibrated",
+  "hand_acc": "high",
+  "obj_acc": "high",
+  "n_samples": 512,
+  "warm_start": "shift",
+  "temperature": 0.1,
+  "noise_sigma": 0.05,
+  "time_horizon": 0.32,
+  "ctrl_time_step": 0.064,
+  "pace_control": false,
+  "command": [
+    "/home/chetan/miniconda3/envs/mj_env/bin/python",
+    "/home/chetan/contact_model_study/launch_leap_experiment.py",
+    "--config",
+    "/home/chetan/contact_model_study/configs/m2_original_P011_clip020/experiment.json",
+    "--n-episodes",
+    "12",
+    "--log-dir",
+    "results/bo_validation/hardware/cube_reorient/hand-high_obj-high/M2/original_P011_shift512_clip020",
+    "--restart-tracking"
+  ],
+  "log_dir": "results/bo_validation/hardware/cube_reorient/hand-high_obj-high/M2/original_P011_shift512_clip020",
+  "input_sha256": {
+    "experiment.json": "b3a300c482589e7f01c6e27bbe4e7300aaa09890f15405a46d27e2c1e33b6411",
+    "hardware.json": "3d1ed351f3fef26cb10b366095ee474aee7cf6daf7069ca307d0686c4bf89405",
+    "cube_joint_reference.json": "c9c98e3b453664fd447cc38ef356dd547f1ef02b32b06591fc72b1db7c346584",
+    "weights.json": "881ae717b771ce89e8a6174fd919d76e23bff7ae8403d0d68c5f44403d869151"
+  },
+  "tracking_restart": true
+}

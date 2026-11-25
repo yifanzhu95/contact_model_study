@@ -1,0 +1,250 @@
+{
+  "created_at_utc": "2026-11-18T07:03:18.646912+00:00",
+  "initial": "scratch",
+  "diagnostics": {
+    "success": true,
+    "message": "`xtol` termination condition is satisfied.",
+    "inliers": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "jacobian_rank": 6,
+    "scaled_jacobian_condition": 25.272215550574614,
+    "planar_geometry": false,
+    "warning": null
+  },
+  "synthetic_test_only": true,
+  "prior_transform": [
+    [
+      -0.053325542737646295,
+      0.8305459369514124,
+      -0.5543914078566113,
+      0.4275556239117867
+    ],
+    [
+      0.9980614638070043,
+      0.02648894046274657,
+      -0.05631740846826334,
+      0.05352875202028851
+    ],
+    [
+      -0.03208895378717712,
+      -0.5563198564195432,
+      -0.8303484307194078,
+      0.5130868213950068
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "config": {
+    "camera": {
+      "serial": "310522070297",
+      "width": 640,
+      "height": 480,
+      "fps": 60,
+      "warmup_frames": 60,
+      "enable_global_time": true,
+      "save_every_n_frames": 12,
+      "depth_min_m": 0.1,
+      "depth_max_m": 1.5
+    },
+    "model": "model/hand.xml",
+    "model_binary": "model/hand.mjb",
+    "camera_prior": "configs/current_transform.json",
+    "joints": {
+      "url": "udpm://239.255.76.67:7667?ttl=1",
+      "channel": "LEAP_STATE",
+      "names": [
+        "if_mcp",
+        "if_rot",
+        "if_pip",
+        "if_dip",
+        "mf_mcp",
+        "mf_rot",
+        "mf_pip",
+        "mf_dip",
+        "rf_mcp",
+        "rf_rot",
+        "rf_pip",
+        "rf_dip",
+        "th_cmc",
+        "th_axl",
+        "th_mcp",
+        "th_ipl"
+      ],
+      "max_frame_skew_ms": 30.0,
+      "settle_window_s": 0.4,
+      "max_motion_rad": 0.01,
+      "max_speed_rad_s": 0.03,
+      "min_settle_samples": 5,
+      "max_sample_gap_s": 0.05
+    },
+    "fit": {
+      "ransac_px": 3.0,
+      "robust_scale_px": 2.0,
+      "heldout_p95_limit_px": 4.0,
+      "seed": 0,
+      "max_scaled_jacobian_condition": 1000000.0
+    },
+    "notes": [
+      "No motor commands or direct serial access are implemented.",
+      "Joint LCM subscription is explicitly opt-in; await operator confirmation before a hardware experiment.",
+      "No object-only translation correction is used for hand calibration."
+    ]
+  },
+  "environment": {
+    "python": "3.12.12 | packaged by Anaconda, Inc. | (main, Oct 21 2025, 20:16:04) [GCC 11.2.0]",
+    "executable": "/home/chetan/miniconda3/envs/mj_env/bin/python",
+    "platform": "Linux-5.15.0-203-generic-x86_64-with-glibc2.35",
+    "packages": {
+      "numpy": "2.2.5",
+      "scipy": "1.16.3",
+      "mujoco": "3.14.0",
+      "pyrealsense2": "2.59.1.11053",
+      "opencv-python": "4.12.0",
+      "matplotlib": "3.10.6",
+      "lcm": "1.5.3",
+      "pytest": "9.2.0"
+    }
+  },
+  "code_sha256": {
+    "calibrate.py": "e7134d33cc2c4befad8cae2935170804c1e085ee7045755f6df6448277195c56",
+    "study.py": "690396895004b2e7e323ea4349ce709726521ed864ab67559236eb18e9fc85a0",
+    "quality.py": "bd5efb9bc1b48dc25f30a904fb549af24b802fdd9d94a1e4a6b81d18cf335607",
+    "workspace.py": "dd1520bb4434684441378f3f85c76def4989d0395101f3c82e73826932810f93",
+    "geometry.py": "ec147593a543e53b34dcf2cfc122903019aa6c85da6ec629b658497ba23cdcd3",
+    "capture.py": "a81bf73b313c6c25087c93c81e317651ca8b84567e54c8af96ad70649674cff9"
+  },
+  "model_manifest": {
+    "created_at_utc": "2026-11-18T06:53:25.257326+00:00",
+    "source_xml": "/home/chetan/contact_model_study/scenes/leap/hardware/calibrated_hand.xml",
+    "source_xml_sha256": "831ee8fd0eb7f3909ef7a46ec9c9adc080275e941fc104791c444c496d1ffb5b",
+    "snapshot_xml_sha256": "41f850db4e9f316e8024465261ca47ac38c5ede441b94c564512969ed61dbdef",
+    "binary_sha256": "2642905eb73576db230de9a3dde18b28daaf062f1b57f5887f913e8e8931b4d4",
+    "assets": {
+      "mesh_palm_right.obj": {
+        "source": "/home/chetan/contact_model_study/scenes/leap/hardware/assets/palm_right.obj",
+        "sha256": "839b2e58e69ce57e0feaa2f565f8124101a2ed81d99fb2c5d00372b245634ab8"
+      },
+      "mesh_base.obj": {
+        "source": "/home/chetan/contact_model_study/scenes/leap/hardware/assets/base.obj",
+        "sha256": "3d7194a6a33626ffcdfce78a0ca854e67b6b49f2e09a3bd62656f94515fdfbec"
+      },
+      "mesh_proximal.obj": {
+        "source": "/home/chetan/contact_model_study/scenes/leap/hardware/assets/proximal.obj",
+        "sha256": "3fff19dc1f0100bb5f34eaf8a40fcf3db40f96fd7179bb7336e538b21ff8e067"
+      },
+      "mesh_medial.obj": {
+        "source": "/home/chetan/contact_model_study/scenes/leap/hardware/assets/medial.obj",
+        "sha256": "472e054348c5a0e987829e721d5ba8486ddd47d867e416bb45d8d2a2ff917acf"
+      },
+      "mesh_distal.obj": {
+        "source": "/home/chetan/contact_model_study/scenes/leap/hardware/assets/distal.obj",
+        "sha256": "6bfa2afb2a06557ce0c54b03baec13522bfe561aabb576bd4701d4704f93ec0f"
+      },
+      "mesh_tip.obj": {
+        "source": "/home/chetan/contact_model_study/scenes/leap/hardware/assets/tip.obj",
+        "sha256": "eb2f5157e29ace1e45c4bf2bd0cacb03cc276458b1c4a21c217e73d0bc4e95c7"
+      },
+      "mesh_thumb_base.obj": {
+        "source": "/home/chetan/contact_model_study/scenes/leap/hardware/assets/thumb_base.obj",
+        "sha256": "d28876cc3b674323aa7d8a628a4240cda2757c61263b05e86a66280035a2689d"
+      },
+      "mesh_thumb_proximal.obj": {
+        "source": "/home/chetan/contact_model_study/scenes/leap/hardware/assets/thumb_proximal.obj",
+        "sha256": "5b402876601f2b0b36631e6a54ad20588f88e74f52320b6c902a8bc694578689"
+      },
+      "mesh_thumb_distal.obj": {
+        "source": "/home/chetan/contact_model_study/scenes/leap/hardware/assets/thumb_distal.obj",
+        "sha256": "4695d72a70285e8a0132ed4de49876cf99c813182e3a24b172b53631224890de"
+      },
+      "mesh_thumb_tip.obj": {
+        "source": "/home/chetan/contact_model_study/scenes/leap/hardware/assets/thumb_tip.obj",
+        "sha256": "7987f2599efaa73a6d7ccf0dd26d9f9e06949c7c66c268c9f8989aac345822e0"
+      }
+    },
+    "joint_names": [
+      "if_mcp",
+      "if_rot",
+      "if_pip",
+      "if_dip",
+      "mf_mcp",
+      "mf_rot",
+      "mf_pip",
+      "mf_dip",
+      "rf_mcp",
+      "rf_rot",
+      "rf_pip",
+      "rf_dip",
+      "th_cmc",
+      "th_axl",
+      "th_mcp",
+      "th_ipl"
+    ],
+    "camera_source_sha256": "a14ca3168d3d2d0fd308965a136ff2a9d27036da41abe76567734348278a79f5",
+    "hardware_source_sha256": "ae7398c7c7fd8b529558b07c1e24d9e6765083452ce3625559b039e8421c6ceb"
+  },
+  "source_observations_sha256": "0ef4ba523ab30a5a1c464f51f15a6e6d9466f0a6f5bd2b73a4a7370b4ddbeb5d"
+}

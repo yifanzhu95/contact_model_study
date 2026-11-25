@@ -1,0 +1,54 @@
+{
+  "session": "datasets/articulated_20261119T033633_480690Z",
+  "seed": 37,
+  "feature_count": 45,
+  "flow_fb_max_px": 1.2,
+  "depth_patch_std_max_m": 0.004,
+  "pixel_sigma": 0.8,
+  "depth_sigma_m": 0.002,
+  "fingers": {
+    "if": {
+      "roi_xyxy": [
+        284,
+        196,
+        307,
+        227
+      ],
+      "body": "if_px",
+      "split": "train"
+    },
+    "rf": {
+      "roi_xyxy": [
+        379,
+        193,
+        404,
+        224
+      ],
+      "body": "rf_px",
+      "split": "train"
+    },
+    "mf": {
+      "roi_xyxy": [
+        332,
+        194,
+        356,
+        227
+      ],
+      "body": "mf_px",
+      "split": "validation"
+    }
+  },
+  "notes": [
+    "Natural distal-finger features only; no fiducial detector or paper corners.",
+    "Extrinsics initialized from AX=XB relative finger motions, without either previous calibration.",
+    "Depth bias is a separate nuisance diagnostic; all production calibration files remain unchanged.",
+    "Second analysis uses rigid proximal servo housings to avoid soft fingertip material and distal self-occlusion.",
+    "Rigid proximal housing is obscured by curled distal links in deep-PIP phases; exclude these phases from both fit and validation before estimating camera parameters. Static templates verify feature identity independently of cumulative optical flow."
+  ],
+  "reanchor": true,
+  "exclude_pose_suffixes": [
+    "pip_low",
+    "pip_high",
+    "combined"
+  ]
+}

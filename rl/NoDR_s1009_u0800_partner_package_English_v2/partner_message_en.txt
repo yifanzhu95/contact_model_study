@@ -1,0 +1,19 @@
+Hi,
+
+Attached is the no-DR LEAP cube-reorientation policy, seed1009, at the final800
+PPO updates. It includes the original TorchScript actor with frozen observation
+normalization, a plain-PyTorch fallback, the exact73D input and16D action
+interface, joint ordering, and an offline parity test.
+
+Please start with README_en.txt and run python self_test.py on your machine.
+The policy expects joint positions/velocities and object pose plus linear/angular
+velocity in the training coordinate frame. Its output must be converted to
+absolute joint-position targets using the supplied decoder at a64ms policy period.
+
+Could you confirm your motor ordering/sign/zero conventions, object-state
+estimation frame, and position-control interface so we can align the hardware
+adapter? hardware_mapping_template.json lists these integration fields.
+
+This is a simulation-trained research baseline for hardware experiments, not an
+already validated real-robot controller. The package preserves the existing
+M2/M5 results, including the M5 continuous-holding limitation.

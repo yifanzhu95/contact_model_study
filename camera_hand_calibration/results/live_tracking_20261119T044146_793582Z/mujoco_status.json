@@ -1,0 +1,43 @@
+{
+  "displayed_at": 1795064263.964086,
+  "tracking_valid": true,
+  "status": "OBJECT IN MUJOCO BASE: +0.212, +0.162, -0.148 m\nPose age 0.05s | joint age 0.01s",
+  "calibration": 3,
+  "calibration_name": "Camera + depth + measured joint poses (provisional)",
+  "object_correction": false,
+  "qpos": [
+    1.2839419841766357,
+    -0.02454376220703125,
+    -0.49240803718566895,
+    -0.3558835983276367,
+    1.383650541305542,
+    0.06596112251281738,
+    -0.46939826011657715,
+    -0.34821367263793945,
+    1.3146212100982666,
+    -0.05982542037963867,
+    -0.47553420066833496,
+    -0.2577087879180908,
+    -0.3604855537414551,
+    -0.18407773971557617,
+    0.7869319915771484,
+    0.32213592529296875,
+    0.2118518909852284,
+    0.16216225575518844,
+    -0.14809340817139494,
+    0.7321006654568221,
+    -0.0197526423151177,
+    -0.009422991836383341,
+    0.6808448104995007
+  ],
+  "feedback": {
+    "robot_timestamp": 1795064263953118,
+    "pose_timestamp": 1795064263909327,
+    "robot_age": 0.005880832672119141,
+    "pose_age": 0.04967164993286133,
+    "rejected_poses": 0,
+    "calibration_index": 3,
+    "calibration_name": "Camera + depth + measured joint poses (provisional)",
+    "object_correction": false
+  }
+}

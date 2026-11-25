@@ -79,12 +79,12 @@ class CubeReorient(LeapReorient):
                 0.709056,  1.01884,   0.74176,   0.26175,   0.701455,  0.610097,
                 0.69912,   1.53211,   1.33179,   0.8657,
             ]),
-            "target_pos": np.array([0.02, 0.035, 0.085]),
+            "target_pos": np.array([0.025, 0.035, 0.075]),
             # Identity: the study's goal orientation is the cube's canonical
             # face-up pose. The old code derived this from _TARGET_EULER =
             # (0, 0, 0), which is the identity quaternion.
             "target_quat": np.array([1.0, 0.0, 0.0, 0.0]),
-            "fallen_z": 0.08,
+            "fallen_z": 0.065,
             # "cost_weights": {
             #     "w_quat":        23.3929,
             #     "w_pos_x":        5.99412,
@@ -115,18 +115,68 @@ class CubeReorient(LeapReorient):
             #     "w_pos_term":   300.0,
             #     "w_fallen_term":  0.0,
             # },
-            "cost_weights": { #potetial cost that seem to work better with a more difficult goal
-                "w_quat":         26.342,#25.0,#23.3929,
-                "w_pos_x":        53.616,#7.0,#5.99412,
-                "w_pos_y":        100.0,#60.0,#50.0,
-                "w_pos_z":        0.0503,#1.0,
-                "w_velo":         0.0,
-                "w_contact":      100.0,#3.5,#2.48369,
-                "w_joint":        0.0538,#0.05,#20.0,
-                "w_joint_velo":   0.0,
-                "w_fallen":     11.841,#100.0,
-                "w_quat_term":  148.42,#100.0,
-                "w_pos_term":   1000.0,#300.0,
-                "w_fallen_term":  0.0,
+            # "cost_weights": { #potetial cost that seem to work better with a more difficult goal
+            #     "w_quat":         26.342,#25.0,#23.3929,
+            #     "w_pos_x":        53.616,#7.0,#5.99412,
+            #     "w_pos_y":        100.0,#60.0,#50.0,
+            #     "w_pos_z":        0.0503,#1.0,
+            #     "w_velo":         0.0,
+            #     "w_contact":      100.0,#3.5,#2.48369,
+            #     "w_joint":        0.0538,#0.05,#20.0,
+            #     "w_joint_velo":   0.0,
+            #     "w_fallen":     11.841,#100.0,
+            #     "w_quat_term":  148.42,#100.0,
+            #     "w_pos_term":   1000.0,#300.0,
+            #     "w_fallen_term":  0.0,
+            # },
+            # "cost_weights": { # BO: mass=0.07 kg, T=0.1, noise=0.05; trial 314
+            #     "w_quat":          45.22510814,
+            #     "w_pos_x":         4.349615154,
+            #     "w_pos_y":         0.08368779856,
+            #     "w_pos_z":         38.6860546,
+            #     "w_velo":          0,
+            #     "w_contact":       94.5517078,
+            #     "w_joint":         0.02764851698,
+            #     "w_joint_velo":    0,
+            #     "w_fallen":        13.16717602,
+            #     "w_quat_term":     10.1237636,
+            #     "w_pos_term":      73.28346845,
+            #     "w_fallen_term":   0,
+            # },
+            "cost_weights": { # BO: mass=0.07 kg, T=0.1, noise=0.05; trial 622
+                "w_quat":          38.35757707291161,
+                "w_pos_x":         100.0,
+                "w_pos_y":         0.01,
+                "w_pos_z":         0.01,
+                "w_velo":          0.0,
+                "w_contact":       100.0,
+                "w_joint":         0.01,
+                "w_joint_velo":    0.0,
+                "w_fallen":        12.982253826428023,
+                "w_quat_term":     10.0,
+                "w_pos_term":      93.66848572281891,
+                "w_fallen_term":   0.0,
             },
         }
+
+
+# BEGIN completed cube friction BO: mass070g_T0.1_noise0.05_750trials
+# Uncalibrated high/high; shared M1-M4 weights; M6 excluded.
+# Cube/tips/palm/other sliding friction: 0.3 / 0.5 / 0.4 / 0.4.
+# Mass=0.07 kg; temperature=0.1; noise_sigma=0.05; samples=256.
+# Best trial=622; objective=-0.49487046957507913 (minimized).
+# "cost_weights": {
+#     "w_quat": 38.35757707291161,
+#     "w_pos_x": 100.0,
+#     "w_pos_y": 0.01,
+#     "w_pos_z": 0.01,
+#     "w_velo": 0.0,
+#     "w_contact": 100.0,
+#     "w_joint": 0.01,
+#     "w_joint_velo": 0.0,
+#     "w_fallen": 12.982253826428023,
+#     "w_quat_term": 10.0,
+#     "w_pos_term": 93.66848572281891,
+#     "w_fallen_term": 0.0,
+# },
+# END completed cube friction BO

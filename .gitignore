@@ -77,6 +77,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+.runtime/
 cover/
 
 # Translations
@@ -238,3 +239,34 @@ _tmp_pin_sim_split_*.xml
 # uv
 uv.lock
 Dependancies/
+
+# Hardware experiment recordings and generated binary artifacts stay local.
+*.mkv
+*.mp4
+*.avi
+*.mov
+*.webm
+*.bag
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.pt
+*.pth
+*.onnx
+*.engine
+*.mjb
+*.npz
+*.npy
+*.jsonl
+
+# Temporary vision inputs and optional large demonstration textures.
+iris-foundationpose-plusplus/tmp/
+iris-foundationpose-plusplus/output.txt
+iris-foundationpose-plusplus/sam-hq/visual_demo/
+iris-foundationpose-plusplus/FoundationPose/assets/
+iris-foundationpose-plusplus/meshes/spamTin_adjusted/spamTin_texture.png
+iris-foundationpose-plusplus/meshes/tomatoSoupTin_adjusted/tomatoSoupTin_texture.png
+iris-foundationpose-plusplus/meshes/cube_70_mm_adjusted/cube_70_mm_texture.png
+rl/**/runtime/

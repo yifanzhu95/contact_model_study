@@ -1,0 +1,827 @@
+{
+  "analysed_at_utc": "2026-11-18T08:12:11.016563+00:00",
+  "package": "/home/chetan/contact_model_study/rl/NoDR_s1009_u0800_partner_package_English_v2",
+  "python": "/home/chetan/miniconda3/envs/mj_env/bin/python",
+  "original_file_integrity": [
+    {
+      "file": "README_en.txt",
+      "ok": true
+    },
+    {
+      "file": "START_HERE.txt",
+      "ok": true
+    },
+    {
+      "file": "actor_inference_weights.pt",
+      "ok": true
+    },
+    {
+      "file": "evaluation_summary.json",
+      "ok": true
+    },
+    {
+      "file": "example_offline.py",
+      "ok": true
+    },
+    {
+      "file": "hardware_mapping_template.json",
+      "ok": true
+    },
+    {
+      "file": "interface.json",
+      "ok": true
+    },
+    {
+      "file": "joint_order.csv",
+      "ok": true
+    },
+    {
+      "file": "offline_self_test_QA.json",
+      "ok": true
+    },
+    {
+      "file": "original_policy_contract.json",
+      "ok": true
+    },
+    {
+      "file": "partner_message_en.txt",
+      "ok": true
+    },
+    {
+      "file": "policy_noDR_s1009_u0800.ts.pt",
+      "ok": true
+    },
+    {
+      "file": "portable_policy.py",
+      "ok": true
+    },
+    {
+      "file": "preparation_QA.json",
+      "ok": true
+    },
+    {
+      "file": "provenance.json",
+      "ok": true
+    },
+    {
+      "file": "reference_cases.json",
+      "ok": true
+    },
+    {
+      "file": "release_info.json",
+      "ok": true
+    },
+    {
+      "file": "runtime_tested.json",
+      "ok": true
+    },
+    {
+      "file": "self_test.py",
+      "ok": true
+    }
+  ],
+  "original_file_count": 20,
+  "embedded_torchscript_contract_equals_external": true,
+  "network": {
+    "linear_layers": [
+      [
+        73,
+        512
+      ],
+      [
+        512,
+        512
+      ],
+      [
+        512,
+        256
+      ],
+      [
+        256,
+        16
+      ]
+    ],
+    "activation": "ELU",
+    "recurrent": false,
+    "mlp_parameter_count": 435984,
+    "normalization": "(raw observation - saved mean) / (saved std + 0.01)"
+  },
+  "reference_arithmetic": {
+    "cases": 112,
+    "by_model": {
+      "M2": 56,
+      "M5": 56
+    },
+    "elapsed_steps": [
+      0,
+      1,
+      9,
+      49,
+      99,
+      349,
+      499
+    ],
+    "observation_max_abs_error": 3.195339546291365e-07,
+    "decoded_target_max_abs_error_rad": 1.1711879155384963e-07,
+    "interpretation": "Independent standard-library encoder/decoder arithmetic against saved arrays, not policy forward-pass parity."
+  },
+  "training_contract": {
+    "format": "arrival_hold_action_v2",
+    "profile": "tanh",
+    "action": {
+      "transform": "tanh",
+      "delta": 0.064,
+      "lead": null
+    },
+    "recipe": "strict_occupancy_fixed500_v1",
+    "seed": 1009,
+    "updates": 800,
+    "num_envs": 8192,
+    "qualification": false,
+    "observation": "native73_current_actor_critic",
+    "goal": "fixed local X +/-90",
+    "model": "M2",
+    "scene_role": "rollout",
+    "geometry": "high_high",
+    "initials": "originalM5/fullbankqvu",
+    "reward": "7terms*0.064;success5*originaljointgateeachcontrol;nooncebonus",
+    "terminal": "originaldropor500;successnonterminal;goalnotresampled",
+    "runner_config": {
+      "num_steps_per_env": 32,
+      "obs_groups": {
+        "actor": [
+          "policy"
+        ],
+        "critic": [
+          "policy"
+        ]
+      },
+      "save_interval": 100,
+      "logger": "tensorboard",
+      "check_for_nan": true,
+      "torch_compile_mode": null,
+      "actor": {
+        "class_name": "MLPModel",
+        "hidden_dims": [
+          512,
+          512,
+          256
+        ],
+        "activation": "elu",
+        "obs_normalization": true,
+        "distribution_cfg": {
+          "class_name": "GaussianDistribution",
+          "init_std": 0.7,
+          "std_type": "scalar",
+          "std_range": [
+            0.05,
+            1.0
+          ],
+          "learn_std": true
+        }
+      },
+      "critic": {
+        "class_name": "MLPModel",
+        "hidden_dims": [
+          512,
+          512,
+          256
+        ],
+        "activation": "elu",
+        "obs_normalization": true,
+        "distribution_cfg": null
+      },
+      "algorithm": {
+        "class_name": "PPO",
+        "num_learning_epochs": 5,
+        "num_mini_batches": 8,
+        "clip_param": 0.2,
+        "gamma": 0.99,
+        "lam": 0.95,
+        "value_loss_coef": 1,
+        "entropy_coef": 0.003,
+        "learning_rate": 0.001,
+        "max_grad_norm": 1,
+        "optimizer": "adam",
+        "use_clipped_value_loss": true,
+        "schedule": "adaptive",
+        "desired_kl": 0.01,
+        "normalize_advantage_per_mini_batch": false,
+        "use_mixed_precision": false,
+        "rnd_cfg": null,
+        "symmetry_cfg": null
+      },
+      "multi_gpu": null
+    },
+    "model_rng_seeded_after_geometry_construction": true,
+    "parent_checkpoint": "/home/weihao/Documents/ChatGPT/contact modle/reports/rl_maturity_11h_2026-11-12_v1/stage_01_s1009_dose_and_action_screen_v1/fresh_high_tanh_s1009_u188/checkpoint_complete_188.pt",
+    "parent_checkpoint_sha256": "9bb95ab77fb2a60ca94886fc895743f2f479d6d5f129f3cbc1eae6b292642a40",
+    "prefix_updates": 188,
+    "total_planned_updates": 800
+  },
+  "interface": {
+    "schema": "noDR_s1009_u0800_handoff_v1",
+    "seed": 1009,
+    "updates": 800,
+    "DR": false,
+    "input_shape": [
+      "batch",
+      73
+    ],
+    "output_shape": [
+      "batch",
+      16
+    ],
+    "dtype": "float32",
+    "normalization": "Inside actor: (observation-mean)/(std+0.01); NEVER normalize externally a second time",
+    "raw_output": "Deterministic mean latent action; no tanh or joint limits in the actor file",
+    "action_equation": "u_next = clamp(u_previous +0.064*tanh(raw_action), training_actuator_lower, training_actuator_upper)",
+    "action_unit": "absolute position targets, radians, training actuator order",
+    "control_period_seconds": 0.064,
+    "control_frequency_hz": 15.625,
+    "episode_controls": 500,
+    "trained_goal": "Fixed canonical localX -90 or+90 degrees; not arbitrary-goal training",
+    "trained_goal_position_world_m": [
+      0.02,
+      0.035,
+      0.085
+    ],
+    "trained_goal_quaternions_wxyz": {
+      "minus90": [
+        0.7071067811865476,
+        -0.7071067811865476,
+        0.0,
+        0.0
+      ],
+      "plus90": [
+        0.7071067811865476,
+        0.7071067811865476,
+        0.0,
+        0.0
+      ]
+    },
+    "quaternion_order": "w,x,y,z; rotation matrix maps object/body vectors into training-world axes",
+    "rotation6_order": [
+      "R00",
+      "R10",
+      "R20",
+      "R01",
+      "R11",
+      "R21"
+    ],
+    "observation_slices": [
+      {
+        "start": 0,
+        "stop": 16,
+        "field": "joint position",
+        "encoding": "2*(q-q_joint_lower)/(q_joint_upper-q_joint_lower)-1"
+      },
+      {
+        "start": 16,
+        "stop": 32,
+        "field": "joint velocity",
+        "encoding": "qdot_rad_s/20"
+      },
+      {
+        "start": 32,
+        "stop": 35,
+        "field": "object position in training world",
+        "encoding": "position_m*10"
+      },
+      {
+        "start": 35,
+        "stop": 41,
+        "field": "object rotation6",
+        "encoding": "first two columns of R_world_object; column0 then column1"
+      },
+      {
+        "start": 41,
+        "stop": 44,
+        "field": "goal minus object position",
+        "encoding": "(goal_position_m-object_position_m)*10"
+      },
+      {
+        "start": 44,
+        "stop": 50,
+        "field": "goal orientation in object frame",
+        "encoding": "rotation6(R_world_object.T @ R_world_goal)"
+      },
+      {
+        "start": 50,
+        "stop": 53,
+        "field": "object linear velocity in training world",
+        "encoding": "metres/second; NOT divided by10"
+      },
+      {
+        "start": 53,
+        "stop": 56,
+        "field": "object angular velocity in training world",
+        "encoding": "radians/second divided by10"
+      },
+      {
+        "start": 56,
+        "stop": 72,
+        "field": "previous actuator target",
+        "encoding": "2*(u_previous-u_ctrl_lower)/(u_ctrl_upper-u_ctrl_lower)-1"
+      },
+      {
+        "start": 72,
+        "stop": 73,
+        "field": "episode time left",
+        "encoding": "1-completed_control_steps/500;0 before first control gives1"
+      }
+    ],
+    "joints": [
+      {
+        "index": 0,
+        "joint_name": "if_mcp",
+        "actuator_name": "if_mcp_act",
+        "qpos_index": 0,
+        "qvel_index": 0,
+        "joint_position_range_rad": [
+          -0.0,
+          2.23
+        ],
+        "actuator_target_range_rad": [
+          -0.314,
+          2.23
+        ],
+        "simulation_position_gain": 3.0,
+        "simulation_velocity_bias": -0.01
+      },
+      {
+        "index": 1,
+        "joint_name": "if_rot",
+        "actuator_name": "if_rot_act",
+        "qpos_index": 1,
+        "qvel_index": 1,
+        "joint_position_range_rad": [
+          -1.047,
+          1.047
+        ],
+        "actuator_target_range_rad": [
+          -1.047,
+          1.047
+        ],
+        "simulation_position_gain": 3.0,
+        "simulation_velocity_bias": -0.01
+      },
+      {
+        "index": 2,
+        "joint_name": "if_pip",
+        "actuator_name": "if_pip_act",
+        "qpos_index": 2,
+        "qvel_index": 2,
+        "joint_position_range_rad": [
+          -0.506,
+          1.885
+        ],
+        "actuator_target_range_rad": [
+          -0.506,
+          1.885
+        ],
+        "simulation_position_gain": 3.0,
+        "simulation_velocity_bias": -0.01
+      },
+      {
+        "index": 3,
+        "joint_name": "if_dip",
+        "actuator_name": "if_dip_act",
+        "qpos_index": 3,
+        "qvel_index": 3,
+        "joint_position_range_rad": [
+          -0.366,
+          2.042
+        ],
+        "actuator_target_range_rad": [
+          -0.366,
+          2.042
+        ],
+        "simulation_position_gain": 3.0,
+        "simulation_velocity_bias": -0.01
+      },
+      {
+        "index": 4,
+        "joint_name": "mf_mcp",
+        "actuator_name": "mf_mcp_act",
+        "qpos_index": 4,
+        "qvel_index": 4,
+        "joint_position_range_rad": [
+          -0.0,
+          2.23
+        ],
+        "actuator_target_range_rad": [
+          -0.314,
+          2.23
+        ],
+        "simulation_position_gain": 3.0,
+        "simulation_velocity_bias": -0.01
+      },
+      {
+        "index": 5,
+        "joint_name": "mf_rot",
+        "actuator_name": "mf_rot_act",
+        "qpos_index": 5,
+        "qvel_index": 5,
+        "joint_position_range_rad": [
+          -1.047,
+          1.047
+        ],
+        "actuator_target_range_rad": [
+          -1.047,
+          1.047
+        ],
+        "simulation_position_gain": 3.0,
+        "simulation_velocity_bias": -0.01
+      },
+      {
+        "index": 6,
+        "joint_name": "mf_pip",
+        "actuator_name": "mf_pip_act",
+        "qpos_index": 6,
+        "qvel_index": 6,
+        "joint_position_range_rad": [
+          -0.506,
+          1.885
+        ],
+        "actuator_target_range_rad": [
+          -0.506,
+          1.885
+        ],
+        "simulation_position_gain": 3.0,
+        "simulation_velocity_bias": -0.01
+      },
+      {
+        "index": 7,
+        "joint_name": "mf_dip",
+        "actuator_name": "mf_dip_act",
+        "qpos_index": 7,
+        "qvel_index": 7,
+        "joint_position_range_rad": [
+          -0.366,
+          2.042
+        ],
+        "actuator_target_range_rad": [
+          -0.366,
+          2.042
+        ],
+        "simulation_position_gain": 3.0,
+        "simulation_velocity_bias": -0.01
+      },
+      {
+        "index": 8,
+        "joint_name": "rf_mcp",
+        "actuator_name": "rf_mcp_act",
+        "qpos_index": 8,
+        "qvel_index": 8,
+        "joint_position_range_rad": [
+          -0.0,
+          2.23
+        ],
+        "actuator_target_range_rad": [
+          -0.314,
+          2.23
+        ],
+        "simulation_position_gain": 3.0,
+        "simulation_velocity_bias": -0.01
+      },
+      {
+        "index": 9,
+        "joint_name": "rf_rot",
+        "actuator_name": "rf_rot_act",
+        "qpos_index": 9,
+        "qvel_index": 9,
+        "joint_position_range_rad": [
+          -1.047,
+          1.047
+        ],
+        "actuator_target_range_rad": [
+          -1.047,
+          1.047
+        ],
+        "simulation_position_gain": 3.0,
+        "simulation_velocity_bias": -0.01
+      },
+      {
+        "index": 10,
+        "joint_name": "rf_pip",
+        "actuator_name": "rf_pip_act",
+        "qpos_index": 10,
+        "qvel_index": 10,
+        "joint_position_range_rad": [
+          -0.506,
+          1.885
+        ],
+        "actuator_target_range_rad": [
+          -0.506,
+          1.885
+        ],
+        "simulation_position_gain": 3.0,
+        "simulation_velocity_bias": -0.01
+      },
+      {
+        "index": 11,
+        "joint_name": "rf_dip",
+        "actuator_name": "rf_dip_act",
+        "qpos_index": 11,
+        "qvel_index": 11,
+        "joint_position_range_rad": [
+          -0.366,
+          2.042
+        ],
+        "actuator_target_range_rad": [
+          -0.366,
+          2.042
+        ],
+        "simulation_position_gain": 3.0,
+        "simulation_velocity_bias": -0.01
+      },
+      {
+        "index": 12,
+        "joint_name": "th_cmc",
+        "actuator_name": "th_cmc_act",
+        "qpos_index": 12,
+        "qvel_index": 12,
+        "joint_position_range_rad": [
+          -0.349,
+          2.094
+        ],
+        "actuator_target_range_rad": [
+          -0.349,
+          2.094
+        ],
+        "simulation_position_gain": 3.0,
+        "simulation_velocity_bias": -0.01
+      },
+      {
+        "index": 13,
+        "joint_name": "th_axl",
+        "actuator_name": "th_axl_act",
+        "qpos_index": 13,
+        "qvel_index": 13,
+        "joint_position_range_rad": [
+          -0.349,
+          2.094
+        ],
+        "actuator_target_range_rad": [
+          -0.349,
+          2.094
+        ],
+        "simulation_position_gain": 3.0,
+        "simulation_velocity_bias": -0.01
+      },
+      {
+        "index": 14,
+        "joint_name": "th_mcp",
+        "actuator_name": "th_mcp_act",
+        "qpos_index": 14,
+        "qvel_index": 14,
+        "joint_position_range_rad": [
+          -0.47,
+          2.443
+        ],
+        "actuator_target_range_rad": [
+          -0.47,
+          2.443
+        ],
+        "simulation_position_gain": 3.0,
+        "simulation_velocity_bias": -0.01
+      },
+      {
+        "index": 15,
+        "joint_name": "th_ipl",
+        "actuator_name": "th_ipl_act",
+        "qpos_index": 15,
+        "qvel_index": 15,
+        "joint_position_range_rad": [
+          -1.34,
+          1.88
+        ],
+        "actuator_target_range_rad": [
+          -1.34,
+          1.88
+        ],
+        "simulation_position_gain": 3.0,
+        "simulation_velocity_bias": -0.01
+      }
+    ],
+    "static_training_scene_root_bodies": [
+      {
+        "name": "palm",
+        "position_world_m": [
+          0.0,
+          0.0,
+          0.01
+        ],
+        "quaternion_wxyz": [
+          0.0,
+          0.9723699212512767,
+          0.0,
+          -0.23344536030040494
+        ]
+      },
+      {
+        "name": "goal",
+        "position_world_m": [
+          0.005,
+          -0.07,
+          0.1353
+        ],
+        "quaternion_wxyz": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "name": "obj",
+        "position_world_m": [
+          -0.0,
+          0.05,
+          0.07
+        ],
+        "quaternion_wxyz": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "hardware_mapping": "Not supplied. Receiver must map each joint to motor ID/sign/zero, register sensing frame to training world, and provide measured/estimated object pose and linear/angular velocity.",
+    "hardware_limits": "JSON joint/control ranges and gains describe simulation training; they are not a calibrated hardware safety specification.",
+    "previous_target": "Actual preceding accepted position target, not measured joint q. If a hardware bridge modifies the target, record the applied value and document the changed interface.",
+    "episode_reset": "No hardware reset implemented. Receiver synchronizes step0 with the actual initial accepted target and a fixed goal; no arbitrary zero-u reset.",
+    "lead_limit": null,
+    "training_physics_substep_seconds": 0.004,
+    "status": "simulation-trained research policy; offline package validation only; hardware not validated"
+  },
+  "archived_evaluation": {
+    "policy": "noDR seed1009 final800",
+    "evaluations": {
+      "M2": {
+        "all": {
+          "n": 128,
+          "pose_arrival": 128,
+          "strict_arrival": 128,
+          "final_pose": 128,
+          "final_strict": 128,
+          "last150_strict": 128,
+          "drops": 0,
+          "drop_without_prior_arrival": 0,
+          "mean_capped_pose_step": 20.7421875,
+          "median_pose_seconds_among_arrivals": 1.344
+        },
+        "by_sign": {
+          "-1": {
+            "n": 64,
+            "pose_arrival": 64,
+            "strict_arrival": 64,
+            "final_pose": 64,
+            "final_strict": 64,
+            "last150_strict": 64,
+            "drops": 0,
+            "drop_without_prior_arrival": 0,
+            "mean_capped_pose_step": 21.0,
+            "median_pose_seconds_among_arrivals": 1.344
+          },
+          "1": {
+            "n": 64,
+            "pose_arrival": 64,
+            "strict_arrival": 64,
+            "final_pose": 64,
+            "final_strict": 64,
+            "last150_strict": 64,
+            "drops": 0,
+            "drop_without_prior_arrival": 0,
+            "mean_capped_pose_step": 20.484375,
+            "median_pose_seconds_among_arrivals": 1.28
+          }
+        },
+        "model": "M2",
+        "split": "validation",
+        "scene_role": "rollout"
+      },
+      "M5": {
+        "all": {
+          "n": 128,
+          "pose_arrival": 52,
+          "strict_arrival": 49,
+          "final_pose": 44,
+          "final_strict": 41,
+          "last150_strict": 0,
+          "drops": 6,
+          "drop_without_prior_arrival": 6,
+          "mean_capped_pose_step": 314.6640625,
+          "median_pose_seconds_among_arrivals": 1.8559999999999999
+        },
+        "by_sign": {
+          "-1": {
+            "n": 64,
+            "pose_arrival": 52,
+            "strict_arrival": 49,
+            "final_pose": 44,
+            "final_strict": 41,
+            "last150_strict": 0,
+            "drops": 3,
+            "drop_without_prior_arrival": 3,
+            "mean_capped_pose_step": 128.328125,
+            "median_pose_seconds_among_arrivals": 1.8559999999999999
+          },
+          "1": {
+            "n": 64,
+            "pose_arrival": 0,
+            "strict_arrival": 0,
+            "final_pose": 0,
+            "final_strict": 0,
+            "last150_strict": 0,
+            "drops": 3,
+            "drop_without_prior_arrival": 3,
+            "mean_capped_pose_step": 501.0,
+            "median_pose_seconds_among_arrivals": null
+          }
+        },
+        "model": "M5",
+        "split": "validation",
+        "scene_role": "eval"
+      }
+    },
+    "interpretation": "M2/M5 are simulator results, not hardware validation. M5 continuous holding0/128; known transfer limitation retained."
+  },
+  "current_repository_comparison": {
+    "training_palm_tilt_deg": 26.999999580992448,
+    "current_palm_rotation_difference_deg": 3.0000004190074057,
+    "current_delta_reference": "measured_position",
+    "current_ctrl_range": {
+      "lower": 0.2,
+      "upper": 0.2
+    },
+    "package_position_gain_values": [
+      3.0
+    ],
+    "calibrated_actuator_examples": [
+      {
+        "name": "if_mcp_act",
+        "gainprm": "1.7260404051104778 0 0 0 0 0 0 0 0 0",
+        "biasprm": "0 -1.7260404051104778 -0.049947418522160711 0 0 0 0 0 0 0",
+        "dyntype": "filterexact"
+      },
+      {
+        "name": "if_rot_act",
+        "gainprm": "1.1224499464751791 0 0 0 0 0 0 0 0 0",
+        "biasprm": "0 -1.1224499464751791 -0.015666475810370138 0 0 0 0 0 0 0",
+        "dyntype": "filterexact"
+      },
+      {
+        "name": "if_pip_act",
+        "gainprm": "2.3297636592788806 0 0 0 0 0 0 0 0 0",
+        "biasprm": "0 -2.3297636592788806 -0.095972577645114396 0 0 0 0 0 0 0",
+        "dyntype": "filterexact"
+      },
+      {
+        "name": "if_dip_act",
+        "gainprm": "1.7850338437087616 0 0 0 0 0 0 0 0 0",
+        "biasprm": "0 -1.7850338437087616 -0.041582055228202255 0 0 0 0 0 0 0",
+        "dyntype": "filterexact"
+      }
+    ],
+    "current_scene_hash_equals_recorded_training_scene": false,
+    "caution": "Hash mismatch does not establish which physical values changed. Exact original physics assets are absent."
+  },
+  "runtime": {
+    "torch_installed_in_audit_environment": null,
+    "package_recorded_runtime": {
+      "Python": "3.12.3",
+      "torch": "2.14.1+cu130",
+      "numpy": "2.5.4",
+      "device": "cpu",
+      "operating_system": "Linux-7.0.0-42-generic-x86_64-with-glibc2.39",
+      "dependencies_for_receiver": "Python + PyTorch only; no CUDA/MuJoCo/Warp/RSL required for inference",
+      "compatibility": "Tested in the recorded runtime only; run self_test.py in receiver environment before integration. TorchScript legacy format retained unchanged; plain PyTorch weights/runtime included as fallback.",
+      "official_references": [
+        "https://docs.pytorch.org/docs/stable/notes/cpu_threading_torchscript_inference.html",
+        "https://docs.pytorch.org/tutorials/beginner/saving_loading_models"
+      ]
+    },
+    "actor_forward_passes": 0,
+    "full_package_self_test_run": false,
+    "simulation_steps": 0,
+    "hardware_commands": 0,
+    "dependencies_installed": false
+  },
+  "missing_training_reproduction_assets": [
+    "training source and full physics implementation",
+    "original scene XML and meshes",
+    "full initial-state bank",
+    "full PPO checkpoint including critic, optimizer and RNG",
+    "numerical definitions of reward terms and strict success joint gate"
+  ],
+  "receiver_integration_missing": [
+    "verified motor order/sign/zero/limits mapping",
+    "registration into the training world",
+    "real-state estimation and synchronized velocity inputs",
+    "previous accepted-target feedback and fixed 64 ms policy scheduling",
+    "hardware reset and experiment lifecycle"
+  ]
+}

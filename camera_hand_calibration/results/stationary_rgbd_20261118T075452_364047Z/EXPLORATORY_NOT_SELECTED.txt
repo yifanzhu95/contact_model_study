@@ -1,0 +1,2 @@
+Exploratory fit, superseded by results/stationary_rgbd_20261118T075944_453797Z. No production use.
+Rejected: housing-only geometry allowed a large tilt; held-out palm depth failed (~22 mm). Final recipe includes a spatially separate palm depth patch to constrain tilt.

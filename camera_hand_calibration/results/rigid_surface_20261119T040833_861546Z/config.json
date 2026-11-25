@@ -1,0 +1,82 @@
+{
+  "session": "datasets/articulated_20261119T033633_480690Z",
+  "exclude_rectangle_xyxy": [
+    320,
+    75,
+    391,
+    151
+  ],
+  "face_z_m": -0.0001,
+  "pixel_sigma": 0.7,
+  "depth_sigma_m": 0.002,
+  "white_threshold": 170,
+  "area_px": [
+    6,
+    65
+  ],
+  "scratch_start": "cache/corrected_static_candidate.json",
+  "fingers": {
+    "if": {
+      "roi_xyxy": [
+        276,
+        178,
+        319,
+        235
+      ],
+      "seed_pixel": [
+        301,
+        211
+      ],
+      "split": "train",
+      "poses": [
+        "neutral",
+        "flex_low",
+        "flex_high",
+        "abduct_out",
+        "return"
+      ],
+      "body": "if_px"
+    },
+    "rf": {
+      "roi_xyxy": [
+        368,
+        178,
+        413,
+        235
+      ],
+      "seed_pixel": [
+        390,
+        209
+      ],
+      "split": "train",
+      "poses": [
+        "neutral",
+        "flex_low",
+        "flex_high",
+        "abduct_in",
+        "return"
+      ],
+      "body": "rf_px"
+    },
+    "mf": {
+      "roi_xyxy": [
+        321,
+        178,
+        366,
+        235
+      ],
+      "seed_pixel": [
+        347,
+        211
+      ],
+      "split": "validation",
+      "poses": [
+        "neutral",
+        "flex_low",
+        "flex_high",
+        "return"
+      ],
+      "body": "mf_px"
+    }
+  }
+}

@@ -1,0 +1,370 @@
+{
+  "status": "prepared_not_started",
+  "created_at_utc": "2026-11-22T01:21:31.321390+00:00",
+  "root": "/home/chetan/contact_model_study",
+  "out": "/home/chetan/contact_model_study/results/isolated_bo/m2_baseline_20261121",
+  "code": "/home/chetan/contact_model_study/results/isolated_bo/m2_baseline_20261121/code",
+  "csv": "/home/chetan/contact_model_study/results/isolated_bo/m2_baseline_20261121/search.csv",
+  "results": "/home/chetan/contact_model_study/results/isolated_bo/m2_baseline_20261121/search_results",
+  "python": "/home/chetan/miniconda3/envs/mj_env/bin/python",
+  "baseline_record": "/home/chetan/contact_model_study/results/bo_validation/M2_baseline_latest.json",
+  "baseline_record_sha256": "6470255db2067d0e81f9331b202dab71a8997a1ed89b3599f6b269df1329f450",
+  "models": [
+    "M2"
+  ],
+  "row": {
+    "label": "M2_baseline_70g_T01_N512_H4",
+    "task": "cube_reorient",
+    "rollout_models": "M2",
+    "model_agg": "mean",
+    "hand_acc": "high",
+    "obj_acc": "high",
+    "eval_sim": "mujoco",
+    "n_episodes": 12,
+    "steps": 1000,
+    "seed": 0,
+    "goal_difficulty": 4,
+    "timestep": 0.004,
+    "eval_steps_per_rollout_step": 1,
+    "ctrl_time_step": 0.064,
+    "time_horizon": 0.256,
+    "n_samples": 512,
+    "n_iterations": 1,
+    "temperature": 0.1,
+    "noise_sigma": 0.05,
+    "control_mode": "pos_relative",
+    "warm_start": "shift",
+    "resample_noise": "false",
+    "center_noise": "true",
+    "adaptive_temp": "false",
+    "graph": "true",
+    "plan_on_eval": "false",
+    "stop_on_success": "true",
+    "settle": 0.0,
+    "nconmax": 100,
+    "njmax": 300,
+    "save_steps": "false",
+    "uncertainty": "false",
+    "opt_weights": "w_quat:0.01:100.0 w_pos_x:0.01:100.0 w_pos_y:0.01:100.0 w_pos_z:0.01:100.0 w_joint:0.01:100.0 w_fallen:10.0:500.0 w_quat_term:10.0:1000.0 w_pos_term:10.0:1000.0",
+    "action_rate_weight_range": "0 50",
+    "joint_limit_weight_range": "0 1000",
+    "plan_blend_alpha_range": "0 1",
+    "n_calls": 500,
+    "n_initial_points": 120,
+    "acq_func": "gp_hedge",
+    "bo_seed": 0,
+    "w_success": 1.0,
+    "w_cost": 0.1,
+    "err_clip": 250.0,
+    "seed_defaults": "true",
+    "trials_in_flight": 3,
+    "w_velo": 0.0,
+    "w_joint_velo": 0.0,
+    "w_fallen_term": 0.0,
+    "seed_points": "/home/chetan/contact_model_study/results/isolated_bo/m2_baseline_20261121/seed_points.csv",
+    "w_contact": 80.0
+  },
+  "searches": [
+    {
+      "label": "M2_baseline_70g_T01_N512_H4",
+      "task": "cube_reorient",
+      "rollout_models": "M2",
+      "model_agg": "mean",
+      "hand_acc": "high",
+      "obj_acc": "high",
+      "eval_sim": "mujoco",
+      "n_episodes": 12,
+      "steps": 1000,
+      "seed": 0,
+      "goal_difficulty": 4,
+      "timestep": 0.004,
+      "eval_steps_per_rollout_step": 1,
+      "ctrl_time_step": 0.064,
+      "time_horizon": 0.256,
+      "n_samples": 512,
+      "n_iterations": 1,
+      "temperature": 0.1,
+      "noise_sigma": 0.05,
+      "control_mode": "pos_relative",
+      "warm_start": "shift",
+      "resample_noise": "false",
+      "center_noise": "true",
+      "adaptive_temp": "false",
+      "graph": "true",
+      "plan_on_eval": "false",
+      "stop_on_success": "true",
+      "settle": 0.0,
+      "nconmax": 100,
+      "njmax": 300,
+      "save_steps": "false",
+      "uncertainty": "false",
+      "opt_weights": "w_quat:0.01:100.0 w_pos_x:0.01:100.0 w_pos_y:0.01:100.0 w_pos_z:0.01:100.0 w_joint:0.01:100.0 w_fallen:10.0:500.0 w_quat_term:10.0:1000.0 w_pos_term:10.0:1000.0",
+      "action_rate_weight_range": "0 50",
+      "joint_limit_weight_range": "0 1000",
+      "plan_blend_alpha_range": "0 1",
+      "n_calls": 500,
+      "n_initial_points": 120,
+      "acq_func": "gp_hedge",
+      "bo_seed": 0,
+      "w_success": 1.0,
+      "w_cost": 0.1,
+      "err_clip": 250.0,
+      "seed_defaults": "true",
+      "trials_in_flight": 3,
+      "w_velo": 0.0,
+      "w_joint_velo": 0.0,
+      "w_fallen_term": 0.0,
+      "seed_points": "/home/chetan/contact_model_study/results/isolated_bo/m2_baseline_20261121/seed_points.csv",
+      "w_contact": 80.0
+    }
+  ],
+  "weight_ranges": {
+    "w_quat": [
+      0.01,
+      100.0
+    ],
+    "w_pos_x": [
+      0.01,
+      100.0
+    ],
+    "w_pos_y": [
+      0.01,
+      100.0
+    ],
+    "w_pos_z": [
+      0.01,
+      100.0
+    ],
+    "w_joint": [
+      0.01,
+      100.0
+    ],
+    "w_fallen": [
+      10.0,
+      500.0
+    ],
+    "w_quat_term": [
+      10.0,
+      1000.0
+    ],
+    "w_pos_term": [
+      10.0,
+      1000.0
+    ]
+  },
+  "extra_ranges": {
+    "action_rate_weight": [
+      0.0,
+      50.0
+    ],
+    "joint_limit_weight": [
+      0.0,
+      1000.0
+    ],
+    "plan_blend_alpha": [
+      0.0,
+      1.0
+    ]
+  },
+  "fixed_weights": {
+    "w_velo": 0.0,
+    "w_joint_velo": 0.0,
+    "w_fallen_term": 0.0,
+    "w_contact": 80.0
+  },
+  "objective": "-success_rate + 0.1*mean(min(sum(final_error/threshold),250)/250)",
+  "n_calls": 500,
+  "n_initial_points": 120,
+  "physical_gpu_indices": [
+    2,
+    3
+  ],
+  "gpus": [
+    "GPU-9d410eae-46e7-c13e-9c03-a44cbda70781",
+    "GPU-3beb4f90-65ae-0ef8-e126-97a81e20ab17"
+  ],
+  "preferred_planners_per_gpu": 20,
+  "fallback_planners_per_gpu": 16,
+  "workers": 48,
+  "trials_in_flight": 3,
+  "mps_bin": "/home/chetan/contact_model_study/results/diagnostics/bo_gpu_concurrency_20261115/private_mps_tools/usr/bin",
+  "scenes": {
+    "rollout": {
+      "path": "/home/chetan/contact_model_study/results/isolated_bo/m2_baseline_20261121/code/scenes/leap/env_leap_rollout_cube_high_high.xml",
+      "sha256": "536af1f15165fd9c25a1b60fdcd18973132744cf8503c2dc230663cc08d36e3c",
+      "source_scene": "/home/chetan/contact_model_study/scenes/leap/env_leap_rollout_cube_high_high.xml",
+      "transformations": "asset paths only; frozen calibrated high/high XML from designated baseline"
+    },
+    "eval": {
+      "path": "/home/chetan/contact_model_study/results/isolated_bo/m2_baseline_20261121/code/scenes/leap/env_leap_eval_cube.xml",
+      "sha256": "35a021efb0b3dec756d5213c70288b3bc2395a0b9df08b34a422f7c615f2afc9",
+      "source_scene": "/home/chetan/contact_model_study/scenes/leap/env_leap_eval_cube.xml",
+      "transformations": "asset paths only; frozen calibrated high/high XML from designated baseline"
+    }
+  },
+  "source_snapshot_sha256": {
+    "ContactModelStudy/Drivers/EpisodePool.py": "8c6339ac0d28dc82bb9b3008cb577032680c1fdff81c2f0822bf1977be4e6903",
+    "ContactModelStudy/Drivers/__init__.py": "460513f45147ba58fce924beca6d4af5459f47d92dcf48e93d570c805955658c",
+    "ContactModelStudy/Drivers/run_episodes.py": "dd472a6cbc7a58bf5f6320469648192b36eaba49fea96c8a9d0a3872436ae58d",
+    "ContactModelStudy/Drivers/run_episodes_interwoven.py": "560f8f13ebb763fa469c4ff512199d767282a27072b2c950f974cae3b8626257",
+    "ContactModelStudy/Drivers/run_episodes_pooled.py": "5b5268c00321049e9524faf508b28e6ca13b97b687085f7c3ca63e6cecc7431e",
+    "ContactModelStudy/Hardware/BridgeTelemetry.py": "5ab5d246b69436f9e2799c8ec6dd997011ab186b86cfeb61b31d031555c4030c",
+    "ContactModelStudy/Hardware/Calibration.py": "37bb89813667e275e9ffe21055e26f2adbdd72f8c1457a30a0fbbcad9df41dc9",
+    "ContactModelStudy/Hardware/Camera.py": "718a753786483cf09501078bdfaa3a13d7ee37bf9b93a704043d0737699c6f65",
+    "ContactModelStudy/Hardware/CubeOrientation.py": "c63fe186b6e5e7ac099aa4913c4df3b48b17ff8884bdaa4a3188b7309ec3a4c2",
+    "ContactModelStudy/Hardware/Episodes.py": "1d5a036d03a042cb6c181438a039b7a154f0da53c77a771570c479499dcba8a3",
+    "ContactModelStudy/Hardware/ExperimentLogs.py": "edb3d092c6b10a0491592a99fc425e1b3195511f9ded3282aa1e0ebbf6f188ab",
+    "ContactModelStudy/Hardware/FailureSummary.py": "4e594b97c7d3388fe4178b8495f530e2c5eabf8ba1c0e58215a2c5f914da9a7c",
+    "ContactModelStudy/Hardware/Fingertips.py": "d7611bf69c0b1c1f0eddf1ef5e5cb624f5f38a345f9aabf89eaadde1832f5943",
+    "ContactModelStudy/Hardware/GPU.py": "fa1e73829c57fbef96c76b2537f3e22d18d2fb40965acf17881d81cca1650ab7",
+    "ContactModelStudy/Hardware/Hand.py": "8e3703f876c435966d10102128dc4e375d842c8301ee37ff7aab12a2656407f6",
+    "ContactModelStudy/Hardware/JointLimits.py": "6750c96df187e660a99f8c02f77c670bb5a587f8f691916bd53d8c58c3d18fc5",
+    "ContactModelStudy/Hardware/JointReferences.py": "e865ae1157a506e43aaa79317d0f016e3e8a6b5519e33f01579ef1e67d10269b",
+    "ContactModelStudy/Hardware/LCM.py": "09761651c6a913e89caebaa746dba42109f61b99d3b82e7907b4809b8ac8c6a4",
+    "ContactModelStudy/Hardware/PlanBlending.py": "9542d79b7b384a4ab6bb66e1cf70bfaa9b015f63356ffa9a3bea2dbb5b461eae",
+    "ContactModelStudy/Hardware/Pose.py": "9899d8804268f3863e1c5d3ebbdde71ffae166c74f260c9e5afa02dce565d13e",
+    "ContactModelStudy/Hardware/Recovery.py": "cb3590294881146ce298d8fd4652f18f785959335b199d14b4c71e383db0516b",
+    "ContactModelStudy/Hardware/Rollouts.py": "63b9f6ccc228ebe2a86733123edba45c4525035c6ab2b6835610293f8e931b6e",
+    "ContactModelStudy/Hardware/RunLogging.py": "41d92e50cd19850113e7c8104e3ed480a5a4fd53ae3a2e65bbcb9ff6971ecb7c",
+    "ContactModelStudy/Hardware/Scene.py": "4b71c1edc24385736966c8d3ac3a849af457f1d984c663746e33af652b3204fc",
+    "ContactModelStudy/Hardware/TargetResponseAnalysis.py": "883c2b01c8f447e623cddedff6a7d5df8711f3be3a7431ee261406ff7441691d",
+    "ContactModelStudy/Hardware/TrackingSession.py": "121a0d22b8650ed59e6b1873088e14c743402bdc5d8f45a404198357a7883a1c",
+    "ContactModelStudy/Hardware/VideoRecording.py": "c8ba0c258526db8b918bf5fba9a631a7aebeb210f0e4a076259687e4ba7be52e",
+    "ContactModelStudy/Hardware/VisionRuntime.py": "f6f44128a5aef5fa28af428042c43984d3e1abf47973d0f33e0698759e16bb9a",
+    "ContactModelStudy/Hardware/Workflow.py": "41d13cad93b306b12ffd12723242ec25e726351ae4b814009bca823a652f9730",
+    "ContactModelStudy/Hardware/__init__.py": "ee5955e25bfe8309911acbd98a28bd16e99927f633ab086f2b9fe4dd313db7ef",
+    "ContactModelStudy/README.md": "6b3ecba8bf1470eb4cda4c811dbefee6f3ab751a617976684b922c2389f9e4e6",
+    "ContactModelStudy/Renderers/MujocoVideoRenderer.py": "4121774f778e4c2bb57171bb06c9dab95ec4750421a453439d8162c041cd64a7",
+    "ContactModelStudy/Renderers/RendererBase.py": "7303b7b92dbff2cc04256c0b2634c67bb7fe5cb592fc68b713e7137164147e06",
+    "ContactModelStudy/Renderers/__init__.py": "b20274257b52cac9646337c2158ea147f212d30aa1d1d2aba972b5039187f28b",
+    "ContactModelStudy/SamplingBasedPlanners/MPPI.py": "c59fb4a31eca8151555e74d1111b3fae7673f31927c9a63680a7026cc5cd812b",
+    "ContactModelStudy/SamplingBasedPlanners/SamplingBasedPlannerBase.py": "d4ce4c7ce597783d079d64fc9b17e76e8a9be078fb60814372ceb52ad5a392e8",
+    "ContactModelStudy/SamplingBasedPlanners/__init__.py": "2a41782ed77f3566ee1dab1d555bd8206bb671cd5054f1968e17d7ae84b32137",
+    "ContactModelStudy/Simulators/ComFree.py": "07118938419aa9ac49d7b43947c8febf67d98309d0f7f8be3c1d4257b0ac4adb",
+    "ContactModelStudy/Simulators/ComFreeV2.py": "a7c4f1125be928006f8bdc07a71b8f5c8cb9d7b956efb4c6efaacdbd0fc7df6b",
+    "ContactModelStudy/Simulators/Drake.py": "c492f940ec3cfc7101e72eede98091cf2a633fb25fd05c3d0a28486aeead7920",
+    "ContactModelStudy/Simulators/Kamino.py": "571fa6b794d32215f727672cf4bfe0365046557656efbaf5b630593441cffc86",
+    "ContactModelStudy/Simulators/Mujoco.py": "9cbed422fc9162c3b85d5bcdaa4c05778a965568858f22852a4f60bb591b2882",
+    "ContactModelStudy/Simulators/Pinocchio.py": "9f56b679263bd3641eeb40b8a0d5f416b40acc228ca0753775a8e7c87651690e",
+    "ContactModelStudy/Simulators/Simulator.py": "1520489e6258aa106586a5b905d85ae25edd4e6260cccb34604e85ba4b513e6c",
+    "ContactModelStudy/Simulators/SingleWorld.py": "f26b97fc598341e5075ffa29f57c43db6122192498315d06023a211ba2e7e8a4",
+    "ContactModelStudy/Simulators/VectorizedMujoco.py": "284e572fd6a26937ec86b48ad7cd149bd3cb6012d53375dc0e6433dadd3598f8",
+    "ContactModelStudy/Simulators/VectorizedSimulator.py": "fb6b2a07d1dcb61a762f01a76d21de1d062be8fcc2f4ec590652a018b1b8eb8c",
+    "ContactModelStudy/Simulators/XPBD.py": "aad0bb8b13b6cc3915482793b9c1b404751e5a990c6191d31ab88e3c100fa23f",
+    "ContactModelStudy/Simulators/__init__.py": "87ec204c3e9cde32ed2f83df5b7e816d89b2baf6dd2eda3d782aaeceb6a5a9da",
+    "ContactModelStudy/Tasks/BallReorient.py": "35777981a53465f664e787a0b38be33f2144561320f90000142c0cc2704dca3e",
+    "ContactModelStudy/Tasks/CubeReorient.py": "9e63348e9d9c22fcdeaab93b4a32b25dc343a4662d8b080093fe71d1f2e7903b",
+    "ContactModelStudy/Tasks/DuckReorient.py": "35708f765ff551597abf9a17b37b113c62e53dfda1629adde397ff8db6947849",
+    "ContactModelStudy/Tasks/LeapReorient.py": "c1a52a8e14a2b418f5eac9311375a616f732d6a8cce44f40c9e1ca884d0255b4",
+    "ContactModelStudy/Tasks/TaskBase.py": "10a67fe3af42b9b08c302cba2b3e4e9ff7d7dd3e264bdc39f2830a00189e3735",
+    "ContactModelStudy/Tasks/XML_Files/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "ContactModelStudy/Tasks/__init__.py": "a412ab0bfad417187bcf15708f1d934d087f6def9bf1976daa0904096fac16cc",
+    "ContactModelStudy/Utils/ContactModelPresets.py": "0470934fbafcb8e5d1fcab7a3672cd70b64b6081c92357867f8f8d67309f2e72",
+    "ContactModelStudy/Utils/EpisodeRecorder.py": "3beb545e301005c33e8189e8f8dc7268c3d02576a869cea43d81e3767b90262c",
+    "ContactModelStudy/Utils/EvalSimulators.py": "16e3f00a7978c25cbcbda474443ddf8fffe6e4eba8bfdef035ec07962720b81c",
+    "ContactModelStudy/Utils/MjcfModelInfo.py": "8ab0f8dcca81cdb8b9a7108b31f9f960126c7699467b82db183d55c4cb1d52ad",
+    "ContactModelStudy/Utils/PlannerKLDiv.py": "cfdf1c37291dd8284869f24313efa434264e19269b18096c2f908c4811bc6c72",
+    "ContactModelStudy/Utils/Quaternions.py": "5b21d8f213c9dbc2deca6494b718a8d51107780b8eff6f86160b88e3269ceee6",
+    "ContactModelStudy/Utils/__init__.py": "e991716a2d818c09aa34582dadb0d867eee2e11de9807706d800eb6b716a2b51",
+    "ContactModelStudy/__init__.py": "a85ff81ba8bc958c65733dee1a1632d036565cdeae0dc73718bb83d0738fd552",
+    "ResumeState.py": "e55b4975e6295117f41c60d0f0c73c30dd9b4115df38948ed5419dbcbb037401",
+    "experiments/run_bayes_opt.py": "c9bd886aa2e3ad5ef5403eea0b5c016432953db2be2ffb9c7522e24ca4d99c42",
+    "experiments/run_episode_batches.py": "c6d5a5308fc73417e1c1de2ecc0b734fb1da69e644b9a9dc27ce7aca73741a32",
+    "run_search.py": "fad8198499cb6b984297041f9e916d94b3e06d96d815976450bd37c5bd26e517",
+    "runtime.py": "09d6c0b688240084d1441d2ed90b4443dee2e68a543ce60e636364b4a75a4167",
+    "scenes/leap/env_leap_eval_cube.xml": "35a021efb0b3dec756d5213c70288b3bc2395a0b9df08b34a422f7c615f2afc9",
+    "scenes/leap/env_leap_rollout_cube_high_high.xml": "536af1f15165fd9c25a1b60fdcd18973132744cf8503c2dc230663cc08d36e3c"
+  },
+  "assets_sha256": {
+    "assets/d712b37cc5013d91.obj": "d712b37cc5013d91bbd26e6f4385ba5fca5c4cfd8f59d8de9fd566a3cdaa0e94",
+    "assets/62fea54f6af58736.png": "62fea54f6af58736380ce554448743ff55426f5b1b66293b530b94f51fd3790e",
+    "assets/b6cad69fdbc0f7c1.obj": "b6cad69fdbc0f7c172484ff9dee4c011b19ee6df8c4e3ba2f5c735c5eab2b4e7",
+    "assets/30aa28f5b7ae6969.obj": "30aa28f5b7ae6969dee2aee89dc8f176e08f12ae09b05e356bd269271d6148ca",
+    "assets/5585a3487e4798e8.obj": "5585a3487e4798e816beab23af0ab0cf876415abb1f5220d6e74d6613e9e4030",
+    "assets/d1dc9384d3ba6902.obj": "d1dc9384d3ba6902c8ea207d63bfa3671d94e786224c1fd9192293bfd06bfcb1",
+    "assets/275ee84047a760b3.obj": "275ee84047a760b36459bbbcdf11a8dc6cccf98aae62e14c727c86621997b63e",
+    "assets/ba0ec9551f43c180.obj": "ba0ec9551f43c180ac039dfbb8b58df70aa5184f3f6c5b636dc960363719cc3e",
+    "assets/c9905dc89ff5b312.obj": "c9905dc89ff5b312ae607b6c37dbc32d31bdc453334e71a264d59307a01753c9",
+    "assets/a36442e318f346e6.obj": "a36442e318f346e6cbc4ee0348d2fba8ff69d8624c41920b72c985c0af4fce08",
+    "assets/b4782bfc6e9a123c.obj": "b4782bfc6e9a123c534a79f744a4c67dcbb7728e63065174d974032ace6893ab",
+    "assets/92994c91f9d13235.obj": "92994c91f9d132358b1c360c73e692c5db0b8cda79e9c53193df2b30208d5e1d",
+    "assets/611f309c669cd86d.obj": "611f309c669cd86d3b89ed53e07e2700b070de117d4fcdd567652d9588de47e7",
+    "assets/d4023caadac4cfe1.obj": "d4023caadac4cfe1f297014a13ad44355cddab40c3c0e4c05ac088dd114dfe8e"
+  },
+  "initial_states_sha256": "c4e83a9377da7455ccd7e2f86352124515093fd3c577cad98c04256579eba516",
+  "baseline_snapshot_sha256": "6470255db2067d0e81f9331b202dab71a8997a1ed89b3599f6b269df1329f450",
+  "episodes_per_trial": 12,
+  "total_episodes_at_budget": 6000,
+  "max_episode_simulation_s": 64.0,
+  "timing": "Virtual 64ms deadline: CPU plant advances under held command before delta application. No wall-clock sleeps or GPU-time-dependent physics.",
+  "sensor_latency": "No camera/USB latency or tracking noise is injected; initial states come from already calibrated hardware records.",
+  "evaluation": "CPU MuJoCo calibrated high/high plant, fixed recorded initial states; no pre-episode settling or hardware.",
+  "starting_states": "Twelve recorded baseline states; six signed ~90deg rotations twice each, including the recorded off-center placement.",
+  "completion_action": "Export best weights/parameters and commented text only; never modify active task weights or hardware configuration.",
+  "notes": [
+    "No prior BO observations reused: dynamics, reference, clipping, horizon and new dimensions differ.",
+    "Historical 20-planner memory test is not proof that 512-sample calibrated planners fit; validate on start and fall back to 16 if needed.",
+    "Synthetic simulation success is not a hardware success prediction; no additional initial-pose correction is applied."
+  ],
+  "search_csv_sha256": "a2cc4f62ef94d31e0ad8ee35129d8504ef36d2250fbae71841b0a4df423b1f0b",
+  "seed_points_sha256": "3de7d71bf6a95a97a85a9ad12934f19c203c416200ddb953e7fa4cb787fb6236",
+  "fixed_weight_reason": "Unchanged means the best candidate retained the original seed value; w_contact varied within the search but returned to 100. It is fixed at current baseline 80 here. Three previously pinned zero terms remain zero.",
+  "production_reference_hashes": {
+    "ContactModelStudy/Tasks/CubeReorient.py": "9e63348e9d9c22fcdeaab93b4a32b25dc343a4662d8b080093fe71d1f2e7903b",
+    "ContactModelStudy/Drivers/EpisodePool.py": "91be395cd02a6711ca4d4fc19d6e6214a321ace1bbff2975da27e35927ddce19",
+    "ContactModelStudy/SamplingBasedPlanners/SamplingBasedPlannerBase.py": "270ac0f77d056f9b480bc723c7cc21dbc2e55bee8bf349e3d16021b80cadb8fd",
+    "configs/leap_hardware.json": "189d121211820e2e7e36b64ea6bdd3d6f73356db757d1b66ac2d09a89477af32",
+    "scenes/leap/hardware/calibrated_hand.xml": "831ee8fd0eb7f3909ef7a46ec9c9adc080275e941fc104791c444c496d1ffb5b",
+    "scenes/leap/hardware/calibrated_hand_measured_limits.xml": "90d278450c752a9425168cac510413b8d21708e89b0d597a6c9b4d46c543de4b"
+  },
+  "search_dimensions": 11,
+  "seeds": {
+    "baseline": 1,
+    "ablations": 3,
+    "random": 116,
+    "gp_guided": 380
+  },
+  "confirmed_new_search_parameters": [
+    "action_rate_weight",
+    "joint_limit_weight",
+    "plan_blend_alpha"
+  ],
+  "gpu_watchdog": {
+    "primary_gpu_index": 2,
+    "secondary_gpu_index": 3,
+    "monitor_gpu_indices": [
+      0,
+      1
+    ],
+    "busy_percent": 20.0,
+    "busy_seconds": 10.0,
+    "idle_percent": 10.0,
+    "idle_seconds": 60.0,
+    "poll_seconds": 5.0,
+    "stale_seconds": 20.0,
+    "release": "Finish the current plan per secondary client, exit clients, then stop GPU 3 private MPS. GPU 2, eval workers and shared queues keep running.",
+    "restore": "Only GPU 3, after sustained idle on GPUs 0/1, free memory and temperature checks. Never migrate to GPUs 0/1."
+  },
+  "resume_policy": {
+    "checkpoint": "Atomic fsync + rename resume.pkl with previous checkpoint backup",
+    "frequency": "Every candidate launch, completed episode, and optimizer observation",
+    "contents": [
+      "optimizer and RNG state",
+      "pending trial candidates",
+      "completed results within partial trials",
+      "completed trial IDs",
+      "remaining seeds and random count"
+    ],
+    "interrupted_episode": "Replay only that unfinished episode from its fixed initial state and seed; not an exact mid-episode physics restore",
+    "kill_cleanup": "Linux parent-death signals for owned children and independent watchdog orphan cleanup for private MPS"
+  },
+  "supervisor_sha256": {
+    "run.py": "b91dabce89f3ad47dc585657cffcb804f6ae5876a242f310a7099e7c3206999c",
+    "gpu_watchdog.py": "834dd639e140d3cb7ff0397a1723dd3c6303cdff9321ce038e1700d07bf2675e",
+    "launch_when_available.py": "4eb5055c05e9fadbac6e28701f4e44f21b7a898fa16f67bca71a873f2ac62385"
+  },
+  "authorized_launch": {
+    "status": "authorized_start",
+    "updated_at_utc": "2026-11-22T03:09:16.736734+00:00"
+  }
+}

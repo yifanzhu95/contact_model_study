@@ -1,0 +1,56 @@
+<mujoco model="right_leap_hand scene duck_med_foam16b">
+  <include file="./leap_right_hand_med.xml" />
+  <statistic center="0 0 0" extent="0.3" />
+  <visual>
+    <rgba haze="0.15 0.25 0.35 1" />
+    <quality shadowsize="8192" />
+    <global azimuth="130" elevation="-40" offwidth="1280" offheight="960" />
+  </visual>
+  <asset>
+    <!-- NB: <mesh file> resolves against `meshdir`, which the included hand XML
+    sets to ./leap_hand/assets/ — hence the ../../ hop back out to scenes/leap/. -->
+    <mesh name="rubber_duck_mesh" file="../../objects/rubber_duck.stl" maxhullvert="30" />
+    <!-- Same mesh at the goal-marker scale (0.43x, matching the cube scene's
+    0.015/0.035 goal-to-object ratio). -->
+    <mesh name="rubber_duck_goal" file="../../objects/rubber_duck.stl" scale="0.43 0.43 0.43" />
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8" width="300" height="300" />
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0." />
+  </asset>
+  <worldbody>
+    <light directional="true" ambient="0.2 0.2 0.2" diffuse="0.8 0.8 0.8" castshadow="false" pos="0 1 4" dir="0 0 -1" name="light0" />
+    <camera name="demo-cam" pos="-0.003 -0.393 0.317" xyaxes="1.000 -0.000 0.000 0.000 0.462 0.887" />
+    <geom name="floor" pos="0 0 -0.1" size="0 0 0.05" type="plane" material="groundplane" />
+    <!-- Reorientation target marker. mocap="true" is REQUIRED: the task's
+    _update_goal rewrites mjd.mocap_quat here each time a goal is sampled, and
+    silently does nothing on a non-mocap body (which is why the older
+    env_leap_duck.xml marker never turned). pos matches the cube scene's proven
+    upper-left inset placement for the eval camera. Visual only. -->
+    <body name="goal" pos="0.005 -0.07 0.1353" quat="1 0 0 0" mocap="true">
+      <geom name="goal_visual" type="mesh" mesh="rubber_duck_goal" contype="0" conaffinity="0" density="0" rgba="0.97 0.6 0 0.6" />
+    </body>
+    <body name="obj" pos="0.02 0.05 0.1">
+      <freejoint name="obj_joint" />
+      <!-- Explicit inertia shared by every Duck collision variant. MuJoCo therefore keeps the same mass, center of mass, principal axes, and diagonal inertia regardless of the number or shape of collision geoms. -->
+      <inertial pos="-0.0088857 -0.0000003 -0.0152658" quat="0.6896432 0.1561964 0.1561924 0.6896367" mass="0.05" diaginertia="4.695783e-05 3.827842e-05 2.721782e-05" />
+      <!-- Visual-only Duck: the calibrated spheres above carry contact, while this mesh shows the original shape and contributes no mass or collision. -->
+      <!-- Calibrated FOAM rollout collision spheres. Positions use the same object-frame offset as the template visual mesh. The explicit inertial above fixes mass and inertia; density=0 prevents geometry-dependent dynamics. -->
+      <geom name="obj_sphere_000" type="sphere" size="0.03130176" pos="-0.0110528010746 0.000562070911352 -0.0245131725902" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_001" type="sphere" size="0.02553696" pos="-0.0183248010746 0.0128011109114 -0.0293544525902" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_002" type="sphere" size="0.02882976" pos="-0.0306646410746 0.000175190911352 -0.0257026125902" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_003" type="sphere" size="0.02473056" pos="-0.0208918410746 -0.0117268890886 -0.0291989325902" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_004" type="sphere" size="0.0225888" pos="0.000206078925362 0.000253910911352 -0.00241493259023" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_005" type="sphere" size="0.02453088" pos="-0.00435200107464 -0.000159849088648 0.0220189874098" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_006" type="sphere" size="0.02478624" pos="0.00223071892536 -0.000109929088648 0.0202449074098" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_007" type="sphere" size="0.01581888" pos="0.0180083189254 -0.000161769088648 0.0220401074098" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_008" type="sphere" size="0.02826528" pos="-5.02410746379e-05 0.00839279091135 -0.0262315725902" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_009" type="sphere" size="0.02782272" pos="-0.00201248107464 -0.0105057690886 -0.0271349325902" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_010" type="sphere" size="0.02935104" pos="0.00442239892536 -0.00378096908865 -0.0249298125902" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_011" type="sphere" size="0.02684832" pos="0.00787743892536 0.00433775091135 -0.0267134925902" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_012" type="sphere" size="0.02115648" pos="-0.0390358410746 0.000135830911352 -0.0190162125902" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_013" type="sphere" size="0.01663296" pos="-0.0436620810746 -0.000373929088648 -0.0116280525902" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_014" type="sphere" size="0.01277952" pos="-0.0469241610746 -0.000324009088648 -0.00500021259023" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_sphere_015" type="sphere" size="0.009816" pos="-0.0480003210746 0.000486230911352 -0.000877012590228" group="3" friction="0.5" density="0" rgba="0.18 0.55 0.95 0.35" />
+      <geom name="obj_visual" type="mesh" mesh="rubber_duck_mesh" contype="0" conaffinity="0" density="0" rgba="0.97 0.6 0 1.0" />
+    </body>
+  </worldbody>
+</mujoco>

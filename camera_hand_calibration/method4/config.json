@@ -1,0 +1,20 @@
+{
+  "initial_transform": "results/rigid_surface_20261119T042209_623823Z/joint_candidate.json",
+  "camera_config": "configs/source_camera.json",
+  "cube_edge_m": 0.07,
+  "inward_yaw_rad": 0.0,
+  "pad_surface_offset_m": 0.0,
+  "collision_margin_m": 0.004,
+  "max_speed_rad_s": 0.18,
+  "max_acceleration_rad_s2": 0.35,
+  "stable_frames": 60,
+  "min_stable_frames": 30,
+  "max_translation_change_m": 0.03,
+  "max_pad_tilt_deg": 2.0,
+  "max_pad_height_spread_mm": 1.0,
+  "rotation_refinement": "preserve_method3_verify_cube_resting_face_and_rear_edge",
+  "physical_centering": "Middle finger for Y; palm-side lower corners against fixed index/ring housing faces for X; resting on upper proximal finger housings for Z.",
+  "production_configuration_modified": false,
+  "operator_empty_hand_confirmed": true,
+  "finger_layout": "straight and mutually parallel"
+}

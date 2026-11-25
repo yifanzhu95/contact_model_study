@@ -1,0 +1,81 @@
+<mujoco model="right_leap_hand scene">
+  <include file="./leap_right_hand_eval.xml"/>
+  <!--
+  <include file="./leap_right_hand.xml"/>
+  -->
+
+  <statistic center="0 0 0" extent="0.3"/>
+
+  <visual>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <quality shadowsize="8192"/>
+    <global azimuth="130" elevation="-40" offwidth="1280" offheight="960"/>
+  </visual>
+
+  <asset>
+    <!-- The cube's appearance: ONE texture (the IRIS block atlas) on a UV-mapped
+    cube mesh. objects/iris_cube.obj is a unit cube (half-extent 1, scaled per
+    geom below) whose 6 faces carry texture coordinates indexing into the atlas
+    cells — i.e. the mesh encodes in plain OBJ `vt` exactly what this texture
+    used to declare as gridsize="3 4" gridlayout=".U..LFRB.D..".
+    That swap is the point: gridlayout is a MuJoCo-only feature, so Pinocchio's
+    Panda3d viewer ignored it and stretched the whole atlas across every face
+    (the reason this scene previously needed six pre-cropped per-face images on
+    six sticker geoms). OBJ texture coordinates are understood by both renderers,
+    so one texture + one geom now works everywhere. The UVs were solved against
+    the old gridlayout box and verified face-by-face from all 6 axis views —
+    identical cell and orientation on every face. -->
+    <texture type="2d" name="cube_surface" file="./textures/iris_block.png"/>
+    <material name="obj_material" texture="cube_surface" texuniform="false" specular="5" shininess=".0"/>
+    <!-- NB: <mesh file> resolves against `meshdir`, which the included
+    leap_right_hand.xml sets to ./leap_hand/assets/ — hence the ../../ hop back
+    out to scenes/leap/objects/. (<texture file> above is unaffected: texturedir
+    is unset, so it resolves against the model directory.) -->
+    <mesh name="iris_cube" file="../../objects/iris_cube.obj" scale="0.035 0.035 0.035"/>
+    <mesh name="iris_cube_goal" file="../../objects/iris_cube.obj" scale="0.015 0.015 0.015"/>
+
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+      markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0."/>
+  </asset>
+
+  <worldbody>
+    <light directional="true" ambient="0.2 0.2 0.2" diffuse="0.8 0.8 0.8"  castshadow="false" pos="0 1 4" dir="0 0 -1" name="light0"/>
+    <camera name="demo-cam" pos="-0.003 -0.393 0.317" xyaxes="1.000 -0.000 0.000 0.000 0.462 0.887"/>
+
+    <geom name="floor" pos="0 0 -0.1" size="0 0 0.05" type="plane" material="groundplane"/>
+
+    <!-- Reorientation target marker. mocap="true" so the task's _update_goal can
+    rewrite its orientation each time a new goal is sampled (MuJoCo drives it via
+    mjd.mocap_quat; the Pinocchio viewer via PinocchioSimulator.set_goal_quat).
+    pos places it in the UPPER-LEFT of the eval camera's frame. That camera
+    (_CAM_POS/_CAM_ROTMAT in tasks/grasp_reorient.py) sits at (0.2, 0.02, 0.4)
+    with right=+Y, up=(-0.894, 0, 0.447) and forward=(-0.447, 0, -0.894); the
+    Panda3d lens measures tan(fov/2) = 0.346 horizontal / 0.268 vertical, so
+    this pos is cam + 0.32*forward - 0.073*right + 0.048*up, i.e. normalized
+    screen (-0.66, 0.56) — far enough out to read as a corner inset, with the
+    cube's corners still landing inside the frame. Visual only
+    (contype/conaffinity 0, density 0): it never collides and carries no mass. -->
+    <body name="goal" pos="0.005 -0.07 0.1353" quat="1 0 0 0" mocap="true">
+      <!-- Same textured cube mesh as "obj" below, just at the smaller goal scale. -->
+      <geom name="goal_visual" type="mesh" mesh="iris_cube_goal" material="obj_material"
+        contype="0" conaffinity="0" density="0"/>
+    </body>
+    
+    <body name="obj" pos="-0.00 0.05 0.07">
+        <freejoint name="obj_joint"/>
+        <!-- Collision + physics body. Kept a box (exact and cheap) rather than
+        the mesh; group="3" hides it from all three renderers (MuJoCo's default
+        mjvOption, Drake's illustration/perception roles, and Pinocchio's visual
+        model all treat group>=3 as collision-only) so it doesn't z-fight with
+        the visual mesh. It remains the sole proximity/mass-carrying geometry. -->
+        <geom name="obj" type="box" material="obj_material" size="0.035 0.035 0.035"
+              quat="1 0 0 0" friction="0.5" rgba="1.0 1.0 0 0.99" mass="0.14" group="3"
+              />
+        <!-- Visual-only textured cube (contype/conaffinity 0, density 0). -->
+        <geom name="obj_visual" type="mesh" mesh="iris_cube" material="obj_material"
+              contype="0" conaffinity="0" density="0"/>
+    </body>
+    
+  </worldbody>
+</mujoco>

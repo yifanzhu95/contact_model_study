@@ -1,0 +1,8 @@
+{
+  "package_release": "English-only v2",
+  "policy": "noDR seed1009 scheduled final800",
+  "inference_interface_version": "v1, unchanged",
+  "documentation_language": "English",
+  "actor_and_weights_unchanged": true,
+  "recorded_UTC": "2026-11-13T22:15:34.256912+00:00"
+}

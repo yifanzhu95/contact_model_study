@@ -1,0 +1,222 @@
+{
+  "camera_sessions": [
+    {
+      "directory": "datasets/20261118T065346_240673Z",
+      "status": "complete",
+      "frames_received": 180,
+      "frames_saved": 15,
+      "joint_subscription": false,
+      "direct_motor_motion": false,
+      "torque_disabled_verified": null
+    },
+    {
+      "directory": "datasets/20261118T065856_393464Z",
+      "status": "complete",
+      "frames_received": 600,
+      "frames_saved": 50,
+      "joint_subscription": false,
+      "direct_motor_motion": false,
+      "torque_disabled_verified": null
+    },
+    {
+      "directory": "datasets/20261118T074905_804116Z",
+      "status": "complete",
+      "frames_received": 240,
+      "frames_saved": 20,
+      "joint_subscription": false,
+      "direct_motor_motion": false,
+      "torque_disabled_verified": null
+    },
+    {
+      "directory": "datasets/20261118T075607_336932Z",
+      "status": "complete",
+      "frames_received": 240,
+      "frames_saved": 20,
+      "joint_subscription": false,
+      "direct_motor_motion": false,
+      "torque_disabled_verified": null
+    },
+    {
+      "directory": "datasets/20261119T032702_555423Z",
+      "status": "complete",
+      "frames_received": 120,
+      "frames_saved": 10,
+      "joint_subscription": false,
+      "direct_motor_motion": false,
+      "torque_disabled_verified": null
+    },
+    {
+      "directory": "datasets/articulated_20261119T033502_621868Z",
+      "status": "failed",
+      "frames_received": null,
+      "frames_saved": 0,
+      "joint_subscription": false,
+      "direct_motor_motion": true,
+      "torque_disabled_verified": null
+    },
+    {
+      "directory": "datasets/articulated_20261119T033633_480690Z",
+      "status": "complete",
+      "frames_received": null,
+      "frames_saved": 1982,
+      "joint_subscription": false,
+      "direct_motor_motion": true,
+      "torque_disabled_verified": true
+    }
+  ],
+  "camera_quality": [
+    {
+      "path": "results/camera_quality_20261118T065346_240673Z/report.json",
+      "camera_serial": "310522070297",
+      "received": 180,
+      "saved": 15,
+      "requested_fps": 60,
+      "median_fps": 59.530557372283994,
+      "interval_ms": {
+        "median": 16.798095703125,
+        "p95": 16.7998046875,
+        "max": 50.38525390625
+      },
+      "color_depth_skew_ms": {
+        "median_abs": 0.10400390625,
+        "p95_abs": 0.10400390625
+      },
+      "skipped_source_frames": 2,
+      "writer_loss": 0,
+      "clock_bases": [
+        "sdk_epoch"
+      ],
+      "joint_subscription_enabled": false,
+      "camera_intrinsics": [
+        [
+          605.6220092773438,
+          0.0,
+          316.6953125
+        ],
+        [
+          0.0,
+          605.2809448242188,
+          252.77352905273438
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "intrinsics_change": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "pinhole_supported": true,
+      "extrinsics_verified": false,
+      "note": "Camera-only stream/profile test; no joint/hardware/calibration accuracy claim."
+    },
+    {
+      "path": "results/camera_quality_20261118T065856_393464Z/report.json",
+      "camera_serial": "310522070297",
+      "received": 600,
+      "saved": 50,
+      "requested_fps": 60,
+      "median_fps": 59.52882700887991,
+      "interval_ms": {
+        "median": 16.798583984375,
+        "p95": 16.79931640625,
+        "max": 16.799560546875
+      },
+      "color_depth_skew_ms": {
+        "median_abs": 4.02880859375,
+        "p95_abs": 7.9876953125
+      },
+      "skipped_source_frames": 0,
+      "writer_loss": 0,
+      "clock_bases": [
+        "sdk_epoch"
+      ],
+      "joint_subscription_enabled": false,
+      "camera_intrinsics": [
+        [
+          605.6220092773438,
+          0.0,
+          316.6953125
+        ],
+        [
+          0.0,
+          605.2809448242188,
+          252.77352905273438
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "intrinsics_change": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "pinhole_supported": true,
+      "extrinsics_verified": false,
+      "note": "Camera-only stream/profile test; no joint/hardware/calibration accuracy claim."
+    }
+  ],
+  "fit_candidates": [
+    {
+      "directory": "results/synthetic_test_20261118T070318_492772Z",
+      "status": "synthetic_test_only",
+      "synthetic_test_only": true
+    },
+    {
+      "directory": "results/synthetic_test_20261118T070439_272928Z",
+      "status": "synthetic_test_only",
+      "synthetic_test_only": true
+    }
+  ],
+  "stationary_rgbd_candidates": [
+    {
+      "directory": "results/stationary_rgbd_20261118T075810_673233Z",
+      "status": "candidate_unvalidated_single_pose",
+      "relative_rotation_deg": 4.526039206417591,
+      "camera_center_difference_mm": 50.163232469675755,
+      "absolute_accuracy_established": false
+    },
+    {
+      "directory": "results/stationary_rgbd_20261118T075944_453797Z",
+      "status": "candidate_unvalidated_single_pose",
+      "relative_rotation_deg": 4.526039206417591,
+      "camera_center_difference_mm": 50.163232469675755,
+      "absolute_accuracy_established": false
+    }
+  ],
+  "real_fit_candidates_present": true,
+  "passive_joint_sessions_present": false,
+  "direct_motor_access_implemented": true,
+  "hardware_phase": "Operator-authorized articulated sweeps recorded. See per-session torque verification.",
+  "production_configuration_modified": false
+}

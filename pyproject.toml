@@ -30,6 +30,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "black", "ruff"]
+hardware = [
+    "lcm", "dynamixel-sdk", "pyserial", "pyrealsense2", "pupil-apriltags",
+    "opencv-python", "pyzmq", "trimesh", "Pillow", "requests",
+]
 # M5 (Kamino, ContactModelStudy/Simulators/Kamino.py): Newton's SolverKamino.
 # Needs Python >= 3.11 (Newton's Kamino code does not import on 3.10) and
 # exactly Warp 1.17 (the Kamino reference measured 1.18 as much slower). The

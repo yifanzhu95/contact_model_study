@@ -1,0 +1,176 @@
+{
+  "status": "offline_plan_only_awaiting_placement_definition",
+  "q_level": [
+    0.5235858006060097,
+    0.15,
+    0.0,
+    0.0,
+    0.5235927755725042,
+    0.0,
+    0.0,
+    0.0,
+    0.5235931608422384,
+    -0.15,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.55,
+    0.35
+  ],
+  "q_level_deg": [
+    29.999256587702614,
+    8.594366926962348,
+    0.0,
+    0.0,
+    29.999656223844994,
+    0.0,
+    0.0,
+    0.0,
+    29.99967829817474,
+    -8.594366926962348,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    31.51267873219528,
+    20.05352282957881
+  ],
+  "expected_cube_center_world_m": [
+    0.1271994897520175,
+    0.0373083213603128,
+    0.07679438616523673
+  ],
+  "geometry": {
+    "pads": [
+      {
+        "finger": "if",
+        "body": "if_ds",
+        "point_body_m": [
+          -0.011250300588852095,
+          -0.03479834930738522,
+          0.014508649639799762
+        ],
+        "surface_center_world_m": [
+          0.12626035104462235,
+          0.004740801678819538,
+          0.041744394142568336
+        ],
+        "normal_world": [
+          1.0423685112281866e-06,
+          -6.896646592313704e-06,
+          0.9999999999756755
+        ],
+        "tilt_from_vertical_deg": 0.0003996317359459633,
+        "footprint_world_bounds_m": [
+          [
+            0.10945775394225533,
+            -0.009528794513234583,
+            0.020906355596575027
+          ],
+          [
+            0.14174226690800756,
+            0.017482223297539193,
+            0.04174444242159267
+          ]
+        ]
+      },
+      {
+        "finger": "mf",
+        "body": "mf_ds",
+        "point_body_m": [
+          -0.011250300588852097,
+          -0.034798349307385235,
+          0.014508649639799765
+        ],
+        "surface_center_world_m": [
+          0.1271994897520175,
+          0.0373083213603128,
+          0.04179438616523674
+        ],
+        "normal_world": [
+          2.4116819652419963e-12,
+          -3.0000024111576096e-06,
+          0.9999999999955006
+        ],
+        "tilt_from_vertical_deg": 0.0001718758952725559,
+        "footprint_world_bounds_m": [
+          [
+            0.11199743117555773,
+            0.025152690403220955,
+            0.020956329237961265
+          ],
+          [
+            0.1424015406866191,
+            0.049463991247269204,
+            0.041794406930501724
+          ]
+        ]
+      },
+      {
+        "finger": "rf",
+        "body": "rf_ds",
+        "point_body_m": [
+          -0.011250300588852099,
+          -0.03479834930738522,
+          0.014508649639799755
+        ],
+        "surface_center_world_m": [
+          0.1262947782146562,
+          0.06986876132962114,
+          0.04178940048744443
+        ],
+        "normal_world": [
+          -3.178918211166337e-07,
+          -2.103371762263162e-06,
+          0.999999999997738
+        ],
+        "tilt_from_vertical_deg": 0.00012186553405651269,
+        "footprint_world_bounds_m": [
+          [
+            0.10955841989484792,
+            0.0570990733047742,
+            0.020951339524422127
+          ],
+          [
+            0.14154754823553511,
+            0.08410906312501604,
+            0.04178941521179352
+          ]
+        ]
+      }
+    ],
+    "pad_height_spread_mm": 0.04999202266840058,
+    "max_pad_tilt_deg": 0.0003996317359459633,
+    "definition": "Cube geometric center above the middle distal pad footprint center, with bottom face horizontal.",
+    "cube_edge_m": 0.07,
+    "pad_surface_offset_m": 0.0
+  },
+  "approach_from_park": {
+    "passed": true,
+    "minimum_clearance_m": 0.004934775812446001,
+    "nearest_pair": [
+      "mf_ds_collision_1",
+      "rf_ds_collision_1"
+    ],
+    "worst_segment": 0,
+    "required_margin_m": 0.004
+  },
+  "minimum_clearance_mm": 4.934775812446001,
+  "nearest_collision_pair": [
+    "mf_ds_collision_1",
+    "rf_ds_collision_1"
+  ],
+  "hardware_motion_executed": false,
+  "requires_fresh_measured_pose_path_screen": true,
+  "operator_stages": [
+    "Confirm hand empty and clear",
+    "Gradually move and settle at level pose",
+    "Prompt for cube placement at physical reference",
+    "Confirm placement; settle under load and average fresh poses",
+    "Prompt for cube removal; keep holding",
+    "Confirm removal",
+    "Disable and verify torque off",
+    "Refine method 3 and save isolated method 4 candidate"
+  ]
+}

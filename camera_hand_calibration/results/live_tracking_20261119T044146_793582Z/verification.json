@@ -1,0 +1,23 @@
+{
+  "verified_at": 1795063394.4005346,
+  "tracking_valid": true,
+  "hardware_tracker_args_match": true,
+  "hardware_bbox": [
+    440,
+    272,
+    103,
+    113
+  ],
+  "mesh": "/home/chetan/contact_model_study/iris-foundationpose-plusplus/meshes/cube_70_mm_2_adjusted/cube_70_mm_2.obj",
+  "mesh_sha256": "f07176b757de816dcaa0b070c1a4a56b715a86273ace4303569205a50cf74b65",
+  "object_geom_type": "mjGEOM_MESH",
+  "shortcuts": {
+    "F6": "original",
+    "F7": "camera_depth",
+    "F8": "camera_depth_measured_poses",
+    "F9": "object_correction"
+  },
+  "production_camera_unchanged": true,
+  "no_controller": true,
+  "tests": "4 passed"
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "object": "cube",
+  "joint_order": [
+    "if_mcp",
+    "if_rot",
+    "if_pip",
+    "if_dip",
+    "mf_mcp",
+    "mf_rot",
+    "mf_pip",
+    "mf_dip",
+    "rf_mcp",
+    "rf_rot",
+    "rf_pip",
+    "rf_dip",
+    "th_cmc",
+    "th_axl",
+    "th_mcp",
+    "th_ipl"
+  ],
+  "joint_reference": [
+    0.15646600723266602,
+    -0.9096508026123047,
+    1.1412818431854248,
+    0.3206019401550293,
+    0.31172097356695877,
+    -0.0981748104095459,
+    1.178177745718705,
+    0.11076939733404863,
+    0.2807183265686035,
+    1.0308349132537842,
+    1.179630994796753,
+    0.2546408176422119,
+    0.5629708766937256,
+    1.5477864742279053,
+    1.6183497905731201,
+    0.4448542594909668
+  ],
+  "source_controller": "results/pilot/hardware/cube_reorient/hand-high_obj-high/M2/leap_experiment_20261113_213615_713571/controller.json"
+}

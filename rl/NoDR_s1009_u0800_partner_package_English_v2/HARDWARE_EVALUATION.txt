@@ -1,0 +1,180 @@
+LEAP RL HARDWARE EVALUATION
+
+All receiver-side code, configurations, environments, logs, results and new
+tracking operational files live inside this policy package. Original package
+exports and their checksums are unchanged. Shared repository bridge, tracking,
+receiver, MuJoCo viewer and episode helpers are imported/launched read-only.
+
+RUN FROM THE REPOSITORY ROOT (mj_env)
+
+  python rl/NoDR_s1009_u0800_partner_package_English_v2/launch_rl_hardware.py --n-episodes 2
+
+The launcher uses its own CPU PyTorch environment automatically; mj_env was not
+modified. This command DOES enable torque and move the hand once tracking is
+ready. No such command was run during setup.
+
+An offline command preview, starting no services:
+
+  python rl/NoDR_s1009_u0800_partner_package_English_v2/launch_rl_hardware.py --dry-run --n-episodes 2
+
+Offline policy/contract/frame preflight only:
+
+  python rl/NoDR_s1009_u0800_partner_package_English_v2/launch_rl_hardware.py --check
+
+WORKFLOW
+
+1. Reuse active tracking; first launch otherwise uses the existing Docker,
+   SAM-HQ mask preview/acceptance, FoundationPose and supervision receiver.
+   An owned SAM server exits after mask acceptance. Use --restart-tracking
+   explicitly to recapture. Tracking stays alive after manipulation exits.
+2. Start the existing calibrated-hand MuJoCo viewer and LCM hardware bridge.
+3. Gradually move to the existing robot_qref, using the existing preparation
+   speed/tolerances. Hold that command while the operator places the cube.
+4. Enter starts RL. The default alternates the trained canonical goals:
+   episode 1 = -90 X, episode 2 = +90 X, then repeat. Goal position in training
+   world is [0.02,0.035,0.085] m. These goals are fixed training poses, not a
+   relative 90-degree rotation from wherever the cube currently starts.
+5. CPU inference, target publication and an accepted-target acknowledgement
+   occur once per nominal 64 ms control period (15.625 Hz). Faster serial writes
+   simply retain the target. Inference overruns are logged; the controller
+   never accumulates multiple catch-up actions in a burst.
+6. At hardware success, freeze the last accepted command and wait for Enter.
+   At a drop/timeout, likewise wait for Enter. Remove the cube before confirming
+   the gradual zero return. Next episode repeats reference preparation/Enter.
+7. After the final zero return, request verified torque disable via the bridge.
+
+Ctrl-C requests gradual zero return then torque disable. A second Ctrl-C,
+Q/Escape/viewer closure, or supervisor termination requests immediate cleanup.
+Camera/timestamp failures use the existing joint-only hold-until-Enter recovery,
+then zero/torque-off. Robot/bridge faults remain immediate stops. The shared
+supervisor retains some legacy MPPI wording; its controller argv points to
+run_rl_hardware.py, and no MPPI planner or rollout simulator is instantiated.
+
+POLICY AND BRIDGE CONTRACT
+
+  next_target = clamp(previous_accepted_target + 0.064*tanh(actor_output),
+                      training_actuator_lower, training_actuator_upper)
+
+The actor still observes measured joints and the tracked object. The action
+accumulator and observation's previous_target use actual bridge target reports,
+not measured joints or the controller's estimate of a previous target.
+
+Every launch saves a PRIVATE copy of the current hardware config and changes
+only delta_reference to previous_target. The root hardware config is untouched.
+The existing ctrl_range is retained (currently +/-0.2 rad); it normally does
+not activate because policy increments are <=0.064 rad. Any additional receiver
+clipping against these margins/intersected actuator limits is logged separately.
+Configured motor gains are unchanged; the bridge retains its existing register
+initialization and safety checks. There are no added serial reads, low-level
+sleeps or velocity caps. Each new delta is consumed once by the LCM bridge;
+the controller waits for its target report before the next decision.
+
+FRAME AND VELOCITY CONVENTIONS
+
+Production camera intrinsics/extrinsics and the existing object-only camera
+correction are reused unchanged; the experimental camera candidate is NOT used.
+The policy trained at a 27-degree palm mounting tilt; current hardware model is
+30 degrees. Default palm_registered transforms the current world to the training
+world by matching their fixed palm transforms. Goal position/orientation are
+mapped back into current world for the viewer/evaluation. This is coordinate
+registration only; it cannot remove a physical gravity/dynamics mismatch.
+
+Measured joints already arrive in the canonical MuJoCo/policy joint order via
+the existing bridge; preflight verifies that order. Object velocities use the
+existing tracker finite differences. Free-joint angular velocity is explicitly
+rotated from body to current world, then training world. No second object
+correction is applied and no joint measurements are replaced by targets.
+
+EVALUATION DEFINITIONS
+
+Default stop_on_success=true matches the previous hardware episode lifecycle:
+  position error <0.02 m;
+  quaternion metric 1-dot(q,q_goal)^2 <0.04 (angle <23.07 degrees);
+  combined object velocity norm <10.
+No consecutive-step requirement or joint-reference gate is added.
+Hardware drop termination uses current-world object Z<0 m, as the MPPI runner.
+These are explicitly labelled HARDWARE evaluation criteria, not the original
+package's strict simulator metric, whose full joint-gate definition is absent.
+
+For the trained full 500-control (nominal 32 s) arrival/hold evaluation instead
+of freezing at first success:
+
+  python rl/NoDR_s1009_u0800_partner_package_English_v2/launch_rl_hardware.py --n-episodes 2 -- --no-stop-on-success
+
+Arrival, final success and continuous last-150-sample success are then logged
+using the declared hardware thresholds. Last150 is null on shorter episodes.
+The original training initial-state bank is missing; preparation uses the user's
+existing hardware robot_qref. Real starts and accepted targets are logged.
+Therefore these runs do not recreate the original simulator initial-state test.
+
+OPTIONS
+
+Before --, existing launcher options work: --n-episodes, --restart-tracking,
+--stop-tracking, --record-video, --no-logging, --log-dir, --overwrite-logs,
+--no-mujoco-viewer, --bridge-telemetry, camera/mask/GPU configuration options.
+All output/log/tracking-directory overrides must remain inside this package.
+--runtime-python (alias --control-python) overrides the CPU policy interpreter.
+--reuse-tracking-from selects an existing tracker registry to borrow read-only.
+
+After --, policy options include:
+  --goal-sign alternate|-1|1
+  --frame-mode palm_registered|identity
+  --stop-on-success / --no-stop-on-success
+  --steps 1..500                  (observation time still has denominator 500)
+  --backend pytorch|torchscript   (both tested on CPU; default pytorch)
+  --torch-threads 1
+  --max-robot-age 0.15 --max-pose-age 0.3 --max-state-skew 0.15
+  --target-ack-timeout 0.15 --max-inference-time 0.15
+
+With --observe-only before --, the bridge is explicitly --state-only and the
+controller never publishes actions/holds/stops. This reads hardware feedback
+without enabling or changing torque. --dry-run/--check access no hardware.
+
+TRACKING OWNERSHIP
+
+New RL vision sessions are registered in runtime/tracking/session.json.
+If the standard MPPI registry has a live tracker/receiver and no RL registry
+exists, its record is mirrored privately and its existing lock held read-only
+to exclude concurrent MPPI launches. Its original registry is not rewritten.
+Default cleanup preserves borrowed tracking. Explicit --restart-tracking or
+--stop-tracking may stop those owned vision services; their old MPPI registry
+then becomes stale and a later MPPI launch needs its own --restart-tracking.
+Do not manually run concurrent controllers against the hand's action channel.
+
+LOGS
+
+runtime/results/leap_experiment_<time>/ contains:
+  controller.json       full measured state, world/training policy inputs,
+                        raw actor output, clipped/published/accepted targets,
+                        robot/pose/action/ack timestamps, inference/wait times,
+                        initial/final object poses and episode results
+  steps.csv             per-decision errors, timing, freshness, clipping counts
+  episodes.csv          per-episode completion/arrival/hold/success metrics
+  summary.json          aggregate outcomes and CPU inference timing
+  launch.json           exact commands and input config snapshots
+  preparation_trace.jsonl, bridge/controller/tracker/viewer logs
+  video/                optional episode-only video via existing recorder
+
+Configuration-specific cumulative logs append under runtime/results/configurations
+by default. --overwrite-logs replaces only the matching configuration's cumulative
+records; raw timestamped runs remain separate. Shared cumulative export retains
+legacy empty MPPI timing fields; RL inference timing is in the raw summary and
+episode/step CSVs. --no-logging uses temporary operational files under runtime/tmp;
+active persistent tracking files remain until explicitly stopped.
+
+REPRODUCING THE LOCAL ENVIRONMENT AND TESTS
+
+  python rl/NoDR_s1009_u0800_partner_package_English_v2/setup_cpu_runtime.py
+
+Run that with mj_env active. It creates runtime/venv with system-site-packages
+read access to mj_env's NumPy/SciPy/MuJoCo/LCM, and installs pinned CPU PyTorch
+inside the private venv only. --check-only validates an existing environment.
+Pinned PyTorch requirements: requirements-hardware-cpu.txt.
+Environment inventory and package parity logs: runtime/environment.json,
+runtime/logs/package_self_test.log.
+
+  rl/NoDR_s1009_u0800_partner_package_English_v2/runtime/venv/bin/python -B -m pytest -q rl/NoDR_s1009_u0800_partner_package_English_v2/tests --basetemp rl/NoDR_s1009_u0800_partner_package_English_v2/runtime/test_tmp -o cache_dir=rl/NoDR_s1009_u0800_partner_package_English_v2/runtime/cache/pytest
+
+Tests use fake LCM, a fake hand, synthetic poses and archived arrays. No serial
+ports, cameras, real command channels, physics rollouts or hardware tests are
+used. Both original inference backends also pass all 112 package reference cases.

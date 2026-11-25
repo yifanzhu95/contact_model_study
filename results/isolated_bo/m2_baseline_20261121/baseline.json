@@ -1,0 +1,502 @@
+{
+  "record_type": "user_designated_hardware_baseline",
+  "task": "cube_reorient",
+  "model": "M2",
+  "designated_at_utc": "2026-11-22T01:09:12.412376+00:00",
+  "client_timezone": "America/Phoenix",
+  "designation": "User explicitly selected the second 12-episode archive: 6 successes, 5 drops, 1 timeout. Use this exact batch as the latest M2 baseline for future comparisons.",
+  "results_directory": "results/bo_validation/hardware/cube_reorient/hand-high_obj-high/M2/baseline_trial314_shift512_h0256_paced_measured_limits/combined_12_completed_20261121_031802_032712",
+  "controller_sha256": "754bc430e9fa971a0485917bccc52a7673ac669d0a000eb3e37aad60d0f6dc35",
+  "report": "results/bo_validation/hardware/cube_reorient/hand-high_obj-high/M2/baseline_trial314_shift512_h0256_paced_measured_limits/combined_12_completed_20261121_031802_032712/analysis/report.json",
+  "summary": {
+    "requested_episodes": 12,
+    "completed_episodes": 12,
+    "successful_episodes": 6,
+    "unsuccessful_episodes": 6,
+    "success_rate_completed": 0.5,
+    "aborted_episodes": 0,
+    "completed_steps": 3749,
+    "wall_time_s": 241.79068252793513
+  },
+  "outcomes": {
+    "successes": 6,
+    "drops": 5,
+    "timeouts": 1,
+    "completed": 12,
+    "success_rate": 0.5
+  },
+  "desktop_archive": "/home/chetan/Desktop/M2_12_completed_episodes_20261121_batch_02_031802_032712.zip",
+  "source_runs": [
+    "leap_experiment_20261121_031802_821943",
+    "leap_experiment_20261121_032216_618091",
+    "leap_experiment_20261121_032712_085446"
+  ],
+  "settings": {
+    "task": "cube_reorient",
+    "rollout_model": "M2",
+    "hand_acc": "high",
+    "obj_acc": "high",
+    "n_samples": 512,
+    "n_iterations": 1,
+    "ctrl_time_step": 0.064,
+    "time_horizon": 0.256,
+    "noise_sigma": 0.05,
+    "temperature": 0.1,
+    "warm_start": "shift",
+    "pace_control": true,
+    "action_rate_weight": 10.0,
+    "plan_blend_alpha": 0.75,
+    "joint_limit_weight": 100.0,
+    "cube_friction": [
+      0.3,
+      0.005,
+      0.0001
+    ],
+    "fingertip_friction": [
+      0.5,
+      0.005,
+      0.0001
+    ],
+    "palm_friction": [
+      0.4,
+      0.005,
+      0.0001
+    ],
+    "finger_friction": [
+      0.4,
+      0.005,
+      0.0001
+    ]
+  },
+  "object_mass_kg": 0.07,
+  "weights": {
+    "w_quat": 45.22510814,
+    "w_pos_x": 4.349615154,
+    "w_pos_y": 1.0,
+    "w_pos_z": 38.6860546,
+    "w_velo": 0.0,
+    "w_contact": 80.0,
+    "w_joint": 0.02764851698,
+    "w_joint_velo": 0.0,
+    "w_fallen": 13.16717602,
+    "w_quat_term": 10.1237636,
+    "w_pos_term": 73.28346845,
+    "w_fallen_term": 0.0
+  },
+  "joint_reference": [
+    0.15646600723266602,
+    -0.9096508026123047,
+    1.1412818431854248,
+    0.3206019401550293,
+    0.31172097356695877,
+    -0.0981748104095459,
+    1.178177745718705,
+    0.11076939733404863,
+    0.2807183265686035,
+    1.0308349132537842,
+    1.179630994796753,
+    0.2546408176422119,
+    0.5629708766937256,
+    1.5477864742279053,
+    1.6183497905731201,
+    0.4448542594909668
+  ],
+  "hardware_config": {
+    "reviewed_for_this_hand": true,
+    "robot_qref": [
+      0.765751,
+      -0.568012,
+      0.916951,
+      0.573897,
+      -0.0191225,
+      -0.0837503,
+      0.709056,
+      1.01884,
+      0.830768,
+      0.610365,
+      0.929305,
+      0.610097,
+      1.09912,
+      1.44581,
+      1.33179,
+      0.192794
+    ],
+    "episode_preparation": {
+      "speed_rad_s": 0.5,
+      "tolerance_rad": 0.06,
+      "joint_tolerance_rad": {
+        "if_mcp": 0.08
+      },
+      "settle_time_s": 0.3,
+      "settle_velocity_rad_s": 0.08,
+      "timeout_s": 0,
+      "interrupt_timeout_s": 30,
+      "command_hz": 50
+    },
+    "port": "/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT9HDB0V-if00-port0",
+    "baudrate": 3000000,
+    "gravity_mujoco": [
+      0.0,
+      0.0,
+      -9.81
+    ],
+    "palm_quat_wxyz": [
+      0.0,
+      0.9659258262890683,
+      0.0,
+      -0.25881904510252074
+    ],
+    "manual_viewer_limits": {
+      "max_command_speed": 0.5,
+      "max_velocity": 3.0,
+      "max_tracking_error": 0.35
+    },
+    "delta_reference": "measured_position",
+    "hold_on_non_motor_failure": true,
+    "ctrl_range": {
+      "lower": 0.2,
+      "upper": 0.2
+    },
+    "joint_limits": {
+      "model": "scenes/leap/hardware/calibrated_hand_measured_limits.xml",
+      "cost_weight": 100.0
+    },
+    "max_current_raw": 550,
+    "max_temperature": 50,
+    "expected_registers": {
+      "model_number": 1240,
+      "mode": 5,
+      "p": [
+        450,
+        600,
+        600,
+        600,
+        450,
+        600,
+        600,
+        600,
+        450,
+        600,
+        600,
+        600,
+        600,
+        600,
+        600,
+        600
+      ],
+      "i": 0,
+      "d": [
+        150,
+        200,
+        200,
+        200,
+        150,
+        200,
+        200,
+        200,
+        150,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "goal_current": 550
+    }
+  },
+  "joint_limits": {
+    "model": "/home/chetan/contact_model_study/scenes/leap/hardware/calibrated_hand_measured_limits.xml",
+    "model_sha256": "90d278450c752a9425168cac510413b8d21708e89b0d597a6c9b4d46c543de4b",
+    "joint_order": [
+      "if_mcp",
+      "if_rot",
+      "if_pip",
+      "if_dip",
+      "mf_mcp",
+      "mf_rot",
+      "mf_pip",
+      "mf_dip",
+      "rf_mcp",
+      "rf_rot",
+      "rf_pip",
+      "rf_dip",
+      "th_cmc",
+      "th_axl",
+      "th_mcp",
+      "th_ipl"
+    ],
+    "lower": [
+      0.151864051819,
+      -1.59994208813,
+      0.3021941185,
+      -0.0276117324829,
+      0.0552232265472,
+      -1.21031093597,
+      0.280718326569,
+      0.0299124717712,
+      0.11351442337,
+      -1.43427217007,
+      0.251572847366,
+      0.061359167099,
+      -0.0199418067932,
+      -0.518485546112,
+      -1.09679627419,
+      -0.66344666481
+    ],
+    "upper": [
+      1.80089354515,
+      0.994019269943,
+      1.71345639229,
+      1.98036932945,
+      1.87759232521,
+      1.02163100243,
+      1.63215565681,
+      1.84231066704,
+      2.00031065941,
+      1.16889309883,
+      1.77788376808,
+      1.96502947807,
+      2.06013607979,
+      1.40052437782,
+      1.62908768654,
+      1.69504857063
+    ],
+    "cost_weight": 100.0,
+    "application": "MPPI delta targets only, after ctrl_range",
+    "cost_definition": "weight * sum_hj (max(lower_j-target_hj,0)^2 + max(target_hj-upper_j,0)^2)",
+    "cost_targets": "raw requested absolute targets before filtering; includes final horizon target",
+    "hardware_clip_order": [
+      "ctrl_range",
+      "measured_joint_limits"
+    ]
+  },
+  "pose_transform": {
+    "T_model_from_published": [
+      [
+        0.9942763914966642,
+        0.06103345400885701,
+        0.08768908030148781,
+        -0.0062803324738410216
+      ],
+      [
+        -0.05519805901547157,
+        0.9961913190373315,
+        -0.0674983715032114,
+        0.0035368834809880395
+      ],
+      [
+        -0.09147475932352393,
+        0.06227177022062031,
+        0.9938584381290392,
+        0.0007501505138129971
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "T_tracked_from_object": [
+      [
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        1
+      ]
+    ],
+    "camera_fps": 60,
+    "camera_intrinsics": [
+      [
+        605.6220092773438,
+        0,
+        316.6953125
+      ],
+      [
+        0,
+        605.2809448242188,
+        252.77352905273438
+      ],
+      [
+        0,
+        0,
+        1
+      ]
+    ],
+    "camera_serial": "310522070297",
+    "camera_to_published": [
+      [
+        -0.053325542737646295,
+        0.8305459369514124,
+        -0.5543914078566113,
+        0.4275556239117867
+      ],
+      [
+        0.9980614638070043,
+        0.02648894046274657,
+        -0.05631740846826334,
+        0.05352875202028851
+      ],
+      [
+        -0.03208895378717712,
+        -0.5563198564195432,
+        -0.8303484307194078,
+        0.5130868213950068
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "extrinsics_status": "selected_calibration",
+    "image_size": [
+      640,
+      480
+    ],
+    "intrinsics_measured_at_utc": "2026-11-10T09:26:33.507106+00:00",
+    "object_translation_adjust_camera_m": [
+      0,
+      0,
+      -0.015
+    ],
+    "published_pose_frame": "mujoco_world",
+    "realsense": {
+      "color_format": "format.rgb8",
+      "color_intrinsics": [
+        [
+          605.6220092773438,
+          0,
+          316.6953125
+        ],
+        [
+          0,
+          605.2809448242188,
+          252.77352905273438
+        ],
+        [
+          0,
+          0,
+          1
+        ]
+      ],
+      "depth_scale_m": 0.0010000000474974513,
+      "distortion_coefficients": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "distortion_model": "distortion.inverse_brown_conrady",
+      "firmware": "5.13.0.55",
+      "name": "Intel RealSense D435I"
+    },
+    "rotation_adjust_deg": [
+      0,
+      0,
+      0
+    ],
+    "selected_calibration": {
+      "T_world_from_camera": [
+        [
+          0.005080959396054692,
+          0.7786257521308572,
+          -0.6274680246596411,
+          0.4764993069106934
+        ],
+        [
+          0.9993695846891703,
+          0.018094213239800212,
+          0.03054558307558336,
+          -0.0018291876286339057
+        ],
+        [
+          0.03513711783584944,
+          -0.6272276600771758,
+          -0.7780429585725328,
+          0.48657924417989
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "application": "consumer adapter; tracker publication is unchanged",
+      "name": "latest",
+      "object_translation_adjust_camera_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "publication_config": "/home/chetan/contact_model_study/configs/leap_pose_transform.json",
+      "publication_sha256": "a14ca3168d3d2d0fd308965a136ff2a9d27036da41abe76567734348278a79f5",
+      "source": "/home/chetan/contact_model_study/camera_hand_calibration/method5/results/session_20261119T065119_646514Z/fit_001/candidate.json",
+      "source_sha256": "9cf10244e0e86e44fce74a4c25d745bba9806d71d886fd3a089fb4953a3c26a4"
+    },
+    "translation_adjust_m": [
+      0,
+      0,
+      0
+    ]
+  },
+  "success_thresholds": {
+    "pos": 0.02,
+    "quat": 0.04,
+    "vel": 10.0
+  },
+  "failure_z": 0.0,
+  "target_pos": [
+    0.025,
+    0.035,
+    0.075
+  ],
+  "cost_drop_height": 0.065,
+  "timing": {
+    "planning_ms": {
+      "n": 3749,
+      "mean": 58.565823981828075,
+      "median": 58.29392408486456,
+      "min": 41.88212601002306,
+      "p90": 62.597414990887046,
+      "p95": 64.68177281785756,
+      "p99": 68.37864376138896,
+      "max": 75.18115197308362
+    },
+    "publication_rate_hz": 15.505316973178404,
+    "command_joint_age_ms": {
+      "n": 3749,
+      "mean": 1.5370270257696974,
+      "median": 1.5180110931396484,
+      "min": 0.06532669067382812,
+      "p90": 2.747344970703125,
+      "p95": 2.915811538696289,
+      "p99": 3.0412673950195312,
+      "max": 10.995149612426758
+    }
+  },
+  "note": "Baseline designation only. No runtime parameters, active task weights, calibration, source results, or videos changed. The later four-episode run is not the designated evaluation batch."
+}

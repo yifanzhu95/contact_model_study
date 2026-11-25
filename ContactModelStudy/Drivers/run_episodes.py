@@ -37,6 +37,7 @@ MUJOCO_GL to "egl".
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 import time
@@ -167,6 +168,10 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--noise-sigma", type=float, default=0.05)#0.05)#0.1)#40.0)#0.01)
     g.add_argument("--temperature", type=float, default=1e-1,#1.0,#40.0,#0.001,
                    help="MPPI lambda; smaller is greedier")
+    g.add_argument("--action-rate-weight", type=float, default=0.0,
+                   help="cost of squared changes in absolute targets, including the first "
+                        "target versus the previous command; 0 disables "
+                        "(default: 0, opt in explicitly)")
     g.add_argument("--control-mode", default="pos_relative",
                    choices=["pos_relative", "ctrl_relative", "absolute"],
                    help="pos_relative: ctrl = q + U; ctrl_relative: ctrl = "
@@ -400,6 +405,8 @@ def parseArgs(argv=None, parser: argparse.ArgumentParser | None = None,
                 parser.error(f"--cost-weight {name}: {value!r} is not a number")
     if args.settle < 0:
         parser.error(f"--settle must be >= 0, got {args.settle}")
+    if not math.isfinite(args.action_rate_weight) or args.action_rate_weight < 0:
+        parser.error("--action-rate-weight must be finite and nonnegative")
     if args.save_stride < 1:
         parser.error(f"--save-stride must be >= 1, got {args.save_stride}")
     # Each pair is one setting given two ways; the rollout config rejects both
@@ -458,6 +465,7 @@ def buildPlannerConfig(args) -> MPPI_Config:
         resample_noise=args.resample_noise, center_noise=args.center_noise,
         temperature=args.temperature, adaptive_temp=args.adaptive_temp,
         control_mode=args.control_mode, delta_range=delta_range,
+        action_rate_weight=args.action_rate_weight,
         warm_start=args.warm_start, seed=args.seed, use_graph=args.graph,
         debug=args.debug, return_uncertainty=args.uncertainty,
         plan_on_eval_scene=args.plan_on_eval,

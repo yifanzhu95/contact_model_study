@@ -1,0 +1,4 @@
+action_rate_weight,joint_limit_weight,plan_blend_alpha
+0,100,0.75
+10,0,0.75
+10,100,1

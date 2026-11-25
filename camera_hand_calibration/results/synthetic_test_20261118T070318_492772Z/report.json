@@ -1,0 +1,72 @@
+{
+  "status": "synthetic_test_only",
+  "synthetic_test_only": true,
+  "absolute_accuracy_established": false,
+  "camera_serial": "SYNTHETIC_TEST_ONLY",
+  "metrics": {
+    "train": {
+      "poses": [
+        "synthetic_pose_0",
+        "synthetic_pose_1",
+        "synthetic_pose_2"
+      ],
+      "before_pixel_error": {
+        "n": 60,
+        "mean": 3.2106016143114133,
+        "median": 3.1880874210132535,
+        "rms": 3.214297572099057,
+        "mae": 3.2106016143114133,
+        "p95": 3.501475535422962,
+        "p95_abs": 3.501475535422962,
+        "max": 3.5826678671287167
+      },
+      "after_pixel_error": {
+        "n": 60,
+        "mean": 0.119354942857806,
+        "median": 0.1121160520447386,
+        "rms": 0.1367321049119265,
+        "mae": 0.119354942857806,
+        "p95": 0.24402591216682495,
+        "p95_abs": 0.24402591216682495,
+        "max": 0.32722529912030185
+      },
+      "before_depth_error_mm": null,
+      "after_depth_error_mm": null
+    },
+    "validation": {
+      "poses": [
+        "synthetic_pose_3"
+      ],
+      "before_pixel_error": {
+        "n": 20,
+        "mean": 3.2579968390492184,
+        "median": 3.2702899937915637,
+        "rms": 3.2613501014956983,
+        "mae": 3.2579968390492184,
+        "p95": 3.440186838132229,
+        "p95_abs": 3.440186838132229,
+        "max": 3.5691807559098776
+      },
+      "after_pixel_error": {
+        "n": 20,
+        "mean": 0.14164188019603277,
+        "median": 0.11517325343517491,
+        "rms": 0.1665134936695753,
+        "mae": 0.14164188019603277,
+        "p95": 0.32099348530219024,
+        "p95_abs": 0.32099348530219024,
+        "max": 0.3437487220707756
+      },
+      "before_depth_error_mm": null,
+      "after_depth_error_mm": null
+    }
+  },
+  "delta_translation_mm": [
+    4.0475805334148625,
+    -2.9392065013311846,
+    2.0587241387831634
+  ],
+  "delta_rotation_deg": 0.0514131063819944,
+  "model_dependence": "Agreement is relative to frozen CAD and measured joints; mounting/geometry/joint-zero errors may be confounded.",
+  "production_configuration_modified": false
+}

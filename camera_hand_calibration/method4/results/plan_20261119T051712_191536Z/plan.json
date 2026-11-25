@@ -1,0 +1,160 @@
+{
+  "status": "offline_plan_only_awaiting_placement_definition",
+  "q_level": [
+    0.5235858006060097,
+    0.15,
+    0.0,
+    0.0,
+    0.5235927755725042,
+    0.0,
+    0.0,
+    0.0,
+    0.5235931608422384,
+    -0.15,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.55,
+    0.35
+  ],
+  "q_level_deg": [
+    29.999256587702614,
+    8.594366926962348,
+    0.0,
+    0.0,
+    29.999656223844994,
+    0.0,
+    0.0,
+    0.0,
+    29.99967829817474,
+    -8.594366926962348,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    31.51267873219528,
+    20.05352282957881
+  ],
+  "expected_cube_center_world_m": [
+    0.03835037963754037,
+    0.03659962545355873,
+    0.07562821259667352
+  ],
+  "geometry": {
+    "reference": "Both palm-side bottom corners touch the fixed gray index/ring motor-housing front faces; cube centered over middle proximal finger; bottom face on upper finger surfaces.",
+    "support_surfaces": [
+      {
+        "finger": "if",
+        "point_body_m": [
+          0.007456930224437863,
+          0.00020003197216132262,
+          -0.02308408388820924
+        ],
+        "surface_center_world_m": [
+          0.04879091422704391,
+          -0.007583574606662774,
+          0.040578218454714265
+        ],
+        "normal_world": [
+          6.974992288997608e-06,
+          -5.99999999991173e-06,
+          0.999999999957675
+        ],
+        "tilt_from_vertical_deg": 0.0005271525111813409
+      },
+      {
+        "finger": "mf",
+        "point_body_m": [
+          0.007456930224437861,
+          0.0003000319721613246,
+          -0.023084083888209244
+        ],
+        "surface_center_world_m": [
+          0.04875821574327939,
+          0.03659962545355873,
+          0.04062821259667352
+        ],
+        "normal_world": [
+          6.000002411672078e-06,
+          -3.0000155882624738e-06,
+          0.9999999999775002
+        ],
+        "tilt_from_vertical_deg": 0.0003843498928257065
+      },
+      {
+        "finger": "rf",
+        "point_body_m": [
+          0.007456930224437865,
+          0.0003000319721613333,
+          -0.023084083888209244
+        ],
+        "surface_center_world_m": [
+          0.0486382965254024,
+          0.08088864543062939,
+          0.04062322753733673
+        ],
+        "normal_world": [
+          5.614732677346274e-06,
+          -3.000013586315139e-06,
+          0.9999999999797375
+        ],
+        "tilt_from_vertical_deg": 0.00036474025560612227
+      }
+    ],
+    "bottom_height_m": 0.04062821259667352,
+    "palm_stop_normal_world": [
+      0.49999999999999994,
+      0.0,
+      0.8660254037844387
+    ],
+    "palm_stop_plane_offset_m": 0.03686025403784439,
+    "lower_rear_corners_world_m": [
+      [
+        0.0033503796375403687,
+        0.0015996254535587257,
+        0.04062821259667352
+      ],
+      [
+        0.0033503796375403687,
+        0.07159962545355873,
+        0.04062821259667352
+      ]
+    ],
+    "corner_to_finite_palm_face_error_mm": [
+      1.2622030157173375e-07,
+      2.903284626598617e-07
+    ],
+    "support_height_spread_mm": 0.0499941419592545,
+    "max_support_tilt_deg": 0.0005271525111813409,
+    "cube_edge_m": 0.07,
+    "surface_offset_m": 0.0
+  },
+  "approach_from_park": {
+    "passed": true,
+    "minimum_clearance_m": 0.004934775812446001,
+    "nearest_pair": [
+      "mf_ds_collision_1",
+      "rf_ds_collision_1"
+    ],
+    "worst_segment": 0,
+    "required_margin_m": 0.004
+  },
+  "minimum_clearance_mm": 4.934775812446001,
+  "nearest_collision_pair": [
+    "mf_ds_collision_1",
+    "rf_ds_collision_1"
+  ],
+  "hardware_motion_executed": false,
+  "requires_fresh_measured_pose_path_screen": true,
+  "operator_stages": [
+    "Confirm hand empty and clear",
+    "Gradually move and settle at level pose",
+    "Prompt for cube placement at physical reference",
+    "Confirm placement; settle under load and average fresh poses",
+    "Prompt for cube removal; keep holding",
+    "Confirm removal",
+    "Disable and verify torque off",
+    "Refine method 3 and save isolated method 4 candidate"
+  ]
+}

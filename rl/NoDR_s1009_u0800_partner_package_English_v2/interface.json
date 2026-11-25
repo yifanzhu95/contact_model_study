@@ -1,0 +1,438 @@
+{
+  "schema": "noDR_s1009_u0800_handoff_v1",
+  "seed": 1009,
+  "updates": 800,
+  "DR": false,
+  "input_shape": [
+    "batch",
+    73
+  ],
+  "output_shape": [
+    "batch",
+    16
+  ],
+  "dtype": "float32",
+  "normalization": "Inside actor: (observation-mean)/(std+0.01); NEVER normalize externally a second time",
+  "raw_output": "Deterministic mean latent action; no tanh or joint limits in the actor file",
+  "action_equation": "u_next = clamp(u_previous +0.064*tanh(raw_action), training_actuator_lower, training_actuator_upper)",
+  "action_unit": "absolute position targets, radians, training actuator order",
+  "control_period_seconds": 0.064,
+  "control_frequency_hz": 15.625,
+  "episode_controls": 500,
+  "trained_goal": "Fixed canonical localX -90 or+90 degrees; not arbitrary-goal training",
+  "trained_goal_position_world_m": [
+    0.02,
+    0.035,
+    0.085
+  ],
+  "trained_goal_quaternions_wxyz": {
+    "minus90": [
+      0.7071067811865476,
+      -0.7071067811865476,
+      0.0,
+      0.0
+    ],
+    "plus90": [
+      0.7071067811865476,
+      0.7071067811865476,
+      0.0,
+      0.0
+    ]
+  },
+  "quaternion_order": "w,x,y,z; rotation matrix maps object/body vectors into training-world axes",
+  "rotation6_order": [
+    "R00",
+    "R10",
+    "R20",
+    "R01",
+    "R11",
+    "R21"
+  ],
+  "observation_slices": [
+    {
+      "start": 0,
+      "stop": 16,
+      "field": "joint position",
+      "encoding": "2*(q-q_joint_lower)/(q_joint_upper-q_joint_lower)-1"
+    },
+    {
+      "start": 16,
+      "stop": 32,
+      "field": "joint velocity",
+      "encoding": "qdot_rad_s/20"
+    },
+    {
+      "start": 32,
+      "stop": 35,
+      "field": "object position in training world",
+      "encoding": "position_m*10"
+    },
+    {
+      "start": 35,
+      "stop": 41,
+      "field": "object rotation6",
+      "encoding": "first two columns of R_world_object; column0 then column1"
+    },
+    {
+      "start": 41,
+      "stop": 44,
+      "field": "goal minus object position",
+      "encoding": "(goal_position_m-object_position_m)*10"
+    },
+    {
+      "start": 44,
+      "stop": 50,
+      "field": "goal orientation in object frame",
+      "encoding": "rotation6(R_world_object.T @ R_world_goal)"
+    },
+    {
+      "start": 50,
+      "stop": 53,
+      "field": "object linear velocity in training world",
+      "encoding": "metres/second; NOT divided by10"
+    },
+    {
+      "start": 53,
+      "stop": 56,
+      "field": "object angular velocity in training world",
+      "encoding": "radians/second divided by10"
+    },
+    {
+      "start": 56,
+      "stop": 72,
+      "field": "previous actuator target",
+      "encoding": "2*(u_previous-u_ctrl_lower)/(u_ctrl_upper-u_ctrl_lower)-1"
+    },
+    {
+      "start": 72,
+      "stop": 73,
+      "field": "episode time left",
+      "encoding": "1-completed_control_steps/500;0 before first control gives1"
+    }
+  ],
+  "joints": [
+    {
+      "index": 0,
+      "joint_name": "if_mcp",
+      "actuator_name": "if_mcp_act",
+      "qpos_index": 0,
+      "qvel_index": 0,
+      "joint_position_range_rad": [
+        -0.0,
+        2.23
+      ],
+      "actuator_target_range_rad": [
+        -0.314,
+        2.23
+      ],
+      "simulation_position_gain": 3.0,
+      "simulation_velocity_bias": -0.01
+    },
+    {
+      "index": 1,
+      "joint_name": "if_rot",
+      "actuator_name": "if_rot_act",
+      "qpos_index": 1,
+      "qvel_index": 1,
+      "joint_position_range_rad": [
+        -1.047,
+        1.047
+      ],
+      "actuator_target_range_rad": [
+        -1.047,
+        1.047
+      ],
+      "simulation_position_gain": 3.0,
+      "simulation_velocity_bias": -0.01
+    },
+    {
+      "index": 2,
+      "joint_name": "if_pip",
+      "actuator_name": "if_pip_act",
+      "qpos_index": 2,
+      "qvel_index": 2,
+      "joint_position_range_rad": [
+        -0.506,
+        1.885
+      ],
+      "actuator_target_range_rad": [
+        -0.506,
+        1.885
+      ],
+      "simulation_position_gain": 3.0,
+      "simulation_velocity_bias": -0.01
+    },
+    {
+      "index": 3,
+      "joint_name": "if_dip",
+      "actuator_name": "if_dip_act",
+      "qpos_index": 3,
+      "qvel_index": 3,
+      "joint_position_range_rad": [
+        -0.366,
+        2.042
+      ],
+      "actuator_target_range_rad": [
+        -0.366,
+        2.042
+      ],
+      "simulation_position_gain": 3.0,
+      "simulation_velocity_bias": -0.01
+    },
+    {
+      "index": 4,
+      "joint_name": "mf_mcp",
+      "actuator_name": "mf_mcp_act",
+      "qpos_index": 4,
+      "qvel_index": 4,
+      "joint_position_range_rad": [
+        -0.0,
+        2.23
+      ],
+      "actuator_target_range_rad": [
+        -0.314,
+        2.23
+      ],
+      "simulation_position_gain": 3.0,
+      "simulation_velocity_bias": -0.01
+    },
+    {
+      "index": 5,
+      "joint_name": "mf_rot",
+      "actuator_name": "mf_rot_act",
+      "qpos_index": 5,
+      "qvel_index": 5,
+      "joint_position_range_rad": [
+        -1.047,
+        1.047
+      ],
+      "actuator_target_range_rad": [
+        -1.047,
+        1.047
+      ],
+      "simulation_position_gain": 3.0,
+      "simulation_velocity_bias": -0.01
+    },
+    {
+      "index": 6,
+      "joint_name": "mf_pip",
+      "actuator_name": "mf_pip_act",
+      "qpos_index": 6,
+      "qvel_index": 6,
+      "joint_position_range_rad": [
+        -0.506,
+        1.885
+      ],
+      "actuator_target_range_rad": [
+        -0.506,
+        1.885
+      ],
+      "simulation_position_gain": 3.0,
+      "simulation_velocity_bias": -0.01
+    },
+    {
+      "index": 7,
+      "joint_name": "mf_dip",
+      "actuator_name": "mf_dip_act",
+      "qpos_index": 7,
+      "qvel_index": 7,
+      "joint_position_range_rad": [
+        -0.366,
+        2.042
+      ],
+      "actuator_target_range_rad": [
+        -0.366,
+        2.042
+      ],
+      "simulation_position_gain": 3.0,
+      "simulation_velocity_bias": -0.01
+    },
+    {
+      "index": 8,
+      "joint_name": "rf_mcp",
+      "actuator_name": "rf_mcp_act",
+      "qpos_index": 8,
+      "qvel_index": 8,
+      "joint_position_range_rad": [
+        -0.0,
+        2.23
+      ],
+      "actuator_target_range_rad": [
+        -0.314,
+        2.23
+      ],
+      "simulation_position_gain": 3.0,
+      "simulation_velocity_bias": -0.01
+    },
+    {
+      "index": 9,
+      "joint_name": "rf_rot",
+      "actuator_name": "rf_rot_act",
+      "qpos_index": 9,
+      "qvel_index": 9,
+      "joint_position_range_rad": [
+        -1.047,
+        1.047
+      ],
+      "actuator_target_range_rad": [
+        -1.047,
+        1.047
+      ],
+      "simulation_position_gain": 3.0,
+      "simulation_velocity_bias": -0.01
+    },
+    {
+      "index": 10,
+      "joint_name": "rf_pip",
+      "actuator_name": "rf_pip_act",
+      "qpos_index": 10,
+      "qvel_index": 10,
+      "joint_position_range_rad": [
+        -0.506,
+        1.885
+      ],
+      "actuator_target_range_rad": [
+        -0.506,
+        1.885
+      ],
+      "simulation_position_gain": 3.0,
+      "simulation_velocity_bias": -0.01
+    },
+    {
+      "index": 11,
+      "joint_name": "rf_dip",
+      "actuator_name": "rf_dip_act",
+      "qpos_index": 11,
+      "qvel_index": 11,
+      "joint_position_range_rad": [
+        -0.366,
+        2.042
+      ],
+      "actuator_target_range_rad": [
+        -0.366,
+        2.042
+      ],
+      "simulation_position_gain": 3.0,
+      "simulation_velocity_bias": -0.01
+    },
+    {
+      "index": 12,
+      "joint_name": "th_cmc",
+      "actuator_name": "th_cmc_act",
+      "qpos_index": 12,
+      "qvel_index": 12,
+      "joint_position_range_rad": [
+        -0.349,
+        2.094
+      ],
+      "actuator_target_range_rad": [
+        -0.349,
+        2.094
+      ],
+      "simulation_position_gain": 3.0,
+      "simulation_velocity_bias": -0.01
+    },
+    {
+      "index": 13,
+      "joint_name": "th_axl",
+      "actuator_name": "th_axl_act",
+      "qpos_index": 13,
+      "qvel_index": 13,
+      "joint_position_range_rad": [
+        -0.349,
+        2.094
+      ],
+      "actuator_target_range_rad": [
+        -0.349,
+        2.094
+      ],
+      "simulation_position_gain": 3.0,
+      "simulation_velocity_bias": -0.01
+    },
+    {
+      "index": 14,
+      "joint_name": "th_mcp",
+      "actuator_name": "th_mcp_act",
+      "qpos_index": 14,
+      "qvel_index": 14,
+      "joint_position_range_rad": [
+        -0.47,
+        2.443
+      ],
+      "actuator_target_range_rad": [
+        -0.47,
+        2.443
+      ],
+      "simulation_position_gain": 3.0,
+      "simulation_velocity_bias": -0.01
+    },
+    {
+      "index": 15,
+      "joint_name": "th_ipl",
+      "actuator_name": "th_ipl_act",
+      "qpos_index": 15,
+      "qvel_index": 15,
+      "joint_position_range_rad": [
+        -1.34,
+        1.88
+      ],
+      "actuator_target_range_rad": [
+        -1.34,
+        1.88
+      ],
+      "simulation_position_gain": 3.0,
+      "simulation_velocity_bias": -0.01
+    }
+  ],
+  "static_training_scene_root_bodies": [
+    {
+      "name": "palm",
+      "position_world_m": [
+        0.0,
+        0.0,
+        0.01
+      ],
+      "quaternion_wxyz": [
+        0.0,
+        0.9723699212512767,
+        0.0,
+        -0.23344536030040494
+      ]
+    },
+    {
+      "name": "goal",
+      "position_world_m": [
+        0.005,
+        -0.07,
+        0.1353
+      ],
+      "quaternion_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "obj",
+      "position_world_m": [
+        -0.0,
+        0.05,
+        0.07
+      ],
+      "quaternion_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "hardware_mapping": "Not supplied. Receiver must map each joint to motor ID/sign/zero, register sensing frame to training world, and provide measured/estimated object pose and linear/angular velocity.",
+  "hardware_limits": "JSON joint/control ranges and gains describe simulation training; they are not a calibrated hardware safety specification.",
+  "previous_target": "Actual preceding accepted position target, not measured joint q. If a hardware bridge modifies the target, record the applied value and document the changed interface.",
+  "episode_reset": "No hardware reset implemented. Receiver synchronizes step0 with the actual initial accepted target and a fixed goal; no arbitrary zero-u reset.",
+  "lead_limit": null,
+  "training_physics_substep_seconds": 0.004,
+  "status": "simulation-trained research policy; offline package validation only; hardware not validated"
+}

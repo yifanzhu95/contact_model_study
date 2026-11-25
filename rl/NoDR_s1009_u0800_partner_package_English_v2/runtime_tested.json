@@ -1,0 +1,13 @@
+{
+  "Python": "3.12.3",
+  "torch": "2.14.1+cu130",
+  "numpy": "2.5.4",
+  "device": "cpu",
+  "operating_system": "Linux-7.0.0-42-generic-x86_64-with-glibc2.39",
+  "dependencies_for_receiver": "Python + PyTorch only; no CUDA/MuJoCo/Warp/RSL required for inference",
+  "compatibility": "Tested in the recorded runtime only; run self_test.py in receiver environment before integration. TorchScript legacy format retained unchanged; plain PyTorch weights/runtime included as fallback.",
+  "official_references": [
+    "https://docs.pytorch.org/docs/stable/notes/cpu_threading_torchscript_inference.html",
+    "https://docs.pytorch.org/tutorials/beginner/saving_loading_models"
+  ]
+}

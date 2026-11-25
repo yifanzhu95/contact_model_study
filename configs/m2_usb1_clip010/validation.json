@@ -1,0 +1,21 @@
+{
+  "status": "prepared_not_started",
+  "base_config": "configs/m2_tracking_diagnostic/experiment.json",
+  "base_config_sha256": "1b2e281f1d0d6bc1623e068053268e8e065480ed57d147105fcaf8fce9109003",
+  "hardware_changes": {
+    "ctrl_range": {
+      "before": {
+        "lower": 0.2,
+        "upper": 0.2
+      },
+      "after": {
+        "lower": 0.1,
+        "upper": 0.1
+      }
+    }
+  },
+  "all_other_hardware_fields_identical": true,
+  "all_controller_arguments_identical": true,
+  "n_episodes": 12,
+  "log_dir": "results/diagnostics/m2_usb_latency_1ms_clip010"
+}

@@ -108,6 +108,15 @@ class SamplingBasedPlannerConfig:
             the position-servo error, so clipping it caps how hard the hand can
             grip. Under ``"absolute"`` it bounds the command itself; under
             ``"ctrl_relative"``, the per-step change in it.
+        action_rate_weight: Nonnegative weight on squared changes in requested
+            absolute actuator targets. Includes the first target relative to
+            ``Plan(u=...)`` and every subsequent horizon target, including the
+            last. Uses targets before actuator filtering, without dividing by
+            the timestep. Zero preserves the original objective and launches.
+        joint_limit_weight: Squared-hinge penalty on raw absolute position
+            targets outside joint_limit_lower/upper, summed across joints and
+            every horizon step, including the final one. Separate from sampled
+            delta clipping and actuator ctrlrange. Zero adds no kernel launches.
         seed: Seed for the noise. ``None`` draws one from fresh entropy.
         use_graph: Capture the rollout into a CUDA graph. This is most of the
             planner's speed — a rollout is thousands of small kernel launches,
@@ -139,6 +148,12 @@ class SamplingBasedPlannerConfig:
     warm_start: str = "none"
     control_mode: str = "pos_relative"
     delta_range: tuple[float | None, float | None] = (None, None)
+    action_rate_weight: float = 0.0
+    # Squared hinge on raw absolute position targets, before actuator filtering.
+    # These are joint-travel bounds, independent of delta_range and ctrlrange.
+    joint_limit_weight: float = 0.0
+    joint_limit_lower: tuple[float, ...] | None = None
+    joint_limit_upper: tuple[float, ...] | None = None
     seed: int | None = None
     use_graph: bool = True
     debug: bool = False
@@ -146,6 +161,19 @@ class SamplingBasedPlannerConfig:
     plan_on_eval_scene: bool = False
 
     def __post_init__(self) -> None:
+        if not np.isfinite(self.action_rate_weight) or self.action_rate_weight < 0.0:
+            raise ValueError("action_rate_weight must be finite and nonnegative")
+        if not np.isfinite(self.joint_limit_weight) or self.joint_limit_weight < 0:
+            raise ValueError('joint_limit_weight must be finite and nonnegative')
+        if (self.joint_limit_lower is None) != (self.joint_limit_upper is None):
+            raise ValueError('joint limit lower and upper must be provided together')
+        if self.joint_limit_weight > 0 and self.joint_limit_lower is None:
+            raise ValueError('joint limit penalty requires lower and upper bounds')
+        if self.joint_limit_lower is not None:
+            lo, hi = np.asarray(self.joint_limit_lower), np.asarray(self.joint_limit_upper)
+            if (lo.ndim != 1 or lo.size == 0 or hi.shape != lo.shape or not np.isfinite(lo).all()
+                    or not np.isfinite(hi).all() or np.any(lo >= hi)):
+                raise ValueError('joint limit bounds must be finite nonempty intervals')
         if self.noise_sigma <= 0.0:
             raise ValueError(f"noise_sigma must be positive, got {self.noise_sigma}")
         if self.n_iterations < 1:
@@ -315,12 +343,20 @@ class SamplingBasedPlannerBase(abc.ABC):
         self._clip_wp = wp.array(rng, dtype=wp.float32, device=dev)
         self._has_clip = not (low is None and high is None)
 
-        # ctrl_relative: the control applied when planning starts, which the
-        # accumulated deltas are added to.
+        # Control applied when planning starts: ctrl_relative accumulates from
+        # it, and the optional action-rate cost anchors its first target to it.
         self._u_prev_wp = wp.zeros(nu, dtype=wp.float32, device=dev)
         # pos_relative: one control step's commands, computed on the device from
         # the rollout's current positions and handed to the simulator.
         self._ctrl_step_wp = wp.zeros((N, nu), dtype=wp.float32, device=dev)
+        self._rate_previous_wp = (wp.zeros((N, nu), dtype=wp.float32, device=dev)
+                                  if self.config.action_rate_weight > 0 else None)
+        self._joint_limits_wp = None
+        if self.config.joint_limit_weight > 0:
+            if len(self.config.joint_limit_lower) != nu:
+                raise ValueError('joint limit bounds must have one entry per actuator')
+            self._joint_limits_wp = wp.array(np.column_stack((self.config.joint_limit_lower,
+                self.config.joint_limit_upper)), dtype=wp.float32, device=dev)
         # Host copies of the two command bases, for forming the returned action.
         self._u_prev: np.ndarray | None = None
         self._q_robot = np.zeros(nu)
@@ -388,12 +424,14 @@ class SamplingBasedPlannerBase(abc.ABC):
         Args:
             q: Measured positions, ``(nq,)``.
             q_dot: Measured velocities, ``(nv,)``.
-            u: The control currently applied, ``(nu,)``. Only
-                ``"ctrl_relative"`` uses it — its deltas start from it. ``None``
+            u: The control currently applied, ``(nu,)``. ``"ctrl_relative"``
+                starts its deltas from it; the action-rate cost uses it as the
+                first target's reference in every control mode. ``None``
                 falls back to the action this planner returned last, which is
                 right as long as that is what was applied; pass it whenever it
-                may not be, such as at the start of an episode. Not in the
-                plan's signature; ``ctrl_relative`` cannot work without it.
+                may not be, such as at the start of an episode. With no previous
+                action, the rate cost starts from measured joints; however,
+                ``ctrl_relative`` always requires a known applied command.
 
         Returns:
             ``(nu,)`` actuator command — what to hand
@@ -520,11 +558,12 @@ class SamplingBasedPlannerBase(abc.ABC):
         ``pos_relative`` needs the measured joint positions — only for the
         returned action and tape; the rollout re-reads each world's own. And
         ``ctrl_relative`` needs the control currently applied, uploaded for the
-        rollout's accumulation.
+        rollout's accumulation. The action-rate cost uses that same applied
+        target as its first reference, independently of the control mode.
         """
         a = self.robot_qpos_adr
         self._q_robot = q[a:a + self.nu].copy()
-        if self.config.control_mode != "ctrl_relative":
+        if self.config.control_mode != "ctrl_relative" and self.config.action_rate_weight == 0:
             return
         if u is not None:
             u = np.asarray(u, dtype=float).ravel()
@@ -532,10 +571,14 @@ class SamplingBasedPlannerBase(abc.ABC):
                 raise ValueError(f"u must have shape ({self.nu},), got {u.shape}")
             self._u_prev = u.copy()
         if self._u_prev is None:
-            raise ValueError(
-                "ctrl_relative needs the control currently applied: pass u= to "
-                "Plan (there is no previous action to fall back on)."
-            )
+            if self.config.control_mode == "ctrl_relative":
+                raise ValueError(
+                    "ctrl_relative needs the control currently applied: pass u= to "
+                    "Plan (there is no previous action to fall back on)."
+                )
+            self._u_prev = self._q_robot.copy()
+        if self.config.action_rate_weight > 0 and not np.isfinite(self._u_prev).all():
+            raise ValueError("action-rate reference must be finite")
         self._u_prev_wp.assign(self._u_prev.astype(np.float32))
 
     def _sampleNoise(self, iteration: int = 0) -> None:
@@ -620,10 +663,11 @@ class SamplingBasedPlannerBase(abc.ABC):
         ``.numpy()``, no synchronize — because this is the body that gets
         recorded into a CUDA graph.
 
-        The cost of the final control step goes to ``terminal_costs_wp`` instead
-        of the running sum, not in addition to it, matching the old
+        The state cost of the final control step goes to ``terminal_costs_wp``
+        instead of the running sum, not in addition to it, matching the old
         ``_launch_accumulate_costs(terminal=...)``, where the terminal cost
-        *replaces* that step's running cost.
+        *replaces* that step's running state cost. Optional action-rate costs
+        accumulate for every command, including the final one.
         """
         self.sim.BroadcastState(self._q0_wp, self._v0_wp)
         self.costs_wp.zero_()
@@ -641,6 +685,21 @@ class SamplingBasedPlannerBase(abc.ABC):
                     outputs=[self._ctrl_step_wp],
                 )
                 self.sim.SetControl(self._ctrl_step_wp)
+            if self.config.action_rate_weight > 0:
+                # Score raw requested targets, not DeviceState.ctrl: some
+                # calibrated backends expose a filtered target in that field.
+                sequence = self.A_wp if self.config.control_mode == "ctrl_relative" else self.V_wp
+                wp.launch(
+                    _action_rate_cost_kernel, dim=self.N,
+                    inputs=[sequence, self._ctrl_step_wp, self._u_prev_wp, t,
+                            int(pos_relative), self.config.action_rate_weight],
+                    outputs=[self._rate_previous_wp, self.costs_wp],
+                )
+            if self.config.joint_limit_weight > 0:
+                sequence = self.A_wp if self.config.control_mode == 'ctrl_relative' else self.V_wp
+                wp.launch(_joint_limit_cost_kernel, dim=self.N,
+                    inputs=[sequence, self._ctrl_step_wp, self._joint_limits_wp, t,
+                            int(pos_relative), self.config.joint_limit_weight], outputs=[self.costs_wp])
             self.sim.Step_GPU(self.substeps)
             terminal = t == self.horizon - 1
             # The task reads the simulator's device state itself; `out` keeps
@@ -899,6 +958,55 @@ def _pos_relative_kernel(
     """pos_relative command for step t: out = q_t + V[t], per world."""
     n, u = wp.tid()
     out[n, u] = qpos[n, robot_adr + u] + V[n, t, u]
+
+
+@wp.kernel
+def _action_rate_cost_kernel(
+    sequence: wp.array3d(dtype=float),
+    step_target: wp.array2d(dtype=float),
+    applied_target: wp.array(dtype=float),
+    t: int,
+    pos_relative: int,
+    weight: float,
+    previous: wp.array2d(dtype=float),
+    costs: wp.array(dtype=float),
+):
+    """Sum_j weight*(target_t-target_(t-1))^2 for each sampled world."""
+    n = wp.tid()
+    value = float(0.0)
+    for j in range(previous.shape[1]):
+        target = sequence[n, t, j]
+        if pos_relative != 0:
+            target = step_target[n, j]
+        before = applied_target[j]
+        if t > 0:
+            before = previous[n, j]
+        change = target - before
+        value = value + change * change
+        previous[n, j] = target
+    costs[n] = costs[n] + weight * value
+
+
+@wp.kernel
+def _joint_limit_cost_kernel(
+    sequence: wp.array3d(dtype=float),
+    step_target: wp.array2d(dtype=float),
+    bounds: wp.array2d(dtype=float),
+    t: int,
+    pos_relative: int,
+    weight: float,
+    costs: wp.array(dtype=float),
+):
+    n = wp.tid()
+    value = float(0.0)
+    for j in range(bounds.shape[0]):
+        target = sequence[n, t, j]
+        if pos_relative != 0:
+            target = step_target[n, j]
+        below = wp.max(bounds[j, 0] - target, 0.0)
+        above = wp.max(target - bounds[j, 1], 0.0)
+        value = value + below*below + above*above
+    costs[n] = costs[n] + weight*value
 
 
 @wp.kernel

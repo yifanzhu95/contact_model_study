@@ -1,0 +1,32 @@
+{
+  "accepted_under_updated_limits": true,
+  "metrics": {
+    "samples": 78,
+    "stability": {
+      "position_std_m": 0.00038540538382159556,
+      "orientation_rms_deg": 0.3377907973631908
+    },
+    "before": {
+      "position_rms_mm": 4.74842804054878,
+      "orientation_rms_deg": 6.261421997846928
+    },
+    "after": {
+      "position_rms_mm": 0.3854109013430175,
+      "orientation_rms_deg": 0.33779802321427915
+    },
+    "translation_change_world_m": [
+      0.03165592749304863,
+      -0.03323651157510535,
+      -0.04008413743826433
+    ],
+    "rotation_change_deg": 6.250886915077998,
+    "camera_origin_displacement_m": 0.060938506063874985,
+    "anchor_displacement_m": 0.004732459672053644,
+    "optimizer": "scipy least_squares, soft_l1, full 6-DOF extrinsic",
+    "reference_source": "operator visual alignment in MuJoCo world",
+    "independent_accuracy_established": false,
+    "object_only_correction_applied": false,
+    "hardware_commands_generated": false
+  },
+  "applied": false
+}

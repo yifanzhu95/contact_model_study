@@ -1,0 +1,46 @@
+{
+  "session": "datasets/articulated_20261119T033633_480690Z",
+  "seed": 37,
+  "feature_count": 45,
+  "flow_fb_max_px": 1.2,
+  "depth_patch_std_max_m": 0.004,
+  "pixel_sigma": 0.8,
+  "depth_sigma_m": 0.002,
+  "fingers": {
+    "if": {
+      "roi_xyxy": [
+        278,
+        258,
+        310,
+        289
+      ],
+      "body": "if_ds",
+      "split": "train"
+    },
+    "rf": {
+      "roi_xyxy": [
+        373,
+        255,
+        410,
+        288
+      ],
+      "body": "rf_ds",
+      "split": "train"
+    },
+    "mf": {
+      "roi_xyxy": [
+        325,
+        257,
+        361,
+        290
+      ],
+      "body": "mf_ds",
+      "split": "validation"
+    }
+  },
+  "notes": [
+    "Natural distal-finger features only; no fiducial detector or paper corners.",
+    "Extrinsics initialized from AX=XB relative finger motions, without either previous calibration.",
+    "Depth bias is a separate nuisance diagnostic; all production calibration files remain unchanged."
+  ]
+}

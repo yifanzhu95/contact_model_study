@@ -1,0 +1,30 @@
+{
+  "initial_transform": "results/rigid_surface_20261119T042209_623823Z/joint_candidate.json",
+  "hardware_config": "method5/hardware.json",
+  "tracking_config": "method5/tracking.json",
+  "inward_yaw_rad": 0.0,
+  "max_speed_rad_s": 0.3,
+  "max_acceleration_rad_s2": 0.35,
+  "collision_margin_m": 0.004,
+  "fit_window_s": 3.0,
+  "min_samples": 30,
+  "min_sample_span_s": 1.0,
+  "max_position_std_m": 0.002,
+  "max_orientation_rms_deg": 2.0,
+  "max_translation_change_m": 0.05,
+  "max_rotation_change_deg": 15.0,
+  "tracked_opacity": 0.28,
+  "reference_opacity": 0.8,
+  "translation_steps_m": [
+    0.00025,
+    0.001,
+    0.005
+  ],
+  "rotation_steps_deg": [
+    0.25,
+    1.0,
+    5.0
+  ],
+  "keep_torque_after_fit": true,
+  "object_correction_used": false
+}

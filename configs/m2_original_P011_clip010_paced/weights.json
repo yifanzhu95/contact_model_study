@@ -1,0 +1,14 @@
+{
+  "w_quat": 26.342,
+  "w_pos_x": 53.616,
+  "w_pos_y": 100.0,
+  "w_pos_z": 0.0503,
+  "w_velo": 0.0,
+  "w_contact": 100.0,
+  "w_joint": 0.0538,
+  "w_joint_velo": 0.0,
+  "w_fallen": 11.841,
+  "w_quat_term": 148.42,
+  "w_pos_term": 1000.0,
+  "w_fallen_term": 0.0
+}

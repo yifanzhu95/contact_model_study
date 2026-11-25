@@ -1,0 +1,6 @@
+package pose_types;
+
+struct Pose {
+    int64_t timestamp;           // timestamp in microseconds
+    float pose_matrix[16];       // 4x4 transformation matrix in row-major order
+}

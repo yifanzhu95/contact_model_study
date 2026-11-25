@@ -256,9 +256,10 @@ class LeapReorient(TaskBase):
 
         Required keys:
             init_qpos:    (nq,) initial state — 16 hand joints then obj pos(3)+quat(4).
-            init_ctrl:    (16,) initial hand command. Doubles as the cost's joint
-                          "home" target, so the joint term penalizes drift away
-                          from the commanded grasp.
+            init_ctrl:    (16,) initial hand command. Also the default joint
+                          cost reference when no independent reference is set.
+            joint_reference: optional (16,) independent pose for the joint cost.
+                          Does not change the initial state or initial command.
             target_pos:   (3,) goal position for the object.
             target_quat:  (4,) goal orientation, wxyz.
             fallen_z:     scalar. Below this object height the cost's drop
@@ -278,6 +279,8 @@ class LeapReorient(TaskBase):
 
         shapes = {"init_qpos": 23, "init_ctrl": N_HAND_JOINTS, "target_pos": 3,
                   "target_quat": 4}
+        if 'joint_reference' in self.params:
+            shapes['joint_reference'] = N_HAND_JOINTS
         for key, n in shapes.items():
             arr = np.asarray(self.params[key], dtype=float).ravel()
             if arr.shape != (n,):
@@ -286,6 +289,8 @@ class LeapReorient(TaskBase):
                     f"{n} elements, got {arr.shape[0]}"
                 )
             self.params[key] = arr
+            if key == 'joint_reference' and not np.isfinite(arr).all():
+                raise ValueError('joint_reference must contain 16 finite radians')
 
         w = self.params["cost_weights"]
         missing_w = set(COST_WEIGHT_KEYS) - set(w)
@@ -389,7 +394,7 @@ class LeapReorient(TaskBase):
             self._goal = np.concatenate([
                 self.params["target_pos"],
                 self.params["target_quat"],
-                self.params["init_ctrl"],
+                self.jointReference(),
                 [float(self.params["fallen_z"])],
             ]).astype(np.float32)
         return self._goal
@@ -464,6 +469,23 @@ class LeapReorient(TaskBase):
             # In place, never reallocated: a planner's captured CUDA graph holds
             # this buffer's address, and must see the new goal on replay.
             self._gpu["goal"].assign(self.goal)
+
+    def jointReference(self) -> np.ndarray:
+        """Independent joint-cost pose, falling back to the initial command."""
+        return np.asarray(self.params.get('joint_reference', self.params['init_ctrl']), dtype=float).copy()
+
+    def setJointReference(self, reference: np.ndarray | None) -> None:
+        """Set only the joint-cost reference, updating captured GPU goals in place."""
+        if reference is None:
+            self.params.pop('joint_reference', None)
+        else:
+            value = np.asarray(reference, dtype=float)
+            if value.shape != (N_HAND_JOINTS,) or not np.isfinite(value).all():
+                raise ValueError('joint_reference must contain 16 finite radians in MuJoCo order')
+            self.params['joint_reference'] = value.copy()
+        self._goal = None
+        if self._gpu is not None:
+            self._gpu['goal'].assign(self.goal)
 
     def setCostWeights(self, weights: dict) -> None:
         """Override some cost weights by name; see ``TaskBase.setCostWeights``.

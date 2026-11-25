@@ -1,0 +1,182 @@
+{
+  "model_sha256": "41f850db4e9f316e8024465261ca47ac38c5ede441b94c564512969ed61dbdef",
+  "landmarks": [
+    {
+      "id": "palm_v00",
+      "body": "palm",
+      "xyz_body_m": [
+        -0.0847210031,
+        -0.0900960024,
+        -0.0332359998
+      ],
+      "kind": "actual_visual_mesh_vertex",
+      "needs_visual_identification": true
+    },
+    {
+      "id": "palm_v01",
+      "body": "palm",
+      "xyz_body_m": [
+        0.0027999981,
+        0.0203049974,
+        0.0047169984
+      ],
+      "kind": "actual_visual_mesh_vertex",
+      "needs_visual_identification": true
+    },
+    {
+      "id": "palm_v02",
+      "body": "palm",
+      "xyz_body_m": [
+        -0.0999999975,
+        0.0089200013,
+        0.0083000009
+      ],
+      "kind": "actual_visual_mesh_vertex",
+      "needs_visual_identification": true
+    },
+    {
+      "id": "palm_v03",
+      "body": "palm",
+      "xyz_body_m": [
+        0.0029999994,
+        -0.0874559986,
+        0.0048000021
+      ],
+      "kind": "actual_visual_mesh_vertex",
+      "needs_visual_identification": true
+    },
+    {
+      "id": "palm_v04",
+      "body": "palm",
+      "xyz_body_m": [
+        -0.0455040005,
+        -0.0252300018,
+        -0.030605
+      ],
+      "kind": "actual_visual_mesh_vertex",
+      "needs_visual_identification": true
+    },
+    {
+      "id": "palm_v05",
+      "body": "palm",
+      "xyz_body_m": [
+        -0.0999999993,
+        -0.0267199982,
+        -0.0346999997
+      ],
+      "kind": "actual_visual_mesh_vertex",
+      "needs_visual_identification": true
+    },
+    {
+      "id": "palm_v06",
+      "body": "palm",
+      "xyz_body_m": [
+        -0.0945439978,
+        -0.0606080052,
+        0.0112999992
+      ],
+      "kind": "actual_visual_mesh_vertex",
+      "needs_visual_identification": true
+    },
+    {
+      "id": "palm_v07",
+      "body": "palm",
+      "xyz_body_m": [
+        -0.0501730003,
+        -0.0922230001,
+        0.0070319978
+      ],
+      "kind": "actual_visual_mesh_vertex",
+      "needs_visual_identification": true
+    },
+    {
+      "id": "palm_v08",
+      "body": "palm",
+      "xyz_body_m": [
+        0.003000001,
+        -0.0382529981,
+        -0.014949999
+      ],
+      "kind": "actual_visual_mesh_vertex",
+      "needs_visual_identification": true
+    },
+    {
+      "id": "palm_v09",
+      "body": "palm",
+      "xyz_body_m": [
+        -0.0360000011,
+        0.0257499992,
+        -0.0346999991
+      ],
+      "kind": "actual_visual_mesh_vertex",
+      "needs_visual_identification": true
+    },
+    {
+      "id": "palm_v10",
+      "body": "palm",
+      "xyz_body_m": [
+        -0.0557839991,
+        0.0252549987,
+        0.0083000007
+      ],
+      "kind": "actual_visual_mesh_vertex",
+      "needs_visual_identification": true
+    },
+    {
+      "id": "palm_v11",
+      "body": "palm",
+      "xyz_body_m": [
+        -0.0360000008,
+        -0.0962820013,
+        -0.0347000002
+      ],
+      "kind": "actual_visual_mesh_vertex",
+      "needs_visual_identification": true
+    },
+    {
+      "id": "palm_v12",
+      "body": "palm",
+      "xyz_body_m": [
+        -0.0250000002,
+        -0.0122889991,
+        0.0031980005
+      ],
+      "kind": "actual_visual_mesh_vertex",
+      "needs_visual_identification": true
+    },
+    {
+      "id": "palm_v13",
+      "body": "palm",
+      "xyz_body_m": [
+        -0.0693000006,
+        0.0064390017,
+        -0.0237649998
+      ],
+      "kind": "actual_visual_mesh_vertex",
+      "needs_visual_identification": true
+    },
+    {
+      "id": "palm_v14",
+      "body": "palm",
+      "xyz_body_m": [
+        -0.0043000001,
+        -0.000287002,
+        -0.0282000004
+      ],
+      "kind": "actual_visual_mesh_vertex",
+      "needs_visual_identification": true
+    },
+    {
+      "id": "palm_v15",
+      "body": "palm",
+      "xyz_body_m": [
+        -0.0249999996,
+        -0.0598119985,
+        0.0031980005
+      ],
+      "kind": "actual_visual_mesh_vertex",
+      "needs_visual_identification": true
+    }
+  ],
+  "warning": "Candidates are actual CAD vertices, not automatically identified real features. Use only clearly corresponding visible points."
+}

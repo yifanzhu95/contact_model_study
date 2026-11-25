@@ -1,0 +1,23 @@
+{
+  "status": "validated_without_hardware_or_physics_steps",
+  "baseline_source": "results/bo_validation/hardware/cube_reorient/hand-high_obj-high/M2/trial314_shift512/leap_experiment_20261115_173310_247065/controller.json",
+  "physical_scenes_match": true,
+  "weights_match": true,
+  "joint_reference_match": true,
+  "hardware_configuration_match": true,
+  "bridge_telemetry": true,
+  "prior_writer_benchmark": {
+    "records": 1000,
+    "producer_mean_us": 4.822219430934638,
+    "producer_p95_us": 7.176006329245864,
+    "producer_max_us": 30.677998438477516,
+    "dropped": 0,
+    "note": "Synthetic producer+array-copy benchmark; does not measure full hardware timing/GIL effects. No serial or GPU access."
+  },
+  "diagnostic_isolation_fix": {
+    "report": "results/diagnostics/diagnostic_isolation_fix_20261116/validation.json",
+    "passed_tests": 239,
+    "recorder": "separate_process_nonblocking_ipc",
+    "max_emulated_joint_update_gap_ms": 32.847
+  }
+}

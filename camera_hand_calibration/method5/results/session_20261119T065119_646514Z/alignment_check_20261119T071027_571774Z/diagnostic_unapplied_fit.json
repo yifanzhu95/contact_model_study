@@ -1,0 +1,60 @@
+{
+  "T_world_from_camera": [
+    [
+      0.004830474207641773,
+      0.7792342079751071,
+      -0.626714221667529,
+      0.47605384119633665
+    ],
+    [
+      0.9993752296238569,
+      0.018181015754450587,
+      0.030308432496578996,
+      -0.0016527103414505017
+    ],
+    [
+      0.03501166852911436,
+      -0.6264690732889724,
+      -0.7786595425982165,
+      0.48691914024449534
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "metrics": {
+    "samples": 78,
+    "stability": {
+      "position_std_m": 0.00038540538382159556,
+      "orientation_rms_deg": 0.3377907973631908
+    },
+    "before": {
+      "position_rms_mm": 4.74842804054878,
+      "orientation_rms_deg": 6.261421997846928
+    },
+    "after": {
+      "position_rms_mm": 0.3854109013430175,
+      "orientation_rms_deg": 0.33779802321427915
+    },
+    "translation_change_world_m": [
+      0.03165592749304863,
+      -0.03323651157510535,
+      -0.04008413743826433
+    ],
+    "rotation_change_deg": 6.250886915077998,
+    "optimizer": "scipy least_squares, soft_l1, full 6-DOF extrinsic",
+    "reference_source": "operator visual alignment in MuJoCo world",
+    "independent_accuracy_established": false,
+    "object_only_correction_applied": false,
+    "hardware_commands_generated": false,
+    "camera_origin_displacement_mm": 60.93850606387498,
+    "limits": {
+      "max_camera_origin_displacement_mm": 50.0,
+      "max_rotation_deg": 15.0
+    }
+  },
+  "applied": false
+}

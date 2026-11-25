@@ -1,0 +1,24 @@
+{
+  "status": "PASS_CPU_PACKAGE_PREPARATION",
+  "source_actor_sha256": "c7e34e236c91f32e6d27473a732837da97a643584d3a393b59ed04a24fb2b86a",
+  "actor_copy_byte_identical": true,
+  "every_exported_actor_tensor_exactly_matches_800_checkpoint": true,
+  "normalizer_count": 209715200.0,
+  "normalizer_epsilon": 0.01,
+  "archived_decision_cases": 112,
+  "encoder_max_abs_error": 0.0,
+  "raw_action_CPU_vs_archived_max_abs_error": 1.6689300537109375e-06,
+  "target_CPU_vs_archived_max_abs_error_rad": 2.384185791015625e-07,
+  "original_training_observation_max_abs_error": 9.094947017729282e-13,
+  "declared_tolerances": {
+    "encoder_atol": 2e-06,
+    "raw_action_atol": 2e-05,
+    "target_atol_rad": 2e-06,
+    "rtol": 2e-05
+  },
+  "new_simulation_steps": 0,
+  "new_training_updates": 0,
+  "hardware_commands": 0,
+  "new_forward_passes": "Offline validation on archived arrays only; not new scientific transfer evaluation",
+  "receiver_hardware_mapping": "not provided/not implemented; template includes unresolved motor/frame/estimator integration"
+}

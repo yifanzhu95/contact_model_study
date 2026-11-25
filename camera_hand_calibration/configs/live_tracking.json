@@ -1,0 +1,95 @@
+{
+  "gpu": "auto",
+  "tracking_gpu": "auto",
+  "mppi_gpu": "auto",
+  "interpreters": {
+    "vision": null,
+    "control": "/home/chetan/miniconda3/envs/mj_env/bin/python",
+    "viewer": "/home/chetan/miniconda3/envs/mj_env/bin/python"
+  },
+  "init_mask_path": null,
+  "generate_mask": true,
+  "bbox_xywh": [
+    440,
+    272,
+    103,
+    113
+  ],
+  "docker": {
+    "enabled": true,
+    "executable": "./leap_docker.py",
+    "image": "irislab_fppp:leap_hardware",
+    "python": "python",
+    "cuda_visible_devices": "3",
+    "foundationpose_root": "/FoundationPose-plus-plus/FoundationPose",
+    "extra_mounts": []
+  },
+  "sam_hq": {
+    "start_server": true,
+    "checkpoint_path": "/FoundationPose-plus-plus/sam-hq/pretrained_checkpoints/sam_hq_vit_h.pth",
+    "port": 9069,
+    "api_url": "http://127.0.0.1:9069/hq_sam",
+    "health_url": "http://127.0.0.1:9069/health"
+  },
+  "mesh": "/home/chetan/contact_model_study/iris-foundationpose-plusplus/meshes/cube_70_mm_2_adjusted/cube_70_mm_2.obj",
+  "mesh_scale": 1.0,
+  "camera_index": 0,
+  "camera_config": "/home/chetan/contact_model_study/camera_hand_calibration/configs/source_camera.json",
+  "tracking_dir": ".runtime/leap_tracking",
+  "hardware_config": "/home/chetan/contact_model_study/camera_hand_calibration/configs/articulated_hardware.json",
+  "viewer_bind": "tcp://127.0.0.1:2223",
+  "viewer_endpoint": "tcp://127.0.0.1:2223",
+  "lcm_url": "udpm://239.255.76.67:7667?ttl=1",
+  "pose_channel": "POSE",
+  "state_channel": "LEAP_STATE",
+  "action_channel": "LEAP_ACTION_DELTA",
+  "startup_timeout": 180.0,
+  "placement_timeout": 0.0,
+  "supervision_timeout": 2.0,
+  "tracking_ready_frames": 5,
+  "tracking_ready_max_age": 0.3,
+  "shutdown_timeout": 10.0,
+  "observe_only": true,
+  "logging": true,
+  "record_video": false,
+  "video_fps": 30,
+  "mujoco_viewer": true,
+  "fingertip_paths": false,
+  "tracker_args": [],
+  "viewer_args": [],
+  "bridge_args": [],
+  "controller_args": [
+    "--task",
+    "cube_reorient",
+    "--calibrated-hand",
+    "/home/chetan/contact_model_study/camera_hand_calibration/model/hand.xml"
+  ],
+  "tracking_meshes": {
+    "cube_reorient": {
+      "mesh": "iris-foundationpose-plusplus/meshes/cube_70_mm_2_adjusted/cube_70_mm_2.obj",
+      "mesh_scale": 1.0
+    }
+  },
+  "bridge_telemetry": false,
+  "calibrations": [
+    {
+      "name": "Original production calibration",
+      "file": "configs/current_transform.json"
+    },
+    {
+      "name": "Camera + depth only (corrected stationary)",
+      "file": "results/rigid_surface_20261119T042209_623823Z/palm_candidate.json"
+    },
+    {
+      "name": "Camera + depth + measured joint poses (provisional)",
+      "file": "results/rigid_surface_20261119T042209_623823Z/joint_candidate.json"
+    },
+    {
+      "name": "Method 4: known cube on measured finger links",
+      "file": "method4/results/capture_20261119T052939_712833Z/candidate.json",
+      "note": "Method 4 fits one cube placement; rigid-palm cross-check worsens. Experimental."
+    }
+  ],
+  "initial_calibration": 3,
+  "object_correction_default": false
+}

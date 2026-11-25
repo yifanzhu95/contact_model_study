@@ -1,0 +1,351 @@
+{
+  "configuration": {
+    "initial_transform": "results/rigid_surface_20261119T042209_623823Z/joint_candidate.json",
+    "hardware_config": "method5/hardware.json",
+    "tracking_config": "method5/tracking.json",
+    "inward_yaw_rad": 0.0,
+    "max_speed_rad_s": 0.3,
+    "max_acceleration_rad_s2": 0.35,
+    "collision_margin_m": 0.004,
+    "fit_window_s": 3.0,
+    "min_samples": 30,
+    "min_sample_span_s": 1.0,
+    "max_position_std_m": 0.002,
+    "max_orientation_rms_deg": 2.0,
+    "max_translation_change_m": 0.2,
+    "max_anchor_displacement_m": 0.05,
+    "max_rotation_change_deg": 15.0,
+    "tracked_opacity": 0.28,
+    "reference_opacity": 0.8,
+    "translation_steps_m": [
+      0.00025,
+      0.001,
+      0.005
+    ],
+    "rotation_steps_deg": [
+      0.25,
+      1.0,
+      5.0
+    ],
+    "keep_torque_after_fit": true,
+    "object_correction_used": false
+  },
+  "tracking_configuration": {
+    "gpu": "auto",
+    "tracking_gpu": "auto",
+    "mppi_gpu": "auto",
+    "interpreters": {
+      "vision": null,
+      "control": "/home/chetan/miniconda3/envs/mj_env/bin/python",
+      "viewer": "/home/chetan/miniconda3/envs/mj_env/bin/python"
+    },
+    "init_mask_path": null,
+    "generate_mask": true,
+    "bbox_xywh": [
+      440,
+      272,
+      103,
+      113
+    ],
+    "docker": {
+      "enabled": true,
+      "executable": "./leap_docker.py",
+      "image": "irislab_fppp:leap_hardware",
+      "python": "python",
+      "cuda_visible_devices": "3",
+      "foundationpose_root": "/FoundationPose-plus-plus/FoundationPose",
+      "extra_mounts": []
+    },
+    "sam_hq": {
+      "start_server": true,
+      "checkpoint_path": "/FoundationPose-plus-plus/sam-hq/pretrained_checkpoints/sam_hq_vit_h.pth",
+      "port": 9069,
+      "api_url": "http://127.0.0.1:9069/hq_sam",
+      "health_url": "http://127.0.0.1:9069/health"
+    },
+    "mesh": "/home/chetan/contact_model_study/iris-foundationpose-plusplus/meshes/cube_70_mm_2_adjusted/cube_70_mm_2.obj",
+    "mesh_scale": 1.0,
+    "camera_index": 0,
+    "camera_config": "/home/chetan/contact_model_study/camera_hand_calibration/configs/source_camera.json",
+    "tracking_dir": ".runtime/leap_tracking",
+    "hardware_config": "/home/chetan/contact_model_study/camera_hand_calibration/method5/hardware.json",
+    "viewer_bind": "tcp://127.0.0.1:2223",
+    "viewer_endpoint": "tcp://127.0.0.1:2223",
+    "lcm_url": "udpm://239.255.76.67:7667?ttl=1",
+    "pose_channel": "POSE",
+    "state_channel": "LEAP_STATE",
+    "action_channel": "LEAP_ACTION_DELTA",
+    "startup_timeout": 180.0,
+    "placement_timeout": 0.0,
+    "supervision_timeout": 2.0,
+    "tracking_ready_frames": 5,
+    "tracking_ready_max_age": 0.3,
+    "shutdown_timeout": 10.0,
+    "observe_only": true,
+    "logging": true,
+    "record_video": false,
+    "video_fps": 30,
+    "mujoco_viewer": true,
+    "fingertip_paths": false,
+    "tracker_args": [],
+    "viewer_args": [],
+    "bridge_args": [],
+    "controller_args": [
+      "--task",
+      "cube_reorient",
+      "--calibrated-hand",
+      "/home/chetan/contact_model_study/camera_hand_calibration/model/hand.xml"
+    ],
+    "tracking_meshes": {
+      "cube_reorient": {
+        "mesh": "iris-foundationpose-plusplus/meshes/cube_70_mm_2_adjusted/cube_70_mm_2.obj",
+        "mesh_scale": 1.0
+      }
+    },
+    "bridge_telemetry": false,
+    "calibrations": [
+      {
+        "name": "Original production calibration",
+        "file": "configs/current_transform.json"
+      },
+      {
+        "name": "Camera + depth only (corrected stationary)",
+        "file": "results/rigid_surface_20261119T042209_623823Z/palm_candidate.json"
+      },
+      {
+        "name": "Camera + depth + measured joint poses (provisional)",
+        "file": "results/rigid_surface_20261119T042209_623823Z/joint_candidate.json"
+      },
+      {
+        "name": "Method 4: known cube on measured finger links",
+        "file": "method4/results/capture_20261119T052939_712833Z/candidate.json",
+        "note": "Method 4 fits one cube placement; rigid-palm cross-check worsens. Experimental."
+      }
+    ],
+    "initial_calibration": 3,
+    "object_correction_default": false
+  },
+  "camera_configuration": {
+    "camera_intrinsics": [
+      [
+        605.6220092773438,
+        0,
+        316.6953125
+      ],
+      [
+        0,
+        605.2809448242188,
+        252.77352905273438
+      ],
+      [
+        0,
+        0,
+        1
+      ]
+    ],
+    "camera_to_published": [
+      [
+        -0.053325542737646295,
+        0.8305459369514124,
+        -0.5543914078566113,
+        0.4275556239117867
+      ],
+      [
+        0.9980614638070043,
+        0.02648894046274657,
+        -0.05631740846826334,
+        0.05352875202028851
+      ],
+      [
+        -0.03208895378717712,
+        -0.5563198564195432,
+        -0.8303484307194078,
+        0.5130868213950068
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "image_size": [
+      640,
+      480
+    ],
+    "T_model_from_published": [
+      [
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        1
+      ]
+    ],
+    "object_translation_adjust_camera_m": [
+      0,
+      0,
+      -0.015
+    ],
+    "translation_adjust_m": [
+      0,
+      0,
+      0
+    ],
+    "rotation_adjust_deg": [
+      0,
+      0,
+      0
+    ],
+    "T_tracked_from_object": [
+      [
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        1
+      ]
+    ],
+    "camera_serial": "310522070297",
+    "camera_fps": 60,
+    "realsense": {
+      "name": "Intel RealSense D435I",
+      "firmware": "5.13.0.55",
+      "color_intrinsics": [
+        [
+          605.6220092773438,
+          0,
+          316.6953125
+        ],
+        [
+          0,
+          605.2809448242188,
+          252.77352905273438
+        ],
+        [
+          0,
+          0,
+          1
+        ]
+      ],
+      "distortion_model": "distortion.inverse_brown_conrady",
+      "distortion_coefficients": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "depth_scale_m": 0.0010000000474974513,
+      "color_format": "format.rgb8"
+    },
+    "intrinsics_measured_at_utc": "2026-11-10T09:26:33.507106+00:00",
+    "extrinsics_status": "calibrated",
+    "T_tag_from_camera": [
+      [
+        0.9980614638070043,
+        0.02648894046274655,
+        -0.05631740846826334,
+        0.003528752020288505
+      ],
+      [
+        -0.03013679778780594,
+        0.9974338086196436,
+        -0.06494282748394148,
+        0.1857306211410094
+      ],
+      [
+        0.05445262052938341,
+        0.06651415981332962,
+        0.9962985389238558,
+        -0.6144637795931339
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "T_base_from_tag": [
+      [
+        2.0816681711721685e-17,
+        0.8660254037844386,
+        -0.4999999999999999,
+        -0.0405237020535574
+      ],
+      [
+        1.0,
+        2.0816681711721685e-17,
+        0.0,
+        0.05
+      ],
+      [
+        0.0,
+        -0.4999999999999999,
+        -0.8660254037844387,
+        0.07381088913245534
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "published_pose_frame": "mujoco_world",
+    "tag_calibration": {
+      "tag_id": 7,
+      "tag_family": "tag36h11",
+      "tag_size_m": 0.04,
+      "model_path": "/home/chetan/contact_model_study/scenes/leap/hardware/calibrated_hand.xml",
+      "model_sha256": "831ee8fd0eb7f3909ef7a46ec9c9adc080275e941fc104791c444c496d1ffb5b",
+      "site_name": "tag",
+      "measured_at_utc": "2026-11-10T09:26:33.507106+00:00",
+      "stability": {
+        "samples": 30,
+        "max_translation_deviation_m": 0.0015073791449373712,
+        "max_rotation_deviation_deg": 0.8741646614053178
+      }
+    }
+  },
+  "source_sha256": {
+    "method5_viewer.py": "4a9966ef38b981e3b704ddd9da04177da5b4f1a71a82747ee28fe62886d59810",
+    "method5_alignment.py": "c59b7f04975b13368431d3bf8fa87ec08e8f6c2ae18ad0f2a5fdd89967d0fe01"
+  },
+  "created_at": "2026-11-19T07:13:02.192102+00:00"
+}

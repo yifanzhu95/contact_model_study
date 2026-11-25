@@ -1,0 +1,34 @@
+<mujoco model="rubber_duck">
+  <default>
+    <default class="visual">
+      <geom group="2" type="mesh" contype="0" conaffinity="0"/>
+    </default>
+    <default class="collision">
+      <geom group="3" type="mesh"/>
+    </default>
+  </default>
+  <asset>
+    <mesh file="rubber_duck.obj"/>
+    <mesh file="rubber_duck_collision_0.obj"/>
+    <mesh file="rubber_duck_collision_1.obj"/>
+    <mesh file="rubber_duck_collision_2.obj"/>
+    <mesh file="rubber_duck_collision_3.obj"/>
+    <mesh file="rubber_duck_collision_4.obj"/>
+    <mesh file="rubber_duck_collision_5.obj"/>
+    <mesh file="rubber_duck_collision_6.obj"/>
+    <mesh file="rubber_duck_collision_7.obj"/>
+  </asset>
+  <worldbody>
+    <body name="rubber_duck">
+      <geom mesh="rubber_duck" class="visual"/>
+      <geom mesh="rubber_duck_collision_0" rgba="0.9909314043975451 0.27625373322012614 0.1738987770894782 1" class="collision"/>
+      <geom mesh="rubber_duck_collision_1" rgba="0.967053170824638 0.11680587319571234 0.11087793515699562 1" class="collision"/>
+      <geom mesh="rubber_duck_collision_2" rgba="0.21857155683837937 0.6007722366486206 0.4358911977292488 1" class="collision"/>
+      <geom mesh="rubber_duck_collision_3" rgba="0.02222645102768006 0.9001758651591799 0.7904868222198979 1" class="collision"/>
+      <geom mesh="rubber_duck_collision_4" rgba="0.6779295287364845 0.9448722533928271 0.3856126504671491 1" class="collision"/>
+      <geom mesh="rubber_duck_collision_5" rgba="0.25726196822082226 0.9865016020974317 0.8958947296165829 1" class="collision"/>
+      <geom mesh="rubber_duck_collision_6" rgba="0.5724334072035917 0.79524676933259 0.9569494353873428 1" class="collision"/>
+      <geom mesh="rubber_duck_collision_7" rgba="0.20459424864816478 0.5793317490155067 0.45514807817811087 1" class="collision"/>
+    </body>
+  </worldbody>
+</mujoco>

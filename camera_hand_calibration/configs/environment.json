@@ -1,0 +1,15 @@
+{
+  "python": "3.12.12 | packaged by Anaconda, Inc. | (main, Oct 21 2025, 20:16:04) [GCC 11.2.0]",
+  "executable": "/home/chetan/miniconda3/envs/mj_env/bin/python",
+  "platform": "Linux-5.15.0-203-generic-x86_64-with-glibc2.35",
+  "packages": {
+    "numpy": "2.2.5",
+    "scipy": "1.16.3",
+    "mujoco": "3.14.0",
+    "pyrealsense2": "2.59.1.11053",
+    "opencv-python": "4.12.0",
+    "matplotlib": "3.10.6",
+    "lcm": "1.5.3",
+    "pytest": "9.2.0"
+  }
+}

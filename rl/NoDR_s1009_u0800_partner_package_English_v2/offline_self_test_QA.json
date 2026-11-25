@@ -1,0 +1,22 @@
+{
+  "status": "PASS_OFFLINE_INTERFACE_PARITY",
+  "device": "cpu",
+  "torch": "2.14.1+cu130",
+  "backends": {
+    "torchscript": {
+      "cases": 112,
+      "max_observation_error": 0.0,
+      "max_raw_action_error": 1.6689300537109375e-06,
+      "max_joint_target_error_rad": 2.384185791015625e-07
+    },
+    "pytorch": {
+      "cases": 112,
+      "max_observation_error": 0.0,
+      "max_raw_action_error": 1.6689300537109375e-06,
+      "max_joint_target_error_rad": 2.384185791015625e-07
+    }
+  },
+  "robot_commands_sent": 0,
+  "physics_steps": 0,
+  "interpretation": "Inference/encoding/decoding parity only; not a robot performance test."
+}

@@ -1,0 +1,30 @@
+{
+  "resumed_at": 1795069917.140267,
+  "hold_status": {
+    "stage": "awaiting_object_removal",
+    "prompt": "Remove the cube completely. Confirm removal before disabling torque. Holding the preparation target.",
+    "updated_at": 1795069917.1011186,
+    "torque_enabled": true,
+    "object_may_be_present": true,
+    "samples": 0,
+    "measured_q": [
+      0.707165002822876,
+      -0.567573070526123,
+      0.9081165790557861,
+      0.5737087726593018,
+      -0.03528165817260742,
+      -0.07823300361633301,
+      0.6964271068572998,
+      1.017029047012329,
+      0.8114757537841797,
+      0.6105241775512695,
+      0.9234564304351807,
+      0.6105241775512695,
+      1.101398229598999,
+      1.4404079914093018,
+      1.3453009128570557,
+      0.19481539726257324
+    ]
+  },
+  "reason": "Operator requested viewer reopen; existing physical hold and tracker preserved"
+}

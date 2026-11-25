@@ -1,0 +1,15 @@
+# M2 baseline BO: best completed 500-trial candidate; not activated.
+# "cost_weights": {
+#     "w_velo": 0.0,
+#     "w_joint_velo": 0.0,
+#     "w_fallen_term": 0.0,
+#     "w_contact": 80.0,
+#     "w_quat": 0.01,
+#     "w_pos_x": 19.93030694751929,
+#     "w_pos_y": 100.0,
+#     "w_pos_z": 0.01,
+#     "w_joint": 0.8575242876710942,
+#     "w_fallen": 10.0,
+#     "w_quat_term": 277.07876775743,
+#     "w_pos_term": 1000.0,
+# },

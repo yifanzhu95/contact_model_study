@@ -1,0 +1,24 @@
+<mujoco model="rubber_duck">
+  <default>
+    <default class="visual">
+      <geom group="2" type="mesh" contype="0" conaffinity="0"/>
+    </default>
+    <default class="collision">
+      <geom group="3" type="mesh"/>
+    </default>
+  </default>
+  <asset>
+    <mesh file="rubber_duck.obj"/>
+    <mesh file="rubber_duck_collision_0.obj"/>
+    <mesh file="rubber_duck_collision_1.obj"/>
+    <mesh file="rubber_duck_collision_2.obj"/>
+  </asset>
+  <worldbody>
+    <body name="rubber_duck">
+      <geom mesh="rubber_duck" class="visual"/>
+      <geom mesh="rubber_duck_collision_0" rgba="0.5484391286776256 0.8135449258906484 0.8418353246366944 1" class="collision"/>
+      <geom mesh="rubber_duck_collision_1" rgba="0.14739218191452763 0.05768076006132827 0.4741187028223235 1" class="collision"/>
+      <geom mesh="rubber_duck_collision_2" rgba="0.5453472373476297 0.4541441396176209 0.007317019679678682 1" class="collision"/>
+    </body>
+  </worldbody>
+</mujoco>

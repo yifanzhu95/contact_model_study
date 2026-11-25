@@ -1,0 +1,16 @@
+{
+  "workspace": "/home/chetan/contact_model_study/camera_hand_calibration",
+  "frozen_mesh_assets": 10,
+  "real_camera_sessions": 2,
+  "real_rgbd_pairs_verified": 65,
+  "camera_only": true,
+  "real_hand_test_executed": false,
+  "real_extrinsic_fit_executed": false,
+  "production_camera_config_unchanged": true,
+  "production_model_unchanged": true,
+  "source_frame_loss_in_long_test": 0,
+  "writer_loss_in_long_test": 0,
+  "test_result": "12 passed; synthetic fixtures and fake LCM only",
+  "camera_quality_report": "results/camera_quality_20261118T065856_393464Z/report.json",
+  "ready_for": "Operator confirmation before joint-state/hardware testing."
+}

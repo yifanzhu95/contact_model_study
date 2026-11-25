@@ -1,0 +1,1 @@
+Exploratory fit, superseded by results/stationary_rgbd_20261118T075944_453797Z. No production use.

@@ -1,0 +1,521 @@
+# Experiments: batches, grids, Bayesian optimization, and analysing results
+
+`run_episode_batches.py` runs batches of `run_episodes.py` episodes described by
+a CSV, one row per batch (a *cell*). It works the same on a workstation and on
+the HPC:
+
+| | Command |
+| --- | --- |
+| Check a CSV (runs nothing) | `python experiments/run_episode_batches.py my.csv --check` |
+| Run every cell, in order | `python experiments/run_episode_batches.py my.csv` |
+| Run one cell (0-based row) | `python experiments/run_episode_batches.py my.csv --cell 3` |
+| Run one cell's episodes at once | `python experiments/run_episode_batches.py my.csv --cell 3 --pool --planners-per-gpu 2 --workers 8` |
+| Rebuild the summary | `python experiments/run_episode_batches.py my.csv --summarize --outdir <results dir>` |
+| Submit to the HPC | `experiments/hpc/submit_episode_batches.sh my.csv [max concurrent]` |
+
+`example_batches.csv` is a template.
+
+## The CSV
+
+Each column is one setting. A blank cell, or a missing column, keeps the
+driver's default.
+
+- **Driver options.** Any `run_episodes.py` flag, with underscores instead of
+  dashes. For example: `task`, `n_episodes`, `steps`, `rollout_model`,
+  `eval_sim`, `hand_acc`, `obj_acc`, `timestep`, `ctrl_time_step` or
+  `substeps`, `time_horizon` or `horizon`, `n_samples`, `noise_sigma`,
+  `temperature`, `control_mode`, `settle`, `seed`, `goal_difficulty`,
+  `nconmax`, `njmax`. `run_episodes.py --help` lists them all.
+  `eval_sim` takes a CPU simulator (`mujoco`, `pinocchio`, `drake`) or a GPU
+  contact model (`M1`–`M6`, all in the `contact_comfree2` env).
+  `plan_on_eval` (true/false) makes the planner roll out on the eval scene.
+- **On/off options.** These take `true` or `false`: `stop_on_success`,
+  `uncertainty`, `save_steps`, `graph`, `debug`, ...
+- **`warm_start`.** Where each plan starts its mean: `none` (the default) starts
+  afresh from the reset mean, `hold` reuses the last plan's solution as is, and
+  `shift` moves that solution one control step earlier.
+- **`save_stride`.** With `save_steps=true`, save every k-th control step
+  (0, k, 2k, ...) instead of all of them. Each saved step keeps its state,
+  action, uncertainty, the state that followed it and where its plan started;
+  under a `hold` or `shift` warm start also the plan's starting mean and its
+  action sequence.
+- **Cost weights.** `w_quat`, `w_pos_x`, ..., `w_fallen_term` override the
+  object's tuned weights.
+- **`label`.** Names the row in the output files.
+- **`video`.** `true` records each episode's video.
+
+Any other column is an error, so a misspelled one can't silently run a whole
+sweep at the default. `--check`, which the submit script always runs first,
+also catches bad values: an unknown model, both `horizon` and `time_horizon`,
+a non-number.
+
+## Output
+
+Each run gets one folder, `results/episode_batches_<csv name>_<job id or time>/`
+(set it with `--outdir`, or `OUTDIR=` on the HPC). For each cell it holds:
+
+- **`cell_<row>_<label>.json`:** the `EpisodeRecorder` results, with one `.npy`
+  of per-step data (every `save_stride`-th step) per episode beside it when
+  the row sets `save_steps=true`. Read it with `EpisodeReplayer`.
+- **`cell_<row>_<label>.status.json`:** `done` or `failed`, the exact driver
+  command line, the wall time and any error.
+- **`cell_<row>_<label>.log`:** the driver's output, when run locally.
+- **`summary.csv` / `summary.json`:** every row's settings next to its status,
+  success rate, successes, mean steps to success and mean planning time.
+
+**Resuming.** A cell marked `done` is skipped when the same CSV is run again
+into the same folder, so a run that stopped part-way picks up where it left
+off. `--overwrite` redoes cells. Keep the CSV's row order when resuming: cells
+are named by row number.
+
+**Failures.** Run locally, each cell runs in its own process, so a failing cell
+is marked `failed` and the rest carry on (`--stop-on-error` stops instead).
+SIGTERM (`scancel`, the time limit) stops a cell as Ctrl-C does: the episodes
+finished so far are saved, and the cell is marked `failed`, so a resumed run
+redoes it.
+
+**Episodes at once (`--pool`).** A cell's episodes run together through
+`run_episodes_pooled.py`: planner processes on the GPUs (`--planners-per-gpu`)
+serve one eval-sim worker per episode in flight (`--workers`). Episode k then
+draws its goals and noise from `(seed, k)`, as the BO's episodes do, so give
+the batch another `seed` than the BO to keep the tuning episodes out of it.
+
+## On the HPC (`hpc/`)
+
+| File | Role |
+| --- | --- |
+| `submit_episode_batches.sh` | **What you run**, from the repo root, on the login node. It loads `miniconda` and activates the `contact_comfree2` env (`CONDA_ENV=` picks another, and the jobs inherit it) so it can run Python there, then validates the CSV, submits the array sized to its rows (an optional second argument caps how many cells run at once), and queues the summary. Extra `sbatch` options go in `SBATCH_ARGS`, for example `SBATCH_ARGS="--time=24:00:00"`. |
+| `run_episode_batches.slurm` | The job array: task *i* runs `--cell i` on its own GPU node, its episodes at once (`--pool` with `PLANNERS_PER_GPU=2` planners and `WORKERS=8` workers, on 11 CPUs and 32 GB; `POOL=0` runs them one after another). Five minutes before the time limit it signals the cell to stop and save. Every task writes into one folder. |
+| `summarize_batches.slurm` | Builds `summary.csv` after the array. It is queued with `afterany`, so it also runs when some cells fail. |
+
+```bash
+mkdir -p logs
+experiments/hpc/submit_episode_batches.sh experiments/example_batches.csv
+# resume an earlier run: finished cells are skipped
+OUTDIR=/abs/path/results/episode_batches_example_batches_123456 \
+    experiments/hpc/submit_episode_batches.sh experiments/example_batches.csv
+```
+
+The resources in `run_episode_batches.slurm` (one `rtx_5000_ada`, 16 GB, 12 h)
+apply to every cell, so they must cover the most expensive row. To estimate a
+row's cost, run `test_scripts/profile_run_episodes.py -- <that row's flags>`.
+The project path defaults to the cluster checkout; set `PROJ_DIR` to use
+another.
+
+# Temperature × noise-sigma grid search
+
+`run_temp_sigma_grid.py` searches MPPI's `temperature` and `noise_sigma` for
+each cell of a CSV. The right temperature scales with the size of the task
+cost, which differs per contact model, object and horizon, so each row names
+its own grid.
+
+For every grid point, the cell runs `n_episodes` episodes through
+`run_episodes_interwoven.py`: while one episode plans on the GPU, the other
+steps its eval simulator on the CPU. Every point sees the same episodes,
+because goals and planner noise depend only on `(seed, episode)`. So points
+differ only in their two settings. Points are ranked by success rate, ties
+broken by mean steps to success.
+
+| | Command |
+| --- | --- |
+| Check a CSV (runs nothing) | `python experiments/run_temp_sigma_grid.py grid.csv --check` |
+| Every cell, in order | `python experiments/run_temp_sigma_grid.py grid.csv` |
+| One cell | `python experiments/run_temp_sigma_grid.py grid.csv --cell 2` |
+| Rebuild the summaries | `python experiments/run_temp_sigma_grid.py grid.csv --summarize --outdir <results dir>` |
+| Submit to the HPC | `experiments/hpc/submit_temp_sigma_grid.sh grid.csv [max concurrent]` |
+
+`example_temp_sigma_grid.csv` is a template.
+
+**The CSV.** It takes the same columns as the batch CSV (driver options,
+`w_*` weights, `label`, `video`), plus two required columns:
+
+- `temperatures`: the values to search, separated by spaces or commas
+  (quote a comma list), all positive, no repeats. They are the outer loop.
+- `noise_sigmas`: the same format. One value makes it a 1-D temperature sweep.
+
+`temperature` and `noise_sigma` themselves can't be columns, because the grid
+sets them.
+
+**Output**, in `results/temp_sigma_grid_<csv>_<job id or time>/`:
+
+- **One folder per cell** (`cell_<row>_<label>/`), containing:
+  - `point_<i>_T<t>_s<σ>.json` (and `.npy` files if `save_steps`) and
+    `.status.json` for each point;
+  - `grid_summary.json`, with the points ranked and the best one.
+- **At the top:**
+  - `summary.csv`: every point with its cell's settings and its rank;
+  - `best.csv`: each cell's best point.
+
+Each finished cell also prints its ranked table and a ready-to-paste
+`run_episodes.py` command for its best point.
+
+**Resuming.** A point marked done is skipped on a rerun into the same folder,
+so a cell that hits the wall clock picks up point by point. Resubmit with
+`OUTDIR=<that folder>`, and keep the same CSV.
+
+**On the HPC.** `hpc/submit_temp_sigma_grid.sh`, `hpc/run_temp_sigma_grid.slurm`
+and `hpc/summarize_temp_sigma_grid.slurm` mirror the batch scripts: one array
+task per row on its own GPU, validation first, and a summary job queued
+`afterany`.
+
+- **CPUs:** each task asks for 4, for the interwoven driver's planner and two
+  workers.
+- **Time:** a cell costs `#temperatures × #noise_sigmas × n_episodes`
+  episodes, so the time limit has to cover the widest row. Raise it with
+  `SBATCH_ARGS="--time=24:00:00"`.
+
+# Bayesian optimization of weights, temperature and noise
+
+`run_bayes_opt.py` runs one Bayesian optimization (BO) per CSV row. It uses
+scikit-optimize's Gaussian process to search the cost weights, MPPI's
+`temperature` and `noise_sigma`. Each *trial* is one point of the search,
+scored by running `n_episodes` episodes on every model in `rollout_models`, with
+the same weights for all of them.
+
+Every episode of a cell runs on one long-lived pool (`EpisodePool`, the engine
+of `run_episodes_pooled.py`): a planner process per GPU, an eval-sim worker per
+remaining core, and several trials in flight at once. While trials are
+pending, the next point is chosen as if each pending trial had scored the best
+J so far (a *constant liar*), so concurrent trials don't pile onto one spot.
+A trial's settings travel with its episodes, and the planner processes apply
+them in place, so nothing restarts between trials.
+
+Every trial and every model sees the same episodes, because goals and planner
+noise depend only on `(seed, episode)`.
+
+| | Command |
+| --- | --- |
+| Check a CSV (runs nothing) | `python experiments/run_bayes_opt.py bo.csv --check` |
+| Every cell, in order | `python experiments/run_bayes_opt.py bo.csv` |
+| One cell, sized pool | `python experiments/run_bayes_opt.py bo.csv --cell 0 --gpus 0,1 --workers 12` |
+| Rebuild the summaries | `python experiments/run_bayes_opt.py bo.csv --summarize --outdir <results dir>` |
+| Submit to the HPC | `experiments/hpc/submit_bayes_opt.sh bo.csv [max concurrent]` |
+
+`example_bayes_opt.csv` is a template, and `example_bo_seeds.csv` is an example
+seed file.
+
+**Objective** (minimized), as in the old `run_bayes_opt.py`:
+
+```
+J_model = -w_success * success_rate + w_cost * mean normalized final goal error
+```
+
+The goal error divides each final error by the task's success threshold, sums
+them, clips at `err_clip` and divides by it, so both terms are in [0, 1]. An
+episode that raised scores as a failure with the worst error. `model_agg`
+folds the models' J: `mean`, or `worst` (the largest).
+
+**The CSV.** It takes the batch CSV's columns (driver options, `w_*` to pin a
+weight, `label`), except `rollout_model` and `video`, plus:
+
+| Column | Meaning | Blank |
+| --- | --- | --- |
+| `rollout_models` | Models scored with the same weights, e.g. `M1 M2 M3 M4` | the driver default |
+| `model_agg` | `mean` or `worst` | `mean` |
+| `opt_weights` | Weights to search: `w_quat:1:50 w_contact` (bare name: x/4 to x4 around the object's value), or `none` | the old study's nine weights and bounds, widened to contain the object's own values |
+| `temperature_range`, `noise_sigma_range` | `lo hi` to search | pinned to the `temperature`/`noise_sigma` column or the driver default |
+| `per_model_temperature`, `per_model_noise_sigma` | `true`: a `temperature_<model>` / `noise_sigma_<model>` dimension per model, each within the range (more dimensions, so more trials) | `false` |
+| `n_calls` | Trials in all, including seeds and resumed trials | 100 |
+| `n_initial_points` | Random trials before the GP, less one per seed | 10 |
+| `acq_func`, `bo_seed` | `gp_hedge`, `EI`, `LCB` or `PI`; the optimizer's seed | `gp_hedge`, 0 |
+| `w_success`, `w_cost`, `err_clip` | The objective | 1, 0.1, 250 |
+| `trials_in_flight` | Trials evaluated at once | enough to give every worker an episode |
+
+Every dimension is log-uniform. `--check` rejects:
+
+- an empty search space;
+- a knob that is both pinned and searched;
+- an unknown weight or model;
+- a seed outside the search box.
+
+**Seeding with known settings.** Seeds run before the random and GP trials,
+count toward `n_calls`, and each replaces one random trial.
+
+- `seed_defaults` (on unless `false`): the object's own weights, with the
+  pinned temperature and noise. The default temperature must then lie inside
+  `temperature_range`. Turn this off if it doesn't.
+- `seed_points`: a CSV of known settings (path relative to the repo root),
+  with one row per point and columns named after the dimensions (`w_quat`,
+  `temperature`, `noise_sigma`, ...). Anything a row leaves out takes its
+  default. A value for a pinned setting must equal the pinned value.
+- `seed_from` + `seed_top_k` (5): an earlier cell folder. Its best trials
+  are **re-run** here, so their scores come from this row's episodes and
+  models. Dimensions that don't exist here are ignored, and values outside the
+  box are clipped into it.
+
+**Output**, in `results/bayes_opt_<csv>_<job id or time>/`:
+
+- **One folder per cell** (`cell_<row>_<label>/`):
+  - `trial_<i>/<model>.json` (and `.npy` files if `save_steps`): the trial's
+    episodes on that model, readable with `EpisodeReplayer`. The recorded
+    configs carry the trial's temperature, noise and weights.
+  - `trial_<i>/trial.json`: the point, its source (`defaults`,
+    `seed_points:<row>`, `seed_from:<trial>`, `random`, `gp`), its J and the
+    per-model scores.
+  - `bo_state.json`: the space and every point and J.
+  - `bo_summary.json`: the trials ranked, the best-so-far trace, the best
+    trial and the commands to replay it.
+- **At the top:**
+  - `summary.csv`: every trial, with its cell's settings;
+  - `best.csv`: each cell's best trial.
+
+**Resuming.** Rerun into the same folder, with `OUTDIR=` on the HPC. Finished
+trials are told to the optimizer again, and the search continues to
+`n_calls`; raise `n_calls` to extend a finished search. Trials that were still
+running are redone. The search space may be widened, but a changed set of
+dimensions, or a narrowed range that leaves earlier trials outside it, is
+refused. `--overwrite` starts the cell over.
+
+**Stopping.** Ctrl-C or `scancel` stops at the next control step. Finished
+trials are kept.
+
+**On the HPC.** `hpc/submit_bayes_opt.sh`, `hpc/run_bayes_opt.slurm` and
+`hpc/summarize_bayes_opt.slurm` mirror the other pipelines: one array task per
+row, validation first, and a summary job queued `afterany`.
+
+- **Resources:** sized per row from its episodes per BO step,
+  `models × n_episodes × trials_in_flight` (1 trial when unset).
+  - **Workers per planner:** 2 for M1–M4, 1 for M5 (its plans are slow). A row
+    with several models gets the mean over them: 1.8 for M1–M5, so 15 workers
+    on 4 GPUs × 2 planners. `WORKERS_PER_PLANNER` overrides it.
+  - **GPUs:** as many as those workers need, 2 planners each, up to `MAX_GPUS` (4).
+  - **CPU and memory:** a CPU per process and about 2.5 GB each. `run_bayes_opt.py bo.csv --resources
+  --planners-per-gpu 2` prints the sizes. Rows that need the same allocation
+  share one job array, and every array writes into one results folder. The
+  time limit is 48 h. `PLANNERS_PER_GPU`, `MAX_GPUS` and `GPU_TYPE` (default
+  `a5000`) change the sizing; `SBATCH_ARGS` overrides it, for example
+  `SBATCH_ARGS="--time=24:00:00"`. An optional second argument caps how many
+  cells of each size run at once.
+- **Cost:** a cell is `n_calls × models × n_episodes` episodes.
+
+# Processing batch results: KL to the optimal planner, forward-simulation error
+
+`process_batch_results.py` takes a results folder written by
+`run_episode_batches.py` and analyses every cell:
+
+1. **KL to the optimal planner.**
+   - **The used planner** is rebuilt from the cell's recorded command line.
+   - **The optimal planner** is the same planner (sample count, temperature,
+     noise, weights, warm start, and the same control step and horizon as
+     durations) planning with the eval model: the eval scene at the eval
+     timestep, with the eval simulator's contact model.
+   - **The replay:** each saved step is planned on its own. Both planners
+     start from what the used planner started that step from (its mean, noise
+     draw, temperature and previous control, saved with the step) and plan
+     from the recorded state toward that step's goal. So both draw the same
+     noise around the same mean, and skipping steps does not change the
+     others. Older warm-started results, saved before the plan's mean was,
+     are walked in order instead, each planner keeping its own warm state.
+   - **The measure:** each step's first actions become Gaussians, and both
+     `KL(used‖opt)` and `KL(opt‖used)` are kept, along with the distance
+     between their means.
+2. **Forward-simulation error.** From every saved state, with that step's
+   action, the rollout model (rollout scene and timestep) and the eval
+   simulator (eval scene and timestep) each take one control step. All the
+   saved steps of an episode run at once, as the worlds of one GPU simulator.
+   - **The comparison:** object position (m) and rotation (rad), hand joints
+     (RMS rad), and the full `qpos`/`qvel`.
+   - **A sanity column (`eval_vs_recorded_*`):** the eval prediction against
+     what the episode actually did next. This shows the cost of restarting
+     from a recorded state; it is about 0.04 mm.
+
+**Requirements.** The cell must have been run with `save_steps=true`, and its
+`eval_sim` must be a GPU contact model (`M1`–`M5`): the optimal planner and the
+forward step need a vectorized eval model. Anything else fails that cell with
+the reason.
+
+| | Command |
+| --- | --- |
+| Count the cells | `python experiments/process_batch_results.py <batch dir> --count` |
+| Analyse every cell, then the final tables | `python experiments/process_batch_results.py <batch dir>` |
+| One cell | `python experiments/process_batch_results.py <batch dir> --cell 2` |
+| Only the final tables | `python experiments/process_batch_results.py <batch dir> --summarize` |
+| One cell, split over 4 jobs | `python experiments/process_batch_results.py <batch dir> --cell 2 --shard 0 --n-shards 4` (and shards 1-3) |
+| Submit to the HPC | `experiments/hpc/submit_process_batch_results.sh <batch dir> [max concurrent]` |
+| Would fewer analysed steps per episode do? (no GPU) | `python experiments/check_steps_analysed.py <analysed batch dir> [--every 2 4]` |
+| Merge a partial rerun into a new batch dir first | `python experiments/combine_episode_batches.py <base dir> <rerun dir> ... --out <new dir>` (later dirs' cells replace earlier ones' with the same label) |
+
+**Options:**
+
+- `--stride k` computes the KL only at every k-th saved step. With a
+  `save_stride` too, that is every (k × save_stride)-th control step.
+- `--max-episodes` limits the episodes analysed per cell.
+- `--shrinkage` is the KL's covariance shrinkage (1e-3).
+- `--overwrite` redoes cells already analysed.
+- `--kamino-max-contacts`, `--kamino-padmm-iterations`: with an M5 eval
+  model, the optimal and zero-gap planners' contact buffer and PADMM cap (96
+  and 100; Kamino's own are 128 and 200).
+- `--shard i --n-shards n` (with `--cell`) analyses only the episodes i, i + n,
+  ... of the cell; the job that saves its last episode computes its metrics.
+
+**Resuming.** Each episode is saved as soon as it is analysed, so a cell cut
+off by the time limit resumes from its next episode when rerun. An episode
+saved under other `--optimal-args`, other analysed rows, or from an earlier run
+of the batch cell is redone. `--summarize` completes any cell whose episodes
+are all saved but which no shard marked done, and lists the rest as `partial`
+(with how many episodes are done) or `failed`.
+
+**Output**, written into the batch folder:
+
+- **`analysis/<cell>.analysis.json`:** each metric's mean, median and p90,
+  per episode and per cell, plus how the optimal planner was built.
+- **`analysis/<cell>.analysis.npz`:** the per-saved-step arrays, with each
+  episode's step indices as `step__<id>`.
+- **`analysis/<cell>.analysis_status.json`:** `done` or `failed`, with the
+  error.
+- **`final_results.csv` (and `.json`):** one row per cell. It holds the cell's
+  settings, the batch's own results as in `summary.csv` (status, success rate,
+  steps to success, plan time), the analysis status, and every analysis
+  metric.
+- **`final_episodes.csv`:** one row per episode, the same way.
+
+**Goals.** New results save each goal's quaternion (`goal_values`,
+`goal_steps`). Older ones are rebuilt by replaying the eval task's goal stream
+from the recorded seed, and checked against the saved goal labels.
+
+**Cost.** The optimal planner runs at the eval timestep, so each analysed step
+costs many plans: about 22 s on an RTX 5000 Ada with M5 as the eval model
+(Nov 2026), 84% of it the optimal planner. Three things cut that:
+
+- **Kamino settings.** With an M5 eval model, the optimal and zero-gap
+  planners run with a smaller contact buffer and PADMM cap,
+  `--kamino-max-contacts` (96) and `--kamino-padmm-iterations` (100); Kamino's
+  own are 128 and 200. The cap cuts ~37% of a step. The used planner and the
+  forward simulation keep the cell's own settings. An episode analysed under
+  other settings is redone. Watch the logs for Kamino's "contact capacity
+  exceeded": a world over the buffer drops contacts (64 overflowed on a cube
+  cell; 96 did not).
+- **One regret rollout.** The regret's two free energies are scored in one
+  rollout of twice the zero-gap planner's worlds rather than two, about a
+  third faster for the same values.
+- **50 analysed steps per episode** (`N_STEPS_ANALYSED`), below.
+
+Where the time goes is saved with each step and reported like a metric:
+`plan_s_<planner>_mean` (s per plan, for `used`, `opt` and `zero`),
+`n_iter_opt_mean` / `_p90` (the optimal planner's iterations),
+`converged_opt_mean` (how often it converged before its `--max-iterations`
+cap) and `regret_s_mean`. Each episode's log line prints the same.
+
+**How many steps to analyse.** `check_steps_analysed.py` takes an analysed
+batch and recomputes each cell's metrics from every k-th analysed step, on
+the CPU. It reports how much each cell's episode-level 95% interval widens,
+and whether the means moved further than dropping steps at random would move
+them (about 1 cell in 20 does by chance). The Nov 2026 batch passed at k = 2
+with intervals 3.5–9% wider, so `N_STEPS_ANALYSED` is 50; its docstring
+explains the columns.
+
+**On the HPC.** `submit_process_batch_results.sh <batch dir> [max concurrent]`
+counts the cells, submits `process_batch_results.slurm` (one GPU per shard,
+4 h), and queues `summarize_batch_results.slurm` `afterany` to build
+`final_results.csv`. The 4 h fits a shard of 6 episodes × 50 steps (~65 min
+expected); with fewer shards or more episodes per cell, raise it with
+`SBATCH_ARGS="--time=HH:MM:SS"`. A task cut off by the limit resumes from its
+next episode when resubmitted.
+
+- **Shards:** each cell's episodes are split over `N_SHARDS` jobs (5 by
+  default), so the array has cells × `N_SHARDS` tasks. Two shards on one GPU
+  were tried and gained nothing: without CUDA MPS the two processes take
+  turns, and each ran at half speed.
+- **Steps per episode:** `N_STEPS_ANALYSED` in the slurm file, 50.
+- **Kamino settings:** `KAMINO_MAX_CONTACTS` and `KAMINO_PADMM_ITERATIONS` in
+  the slurm file (96 and 100).
+- **The optimal planner** is set in the slurm file's `OPTIMAL_ARGS`. Setting
+  `OPTIMAL_ARGS` when submitting replaces it.
+- **Extra flags** go in `ANALYSIS_ARGS`, e.g. `ANALYSIS_ARGS="--stride 4"`.
+- **Resubmitting** skips the cells already done and the episodes already saved.
+
+# Sweeping contact parameters: how regret moves with the rollout model
+
+`contact_param_sweep.py` takes the same results folder and, for each cell,
+asks how its planner's regret changes as its rollout model's contact
+parameters move away from the values the episodes ran with. At each analysed
+step it:
+
+1. plans once with the **zero-gap planner**, exactly as in
+   `process_batch_results.py`, and keeps its mean `U_A`;
+2. plans again with **the cell's own planner**, its rollout model rebuilt at
+   every point θ of a full grid over the model's parameters, and keeps each
+   mean `U_B(θ)`;
+3. scores `F_A(U_B(θ)) - F_A(U_A)` on the eval model, each step on its own
+   evaluation noise.
+
+Every plan starts from the recorded start of the step, so all of them draw the
+same noise. The nominal point (the cell's own parameters) is always in the
+grid, and its regret is the cell's `process_batch_results` regret.
+
+| Model | Parameters | Default values (× nominal unless listed) | Points |
+|---|---|---|---|
+| M1 | `solref_timeconst`, `solref_dampratio` | ×{1, 1.5, 2, 4, 8}; ×{0.25, 0.5, 1, 2, 4} | 25 |
+| M2 | `solref_timeconst`, `solref_dampratio` | ×{0.4, 0.6, 1, 2, 4}; ×{0.25, 0.5, 1, 2, 4} | 25 |
+| M3 | `stiffness`, `damping` | ×{0.25, 0.5, 1, 2, 4} each | 25 |
+| M4 | `xpbd_iterations`, `relaxation` | {1, 2, 3, 4, 6}; {1, 1.5, 2, 2.5, 3, 3.5} | 30 |
+| M6 | `alpha`, `gamma`, `refinement` | ×{0.25, 0.5, 1, 2, 4} each; {0, 1, 2, 3, 4} | 125 |
+
+- **Nominal values** are the preset with the task's tuning. M1's time constant
+  is its resolved 2·dt. M2's solref comes from the rollout scene.
+- **M5 cells** are skipped, since M5 is the ground truth.
+- **Dropped points:** a point the model's config refuses, or one with a time
+  constant below 2·dt, is dropped and listed in the cell's json.
+
+| Task | Command |
+|---|---|
+| One cell, chosen episodes | `python experiments/contact_param_sweep.py <batch dir> --cell 2 --episodes 0-4,9` |
+| Other values | `--values stiffness=0.5,1` (absolute), `--multipliers M1:solref_dampratio=0.5,2` (× nominal) |
+| Every cell, then the table | `python experiments/contact_param_sweep.py <batch dir>` |
+| Only the table | `python experiments/contact_param_sweep.py <batch dir> --summarize` |
+| Submit to the HPC | `experiments/hpc/submit_contact_param_sweep.sh <batch dir> [max concurrent]` |
+
+**Per cell.** A run (and an HPC array task) sweeps one whole cell:
+- It writes `sweep/<cell>.sweep.npz`, with every analysed step's regret,
+  free energies, means and timings per grid point.
+- It writes `sweep/<cell>.sweep.json`, with the settings and each grid point's
+  regret mean, 95% interval, median and p90.
+- `--summarize` gathers every cell into `sweep_results.csv`, one row per
+  (cell, grid point).
+- While a cell runs, `sweep/<cell>.partial.npz` is saved after the zero-gap
+  plans, each grid point and each score block. A cell cut off by the wall
+  clock resumes from there.
+
+**On the HPC.** `submit_contact_param_sweep.sh` submits one task per cell and
+then the summary.
+- The slurm header sets the steps per episode (`N_STEPS_ANALYSED`, 20), the
+  score block (4) and the Kamino settings.
+- `EPISODES="0-4"` picks the episodes of every cell. Other flags go in
+  `SWEEP_ARGS`.
+- An M6 cell costs about 6× an M3 cell: ~115 s against ~20 s a step on an
+  RTX 4090, with M5 as the eval model. Time one cell by hand first
+  (`--episodes 0 --n-steps-analysed 2`) and set
+  `SBATCH_ARGS="--time=HH:MM:SS"`.
+
+# The final batch CSV from the searches
+
+`make_final_batch_csv.py` turns a BO cell folder into the batch CSV for the
+final runs: one row per rollout model × temperature scale × hand accuracy (5 ×
+3 × 3 = 45 by default). Each row has:
+
+- the best trial's cost weights, as `w_*` columns;
+- that model's tuned temperature times the scale (0.5, 1 and 2 by default);
+- the noise the search ran with;
+- the search's other settings: task, eval sim, control step, horizon, samples,
+  warm start, goal difficulty;
+- `save_steps=true`, for `process_batch_results.py`.
+
+```bash
+python experiments/make_final_batch_csv.py results/bayes_opt_bo_123/cell_0000_cube_all \
+    --out experiments/final_batches.csv --set uncertainty=true \
+    --optimal-bo results/bayes_opt_opt_456/cell_0000_opt_temp
+```
+
+- **The trial:** the best one, unless `--trial` picks another.
+- **The seed:** the search's seed + 1 by default. Its own seed would replay the
+  episodes the weights were tuned on.
+- **Other options:** `--models`, `--temp-scales`, `--hand-accs`, `--n-episodes`
+  (30) and `--steps` (4000) change the grid; `--set COLUMN=VALUE` adds a column
+  to every row.
+- **`--optimal-bo`:** the search over the optimal (convergence) planner's
+  temperature. The script prints the `OPTIMAL_ARGS` to submit the analysis
+  with: that search's planner flags and its best temperature. It warns if that
+  search pinned other weights than the batch rows carry, since the optimal
+  planner uses each row's own.
+
+The CSV is checked against the driver before the script exits.

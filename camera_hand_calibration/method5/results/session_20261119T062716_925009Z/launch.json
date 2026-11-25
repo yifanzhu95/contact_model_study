@@ -1,0 +1,282 @@
+{
+  "created_at": "2026-11-19T06:27:16.935512+00:00",
+  "config": {
+    "initial_transform": "results/rigid_surface_20261119T042209_623823Z/joint_candidate.json",
+    "hardware_config": "method5/hardware.json",
+    "tracking_config": "method5/tracking.json",
+    "inward_yaw_rad": 0.0,
+    "max_speed_rad_s": 0.3,
+    "max_acceleration_rad_s2": 0.35,
+    "collision_margin_m": 0.004,
+    "fit_window_s": 3.0,
+    "min_samples": 30,
+    "min_sample_span_s": 1.0,
+    "max_position_std_m": 0.002,
+    "max_orientation_rms_deg": 2.0,
+    "max_translation_change_m": 0.05,
+    "max_rotation_change_deg": 15.0,
+    "tracked_opacity": 0.28,
+    "reference_opacity": 0.8,
+    "translation_steps_m": [
+      0.00025,
+      0.001,
+      0.005
+    ],
+    "rotation_steps_deg": [
+      0.25,
+      1.0,
+      5.0
+    ],
+    "keep_torque_after_fit": true,
+    "object_correction_used": false
+  },
+  "hardware": {
+    "reviewed_for_this_hand": true,
+    "robot_qref": [
+      0.765751,
+      -0.568012,
+      0.916951,
+      0.573897,
+      -0.0191225,
+      -0.0837503,
+      0.709056,
+      1.01884,
+      0.830768,
+      0.610365,
+      0.929305,
+      0.610097,
+      1.09912,
+      1.44581,
+      1.33179,
+      0.192794
+    ],
+    "episode_preparation": {
+      "speed_rad_s": 0.5,
+      "tolerance_rad": 0.06,
+      "joint_tolerance_rad": {
+        "if_mcp": 0.08,
+        "rf_mcp": 0.08
+      },
+      "settle_time_s": 0.3,
+      "settle_velocity_rad_s": 0.08,
+      "timeout_s": 0,
+      "interrupt_timeout_s": 30,
+      "command_hz": 50
+    },
+    "port": "/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT9HDB0V-if00-port0",
+    "baudrate": 3000000,
+    "gravity_mujoco": [
+      0.0,
+      0.0,
+      -9.81
+    ],
+    "palm_quat_wxyz": [
+      0.0,
+      0.9659258262890683,
+      0.0,
+      -0.25881904510252074
+    ],
+    "manual_viewer_limits": {
+      "max_command_speed": 0.5,
+      "max_velocity": 3.0,
+      "max_tracking_error": 0.35
+    },
+    "delta_reference": "measured_position",
+    "ctrl_range": {
+      "lower": 0.15,
+      "upper": 0.15
+    },
+    "max_current_raw": 550,
+    "max_temperature": 50,
+    "expected_registers": {
+      "model_number": 1240,
+      "mode": 5,
+      "p": [
+        450,
+        600,
+        600,
+        600,
+        450,
+        600,
+        600,
+        600,
+        450,
+        600,
+        600,
+        600,
+        600,
+        600,
+        600,
+        600
+      ],
+      "i": 0,
+      "d": [
+        150,
+        200,
+        200,
+        200,
+        150,
+        200,
+        200,
+        200,
+        150,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "goal_current": 550
+    }
+  },
+  "hardware_sha256": "4650e713f31c1a0cd9dc48f655c366f826cb6a41e428a2d95cca46020478da2a",
+  "initial_transform": {
+    "T_world_from_camera": [
+      [
+        -0.0032711976746302644,
+        0.827263697663164,
+        -0.5618043020433743,
+        0.444397913703288
+      ],
+      [
+        0.9992792268678429,
+        -0.018543248598164835,
+        -0.03312362724450058,
+        0.03158380123365485
+      ],
+      [
+        -0.03781965119061063,
+        -0.5615077225293488,
+        -0.8266067695849849,
+        0.5270032776827597
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "convention": "OpenCV RGB camera right/down/forward to frozen MuJoCo world; meters",
+    "status": "No candidate passes every cross-check; the joint fit is a provisional review candidate, not a production calibration.",
+    "production_ready": false,
+    "absolute_accuracy_established": false,
+    "heldout_checks": {
+      "palm_image_rms_px": 1.5516646990602738,
+      "moving_image_rms_px": 1.129518788772793,
+      "moving_depth_rms_mm": 3.046940294632848,
+      "fixed_housing_depth_rms_mm": 1.0907599168451567,
+      "fixed_palm_depth_rms_mm": 1.2714341969703493
+    },
+    "difference_from_current": {
+      "rotation_deg": 2.925279576834843,
+      "camera_origin_mm": 30.966293708766937
+    },
+    "paper_tag_used": false,
+    "object_only_offset_applied": false
+  },
+  "tracking_configuration": {
+    "gpu": "auto",
+    "tracking_gpu": "auto",
+    "mppi_gpu": "auto",
+    "interpreters": {
+      "vision": null,
+      "control": "/home/chetan/miniconda3/envs/mj_env/bin/python",
+      "viewer": "/home/chetan/miniconda3/envs/mj_env/bin/python"
+    },
+    "init_mask_path": null,
+    "generate_mask": true,
+    "bbox_xywh": [
+      440,
+      272,
+      103,
+      113
+    ],
+    "docker": {
+      "enabled": true,
+      "executable": "./leap_docker.py",
+      "image": "irislab_fppp:leap_hardware",
+      "python": "python",
+      "cuda_visible_devices": "3",
+      "foundationpose_root": "/FoundationPose-plus-plus/FoundationPose",
+      "extra_mounts": []
+    },
+    "sam_hq": {
+      "start_server": true,
+      "checkpoint_path": "/FoundationPose-plus-plus/sam-hq/pretrained_checkpoints/sam_hq_vit_h.pth",
+      "port": 9069,
+      "api_url": "http://127.0.0.1:9069/hq_sam",
+      "health_url": "http://127.0.0.1:9069/health"
+    },
+    "mesh": "/home/chetan/contact_model_study/iris-foundationpose-plusplus/meshes/cube_70_mm_2_adjusted/cube_70_mm_2.obj",
+    "mesh_scale": 1.0,
+    "camera_index": 0,
+    "camera_config": "/home/chetan/contact_model_study/camera_hand_calibration/configs/source_camera.json",
+    "tracking_dir": ".runtime/leap_tracking",
+    "hardware_config": "/home/chetan/contact_model_study/camera_hand_calibration/method5/hardware.json",
+    "viewer_bind": "tcp://127.0.0.1:2223",
+    "viewer_endpoint": "tcp://127.0.0.1:2223",
+    "lcm_url": "udpm://239.255.76.67:7667?ttl=1",
+    "pose_channel": "POSE",
+    "state_channel": "LEAP_STATE",
+    "action_channel": "LEAP_ACTION_DELTA",
+    "startup_timeout": 180.0,
+    "placement_timeout": 0.0,
+    "supervision_timeout": 2.0,
+    "tracking_ready_frames": 5,
+    "tracking_ready_max_age": 0.3,
+    "shutdown_timeout": 10.0,
+    "observe_only": true,
+    "logging": true,
+    "record_video": false,
+    "video_fps": 30,
+    "mujoco_viewer": true,
+    "fingertip_paths": false,
+    "tracker_args": [],
+    "viewer_args": [],
+    "bridge_args": [],
+    "controller_args": [
+      "--task",
+      "cube_reorient",
+      "--calibrated-hand",
+      "/home/chetan/contact_model_study/camera_hand_calibration/model/hand.xml"
+    ],
+    "tracking_meshes": {
+      "cube_reorient": {
+        "mesh": "iris-foundationpose-plusplus/meshes/cube_70_mm_2_adjusted/cube_70_mm_2.obj",
+        "mesh_scale": 1.0
+      }
+    },
+    "bridge_telemetry": false,
+    "calibrations": [
+      {
+        "name": "Original production calibration",
+        "file": "configs/current_transform.json"
+      },
+      {
+        "name": "Camera + depth only (corrected stationary)",
+        "file": "results/rigid_surface_20261119T042209_623823Z/palm_candidate.json"
+      },
+      {
+        "name": "Camera + depth + measured joint poses (provisional)",
+        "file": "results/rigid_surface_20261119T042209_623823Z/joint_candidate.json"
+      },
+      {
+        "name": "Method 4: known cube on measured finger links",
+        "file": "method4/results/capture_20261119T052939_712833Z/candidate.json",
+        "note": "Method 4 fits one cube placement; rigid-palm cross-check worsens. Experimental."
+      }
+    ],
+    "initial_calibration": 3,
+    "object_correction_default": false
+  },
+  "bbox": [
+    440,
+    272,
+    103,
+    113
+  ],
+  "production_configuration_modified": false
+}

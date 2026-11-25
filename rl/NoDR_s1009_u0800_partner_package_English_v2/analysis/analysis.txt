@@ -1,0 +1,96 @@
+RL POLICY PACKAGE ANALYSIS
+
+Scope: extracted and inspected only. No actor forward passes, no simulation,
+no camera use, no hardware commands and no dependency installation.
+All analysis files and code are confined to this directory.
+
+FILES AND INTEGRITY
+20 original files. All 19 hashes in SHA256SUMS.json match. Both actor formats,
+portable_policy.py, 112 saved input/output cases, the interface/joint order,
+PPO contract, archived evaluation and provenance are included.
+The TorchScript embedded contract exactly matches original_policy_contract.json.
+
+TRAINING
+M2 rollout, high/high geometry, no domain randomization; PPO seed 1009.
+800 updates (188 original + 612 continuation), 8192 environments, 32 steps per
+update: 209,715,200 transitions. This is the scheduled final checkpoint, not a
+best-checkpoint selection. PPO: five epochs, eight minibatches, adaptive learning
+rate initially 0.001, clipping 0.2, gamma 0.99, GAE lambda 0.95, entropy 0.003.
+Training uses Gaussian exploration (initial scalar std 0.7, learned within
+[0.05,1]); exported inference uses the deterministic mean, no exploration noise.
+
+NETWORK AND INTERFACE
+MLP 73 -> 512 -> 512 -> 256 -> 16, ELU, 435,984 parameters.
+No recurrent/history state. Frozen observation normalization is inside the actor:
+(observation - mean)/(std + 0.01). Do not normalize twice.
+73 observations include measured joints/velocities, object position/orientation,
+goal error, world-frame object linear/angular velocity, previous target and time.
+Quaternions WXYZ; rotation6 stores the first two columns of a rotation matrix.
+Joint-state and actuator-target normalization use different position ranges.
+
+ACTION
+u_next = clamp(u_previous + 0.064*tanh(raw_action), actuator_lower, actuator_upper)
+The decoder returns absolute position targets in radians. The base is the
+previous accepted target, NOT the measured joint position. At most 0.064 rad
+(3.67 deg) requested increment per decision before absolute joint-limit clipping.
+At 64 ms this corresponds to a maximum target change rate of 1 rad/s, not a
+guarantee about actual joint velocity. No separate lead limiter is supplied.
+Exactly one policy decision per 64 ms (15.625 Hz), target held between decisions.
+The initial previous target must match the established grasp target.
+
+TASK
+Cube only, two fixed canonical local-X +/-90 deg target orientations.
+Goal position [0.02,0.035,0.085] m in training world. This is not an arbitrary-goal
+policy or a full six-direction rotation policy. 500 controls = 32 s.
+Success is nonterminal; training encourages holding. Ends on drop or step limit.
+Exact reward and strict-success gate code are not included.
+
+ARCHIVED EVALUATION (PROVIDED, NOT RE-RUN HERE)
+                         M2                M5
+Evaluation episodes      128               128
+Strict arrival           128/128           49/128
+Strict at final step     128/128           41/128
+Last150 continuous hold  128/128           0/128
+Drops                    0                 6
+M5 -X strict arrival: 49/64; M5 +X strict arrival: 0/64.
+These are simulation results, not hardware evidence. The policy transfers poorly
+even to the supplied alternative simulator evaluation; no-DR robustness should
+not be inferred from the perfect in-model score.
+
+INDEPENDENT CHECKS HERE
+112 reference cases: 56 M2 + 56 M5, elapsed controls 0,1,9,49,99,349,499.
+Reconstructed observations maximum absolute discrepancy: 3.19533955e-07.
+Reconstructed decoded targets maximum discrepancy: 1.17118792e-07 rad.
+These verify stored interface arithmetic only. Neural-network inference was NOT
+run. PyTorch in the inspected mj_env: NOT INSTALLED.
+The supplied offline_self_test_QA.json reports both backends passing on the
+sender's runtime; this has not been independently reproduced in this environment.
+
+DIFFERENCES FROM THIS REPOSITORY'S HARDWARE SETUP
+1. Training palm tilt is approximately 27 deg; current hardware configuration is
+   30 deg (relative mounting rotation 3.000000 deg).
+2. Training specifies uniform position gain 3.0, velocity bias -0.01. Current
+   calibrated hand uses per-joint gains/biases and actuator filtering. This
+   package does not describe training on that calibrated model.
+3. Current hardware delta_reference is 'measured_position'; policy
+   requires previous accepted-target accumulation. Directly reusing the MPPI
+   measured-position delta path would change the policy's trained action meaning.
+4. Fixed 64 ms RL scheduling is part of the contract; an unpaced MPPI-style loop
+   would change target accumulation and episode timing.
+5. Motor/frame/state-estimator mapping is an unfilled template. Existing LEAP
+   bridge code is not integrated by this package.
+6. Original training physics, cube mass, regional friction and full state-bank
+   assets cannot be reconstructed from this bundle. Provenance supplies hashes,
+   not the actual files. The current scene XML hash differs from its recorded
+   training scene hash; this alone does not identify physical differences.
+
+FILES TO READ
+../interface.json                exact 73D/16D contract, ranges and frames
+../portable_policy.py            encoder, decoder and CPU inference wrapper
+../original_policy_contract.json PPO/training settings
+../evaluation_summary.json       archived M2/M5 metrics
+analysis.json                    detailed machine-readable audit
+reference_arithmetic_checks.csv  one row per saved reference case
+
+The archive's suggested next-step commands were treated as documentation, not
+instructions to execute them. Original package files remain unchanged.

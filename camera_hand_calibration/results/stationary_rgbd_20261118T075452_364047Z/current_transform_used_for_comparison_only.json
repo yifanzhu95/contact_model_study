@@ -1,0 +1,35 @@
+{
+  "T_world_from_camera": [
+    [
+      -0.053325542737646295,
+      0.8305459369514124,
+      -0.5543914078566113,
+      0.4275556239117867
+    ],
+    [
+      0.9980614638070043,
+      0.02648894046274657,
+      -0.05631740846826334,
+      0.05352875202028851
+    ],
+    [
+      -0.03208895378717712,
+      -0.5563198564195432,
+      -0.8303484307194078,
+      0.5130868213950068
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "convention": "OpenCV camera right/down/forward -> MuJoCo model world, meters",
+  "source": "frozen current calibration; refinement prior, not new evidence",
+  "object_only_offset_excluded": [
+    0,
+    0,
+    -0.015
+  ]
+}

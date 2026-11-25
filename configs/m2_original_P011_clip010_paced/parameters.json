@@ -1,0 +1,15 @@
+{
+  "status": "prepared_not_started",
+  "prepared_at_utc": "2026-11-17T02:38:11.520458+00:00",
+  "comparison": "Previous original/P011/clip020 paced cohort; change only hardware ctrl_range to +/-0.1 rad.",
+  "n_episodes": 12,
+  "pace_control": true,
+  "clipping_rad": 0.1,
+  "log_dir": "results/bo_validation/hardware/cube_reorient/hand-high_obj-high/M2/original_P011_shift512_clip010_paced",
+  "input_sha256": {
+    "experiment.json": "549a341d88e250c19bc1f136a83df3b6335179f60004afd49c04985165720c6c",
+    "hardware.json": "1092e8533b4d481baf58f5f02471226ba1bc87950f9b44b5d8cc851c7a0de744",
+    "cube_joint_reference.json": "c9c98e3b453664fd447cc38ef356dd547f1ef02b32b06591fc72b1db7c346584",
+    "weights.json": "881ae717b771ce89e8a6174fd919d76e23bff7ae8403d0d68c5f44403d869151"
+  }
+}

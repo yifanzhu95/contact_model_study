@@ -1,0 +1,36 @@
+{
+  "status": "prepared_not_started",
+  "prepared_at_utc": "2026-11-17T04:22:56.309605+00:00",
+  "baseline_source": "results/bo_validation/hardware/cube_reorient/hand-high_obj-high/M2/trial314_shift512/leap_experiment_20261115_173310_247065/controller.json",
+  "baseline_sha256": "2e32c3a5c42df6b2a66de63ca688b846f5a711105e8a2605ad7088c1b0758dd3",
+  "baseline_evidence": "Trial314 unpaced corrected-mass M2 reference cohort: 11 successes / 24 completed episodes.",
+  "diagnostic_episodes": 6,
+  "rotation_protocol": "One manually placed +/-90 degree rotation about each signed X/Y/Z axis.",
+  "changes": "Opt-in asynchronous bridge telemetry and exact action-ID logging only; control law/weights/physics unchanged.",
+  "expected_files": [
+    "bridge_telemetry.jsonl",
+    "bridge_telemetry.status.json",
+    "controller.json",
+    "steps.csv"
+  ],
+  "log_dir": "results/diagnostics/m2_tracking_baseline",
+  "settings": {
+    "weights": "trial314",
+    "joint_reference": "P011",
+    "ctrl_range": 0.2,
+    "n_samples": 512,
+    "warm_start": "shift",
+    "pace_control": false,
+    "temperature": 0.1,
+    "noise_sigma": 0.05,
+    "time_horizon": 0.32,
+    "ctrl_time_step": 0.064,
+    "mass_kg": 0.07,
+    "friction": [
+      0.3,
+      0.5,
+      0.4,
+      0.4
+    ]
+  }
+}

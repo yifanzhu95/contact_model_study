@@ -1,0 +1,14 @@
+{
+  "selected_result": "results/stationary_rgbd_20261118T075944_453797Z",
+  "hardware_access": false,
+  "camera_only": true,
+  "independent_physical_poses": 1,
+  "tests_passed": 5,
+  "raw_capture_sessions": [
+    "20261118T074905_804116Z",
+    "20261118T075607_336932Z"
+  ],
+  "source_hashes_verified_unchanged": true,
+  "absolute_accuracy_established": false,
+  "calibration_promoted": false
+}

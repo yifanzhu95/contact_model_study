@@ -1,0 +1,59 @@
+{
+  "archive": "/home/chetan/Downloads/20261110T033819Z_e01f2852_model_and_params.zip",
+  "archive_sha256": "dd2149fffb657e65cfd0d68b768232a9041648a8bd0eec2399b8146f4227aef4",
+  "binary_sha256": "c66294edc9c4cc2ca02b7deac311d1538194ac4f9b5e921a36f36241ab5e5177",
+  "source_xml": "/home/chetan/leap_agentic_sysid/leap/leap_right_hand.xml",
+  "mujoco_version": "3.6.0",
+  "cube_size_m": 0.07,
+  "cube_mass_kg": 0.14,
+  "verified_fields": [
+    "body_pos",
+    "body_quat",
+    "body_mass",
+    "body_inertia",
+    "body_ipos",
+    "body_iquat",
+    "jnt_pos",
+    "jnt_axis",
+    "jnt_range",
+    "dof_damping",
+    "dof_armature",
+    "dof_frictionloss",
+    "geom_pos",
+    "geom_quat",
+    "geom_size",
+    "geom_contype",
+    "geom_conaffinity",
+    "geom_friction",
+    "geom_solref",
+    "geom_solimp",
+    "actuator_gainprm",
+    "actuator_biasprm",
+    "actuator_dynprm",
+    "actuator_gear",
+    "actuator_dyntype",
+    "actuator_ctrlrange",
+    "actuator_forcerange",
+    "actuator_ctrllimited",
+    "actuator_forcelimited",
+    "site_pos",
+    "site_quat",
+    "mesh_vert"
+  ],
+  "mounting_override": {
+    "body": "palm",
+    "source_quat_wxyz": [
+      0.0,
+      0.9702957262759965,
+      0.0,
+      -0.24192189559966773
+    ],
+    "quat_wxyz": [
+      0.0,
+      0.9659258262890683,
+      0.0,
+      -0.25881904510252074
+    ],
+    "pitch_deg": 30.0
+  }
+}

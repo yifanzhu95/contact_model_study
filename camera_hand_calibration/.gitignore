@@ -1,0 +1,32 @@
+cache/
+
+# Keep source, configuration and small fitted calibration JSON files. Captured
+# RGB-D datasets, process state and generated visualizations remain local.
+datasets/
+runtime/
+logs/
+results/synthetic_test_*/
+method4/active.json
+method4/fresh_start.json
+method4/retrack_active.json
+method5/active.json
+method5/retrack_active.json
+method5/tracking.json
+**/code/
+**/frames/
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.pdf
+**/*.html
+**/*.csv
+**/*.trigger
+**/*.request
+results/**/*.py
+method4/results/**/*.py
+method5/results/**/*.py
+
+# Textures referenced by the workspace's object meshes are runtime assets.
+!model/object/**/*.png
+!model/object/**/*.jpg
+!model/object/**/*.jpeg

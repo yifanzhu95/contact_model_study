@@ -1,0 +1,23 @@
+NO-DR SEED1009 / FINAL800 UPDATES — START HERE
+
+1. Read README_en.txt for the exact observation/action contract and task scope.
+2. With Python and PyTorch available, run: python self_test.py
+3. Run python example_offline.py to print an archived example without robot I/O.
+4. Complete hardware_mapping_template.json with your motor ordering, signs,
+   zero offsets, hardware limits, state-estimation frame and position interface.
+
+The package contains the original normalized TorchScript actor, an equivalent
+plain-PyTorch fallback, the73D observation encoder, the16D action decoder and112
+archived parity cases. Only English documentation is included in this release.
+
+The policy needs joint position/velocity AND object pose, linear velocity and
+angular velocity in the training-world frame. Joint feedback alone is not enough.
+The decoder returns absolute joint-position targets in radians. Policy decisions
+are made every64ms; faster motor loops retain the target between decisions.
+
+Simulation results and known M5 transfer limitations remain in evaluation_summary.json.
+This is a simulation-trained research policy for hardware integration/experiments,
+not an already validated real-robot controller. No robot communication or automatic
+physical reset routine is included. Example values are archived simulation data.
+
+partner_message_en.txt contains a short message you may forward with this archive.

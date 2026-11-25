@@ -1,0 +1,56 @@
+{
+  "camera": {
+    "serial": "310522070297",
+    "width": 640,
+    "height": 480,
+    "fps": 60,
+    "warmup_frames": 60,
+    "enable_global_time": true,
+    "save_every_n_frames": 12,
+    "depth_min_m": 0.1,
+    "depth_max_m": 1.5
+  },
+  "model": "model/hand.xml",
+  "model_binary": "model/hand.mjb",
+  "camera_prior": "configs/current_transform.json",
+  "joints": {
+    "url": "udpm://239.255.76.67:7667?ttl=1",
+    "channel": "LEAP_STATE",
+    "names": [
+      "if_mcp",
+      "if_rot",
+      "if_pip",
+      "if_dip",
+      "mf_mcp",
+      "mf_rot",
+      "mf_pip",
+      "mf_dip",
+      "rf_mcp",
+      "rf_rot",
+      "rf_pip",
+      "rf_dip",
+      "th_cmc",
+      "th_axl",
+      "th_mcp",
+      "th_ipl"
+    ],
+    "max_frame_skew_ms": 30.0,
+    "settle_window_s": 0.4,
+    "max_motion_rad": 0.01,
+    "max_speed_rad_s": 0.03,
+    "min_settle_samples": 5,
+    "max_sample_gap_s": 0.05
+  },
+  "fit": {
+    "ransac_px": 3.0,
+    "robust_scale_px": 2.0,
+    "heldout_p95_limit_px": 4.0,
+    "seed": 0,
+    "max_scaled_jacobian_condition": 1000000.0
+  },
+  "notes": [
+    "No motor commands or direct serial access are implemented.",
+    "Joint LCM subscription is explicitly opt-in; await operator confirmation before a hardware experiment.",
+    "No object-only translation correction is used for hand calibration."
+  ]
+}

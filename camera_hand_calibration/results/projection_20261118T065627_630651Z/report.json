@@ -1,0 +1,10 @@
+{
+  "frame": "datasets/20261118T065346_240673Z/frame_00000.npz",
+  "frame_sha256": "db74c96cd7fffdca440347d97ee64e3a917ce70cd0e9cd15daf659e918b8547f",
+  "catalog": "configs/landmarks_palm.json",
+  "transform": "configs/current_transform.json",
+  "in_image_candidates": 16,
+  "hardware_access": false,
+  "calibration_accuracy_verified": false,
+  "note": "Fixed palm points need no joint reads; any articulated landmark requires measured stable joints."
+}

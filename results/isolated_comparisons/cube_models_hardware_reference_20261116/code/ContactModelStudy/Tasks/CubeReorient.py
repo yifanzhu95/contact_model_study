@@ -1,0 +1,182 @@
+"""Reorienting a lettered cube held in the LEAP hand.
+
+The concrete task: everything specific to the cube — where it starts, where it
+should end up, how far it can fall before the grasp counts as failed, and the
+cost weights the study tuned for it. All the machinery is in ``LeapReorient``.
+
+The numbers come from ``_OBJ_PARAMS["cube"]`` in
+``contact_study/tasks/grasp_reorient.py`` and are reproduced here verbatim,
+including the two hand-applied offsets in ``init_qpos`` (see ``objectParams``).
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+from ContactModelStudy.Tasks.LeapReorient import LeapReorient
+
+
+class CubeReorient(LeapReorient):
+    """Reorient the cube to a target pose with the LEAP hand.
+
+    Scene: 16 actuated hand joints and a free-joint cube (nq=23, nv=22, nu=16).
+
+    Example::
+
+        task = CubeReorient(LeapReorientConfig(role=TaskRole.ROLLOUT,
+                                               hand_acc="high", obj_acc="high"))
+        sim = Mujoco(task.getModelPath())
+        q0, v0, u0 = task.getInitialState()
+        sim.SetState(q0, v0)
+        sim.SetControl(u0)
+    """
+
+    OBJECT = "cube"
+
+    #: This object's tuning of the contact models, over their presets; see
+    #: ``TaskBase.CONTACT_PARAMS``.
+    #:
+    #: M3 (ComFree), tuned 2026-10-31 for eval stability first, then SR as a
+    #: rollout model under M5 eval (dt 4 ms, 64 ms control, 384 ms horizon).
+    #: The preset's damping (0.01) sits at ComFree's stability edge: the cube
+    #: is launched out of a held grasp, and as a rollout model it scored SR
+    #: 0.10 (seed 2, 20 episodes) against 0.75 here. Damping above ~1e-3
+    #: starts launching the cube under planner-like finger motion; stiffness
+    #: below ~0.35 lets it sink and slip out of the grasp.
+    CONTACT_PARAMS = {
+        "M3": {"stiffness": 0.75, "damping": 3e-4},
+    }
+
+    def objectParams(self) -> dict:
+        """The cube's entry, carried over from the old task's table.
+
+        Two offsets in ``init_qpos`` are written the way the old table writes
+        them, as ``value + offset``, rather than folded into a single number:
+        they were applied by hand on top of a pose read out of the viewer, and
+        keeping them visible is the only record of that.
+
+        ``th_axl`` (joint 13) is ``1.52604395 + 0.35``. The old table had
+        ``+ 1.0``, which started the thumb at 2.526 rad, 0.43 rad past its
+        2.094 limit. ``+ 0.35`` starts it at 1.876, inside the range. It is
+        still 0.34 rad from what ``init_ctrl`` commands for that joint, so the
+        position servo pulls it there over the first few steps. The initial
+        state is *not* an equilibrium of the initial control, which looks like
+        drift in any "did the hand hold its pose?" check.
+        """
+        return {
+            # 16 hand joints, then the cube's settled in-palm pos(3) + quat(4).
+            "init_qpos": np.array([
+                7.41953443e-01, -5.14095650e-01,  6.97705793e-01,  5.73857360e-01,
+                3.11686592e-01, -2.08901684e-05,  7.04119781e-01,  1.01887562e+00,
+                7.14271347e-01,  2.63610945e-01,  6.97700993e-01,  6.10100133e-01,
+                7.00288255e-01,  1.52604395e+00 + 0.35,  1.33871871e+00,  8.68983906e-01,
+
+                1.70374863e-02,  3.65435775e-02,  8.36225067e-02 + 0.02,
+                1.0, 0.0, 0.0, 0.0,
+            ]),
+            "init_ctrl": np.array([
+                0.7672,   -0.51303,   0.701455,  0.573897,  0.33472,   0.0,
+                0.709056,  1.01884,   0.74176,   0.26175,   0.701455,  0.610097,
+                0.69912,   1.53211,   1.33179,   0.8657,
+            ]),
+            "target_pos": np.array([0.02, 0.035, 0.080]),
+            # Identity: the study's goal orientation is the cube's canonical
+            # face-up pose. The old code derived this from _TARGET_EULER =
+            # (0, 0, 0), which is the identity quaternion.
+            "target_quat": np.array([1.0, 0.0, 0.0, 0.0]),
+            "fallen_z": 0.065,
+            # "cost_weights": {
+            #     "w_quat":        23.3929,
+            #     "w_pos_x":        5.99412,
+            #     "w_pos_y":       50.0,
+            #     "w_pos_z":        1.0,
+            #     # Scales the L2 position error, not a velocity term — see
+            #     # LeapReorient.COST_WEIGHT_KEYS. Zero for the cube either way.
+            #     "w_velo":         0.0,
+            #     "w_contact":      2.48369,
+            #     "w_joint":       20.0,
+            #     "w_joint_velo":   0.0,
+            #     "w_fallen":     100.0,
+            #     "w_quat_term":  100.0,
+            #     "w_pos_term":   300.0,
+            #     "w_fallen_term":  0.0,
+            # },
+            # "cost_weights": { #potetial cost that seem to work better with a more difficult goal
+            #     "w_quat":        50.0,#23.3929,
+            #     "w_pos_x":       50.0,#5.99412,
+            #     "w_pos_y":        60.0,#50.0,
+            #     "w_pos_z":        11.7,
+            #     "w_velo":         0.0,
+            #     "w_contact":      100.0,#2.48369,
+            #     "w_joint":        20.0,#20.0,
+            #     "w_joint_velo":   0.0,
+            #     "w_fallen":     200.0,
+            #     "w_quat_term":  100.0,
+            #     "w_pos_term":   300.0,
+            #     "w_fallen_term":  0.0,
+            # },
+            # "cost_weights": { #potetial cost that seem to work better with a more difficult goal
+            #     "w_quat":         26.342,#25.0,#23.3929,
+            #     "w_pos_x":        53.616,#7.0,#5.99412,
+            #     "w_pos_y":        100.0,#60.0,#50.0,
+            #     "w_pos_z":        0.0503,#1.0,
+            #     "w_velo":         0.0,
+            #     "w_contact":      100.0,#3.5,#2.48369,
+            #     "w_joint":        0.0538,#0.05,#20.0,
+            #     "w_joint_velo":   0.0,
+            #     "w_fallen":     11.841,#100.0,
+            #     "w_quat_term":  148.42,#100.0,
+            #     "w_pos_term":   1000.0,#300.0,
+            #     "w_fallen_term":  0.0,
+            # },
+            # "cost_weights": { # BO: mass=0.07 kg, T=0.1, noise=0.05; trial 314
+            #     "w_quat":          45.22510814,
+            #     "w_pos_x":         4.349615154,
+            #     "w_pos_y":         0.08368779856,
+            #     "w_pos_z":         38.6860546,
+            #     "w_velo":          0,
+            #     "w_contact":       94.5517078,
+            #     "w_joint":         0.02764851698,
+            #     "w_joint_velo":    0,
+            #     "w_fallen":        13.16717602,
+            #     "w_quat_term":     10.1237636,
+            #     "w_pos_term":      73.28346845,
+            #     "w_fallen_term":   0,
+            # },
+            "cost_weights": { # BO: mass=0.07 kg, T=0.1, noise=0.05; trial 622
+                "w_quat":          38.35757707291161,
+                "w_pos_x":         100.0,
+                "w_pos_y":         0.01,
+                "w_pos_z":         0.01,
+                "w_velo":          0.0,
+                "w_contact":       100.0,
+                "w_joint":         0.01,
+                "w_joint_velo":    0.0,
+                "w_fallen":        12.982253826428023,
+                "w_quat_term":     10.0,
+                "w_pos_term":      93.66848572281891,
+                "w_fallen_term":   0.0,
+            },
+        }
+
+
+# BEGIN completed cube friction BO: mass070g_T0.1_noise0.05_750trials
+# Uncalibrated high/high; shared M1-M4 weights; M6 excluded.
+# Cube/tips/palm/other sliding friction: 0.3 / 0.5 / 0.4 / 0.4.
+# Mass=0.07 kg; temperature=0.1; noise_sigma=0.05; samples=256.
+# Best trial=622; objective=-0.49487046957507913 (minimized).
+# "cost_weights": {
+#     "w_quat": 38.35757707291161,
+#     "w_pos_x": 100.0,
+#     "w_pos_y": 0.01,
+#     "w_pos_z": 0.01,
+#     "w_velo": 0.0,
+#     "w_contact": 100.0,
+#     "w_joint": 0.01,
+#     "w_joint_velo": 0.0,
+#     "w_fallen": 12.982253826428023,
+#     "w_quat_term": 10.0,
+#     "w_pos_term": 93.66848572281891,
+#     "w_fallen_term": 0.0,
+# },
+# END completed cube friction BO

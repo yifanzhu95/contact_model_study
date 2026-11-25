@@ -1,0 +1,32 @@
+{
+  "T_world_from_camera": [
+    [
+      0.008884761228063176,
+      0.8037460952316574,
+      -0.5949061063880452,
+      0.46327048083794886
+    ],
+    [
+      0.9995572873046981,
+      -0.024032337402968798,
+      -0.017540699958198954,
+      0.018566288013772463
+    ],
+    [
+      -0.028395253370836454,
+      -0.5944868889713326,
+      -0.8036037882110766,
+      0.5087943865214686
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "convention": "OpenCV color optical camera -> MuJoCo frozen model world, metres",
+  "status": "candidate_unvalidated_single_pose",
+  "production_exported": false,
+  "object_only_offset_excluded": true
+}

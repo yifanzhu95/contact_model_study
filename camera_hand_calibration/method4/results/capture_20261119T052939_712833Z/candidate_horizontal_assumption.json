@@ -1,0 +1,133 @@
+{
+  "T_world_from_camera": [
+    [
+      -0.0032711976746302644,
+      0.827263697663164,
+      -0.5618043020433743,
+      0.45224871938439365
+    ],
+    [
+      0.9992792268678429,
+      -0.018543248598164835,
+      -0.03312362724450058,
+      0.03043715157008612
+    ],
+    [
+      -0.03781965119061063,
+      -0.5615077225293488,
+      -0.8266067695849849,
+      0.5228348506717352
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "method": 4,
+  "parent_method": 3,
+  "status": "Single known-placement translation anchor; independent validation required",
+  "translation_fit": {
+    "total_samples": 60,
+    "inlier_samples": 60,
+    "inliers": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "translation_change_world_m": [
+      0.007850805681105641,
+      -0.0011466496635687286,
+      -0.004168427011024443
+    ],
+    "translation_change_camera_m": [
+      -0.0010138562710167742,
+      0.008856553104643141,
+      -0.0009269852242819203
+    ],
+    "before_reference_rms_mm": 8.974312988858351,
+    "after_reference_rms_mm": 0.46103642189162863,
+    "residual_scatter_mm": [
+      0.30174555753654697,
+      0.14050238018902414,
+      0.31900357674924773
+    ],
+    "rotation_changed": false,
+    "object_only_correction_used": false,
+    "limitation": "Single-pose anchor residual is a training residual, not independent accuracy. Placement, contact geometry and tracker bias can be absorbed into translation."
+  },
+  "rotation_verification": {
+    "resting_face_normal_rms_deg": 1.5045512276549171,
+    "resting_face_normal_max_deg": 2.2851872997786433,
+    "cube_axes_alignment_rms_deg": 2.8592843409640607,
+    "rotation_updated": false,
+    "face_identity_verified": false,
+    "note": "Axes are checked modulo 24 cube symmetries; printed face identity is not inferred. Mesh axes are assumed to represent physical cube faces."
+  },
+  "object_only_offset_applied": false,
+  "torque_disabled_verified": true,
+  "mesh_center_object_m": [
+    -0.0005432149999999997,
+    -0.0004075649999999986,
+    -0.0005389800000000014
+  ],
+  "production_configuration_modified": false
+}

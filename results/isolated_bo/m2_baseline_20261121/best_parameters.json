@@ -1,0 +1,91 @@
+{
+  "trial": 358,
+  "objective": -0.9994230464237815,
+  "weights": {
+    "w_velo": 0.0,
+    "w_joint_velo": 0.0,
+    "w_fallen_term": 0.0,
+    "w_contact": 80.0,
+    "w_quat": 0.01,
+    "w_pos_x": 19.93030694751929,
+    "w_pos_y": 100.0,
+    "w_pos_z": 0.01,
+    "w_joint": 0.8575242876710942,
+    "w_fallen": 10.0,
+    "w_quat_term": 277.07876775743,
+    "w_pos_term": 1000.0
+  },
+  "settings": {
+    "trial": 358,
+    "status": "done",
+    "source": "gp",
+    "x": [
+      0.01,
+      19.93030694751929,
+      100.0,
+      0.01,
+      0.8575242876710942,
+      10.0,
+      277.07876775743,
+      1000.0,
+      50.0,
+      817.6259701873483,
+      1.0
+    ],
+    "params": {
+      "w_quat": 0.01,
+      "w_pos_x": 19.93030694751929,
+      "w_pos_y": 100.0,
+      "w_pos_z": 0.01,
+      "w_joint": 0.8575242876710942,
+      "w_fallen": 10.0,
+      "w_quat_term": 277.07876775743,
+      "w_pos_term": 1000.0,
+      "action_rate_weight": 50.0,
+      "joint_limit_weight": 817.6259701873483,
+      "plan_blend_alpha": 1.0
+    },
+    "cost_weights": {
+      "w_quat": 0.01,
+      "w_pos_x": 19.93030694751929,
+      "w_pos_y": 100.0,
+      "w_pos_z": 0.01,
+      "w_joint": 0.8575242876710942,
+      "w_fallen": 10.0,
+      "w_quat_term": 277.07876775743,
+      "w_pos_term": 1000.0
+    },
+    "settings": {
+      "M2": {
+        "planner_params": {
+          "action_rate_weight": 50.0,
+          "joint_limit_weight": 817.6259701873483,
+          "plan_blend_alpha": 1.0
+        }
+      }
+    },
+    "objective": -0.9994230464237815,
+    "model_agg": "mean",
+    "per_model": {
+      "M2": {
+        "n_episodes": 12,
+        "n_success": 12,
+        "n_errors": 0,
+        "success_rate": 1.0,
+        "mean_norm_goal_err": 0.005769535762184728,
+        "mean_steps_to_success": 164.75,
+        "mean_goals_reached": 1.0,
+        "objective": -0.9994230464237815
+      }
+    },
+    "n_episodes": 12,
+    "success_rate": 1.0,
+    "mean_norm_goal_err": 0.005769535762184728,
+    "wall_s": 87.7,
+    "host": "irisserver",
+    "slurm_job": null,
+    "rank": 1
+  },
+  "baseline": "baseline.json",
+  "publication": "export only; active files untouched"
+}
